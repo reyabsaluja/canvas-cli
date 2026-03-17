@@ -1,0 +1,52 @@
+#!/usr/bin/env node
+
+import { Command } from "commander";
+import { coursesCommand } from "./commands/courses.js";
+import { assignmentsCommand } from "./commands/assignments.js";
+import { showAssignmentCommand } from "./commands/show-assignment.js";
+import { doAssignmentCommand } from "./commands/do-assignment.js";
+
+const program = new Command();
+
+program
+  .name("canvas-cli")
+  .description("A terminal interface for Canvas LMS")
+  .version("0.1.0");
+
+program
+  .command("courses")
+  .description("List your Canvas courses")
+  .option("--all", "Include past/inactive courses")
+  .option("--json", "Output as JSON")
+  .action(coursesCommand);
+
+program
+  .command("assignments")
+  .description("List upcoming assignments")
+  .option("--course <query>", "Filter to a specific course")
+  .option("--all", "Show all assignments including old/submitted")
+  .option("--include-submitted", "Include submitted assignments")
+  .option("--include-no-due-date", "Include assignments with no due date")
+  .option("--json", "Output as JSON")
+  .action(assignmentsCommand);
+
+const show = program
+  .command("show")
+  .description("Show details for a resource");
+
+show
+  .command("assignment <name>")
+  .description("Show detailed info for an assignment")
+  .option("--course <query>", "Scope to a specific course")
+  .option("--id <assignmentId>", "Look up by Canvas assignment ID")
+  .option("--json", "Output as JSON")
+  .action(showAssignmentCommand);
+
+program
+  .command("do <assignment>")
+  .description("Create a local workspace for an assignment")
+  .option("--course <query>", "Scope to a specific course")
+  .option("--id <assignmentId>", "Look up by Canvas assignment ID")
+  .action(doAssignmentCommand);
+
+program.parse();
