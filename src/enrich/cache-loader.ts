@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { makeCourseSlug, getCoursePath } from "../ingest/slug.js";
 import type {
+  AssignmentIndexEntry,
   ModuleIndexEntry,
   FileIndexEntry,
   PageIndexEntry,
@@ -15,6 +16,7 @@ import type {
 export interface CourseCache {
   courseId: number;
   coursePath: string;
+  assignments: AssignmentIndexEntry[];
   modules: ModuleIndexEntry[];
   files: FileIndexEntry[];
   pages: PageIndexEntry[];
@@ -40,8 +42,9 @@ export async function loadCourseCache(
   }
 
   try {
-    const [modules, files, pages, syllabusCandidates, attachments] =
+    const [assignments, modules, files, pages, syllabusCandidates, attachments] =
       await Promise.all([
+        readJsonSafe<AssignmentIndexEntry[]>(path.join(coursePath, "assignments.json"), []),
         readJsonSafe<ModuleIndexEntry[]>(path.join(coursePath, "modules.json"), []),
         readJsonSafe<FileIndexEntry[]>(path.join(coursePath, "files.json"), []),
         readJsonSafe<PageIndexEntry[]>(path.join(coursePath, "pages.json"), []),
@@ -52,6 +55,7 @@ export async function loadCourseCache(
     return {
       courseId,
       coursePath,
+      assignments,
       modules,
       files,
       pages,

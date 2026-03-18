@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import type { AssignmentDetail } from "../domain/models.js";
 import type { EnrichedAssignmentDetail, EnrichmentSummary } from "../enrich/types.js";
+import type { AssignmentRealOverview } from "../ai/types.js";
 import { htmlToText } from "./html-to-text.js";
 
 function formatDate(date: Date | null): string {
@@ -47,7 +48,9 @@ function formatSize(bytes: number): string {
 }
 
 export function renderAssignmentDetail(
-  a: AssignmentDetail | EnrichedAssignmentDetail
+  a: AssignmentDetail | EnrichedAssignmentDetail,
+  aiOverview?: AssignmentRealOverview | null,
+  aiError?: string | null
 ): string {
   const lines: string[] = [""];
 
@@ -126,6 +129,14 @@ export function renderAssignmentDetail(
     lines.push(...renderEnrichmentSection(enrichment));
   }
 
+  // AI overview section
+  if (aiOverview) {
+    lines.push(...renderAIOverview(aiOverview));
+  } else if (aiError) {
+    lines.push("");
+    lines.push(chalk.dim(aiError));
+  }
+
   lines.push("");
   return lines.join("\n");
 }
@@ -197,4 +208,60 @@ function formatConfidence(confidence: string): string {
     default:
       return chalk.dim(confidence);
   }
+}
+
+function renderAIOverview(o: AssignmentRealOverview): string[] {
+  const lines: string[] = [];
+
+  lines.push("");
+  lines.push(chalk.bold.cyan("Real overview"));
+  lines.push("");
+
+  // Overview paragraph — indent each line
+  const overviewLines = o.overview.split("\n");
+  for (const line of overviewLines) {
+    lines.push(line ? `  ${line}` : "");
+  }
+
+  // Due date from syllabus (if AI found one and Canvas didn't have it)
+  if (o.dueDate) {
+    lines.push("");
+    lines.push(`  ${chalk.bold("Due date (from syllabus):")} ${chalk.yellow(o.dueDate)}`);
+  }
+
+  // Tasks
+  if (o.likelyTasks.length > 0) {
+    lines.push("");
+    lines.push(chalk.bold("Tasks"));
+    lines.push("");
+    for (const task of o.likelyTasks) {
+      lines.push(`  - ${task}`);
+    }
+  }
+
+  // Primary sources
+  if (o.primarySources.length > 0) {
+    lines.push("");
+    lines.push(chalk.bold("Sources"));
+    lines.push("");
+    for (const src of o.primarySources) {
+      lines.push(`  ${chalk.dim("-")} ${src}`);
+    }
+  }
+
+  // Next steps (only if there are genuinely missing things)
+  if (o.nextSteps.length > 0) {
+    lines.push("");
+    lines.push(chalk.bold("Next steps"));
+    lines.push("");
+    for (const step of o.nextSteps) {
+      lines.push(`  - ${step}`);
+    }
+  }
+
+  // Confidence
+  lines.push("");
+  lines.push(`  ${chalk.dim("Confidence:")} ${formatConfidence(o.confidence)}`);
+
+  return lines;
 }

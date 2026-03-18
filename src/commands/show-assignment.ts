@@ -4,12 +4,16 @@ import { resolveAssignment } from "../domain/resolve-assignment.js";
 import { renderAssignmentDetail } from "../format/renderAssignmentDetail.js";
 import { loadCourseCache } from "../enrich/cache-loader.js";
 import { enrichAssignmentDetail } from "../enrich/enrich-assignment.js";
+import type { EnrichedAssignmentDetail } from "../enrich/types.js";
+import { generateAssignmentOverview } from "../ai/generate-overview.js";
 import { handleError } from "../errors.js";
+import chalk from "chalk";
 
 interface ShowAssignmentOptions {
   course?: string;
   id?: string;
   json?: boolean;
+  smart?: boolean;
 }
 
 export async function showAssignmentCommand(
@@ -36,10 +40,26 @@ export async function showAssignmentCommand(
       ? enrichAssignmentDetail(detail, cache)
       : detail;
 
+    // Generate AI overview if --smart
+    let aiOverview = null;
+    let aiError: string | null = null;
+
+    if (options.smart) {
+      const enrichment = "enrichment" in enriched ? (enriched as EnrichedAssignmentDetail).enrichment : null;
+      const result = await generateAssignmentOverview(detail, enrichment, cache);
+      aiOverview = result.overview;
+      aiError = result.error;
+    }
+
     if (options.json) {
-      console.log(JSON.stringify(enriched, null, 2));
+      const output: Record<string, unknown> = { ...enriched };
+      if (options.smart) {
+        output.realOverview = aiOverview ?? null;
+        if (aiError) output.realOverviewError = aiError;
+      }
+      console.log(JSON.stringify(output, null, 2));
     } else {
-      console.log(renderAssignmentDetail(enriched));
+      console.log(renderAssignmentDetail(enriched, aiOverview, aiError));
     }
   } catch (err) {
     handleError(err);

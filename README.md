@@ -20,6 +20,7 @@ cp .env.example .env
 
 - **`CANVAS_BASE_URL`** — Your institution's Canvas API base URL (e.g. `https://q.utoronto.ca/api/v1`)
 - **`CANVAS_ACCESS_TOKEN`** — Generate one from Canvas: Account → Settings → New Access Token
+- **`ANTHROPIC_API_KEY`** (optional) — Required for `--smart` AI features. Get one from [console.anthropic.com](https://console.anthropic.com)
 
 4. Build the project:
 
@@ -102,6 +103,7 @@ canvas-cli show assignment "Milestone 3" --course ece297   # scoped to a course
 canvas-cli show assignment "Lab5 Quiz"                      # search across all current courses
 canvas-cli show assignment _ --id 1710240 --course ece297   # look up by Canvas ID
 canvas-cli show assignment "Milestone 3" --json             # JSON output
+canvas-cli show assignment "Milestone 3" --course ece297 --smart   # include AI overview
 ```
 
 Example output:
@@ -127,6 +129,54 @@ Description
 The detail view includes: due/unlock/lock dates, points, grading type, submission types, submission status (with grade if available), description (HTML converted to readable text), and attachments if present.
 
 **Assignment matching** is case-insensitive and supports partial names. If multiple assignments match, you'll see a disambiguation list. If none match, you'll get a hint to use `canvas-cli assignments` to browse.
+
+#### `--smart` — AI-powered real overview
+
+When you add `--smart`, the command generates an AI-powered "Real overview" section that synthesizes what the assignment is likely asking based on all available context.
+
+```bash
+canvas-cli show assignment "Milestone 3" --course ece297 --smart
+```
+
+Example output (appended after the standard detail view):
+
+```
+Real overview
+
+  Milestone 3 requires implementing shortest path algorithms (Dijkstra's and
+  A*) and integrating them into the mapping application's UI. Students must
+  provide a functional pathfinding feature with visual route display.
+
+  Due date (from syllabus): March 22, 2026, 11:59 PM
+
+Tasks
+  - Implement Dijkstra's algorithm for shortest path computation
+  - Implement A* search with a suitable heuristic
+  - Integrate pathfinding into the map UI with route visualization
+  - Write tests demonstrating correctness on provided test cases
+  - Submit via the Canvas assignment page
+
+Sources
+  - M3_Instructions.pdf
+  - M3_Grading_Rubric.pdf
+  - Course syllabus (schedule section)
+
+Next steps
+  - Review the grading rubric for specific weight breakdowns
+
+  Confidence: high
+```
+
+**Requirements:**
+- Set `ANTHROPIC_API_KEY` in your `.env` file
+- Best results when the course has been ingested first (`canvas-cli ingest <course>`)
+
+**How it works:** The AI reads the actual course materials — including PDF instruction documents, the course syllabus, the module structure, and the full assignment list. It synthesizes a concrete summary of what the assignment requires. When the Canvas due date is missing, it cross-references the syllabus and schedule to find it.
+
+**Fallback behavior:**
+- Without `ANTHROPIC_API_KEY`: the `--smart` flag shows a subtle note that AI is unavailable; the rest of the command works normally
+- Without ingestion cache: AI still works but has less context; confidence will be lower
+- If the AI call fails: the deterministic output is still shown, with a failure note
 
 ### `canvas-cli do <assignment>`
 
@@ -336,6 +386,13 @@ By default, `canvas-cli` optimizes for relevance over completeness:
 src/
   cli.ts                          — CLI entry point
   errors.ts                       — Shared error handling
+  ai/
+    types.ts                      — AI overview types
+    provider.ts                   — AI provider abstraction (Anthropic)
+    prompts.ts                    — System/user prompt construction
+    context-bundle.ts             — Assemble context for AI from enrichment
+    parse.ts                      — Parse structured AI response
+    generate-overview.ts          — AI overview pipeline orchestrator
   commands/
     courses.ts                    — courses command
     assignments.ts                — assignments command

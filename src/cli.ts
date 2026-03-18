@@ -41,6 +41,7 @@ show
   .option("--course <query>", "Scope to a specific course")
   .option("--id <assignmentId>", "Look up by Canvas assignment ID")
   .option("--json", "Output as JSON")
+  .option("--smart", "Include AI-generated real assignment overview")
   .action(showAssignmentCommand);
 
 program
