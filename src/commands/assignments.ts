@@ -6,7 +6,10 @@ import { matchCourses } from "../domain/matching.js";
 import { sortByUrgency } from "../domain/sorting.js";
 import { renderAssignments } from "../format/renderAssignments.js";
 import { handleError } from "../errors.js";
-import type { Assignment } from "../domain/models.js";
+import { loadCourseCache } from "../enrich/cache-loader.js";
+import { enrichAssignment } from "../enrich/enrich-assignment.js";
+import type { Assignment, Course } from "../domain/models.js";
+import type { EnrichedAssignment } from "../enrich/types.js";
 import chalk from "chalk";
 
 interface AssignmentsOptions {
@@ -93,8 +96,11 @@ export async function assignmentsCommand(
 
   const sorted = sortByUrgency(filtered);
 
+  // Try to enrich with course caches
+  const enriched = await enrichAll(sorted, targetCourses);
+
   if (options.json) {
-    console.log(JSON.stringify(sorted, null, 2));
+    console.log(JSON.stringify(enriched, null, 2));
     return;
   }
 
@@ -108,5 +114,39 @@ export async function assignmentsCommand(
 
   // Group by course when showing multiple courses, flat when scoped to one
   const groupByCourse = !options.course;
-  console.log(renderAssignments(sorted, { groupByCourse }));
+  console.log(renderAssignments(enriched, { groupByCourse }));
+}
+
+/**
+ * Enrich assignments with course cache data where available.
+ * Falls back gracefully to unenriched assignments if no cache exists.
+ */
+async function enrichAll(
+  assignments: Assignment[],
+  courses: Course[]
+): Promise<(Assignment | EnrichedAssignment)[]> {
+  // Build a map of courseId → Course for lookup
+  const courseMap = new Map<number, Course>();
+  for (const c of courses) {
+    courseMap.set(c.id, c);
+  }
+
+  // Load caches for all relevant courses (deduplicated)
+  const courseIds = [...new Set(assignments.map((a) => a.courseId))];
+  const cacheMap = new Map<number, Awaited<ReturnType<typeof loadCourseCache>>>();
+
+  await Promise.all(
+    courseIds.map(async (courseId) => {
+      const course = courseMap.get(courseId);
+      if (!course) return;
+      const cache = await loadCourseCache(course.courseCode, courseId);
+      cacheMap.set(courseId, cache);
+    })
+  );
+
+  return assignments.map((a) => {
+    const cache = cacheMap.get(a.courseId);
+    if (!cache) return a;
+    return enrichAssignment(a, cache);
+  });
 }

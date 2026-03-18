@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import type { AssignmentDetail } from "../domain/models.js";
+import type { EnrichedAssignmentDetail, EnrichmentSummary } from "../enrich/types.js";
 import { htmlToText } from "./html-to-text.js";
 
 function formatDate(date: Date | null): string {
@@ -45,7 +46,9 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function renderAssignmentDetail(a: AssignmentDetail): string {
+export function renderAssignmentDetail(
+  a: AssignmentDetail | EnrichedAssignmentDetail
+): string {
   const lines: string[] = [""];
 
   // Title
@@ -117,6 +120,81 @@ export function renderAssignmentDetail(a: AssignmentDetail): string {
     }
   }
 
+  // Enrichment section
+  const enrichment = "enrichment" in a ? (a as EnrichedAssignmentDetail).enrichment : null;
+  if (enrichment) {
+    lines.push(...renderEnrichmentSection(enrichment));
+  }
+
   lines.push("");
   return lines.join("\n");
+}
+
+function renderEnrichmentSection(e: EnrichmentSummary): string[] {
+  const lines: string[] = [];
+
+  // Context section
+  lines.push("");
+  lines.push(chalk.bold("Context"));
+  lines.push("");
+
+  const confLabel = formatConfidence(e.contextConfidence);
+  lines.push(`  ${chalk.dim("Confidence           ")} ${confLabel}`);
+
+  if (e.flags.likelySubmissionShell) {
+    lines.push(`  ${chalk.dim("Submission shell     ")} ${chalk.yellow("yes")}`);
+  }
+  if (e.flags.hasWeakCanvasDescription) {
+    lines.push(`  ${chalk.dim("Weak description     ")} ${chalk.yellow("yes")}`);
+  }
+  if (e.flags.missingDueDate) {
+    lines.push(`  ${chalk.dim("Missing due date     ")} ${chalk.yellow("yes")}`);
+  }
+
+  // Instruction sources
+  if (e.likelyInstructionSources.length > 0) {
+    lines.push("");
+    lines.push(chalk.bold("Likely instruction sources"));
+    lines.push("");
+    for (const src of e.likelyInstructionSources) {
+      const typeLabel = chalk.dim(`[${src.type}]`);
+      const location = src.localPath
+        ? chalk.dim(` (${src.localPath})`)
+        : src.url
+          ? chalk.dim(` (${src.url})`)
+          : "";
+      lines.push(`  - ${src.title} ${typeLabel}${location}`);
+    }
+  }
+
+  // Warnings / notes
+  const warnings = e.notes.filter(
+    (n) =>
+      n.includes("incomplete") ||
+      n.includes("submission-only") ||
+      n.includes("elsewhere")
+  );
+  if (warnings.length > 0) {
+    lines.push("");
+    lines.push(chalk.bold("Warnings"));
+    lines.push("");
+    for (const w of warnings) {
+      lines.push(`  ${chalk.yellow("!")} ${w}`);
+    }
+  }
+
+  return lines;
+}
+
+function formatConfidence(confidence: string): string {
+  switch (confidence) {
+    case "high":
+      return chalk.green(confidence);
+    case "medium":
+      return chalk.yellow(confidence);
+    case "low":
+      return chalk.red(confidence);
+    default:
+      return chalk.dim(confidence);
+  }
 }

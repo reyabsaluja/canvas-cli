@@ -2,6 +2,8 @@ import { CanvasClient } from "../canvas/client.js";
 import { loadConfig } from "../config/env.js";
 import { resolveAssignment } from "../domain/resolve-assignment.js";
 import { renderAssignmentDetail } from "../format/renderAssignmentDetail.js";
+import { loadCourseCache } from "../enrich/cache-loader.js";
+import { enrichAssignmentDetail } from "../enrich/enrich-assignment.js";
 import { handleError } from "../errors.js";
 
 interface ShowAssignmentOptions {
@@ -26,12 +28,18 @@ export async function showAssignmentCommand(
   }
 
   try {
-    const { detail } = await resolveAssignment(name, options, client, rawCourses);
+    const { detail, course } = await resolveAssignment(name, options, client, rawCourses);
+
+    // Try to enrich with course cache
+    const cache = await loadCourseCache(course.courseCode, course.id);
+    const enriched = cache
+      ? enrichAssignmentDetail(detail, cache)
+      : detail;
 
     if (options.json) {
-      console.log(JSON.stringify(detail, null, 2));
+      console.log(JSON.stringify(enriched, null, 2));
     } else {
-      console.log(renderAssignmentDetail(detail));
+      console.log(renderAssignmentDetail(enriched));
     }
   } catch (err) {
     handleError(err);

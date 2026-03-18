@@ -76,7 +76,7 @@ ECE221
   - Lab5 Quiz — Apr 1, 11:59 PM — due in 15d
 ```
 
-Course-scoped view:
+Course-scoped view (with ingestion cache available):
 
 ```bash
 canvas-cli assignments --course ece297
@@ -84,8 +84,14 @@ canvas-cli assignments --course ece297
 
 ```
   - Milestone 3 — Mar 22, 11:59 PM — due in 5d
+    context: high  sources: module_item, attachment
   - Milestone 2 — Mar 15, 11:59 PM — overdue
+  - OP2: Submit Final Slides — Apr 29, 8:30 AM — not submitted
+    ! likely submission shell
+    context: low  (no related resources found)
 ```
+
+Enrichment lines only appear when a course has been ingested. Without ingestion, output is unchanged.
 
 ### `canvas-cli show assignment <name>`
 
@@ -244,6 +250,59 @@ Next:
 
 **Note:** Some institutions block the Files API and/or Pages API for students. When this happens, the file and page indexes will be empty, and attachment selection will be limited. Module items and assignment descriptions remain accessible.
 
+### Ingestion-aware enrichment
+
+When a course has been ingested with `canvas-cli ingest`, both `assignments` and `show assignment` automatically become enrichment-aware. The enrichment layer merges live Canvas data with the local course cache to surface additional context.
+
+**How it works:** For each assignment, the enrichment layer:
+1. Searches the course cache for related module items, pages, files, and downloaded attachments by matching titles
+2. Detects weak/missing Canvas descriptions
+3. Identifies likely submission-shell assignments
+4. Computes a context confidence score
+5. Ranks likely instruction sources
+
+**What appears in the output:**
+
+For `assignments`:
+```
+ECE297
+  - Milestone 3 — Mar 22, 11:59 PM — due in 5d
+    context: high  sources: attachment, module_item
+  - OP2: Submit Final Presentation Slides — Apr 29, 8:30 AM — not submitted
+    ! likely submission shell
+    context: low  (no related resources found)
+```
+
+For `show assignment`:
+```
+Context
+  Confidence            high
+  Weak description      yes
+
+Likely instruction sources
+  - M3_Instructions.pdf [attachment] (attachments/important/M3_Instructions.pdf)
+  - Milestone 3 Instructions (File in Week 8) [module_item]
+
+Warnings
+  ! Canvas description appears incomplete or missing
+  ! This may be a submission-only endpoint; instructions likely live elsewhere
+```
+
+**Key concepts:**
+
+- **Likely submission shell**: An assignment that appears to be a submission-only endpoint. Detected when the Canvas description is weak/blank and the title contains patterns like "submit", "upload", "dropbox", or "grade", or when strong related resources exist elsewhere. Instructions for these assignments likely live in modules, pages, or files.
+
+- **Context confidence**:
+  - `high` — strong Canvas description with related resources, or 3+ related resources
+  - `medium` — some related resources, or downloaded attachments, or strong description alone
+  - `low` — weak description with few/no related resources
+
+- **Weak description**: A Canvas description is considered weak if it is blank, very short (<30 chars), consists only of links, or matches generic submit-only text patterns.
+
+**Title matching** uses case-insensitive normalization with punctuation stripping. Matches are found via exact match, containment (one title contains the other), or token overlap (≥50% of meaningful words shared).
+
+**Graceful fallback:** If no course cache exists, commands behave exactly as before — no enrichment lines are shown. Enrichment never breaks existing functionality.
+
 ### Course matching
 
 The `--course` flag matches against course codes and names, case-insensitively:
@@ -294,6 +353,12 @@ src/
     matching.ts                   — Course and assignment matching
     sorting.ts                    — Urgency-based sorting
     resolve-assignment.ts         — Shared assignment resolution logic
+  enrich/
+    types.ts                      — Enriched assignment types
+    enrich-assignment.ts          — Core enrichment logic
+    cache-loader.ts               — Load course cache from disk
+    matchers.ts                   — Title similarity matching
+    scoring.ts                    — Weak description, submission shell, confidence
   ingest/
     types.ts                      — Ingestion-specific normalized types
     slug.ts                       — Course slug generation, paths
