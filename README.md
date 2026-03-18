@@ -168,6 +168,82 @@ Next:
 
 **Repeated invocation** is safe: data files are refreshed with latest Canvas info, but `notes.md` and anything in `work/` are never touched.
 
+### `canvas-cli ingest <course>`
+
+Ingest course structure and content into a local cache for future commands.
+
+```bash
+canvas-cli ingest ece297                              # ingest by course code
+canvas-cli ingest "Software Design and Communication" # ingest by course name
+canvas-cli ingest ece297 --refresh                    # force re-ingestion
+canvas-cli ingest ece297 --json                       # machine-readable summary
+```
+
+Example output:
+
+```
+Course ingested
+
+  Course  ECE297H1 S LEC0101 20261:Software Design and Communication
+  Code    ECE297H1 S LEC0101
+  Term    Winter 2026
+  Path    .canvas-cli/courses/ece297h1-s-lec0101-420471
+
+Fetched:
+  - 9 assignments
+  - 11 modules
+  - 42 module items
+  - files (API not accessible)
+  - pages (API not accessible)
+
+Likely syllabus sources:
+  1. ECE297 Course Outline.pdf [file] high
+  2. Course Outline (in Week 1) [module_item] medium
+
+Attachments:
+  - ECE297 Course Outline.pdf downloaded (title contains 'course outline')
+
+Next:
+  - future commands will use this local course cache
+  - this ingestion does not yet infer true assignments
+```
+
+**Storage location:** `.canvas-cli/courses/<course-slug>/` in the current directory. The slug is deterministic (based on course code and Canvas course ID).
+
+**What gets stored:**
+
+| File | Contents |
+|---|---|
+| `course.json` | Normalized course metadata (name, code, term, dates, syllabus body) |
+| `assignments.json` | All assignment objects for the course |
+| `modules.json` | Module structure with all module items, preserving order |
+| `files.json` | Course file index (empty if Files API is blocked) |
+| `pages.json` | Course page index (empty if Pages API is blocked) |
+| `syllabus-candidates.json` | Ranked list of likely syllabus sources with reasons |
+| `attachments.json` | Metadata for all downloaded/skipped/failed attachments |
+| `ingestion.json` | Ingestion run metadata (timestamps, counts, version) |
+| `extracted/syllabus-body.txt` | Plain text extracted from course syllabus body (if present) |
+| `extracted/syllabus-body.html` | Raw HTML of course syllabus body (if present) |
+| `attachments/syllabus/` | Downloaded syllabus/outline PDFs and docs |
+| `attachments/important/` | Downloaded important course documents |
+
+**Syllabus candidate heuristics:** The tool identifies likely syllabus sources by matching titles/filenames against keywords like "syllabus", "course outline", "schedule", "calendar", "grading scheme". Each candidate is ranked by confidence (high/medium/low) and source type.
+
+**Attachment selection:** Only a targeted subset of files is downloaded — not the entire course. The tool downloads:
+- High/medium confidence syllabus candidate files
+- Files matching importance heuristics (rubric, instructions, handbook, grading, guidelines)
+- Capped at a reasonable limit to avoid excessive downloads
+
+**What this feature does NOT do:**
+- No AI or LLM integration
+- No assignment inference or "true assignment" reconstruction
+- No PDF parsing (PDFs are downloaded and indexed but not read)
+- No semantic interpretation of content
+
+**Repeated invocation** refreshes all data and re-downloads missing attachments. Use `--refresh` to force a complete re-ingestion.
+
+**Note:** Some institutions block the Files API and/or Pages API for students. When this happens, the file and page indexes will be empty, and attachment selection will be limited. Module items and assignment descriptions remain accessible.
+
 ### Course matching
 
 The `--course` flag matches against course codes and names, case-insensitively:
@@ -206,6 +282,7 @@ src/
     assignments.ts                — assignments command
     show-assignment.ts            — show assignment detail command
     do-assignment.ts              — do command (workspace creation)
+    ingest-course.ts              — ingest command (course ingestion)
   canvas/
     client.ts                     — Canvas REST API client
     types.ts                      — Raw Canvas API types
@@ -217,10 +294,21 @@ src/
     matching.ts                   — Course and assignment matching
     sorting.ts                    — Urgency-based sorting
     resolve-assignment.ts         — Shared assignment resolution logic
+  ingest/
+    types.ts                      — Ingestion-specific normalized types
+    slug.ts                       — Course slug generation, paths
+    ingest-course.ts              — Main ingestion pipeline orchestrator
+    fetch-course-content.ts       — Fetch all course data from Canvas
+    normalize-content.ts          — Normalize raw API data for storage
+    syllabus-heuristics.ts        — Identify likely syllabus sources
+    attachment-selection.ts       — Select which files to download
+    attachment-download.ts        — Download selected attachments
+    storage.ts                    — Write artifacts to local filesystem
   format/
     renderCourses.ts              — Course list formatting
     renderAssignments.ts          — Assignment list formatting
     renderAssignmentDetail.ts     — Single assignment detail view
+    render-ingestion-summary.ts   — Ingestion result formatting
     html-to-text.ts               — HTML → terminal text converter
   workspace/
     paths.ts                      — Slug generation, workspace paths

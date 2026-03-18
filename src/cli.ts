@@ -5,6 +5,7 @@ import { coursesCommand } from "./commands/courses.js";
 import { assignmentsCommand } from "./commands/assignments.js";
 import { showAssignmentCommand } from "./commands/show-assignment.js";
 import { doAssignmentCommand } from "./commands/do-assignment.js";
+import { ingestCourseCommand } from "./commands/ingest-course.js";
 
 const program = new Command();
 
@@ -48,5 +49,12 @@ program
   .option("--course <query>", "Scope to a specific course")
   .option("--id <assignmentId>", "Look up by Canvas assignment ID")
   .action(doAssignmentCommand);
+
+program
+  .command("ingest <course>")
+  .description("Ingest course structure and content into a local cache")
+  .option("--refresh", "Force re-ingestion even if cache exists")
+  .option("--json", "Output machine-readable JSON summary")
+  .action(ingestCourseCommand);
 
 program.parse();

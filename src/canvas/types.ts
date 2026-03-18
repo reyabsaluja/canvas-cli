@@ -58,3 +58,49 @@ export interface CanvasAssignmentDetail extends CanvasAssignment {
     size: number;
   }>;
 }
+
+/** Course with syllabus body included. */
+export interface CanvasCourseDetail extends CanvasCourse {
+  syllabus_body: string | null;
+  html_url?: string;
+}
+
+export interface CanvasModule {
+  id: number;
+  name: string;
+  position: number;
+  items_count: number;
+  items_url: string;
+}
+
+export interface CanvasModuleItem {
+  id: number;
+  title: string;
+  type: string;
+  position: number;
+  content_id?: number;
+  page_url?: string;
+  html_url?: string;
+  external_url?: string;
+  url?: string; // API URL to the resource
+}
+
+export interface CanvasFile {
+  id: number;
+  display_name: string;
+  filename: string;
+  content_type: string;
+  size: number;
+  url: string;
+  updated_at: string | null;
+  folder_id: number | null;
+}
+
+export interface CanvasPage {
+  page_id: number;
+  url: string; // slug used as page identifier
+  title: string;
+  html_url: string | null;
+  updated_at: string | null;
+  body?: string | null;
+}

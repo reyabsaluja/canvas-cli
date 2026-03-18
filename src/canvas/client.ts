@@ -3,6 +3,11 @@ import type {
   CanvasAssignment,
   CanvasAssignmentDetail,
   CanvasCourse,
+  CanvasCourseDetail,
+  CanvasFile,
+  CanvasModule,
+  CanvasModuleItem,
+  CanvasPage,
 } from "./types.js";
 
 export class CanvasClient {
@@ -89,5 +94,70 @@ export class CanvasClient {
   ): Promise<CanvasAssignmentDetail> {
     const url = `${this.baseUrl}/courses/${courseId}/assignments/${assignmentId}?include[]=submission`;
     return this.fetchOne<CanvasAssignmentDetail>(url);
+  }
+
+  /** Get course detail with syllabus body. */
+  async getCourseDetail(courseId: number): Promise<CanvasCourseDetail> {
+    const url = `${this.baseUrl}/courses/${courseId}?include[]=syllabus_body&include[]=term`;
+    return this.fetchOne<CanvasCourseDetail>(url);
+  }
+
+  /**
+   * Get modules for a course. Returns empty array if modules are disabled/inaccessible.
+   */
+  async getModulesSafe(courseId: number): Promise<CanvasModule[]> {
+    const url = `${this.baseUrl}/courses/${courseId}/modules?per_page=50`;
+    return this.fetchPaginatedSafe<CanvasModule>(url);
+  }
+
+  /**
+   * Get items for a specific module. Returns empty array on failure.
+   */
+  async getModuleItemsSafe(
+    courseId: number,
+    moduleId: number
+  ): Promise<CanvasModuleItem[]> {
+    const url = `${this.baseUrl}/courses/${courseId}/modules/${moduleId}/items?per_page=50`;
+    return this.fetchPaginatedSafe<CanvasModuleItem>(url);
+  }
+
+  /**
+   * Get files for a course. Returns empty array if the Files API is blocked.
+   * Some institutions restrict student access to the files endpoint.
+   */
+  async getFilesSafe(courseId: number): Promise<CanvasFile[]> {
+    const url = `${this.baseUrl}/courses/${courseId}/files?per_page=50`;
+    return this.fetchPaginatedSafe<CanvasFile>(url);
+  }
+
+  /**
+   * Get pages for a course. Returns empty array if the Pages API is blocked.
+   * Some institutions restrict student access to pages.
+   */
+  async getPagesSafe(courseId: number): Promise<CanvasPage[]> {
+    const url = `${this.baseUrl}/courses/${courseId}/pages?per_page=50`;
+    return this.fetchPaginatedSafe<CanvasPage>(url);
+  }
+
+  /**
+   * Like fetchPaginated but returns [] on auth/access errors instead of throwing.
+   * Used for endpoints that may be blocked for some users/courses.
+   */
+  private async fetchPaginatedSafe<T>(url: string): Promise<T[]> {
+    try {
+      return await this.fetchPaginated<T>(url);
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        (err.message.includes("401") ||
+          err.message.includes("403") ||
+          err.message.includes("404") ||
+          err.message.includes("unauthorized") ||
+          err.message.includes("disabled"))
+      ) {
+        return [];
+      }
+      throw err;
+    }
   }
 }
