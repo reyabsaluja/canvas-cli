@@ -6,6 +6,7 @@ import { assignmentsCommand } from "./commands/assignments.js";
 import { showAssignmentCommand } from "./commands/show-assignment.js";
 import { doAssignmentCommand } from "./commands/do-assignment.js";
 import { ingestCourseCommand } from "./commands/ingest-course.js";
+import { workCommand } from "./commands/work.js";
 
 const program = new Command();
 
@@ -57,5 +58,12 @@ program
   .option("--refresh", "Force re-ingestion even if cache exists")
   .option("--json", "Output machine-readable JSON summary")
   .action(ingestCourseCommand);
+
+program
+  .command("work <assignment>")
+  .description("Create a rich AI-powered workspace for an assignment")
+  .option("--course <query>", "Scope to a specific course")
+  .option("--id <assignmentId>", "Look up by Canvas assignment ID")
+  .action(workCommand);
 
 program.parse();

@@ -140,6 +140,35 @@ export class CanvasClient {
   }
 
   /**
+   * Get a single file's metadata by Canvas file ID.
+   * Returns null if the Files API is blocked or file not found.
+   */
+  async getFileSafe(fileId: number): Promise<CanvasFile | null> {
+    try {
+      const url = `${this.baseUrl}/files/${fileId}`;
+      return await this.fetchOne<CanvasFile>(url);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Download a file by URL with Canvas auth. Returns the buffer or null on failure.
+   */
+  async downloadFile(downloadUrl: string): Promise<Buffer | null> {
+    try {
+      const response = await fetch(downloadUrl, {
+        headers: this.headers,
+        redirect: "follow",
+      });
+      if (!response.ok) return null;
+      return Buffer.from(await response.arrayBuffer());
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Like fetchPaginated but returns [] on auth/access errors instead of throwing.
    * Used for endpoints that may be blocked for some users/courses.
    */

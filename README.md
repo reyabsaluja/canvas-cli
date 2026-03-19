@@ -224,6 +224,93 @@ Next:
 
 **Repeated invocation** is safe: data files are refreshed with latest Canvas info, but `notes.md` and anything in `work/` are never touched.
 
+### `canvas-cli work <assignment>`
+
+The deep assignment setup command. Uses a tool-calling AI agent to investigate the assignment through course materials, then creates a rich local workspace.
+
+```bash
+canvas-cli work "Milestone 3" --course ece297
+canvas-cli work "Lab5 Quiz"
+canvas-cli work "Project" --id 1710240
+```
+
+**Prerequisites:**
+- `ANTHROPIC_API_KEY` set in `.env`
+- Course ingested first: `canvas-cli ingest <course>`
+
+**What happens:**
+1. Resolves the assignment from Canvas
+2. Loads the ingested course cache
+3. Runs a bounded investigation agent that:
+   - Searches modules for related content
+   - Reads downloaded PDFs and instruction documents
+   - Checks the syllabus for schedule/due date info
+   - Cross-references the full assignment list
+4. Synthesizes a structured workup
+5. Creates a rich workspace
+
+Example output:
+
+```
+  > resolving assignment
+  > found: Milestone 3: Shortest Path Algorithms and User Interface
+  > loading course cache
+  > enriching assignment context
+  > starting investigation agent
+  > investigating course materials
+  > reading: list_downloaded_files
+  > reading: read_document (M3_Instructions.pdf)
+  > reading: read_document (M3_Grading_Rubric.pdf)
+  > reading: get_syllabus
+  > reading: search_modules (Milestone 3)
+  > synthesizing assignment workup
+  > creating workspace
+
+Workspace ready
+
+  Assignment  Milestone 3: Shortest Path Algorithms and User Interface
+  Course      ECE297H1 S LEC0101 20261:Software Design and Communication
+  Path        .canvas-cli/sessions/ece297h1-s-lec0101-milestone-3-1710240
+  Confidence  high
+
+Generated:
+  - session.json
+  - assignment.json
+  - workup.json
+  - assignment.md
+  - plan.md
+  - notes.md
+  - extracted/ (3 documents)
+
+Next steps:
+  1. Read M3_Instructions.pdf for detailed requirements
+  2. Review the grading rubric for evaluation criteria
+  3. Start implementing shortest path algorithms
+```
+
+**Workspace contents:**
+
+| File/Dir | Purpose | On re-run |
+|---|---|---|
+| `assignment.md` | Rich brief with overview, deliverables, constraints, reading order | Refreshed |
+| `plan.md` | Practical action plan with checklist | Refreshed |
+| `workup.json` | Structured agent result (machine-readable) | Refreshed |
+| `assignment.json` | Raw Canvas assignment data | Refreshed |
+| `session.json` | Workspace metadata | Updated |
+| `notes.md` | Your scratch notes | Preserved |
+| `work/` | Your files | Preserved |
+| `resources/` | Links to relevant course documents | Refreshed |
+| `extracted/` | Extracted text from PDFs and documents | Refreshed |
+
+**How the agent works:**
+The investigation agent uses Anthropic tool calling with a bounded loop (max 10 iterations). It has tools to search modules, read downloaded PDFs, check the syllabus, and browse files. It decides what to investigate based on the assignment context and enrichment data. After investigation, a separate synthesis pass produces the structured workup.
+
+**The agent does NOT:**
+- Make new Canvas API calls (works from ingested cache)
+- Solve the assignment or write code
+- Run indefinitely (bounded iteration limit)
+- Download files not already ingested
+
 ### `canvas-cli ingest <course>`
 
 Ingest course structure and content into a local cache for future commands.
@@ -393,11 +480,20 @@ src/
     context-bundle.ts             — Assemble context for AI from enrichment
     parse.ts                      — Parse structured AI response
     generate-overview.ts          — AI overview pipeline orchestrator
+  work/
+    types.ts                      — AssignmentWorkup, InvestigationState types
+    orchestrator.ts               — Bounded tool-calling investigation loop
+    tools.ts                      — Tool definitions for the agent
+    tool-handlers.ts              — Tool execution (search, read, extract)
+    synthesis.ts                  — Final structured synthesis pass
+    workspace.ts                  — Rich workspace creation
+    generate-markdown.ts          — assignment.md and plan.md generation
   commands/
     courses.ts                    — courses command
     assignments.ts                — assignments command
     show-assignment.ts            — show assignment detail command
-    do-assignment.ts              — do command (workspace creation)
+    do-assignment.ts              — do command (basic workspace)
+    work.ts                       — work command (AI-powered deep workspace)
     ingest-course.ts              — ingest command (course ingestion)
   canvas/
     client.ts                     — Canvas REST API client
