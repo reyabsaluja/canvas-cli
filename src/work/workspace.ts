@@ -7,6 +7,7 @@ import { makeSessionSlug, getWorkspacePath } from "../workspace/paths.js";
 import {
   generateWorkAssignmentMarkdown,
   generatePlanMarkdown,
+  generateNotesMarkdown,
 } from "./generate-markdown.js";
 
 /**
@@ -93,12 +94,12 @@ export async function createWorkWorkspace(
   );
   filesWritten.push("plan.md");
 
-  // notes.md — only create if doesn't exist
+  // notes.md — only create if doesn't exist (preserve user edits)
   const notesMdPath = path.join(wsPath, "notes.md");
   if (await fileExists(notesMdPath)) {
     filesSkipped.push("notes.md");
   } else {
-    await writeAtomic(notesMdPath, `# Notes: ${detail.name}\n\n`);
+    await writeAtomic(notesMdPath, generateNotesMarkdown(detail, workup));
     filesWritten.push("notes.md");
   }
 
