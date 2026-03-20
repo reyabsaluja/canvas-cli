@@ -7,6 +7,7 @@ import { showAssignmentCommand } from "./commands/show-assignment.js";
 import { doAssignmentCommand } from "./commands/do-assignment.js";
 import { ingestCourseCommand } from "./commands/ingest-course.js";
 import { workCommand } from "./commands/work.js";
+import { askCommand } from "./commands/ask.js";
 
 const program = new Command();
 
@@ -65,5 +66,13 @@ program
   .option("--course <query>", "Scope to a specific course")
   .option("--id <assignmentId>", "Look up by Canvas assignment ID")
   .action(workCommand);
+
+program
+  .command("ask <question>")
+  .description("Ask a question about the current assignment workspace")
+  .option("--workspace <path>", "Path to a specific workspace")
+  .option("--json", "Output as JSON")
+  .option("--debug", "Show retrieval debug info")
+  .action(askCommand);
 
 program.parse();

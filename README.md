@@ -311,6 +311,57 @@ The investigation agent uses Anthropic tool calling with a bounded loop (max 10 
 - Run indefinitely (bounded iteration limit)
 - Download files not already ingested
 
+### `canvas-cli ask "<question>"`
+
+Ask a question about the current assignment workspace. Answers are grounded in local workspace artifacts — no re-crawling or new agent runs.
+
+```bash
+canvas-cli ask "what exactly do I need to submit?"
+canvas-cli ask "what should I read first?"
+canvas-cli ask "what formulas matter here?"
+canvas-cli ask "what is inferred vs confirmed?"
+canvas-cli ask "what are the constraints?" --json
+canvas-cli ask "what's the due date?" --workspace .canvas-cli/sessions/ece212-lab4-1645539
+canvas-cli ask "what should I focus on?" --debug
+```
+
+**Prerequisites:**
+- `ANTHROPIC_API_KEY` set in `.env`
+- A workspace created by `canvas-cli work <assignment>`
+
+Example output:
+
+```
+Question
+  what exactly do I need to submit?
+
+Answer
+  Based on the lab instructions, you need to submit pre-lab simulation results,
+  experimental measurements for three damping conditions, labeled waveform
+  documentation, and a comparison analysis between simulation and experimental
+  results.
+
+Key points
+  - Pre-lab PSpice simulation waveforms
+  - Experimental measurements for underdamped, critically damped, overdamped
+  - Labeled oscilloscope captures
+  - Comparison table: simulation vs experimental
+
+Sources
+  - workup.json [workup] — "Deliverables"
+  - extracted/Lab4_Second-order-Circuits.pdf.txt [extracted]
+
+  Confidence: high
+```
+
+**Workspace detection:** The command automatically finds the most recently updated workspace in `.canvas-cli/sessions/`. Use `--workspace <path>` to target a specific one.
+
+**Retrieval:** Uses BM25 keyword scoring to select the most relevant workspace sections for the question. Workup fields (deliverables, constraints, plan) are treated as high-signal sources. Extracted document text is chunked and scored. Only the top-8 most relevant chunks are sent to the model.
+
+**When no workspace exists:** Shows a helpful error listing available workspaces if any, or suggests running `canvas-cli work` first.
+
+**When retrieval is weak:** The model answers with low confidence and explicitly states what it couldn't find.
+
 ### `canvas-cli ingest <course>`
 
 Ingest course structure and content into a local cache for future commands.
@@ -488,12 +539,20 @@ src/
     synthesis.ts                  — Final structured synthesis pass
     workspace.ts                  — Rich workspace creation
     generate-markdown.ts          — assignment.md and plan.md generation
+  ask/
+    types.ts                      — WorkspaceAnswer, ContentChunk types
+    resolve-workspace.ts          — Find active workspace
+    load-workspace.ts             — Load workspace artifacts
+    retrieve.ts                   — BM25 keyword retrieval over chunks
+    answer.ts                     — Grounded QA via LLM
+    render.ts                     — Terminal output rendering
   commands/
     courses.ts                    — courses command
     assignments.ts                — assignments command
     show-assignment.ts            — show assignment detail command
     do-assignment.ts              — do command (basic workspace)
     work.ts                       — work command (AI-powered deep workspace)
+    ask.ts                        — ask command (workspace QA)
     ingest-course.ts              — ingest command (course ingestion)
   canvas/
     client.ts                     — Canvas REST API client
