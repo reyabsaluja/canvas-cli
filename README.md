@@ -1,6 +1,6 @@
 # canvas-cli
 
-A terminal interface for Canvas LMS. View your courses and assignments from the command line.
+An interactive terminal interface for Canvas LMS. Browse courses, open assignments, and get AI-powered assignment understanding — all from your terminal.
 
 ## Setup
 
@@ -28,7 +28,143 @@ cp .env.example .env
 npm run build
 ```
 
-## Commands
+## Interactive Mode (Flagship)
+
+The primary way to use canvas-cli is the interactive terminal UI:
+
+```bash
+canvas-cli
+```
+
+This launches an interactive application where you can:
+
+1. **Browse courses** — arrow keys to navigate, type to filter, Enter to select
+2. **Pick assignments** — see due dates and status at a glance
+3. **Enter a workspace** — the system automatically ingests and prepares the assignment if needed
+4. **Ask questions** — type natural language questions about the assignment
+5. **Use slash commands** — `/overview`, `/plan`, `/resources`, `/evidence`, etc.
+
+### Example flow
+
+```
+$ canvas-cli
+
+  canvas-cli
+  Recent workspaces
+
+  ❯ Lab4 — ECE212 2026 Home Page
+    Milestone 3 — ECE297 Software Design
+    Browse courses — 5 current courses
+
+  ↑↓ navigate  Enter select  Esc quit
+```
+
+Select an assignment and enter the workspace:
+
+```
+  Lab4
+  ECE212 2026 Home Page
+  Confidence: high | Due: March 6, 2026
+  ──────────────────────────────────────
+
+  This is Lab 4: Second-order Circuits, covering RLC circuit analysis with
+  underdamped, critically damped, and overdamped responses...
+
+  Next steps
+  1. Complete pre-lab PSpice simulations
+  2. Review second-order circuit theory
+  3. Prepare for in-lab measurements
+
+  Type a question, or use /help for commands
+
+  >
+```
+
+Type questions directly:
+
+```
+  > what exactly do I need to submit?
+
+  Based on the lab instructions, you need to submit pre-lab simulation
+  waveforms, experimental measurements for all three damping conditions,
+  labeled oscilloscope captures, and a comparison analysis table.
+
+  • Pre-lab PSpice simulation results
+  • Experimental voltage measurements
+  • Oscilloscope waveform captures
+  • Comparison table: simulation vs experimental
+
+  [extracted] Lab4_Second-order-Circuits.pdf.txt
+  confidence: high
+
+  > /plan
+
+  Action Plan
+
+  1. Complete pre-lab PSpice simulations
+     Run simulations for underdamped, critically damped, overdamped
+  2. Calculate component values
+     Determine R for each damping condition using formulas
+  3. Perform in-lab measurements
+     Build circuits and capture oscilloscope waveforms
+  ...
+```
+
+### Slash commands
+
+| Command | Description |
+|---|---|
+| `/overview` | Show assignment overview |
+| `/requirements` | Show deliverables and constraints |
+| `/plan` | Show the action plan |
+| `/resources` | Show key resources |
+| `/evidence` | Show confirmed vs inferred sources |
+| `/status` | Show workspace status |
+| `/help` | Show available commands |
+| `/back` | Return to assignment selection |
+| `/courses` | Return to course selection |
+| `/quit` | Exit canvas-cli |
+
+### Automatic workspace preparation
+
+When you open an assignment for the first time, canvas-cli automatically:
+1. Checks for an existing workspace
+2. Runs course ingestion if needed (downloads modules, PDFs, syllabus)
+3. Runs the AI work agent (reads documents, synthesizes understanding)
+4. Creates the workspace with assignment.md, plan.md, workup.json, etc.
+
+You see the progress live inside the workspace UI:
+```
+  › resolving assignment
+  › checking course cache
+  › ingesting course data
+  › investigating assignment
+  › list_downloaded_files
+  › read_document (Lab4_Second-order-Circuits.pdf)
+  › get_syllabus
+  › synthesizing assignment workup
+  › creating workspace
+  › workspace ready
+```
+
+On subsequent opens, the workspace loads instantly.
+
+### Local workspace files
+
+The TUI is the primary interface, but all data is persisted as local files under `.canvas-cli/sessions/<slug>/`. Power users can inspect these directly:
+
+| File | Purpose |
+|---|---|
+| `assignment.md` | Rich assignment brief |
+| `plan.md` | Action plan with steps |
+| `notes.md` | Your scratch notes (never overwritten) |
+| `workup.json` | Structured AI analysis |
+| `extracted/` | Text extracted from PDFs |
+| `work/` | Your files |
+
+## Non-Interactive Commands
+
+All original CLI commands remain available for scripting and power use:
 
 ### `canvas-cli courses`
 
@@ -522,7 +658,13 @@ By default, `canvas-cli` optimizes for relevance over completeness:
 
 ```
 src/
-  cli.ts                          — CLI entry point
+  cli.ts                          — Entry point (TUI default + CLI subcommands)
+  tui/
+    app.ts                        — Interactive TUI state machine
+    picker.ts                     — Arrow-key list picker component
+    workspace-ui.ts               — Workspace REPL (chat + slash commands)
+    screen.ts                     — ANSI terminal utilities
+    services.ts                   — Service layer wrapping existing logic
   errors.ts                       — Shared error handling
   ai/
     types.ts                      — AI overview types
