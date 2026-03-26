@@ -1,17 +1,29 @@
-import readline from "node:readline";
 import chalk from "chalk";
 import type { AssignmentWorkup } from "../work/types.js";
 import type { LoadedWorkspace, WorkspaceAnswer } from "../ask/types.js";
 import type { AIProviderConfig } from "../ai/provider.js";
 import { askWorkspaceQuestion } from "./services.js";
-import { divider } from "./screen.js";
+import { clearScreen, showCursor, hideCursor, divider, wrapText, fmtConfidence, C } from "./screen.js";
 
-interface WorkspaceContext {
+export interface WorkspaceContext {
   workspacePath: string;
   workup: AssignmentWorkup | null;
   loaded: LoadedWorkspace;
   aiConfig: AIProviderConfig | null;
 }
+
+// --- Chat message types ---
+
+interface ChatMessage {
+  role: "user" | "assistant" | "system" | "action";
+  content: string;
+  actions?: string[];
+  sources?: Array<{ title: string; kind: string }>;
+  confidence?: string;
+  bulletPoints?: string[];
+}
+
+// --- Slash commands ---
 
 const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
   { cmd: "/overview", desc: "Show assignment overview" },
@@ -27,342 +39,474 @@ const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
 ];
 
 /**
- * Run the workspace interactive REPL.
- * Returns: "back" to go to assignment picker, "courses" to go to course picker, "quit" to exit.
+ * Run the workspace chatbot UI.
+ * Full raw-mode control for slash command popup and chat rendering.
  */
 export async function runWorkspaceUI(
   ctx: WorkspaceContext
 ): Promise<"back" | "courses" | "quit"> {
-  renderWorkspaceHeader(ctx);
-  renderWelcome(ctx);
+  const messages: ChatMessage[] = [];
 
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    prompt: chalk.cyan("\n  > "),
-  });
+  // Initial system message with overview
+  if (ctx.workup?.overview) {
+    messages.push({
+      role: "system",
+      content: ctx.workup.overview,
+    });
+  }
+
+  let inputBuffer = "";
+  let slashSelected = 0;
+  let showSlashMenu = false;
+  let isProcessing = false;
+
+  function getSlashMatches(): typeof SLASH_COMMANDS {
+    if (!inputBuffer.startsWith("/")) return [];
+    const partial = inputBuffer.toLowerCase();
+    return SLASH_COMMANDS.filter((c) => c.cmd.startsWith(partial));
+  }
+
+  function render(): void {
+    clearScreen();
+
+    // Header
+    renderHeader(ctx);
+
+    // Chat messages
+    for (const msg of messages) {
+      renderMessage(msg);
+    }
+
+    // Processing indicator
+    if (isProcessing) {
+      console.log("");
+      console.log(`  ${C.primary("∷")} ${C.dim("Working...")}`);
+    }
+
+    // Slash command popup
+    const matches = showSlashMenu ? getSlashMatches() : [];
+    if (matches.length > 0 && !isProcessing) {
+      console.log("");
+      console.log(C.dimmer("  ─── commands ───"));
+      for (let i = 0; i < matches.length; i++) {
+        const m = matches[i];
+        const sel = i === slashSelected;
+        const ptr = sel ? C.primary("❯ ") : "  ";
+        const cmd = sel ? C.primaryBold(m.cmd) : C.accent(m.cmd);
+        console.log(`  ${ptr}${cmd}  ${C.dim(m.desc)}`);
+      }
+    }
+
+    // Input area
+    console.log("");
+    console.log(C.dimmer("  ─".repeat(1) + "─".repeat(38)));
+    if (isProcessing) {
+      process.stdout.write(C.dim("  > ") + C.dim(inputBuffer));
+    } else {
+      process.stdout.write(C.dim("  > ") + C.text(inputBuffer));
+    }
+  }
+
+  render();
+  showCursor();
+
+  const stdin = process.stdin;
+  stdin.setRawMode(true);
+  stdin.resume();
+  stdin.setEncoding("utf8");
 
   return new Promise((resolve) => {
-    rl.prompt();
+    async function handleKey(key: string): Promise<void> {
+      if (isProcessing) return; // ignore input while working
 
-    rl.on("line", async (line) => {
-      const input = line.trim();
-      if (!input) {
-        rl.prompt();
-        return;
+      // Ctrl+C
+      if (key === "\x03") {
+        cleanup();
+        process.exit(0);
       }
 
-      // Slash commands
-      if (input.startsWith("/")) {
-        const cmd = input.toLowerCase().split(/\s/)[0];
-        switch (cmd) {
-          case "/overview":
-            renderOverview(ctx);
-            break;
-          case "/requirements":
-          case "/reqs":
-            renderRequirements(ctx);
-            break;
-          case "/plan":
-            renderPlan(ctx);
-            break;
-          case "/resources":
-            renderResources(ctx);
-            break;
-          case "/evidence":
-            renderEvidence(ctx);
-            break;
-          case "/status":
-            renderStatus(ctx);
-            break;
-          case "/help":
-            renderHelp();
-            break;
-          case "/back":
-            rl.close();
-            resolve("back");
-            return;
-          case "/courses":
-            rl.close();
-            resolve("courses");
-            return;
-          case "/quit":
-          case "/exit":
-          case "/q":
-            rl.close();
-            resolve("quit");
-            return;
-          default:
-            console.log(chalk.dim(`\n  Unknown command: ${cmd}. Type /help for options.`));
+      // Escape — close slash menu or do nothing
+      if (key === "\x1B") {
+        if (showSlashMenu) {
+          showSlashMenu = false;
+          render();
         }
-        rl.prompt();
         return;
       }
 
-      // Natural language question
-      if (!ctx.aiConfig) {
-        console.log(
-          chalk.dim("\n  AI unavailable (no ANTHROPIC_API_KEY). Slash commands still work — try /help")
-        );
-        rl.prompt();
+      // Enter
+      if (key === "\r" || key === "\n") {
+        if (showSlashMenu && getSlashMatches().length > 0) {
+          // Select from slash menu
+          const matches = getSlashMatches();
+          inputBuffer = matches[slashSelected].cmd;
+          showSlashMenu = false;
+        }
+
+        const input = inputBuffer.trim();
+        inputBuffer = "";
+        slashSelected = 0;
+        showSlashMenu = false;
+
+        if (!input) {
+          render();
+          return;
+        }
+
+        // Handle slash commands
+        if (input.startsWith("/")) {
+          const cmd = input.toLowerCase().split(/\s/)[0];
+          const navResult = handleSlashCommand(cmd, ctx, messages);
+          if (navResult) {
+            cleanup();
+            resolve(navResult);
+            return;
+          }
+          render();
+          return;
+        }
+
+        // Natural language question
+        messages.push({ role: "user", content: input });
+
+        if (!ctx.aiConfig) {
+          messages.push({
+            role: "system",
+            content: "AI unavailable (no ANTHROPIC_API_KEY). Slash commands still work — type /help",
+          });
+          render();
+          return;
+        }
+
+        isProcessing = true;
+        render();
+
+        try {
+          const answer = await askWorkspaceQuestion(ctx.aiConfig, ctx.loaded, input);
+          messages.push({
+            role: "assistant",
+            content: answer.answer,
+            bulletPoints: answer.bulletPoints,
+            sources: answer.sources,
+            confidence: answer.confidence,
+            actions: ["searched workspace", "retrieved context", "generated answer"],
+          });
+        } catch (err) {
+          messages.push({
+            role: "system",
+            content: `Error: ${err instanceof Error ? err.message : "unknown"}`,
+          });
+        }
+
+        isProcessing = false;
+        render();
         return;
       }
 
-      console.log(chalk.dim("\n  Thinking..."));
-
-      try {
-        const answer = await askWorkspaceQuestion(
-          ctx.aiConfig,
-          ctx.loaded,
-          input
-        );
-        renderAnswer(answer);
-      } catch (err) {
-        console.log(
-          chalk.red(
-            `\n  Error: ${err instanceof Error ? err.message : "unknown"}`
-          )
-        );
+      // Arrow up/down for slash menu
+      if (key === "\x1B[A" && showSlashMenu) {
+        const matches = getSlashMatches();
+        slashSelected = Math.max(0, slashSelected - 1);
+        render();
+        return;
+      }
+      if (key === "\x1B[B" && showSlashMenu) {
+        const matches = getSlashMatches();
+        slashSelected = Math.min(matches.length - 1, slashSelected + 1);
+        render();
+        return;
       }
 
-      rl.prompt();
-    });
+      // Backspace
+      if (key === "\x7F" || key === "\b") {
+        if (inputBuffer.length > 0) {
+          inputBuffer = inputBuffer.slice(0, -1);
+          showSlashMenu = inputBuffer.startsWith("/");
+          slashSelected = 0;
+          render();
+        }
+        return;
+      }
 
-    rl.on("close", () => {
-      resolve("quit");
-    });
+      // Tab — autocomplete slash command
+      if (key === "\t" && showSlashMenu) {
+        const matches = getSlashMatches();
+        if (matches.length > 0) {
+          inputBuffer = matches[slashSelected].cmd;
+          render();
+        }
+        return;
+      }
+
+      // Regular character
+      if (key.length === 1 && key >= " ") {
+        inputBuffer += key;
+
+        // Detect slash command start
+        if (inputBuffer === "/") {
+          showSlashMenu = true;
+          slashSelected = 0;
+        } else if (inputBuffer.startsWith("/")) {
+          showSlashMenu = true;
+          slashSelected = 0;
+        } else {
+          showSlashMenu = false;
+        }
+
+        render();
+      }
+    }
+
+    function onData(key: string): void {
+      handleKey(key).catch((err) => {
+        console.error(err);
+      });
+    }
+
+    function cleanup(): void {
+      stdin.removeListener("data", onData);
+      stdin.setRawMode(false);
+      stdin.pause();
+      showCursor();
+      clearScreen();
+    }
+
+    stdin.on("data", onData);
   });
 }
 
-// --- Renderers ---
+// --- Slash command handler ---
 
-function renderWorkspaceHeader(ctx: WorkspaceContext): void {
-  const w = ctx.workup;
+function handleSlashCommand(
+  cmd: string,
+  ctx: WorkspaceContext,
+  messages: ChatMessage[]
+): "back" | "courses" | "quit" | null {
+  switch (cmd) {
+    case "/overview":
+      if (ctx.workup) {
+        messages.push({
+          role: "assistant",
+          content: ctx.workup.overview,
+          actions: ["loaded overview"],
+        });
+      } else {
+        messages.push({ role: "system", content: "No workup data available." });
+      }
+      return null;
+
+    case "/requirements":
+    case "/reqs": {
+      if (!ctx.workup) {
+        messages.push({ role: "system", content: "No workup data available." });
+        return null;
+      }
+      const parts: string[] = [];
+      if (ctx.workup.deliverables.length > 0) {
+        parts.push("**Deliverables**\n" + ctx.workup.deliverables.map((d) => `• ${d}`).join("\n"));
+      }
+      if (ctx.workup.constraints.length > 0) {
+        parts.push("**Constraints**\n" + ctx.workup.constraints.map((c) => `• ${c}`).join("\n"));
+      }
+      messages.push({
+        role: "assistant",
+        content: parts.join("\n\n") || "No deliverables or constraints found.",
+        actions: ["loaded requirements"],
+      });
+      return null;
+    }
+
+    case "/plan":
+      if (ctx.workup && ctx.workup.actionPlan.length > 0) {
+        const planText = ctx.workup.actionPlan
+          .map((s) => `${s.step}. ${s.action}${s.detail ? `\n   ${s.detail}` : ""}`)
+          .join("\n");
+        messages.push({
+          role: "assistant",
+          content: planText,
+          actions: ["loaded plan"],
+        });
+      } else {
+        messages.push({ role: "system", content: "No action plan available." });
+      }
+      return null;
+
+    case "/resources":
+      if (ctx.workup && ctx.workup.relevantResources.length > 0) {
+        const resText = ctx.workup.relevantResources
+          .map((r) => `• **${r.title}** (${r.type}) — ${r.why}`)
+          .join("\n");
+        messages.push({
+          role: "assistant",
+          content: resText,
+          actions: ["loaded resources"],
+        });
+      } else {
+        messages.push({ role: "system", content: "No resources listed." });
+      }
+      return null;
+
+    case "/evidence":
+      if (ctx.workup && ctx.workup.sourceTrace.length > 0) {
+        let text = ctx.workup.sourceTrace
+          .map((e) => `• ${e.conclusion}\n  source: ${e.source}`)
+          .join("\n");
+        if (ctx.workup.uncertainties.length > 0) {
+          text += "\n\n**Open questions**\n" + ctx.workup.uncertainties.map((u) => `? ${u}`).join("\n");
+        }
+        messages.push({
+          role: "assistant",
+          content: text,
+          actions: ["loaded evidence trace"],
+        });
+      } else {
+        messages.push({ role: "system", content: "No source trace available." });
+      }
+      return null;
+
+    case "/status": {
+      const w = ctx.workup;
+      const lines = [
+        `Assignment: ${ctx.loaded.assignmentName}`,
+        `Course: ${ctx.loaded.courseName}`,
+        `Path: ${ctx.workspacePath}`,
+        `Workup: ${w ? "loaded" : "not available"}`,
+        `Extracted: ${ctx.loaded.extractedFiles.length} documents`,
+        w ? `Confidence: ${w.confidence}` : "",
+      ].filter(Boolean);
+      messages.push({
+        role: "assistant",
+        content: lines.join("\n"),
+        actions: ["checked status"],
+      });
+      return null;
+    }
+
+    case "/help":
+      messages.push({
+        role: "assistant",
+        content: SLASH_COMMANDS.map((c) => `${c.cmd}  ${c.desc}`).join("\n"),
+        actions: ["loaded help"],
+      });
+      return null;
+
+    case "/back":
+      return "back";
+    case "/courses":
+      return "courses";
+    case "/quit":
+    case "/exit":
+    case "/q":
+      return "quit";
+
+    default:
+      messages.push({ role: "system", content: `Unknown command: ${cmd}. Type /help for options.` });
+      return null;
+  }
+}
+
+// --- Message renderers ---
+
+function renderHeader(ctx: WorkspaceContext): void {
   const name = ctx.loaded.assignmentName;
   const course = ctx.loaded.courseName;
+  const w = ctx.workup;
 
   console.log("");
-  console.log(chalk.bold.cyan(`  ${name}`));
-  console.log(chalk.dim(`  ${course}`));
+  console.log(`  ${C.primaryBold(name)}  ${C.dim(course)}`);
 
   if (w) {
-    const confidence = w.confidence === "high"
-      ? chalk.green(w.confidence)
-      : w.confidence === "medium"
-        ? chalk.yellow(w.confidence)
-        : chalk.red(w.confidence);
-
-    const dueStr = w.dueDate ? chalk.dim(` | Due: ${w.dueDate}`) : "";
-    console.log(chalk.dim("  Confidence: ") + confidence + dueStr);
+    const parts = [`confidence: ${fmtConfidence(w.confidence)}`];
+    if (w.dueDate) parts.push(`due: ${C.text(w.dueDate)}`);
+    console.log(`  ${parts.map((p) => C.dim(p)).join(C.dimmer("  ·  "))}`);
   }
 
   console.log(divider());
 }
 
-function renderWelcome(ctx: WorkspaceContext): void {
-  if (ctx.workup?.overview) {
-    console.log("");
-    console.log(chalk.dim("  ") + wrapText(ctx.workup.overview, 76, "  "));
-  }
-
-  if (ctx.workup?.actionPlan && ctx.workup.actionPlan.length > 0) {
-    console.log("");
-    console.log(chalk.bold("  Next steps"));
-    const preview = ctx.workup.actionPlan.slice(0, 3);
-    for (const step of preview) {
-      console.log(`  ${chalk.dim(`${step.step}.`)} ${step.action}`);
-    }
-    if (ctx.workup.actionPlan.length > 3) {
-      console.log(chalk.dim(`  ... ${ctx.workup.actionPlan.length - 3} more — type /plan`));
-    }
-  }
-
-  console.log("");
-  console.log(
-    chalk.dim("  Type a question, or use /help for commands")
-  );
-}
-
-function renderOverview(ctx: WorkspaceContext): void {
-  if (!ctx.workup) {
-    console.log(chalk.dim("\n  No workup data available."));
-    return;
-  }
-  console.log("");
-  console.log(chalk.bold("  Overview"));
-  console.log("");
-  console.log("  " + wrapText(ctx.workup.overview, 76, "  "));
-}
-
-function renderRequirements(ctx: WorkspaceContext): void {
-  if (!ctx.workup) {
-    console.log(chalk.dim("\n  No workup data available."));
-    return;
-  }
+function renderMessage(msg: ChatMessage): void {
   console.log("");
 
-  if (ctx.workup.deliverables.length > 0) {
-    console.log(chalk.bold("  Deliverables"));
-    console.log("");
-    for (const d of ctx.workup.deliverables) {
-      console.log(`  ${chalk.dim("•")} ${d}`);
-    }
-  }
+  switch (msg.role) {
+    case "user":
+      // User message — highlighted like a chat bubble
+      console.log(`  ${C.bold(msg.content)}`);
+      break;
 
-  if (ctx.workup.constraints.length > 0) {
-    console.log("");
-    console.log(chalk.bold("  Constraints"));
-    console.log("");
-    for (const c of ctx.workup.constraints) {
-      console.log(`  ${chalk.dim("•")} ${c}`);
-    }
-  }
+    case "assistant":
+      // Show actions first (like tool calls)
+      if (msg.actions && msg.actions.length > 0) {
+        for (const action of msg.actions) {
+          console.log(`  ${C.dim("›")} ${C.dim(action)}`);
+        }
+        console.log("");
+      }
 
-  if (
-    ctx.workup.deliverables.length === 0 &&
-    ctx.workup.constraints.length === 0
-  ) {
-    console.log(chalk.dim("  No deliverables or constraints found in workup."));
+      // Main content
+      renderMarkdownContent(msg.content);
+
+      // Bullet points
+      if (msg.bulletPoints && msg.bulletPoints.length > 0) {
+        console.log("");
+        for (const bp of msg.bulletPoints) {
+          console.log(`  ${C.dim("•")} ${C.text(bp)}`);
+        }
+      }
+
+      // Sources
+      if (msg.sources && msg.sources.length > 0) {
+        console.log("");
+        for (const src of msg.sources) {
+          console.log(`  ${C.dimmer(`[${src.kind}]`)} ${C.dim(src.title)}`);
+        }
+      }
+
+      // Confidence
+      if (msg.confidence) {
+        console.log(`  ${C.dimmer("confidence:")} ${fmtConfidence(msg.confidence)}`);
+      }
+      break;
+
+    case "system":
+      console.log(`  ${C.dim(msg.content)}`);
+      break;
+
+    case "action":
+      console.log(`  ${C.dim("›")} ${C.dim(msg.content)}`);
+      break;
   }
 }
 
-function renderPlan(ctx: WorkspaceContext): void {
-  if (!ctx.workup || ctx.workup.actionPlan.length === 0) {
-    console.log(chalk.dim("\n  No action plan available."));
-    return;
-  }
-  console.log("");
-  console.log(chalk.bold("  Action Plan"));
-  console.log("");
-  for (const step of ctx.workup.actionPlan) {
-    console.log(`  ${chalk.bold(`${step.step}.`)} ${step.action}`);
-    if (step.detail) {
-      console.log(`     ${chalk.dim(step.detail)}`);
-    }
-  }
-}
-
-function renderResources(ctx: WorkspaceContext): void {
-  if (!ctx.workup || ctx.workup.relevantResources.length === 0) {
-    console.log(chalk.dim("\n  No resources listed."));
-    return;
-  }
-  console.log("");
-  console.log(chalk.bold("  Resources"));
-  console.log("");
-  for (const r of ctx.workup.relevantResources) {
-    console.log(`  ${chalk.dim("•")} ${chalk.bold(r.title)} ${chalk.dim(`(${r.type})`)}`);
-    console.log(`    ${r.why}`);
-    if (r.location) console.log(chalk.dim(`    ${r.location}`));
-  }
-}
-
-function renderEvidence(ctx: WorkspaceContext): void {
-  if (!ctx.workup || ctx.workup.sourceTrace.length === 0) {
-    console.log(chalk.dim("\n  No source trace available."));
-    return;
-  }
-  console.log("");
-  console.log(chalk.bold("  Evidence & Source Trace"));
-  console.log("");
-  for (const e of ctx.workup.sourceTrace) {
-    console.log(`  ${chalk.dim("•")} ${e.conclusion}`);
-    console.log(`    ${chalk.dim(`source: ${e.source}`)}`);
-  }
-
-  if (ctx.workup.uncertainties.length > 0) {
-    console.log("");
-    console.log(chalk.bold("  Open questions"));
-    console.log("");
-    for (const u of ctx.workup.uncertainties) {
-      console.log(`  ${chalk.dim("?")} ${u}`);
-    }
-  }
-}
-
-function renderStatus(ctx: WorkspaceContext): void {
-  console.log("");
-  console.log(chalk.bold("  Workspace Status"));
-  console.log("");
-  console.log(`  ${chalk.dim("Assignment")}  ${ctx.loaded.assignmentName}`);
-  console.log(`  ${chalk.dim("Course    ")}  ${ctx.loaded.courseName}`);
-  console.log(`  ${chalk.dim("Path      ")}  ${ctx.workspacePath}`);
-  console.log(
-    `  ${chalk.dim("Workup    ")}  ${ctx.workup ? chalk.green("loaded") : chalk.red("not available")}`
-  );
-  console.log(
-    `  ${chalk.dim("Extracted ")}  ${ctx.loaded.extractedFiles.length} documents`
-  );
-  console.log(
-    `  ${chalk.dim("Notes     ")}  ${ctx.loaded.notesMd ? "present" : "empty"}`
-  );
-  if (ctx.workup) {
-    console.log(
-      `  ${chalk.dim("Confidence")}  ${ctx.workup.confidence}`
-    );
-  }
-}
-
-function renderHelp(): void {
-  console.log("");
-  console.log(chalk.bold("  Commands"));
-  console.log("");
-  for (const { cmd, desc } of SLASH_COMMANDS) {
-    console.log(`  ${chalk.cyan(cmd.padEnd(16))} ${chalk.dim(desc)}`);
-  }
-  console.log("");
-  console.log(chalk.dim("  Or type any question in natural language."));
-}
-
-function renderAnswer(answer: WorkspaceAnswer): void {
-  console.log("");
-
-  // Answer text
-  const lines = answer.answer.split("\n");
+/** Render content that may contain **bold** markers and bullet lists. */
+function renderMarkdownContent(content: string): void {
+  const lines = content.split("\n");
   for (const line of lines) {
-    console.log(line ? `  ${line}` : "");
-  }
-
-  // Bullet points
-  if (answer.bulletPoints.length > 0) {
-    console.log("");
-    for (const bp of answer.bulletPoints) {
-      console.log(`  ${chalk.dim("•")} ${bp}`);
+    if (!line.trim()) {
+      console.log("");
+      continue;
     }
-  }
 
-  // Sources
-  if (answer.sources.length > 0) {
-    console.log("");
-    for (const src of answer.sources) {
-      console.log(`  ${chalk.dim(`[${src.kind}]`)} ${chalk.dim(src.title)}`);
-    }
-  }
+    let rendered = line;
 
-  // Confidence
-  const conf =
-    answer.confidence === "high"
-      ? chalk.green(answer.confidence)
-      : answer.confidence === "medium"
-        ? chalk.yellow(answer.confidence)
-        : chalk.red(answer.confidence);
-  console.log(chalk.dim(`\n  confidence: `) + conf);
-}
+    // Bold: **text**
+    rendered = rendered.replace(/\*\*(.+?)\*\*/g, (_m, t) => C.bold(t));
 
-function wrapText(text: string, width: number, indent: string): string {
-  const words = text.split(/\s+/);
-  const lines: string[] = [];
-  let current = "";
-
-  for (const word of words) {
-    if (current.length + word.length + 1 > width) {
-      lines.push(current);
-      current = word;
+    // Bullet points
+    if (rendered.trim().startsWith("•") || rendered.trim().startsWith("?")) {
+      const indent = rendered.match(/^\s*/)?.[0] ?? "";
+      const symbol = rendered.trim().startsWith("?")
+        ? C.warn("?")
+        : C.dim("•");
+      const text = rendered.trim().slice(1).trim();
+      console.log(`  ${indent}${symbol} ${C.text(text)}`);
+    } else if (/^\d+\.\s/.test(rendered.trim())) {
+      // Numbered list
+      const match = rendered.trim().match(/^(\d+)\.\s(.+)/);
+      if (match) {
+        console.log(`  ${C.primaryBold(match[1] + ".")} ${C.text(match[2])}`);
+      }
     } else {
-      current = current ? current + " " + word : word;
+      console.log(`  ${C.text(rendered)}`);
     }
   }
-  if (current) lines.push(current);
-
-  return lines.join("\n" + indent);
 }
