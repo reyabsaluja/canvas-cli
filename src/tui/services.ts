@@ -20,6 +20,7 @@ import { makeSessionSlug, getWorkspacePath } from "../workspace/paths.js";
 import { listWorkspaces } from "../ask/resolve-workspace.js";
 import type { Course, Assignment, AssignmentDetail } from "../domain/models.js";
 import type { CanvasCourse } from "../canvas/types.js";
+import type { UserCourse, CourseConfig } from "./course-config.js";
 import type { AssignmentWorkup } from "../work/types.js";
 import type { WorkspaceAnswer } from "../ask/types.js";
 import type { LoadedWorkspace } from "../ask/types.js";
@@ -33,7 +34,10 @@ export interface AppServices {
   client: CanvasClient;
   aiConfig: AIProviderConfig | null;
   rawCourses: CanvasCourse[];
-  courses: Course[];
+  /** All current courses from Canvas (unfiltered). */
+  allCourses: Course[];
+  /** User-configured courses (filtered + renamed). Null if no config yet. */
+  courseConfig: CourseConfig | null;
 }
 
 export async function initServices(): Promise<AppServices> {
@@ -41,11 +45,35 @@ export async function initServices(): Promise<AppServices> {
   const client = new CanvasClient(config);
   const aiConfig = getAIConfig();
   const rawCourses = await client.getCourses();
-  const courses = rawCourses
+  const allCourses = rawCourses
     .map(normalizeCourse)
     .filter((c) => c.isCurrent);
 
-  return { config, client, aiConfig, rawCourses, courses };
+  return { config, client, aiConfig, rawCourses, allCourses, courseConfig: null };
+}
+
+/**
+ * Get the display courses — user-configured with custom names.
+ * Returns empty array if no courses configured (user must add via Manage courses).
+ * Only falls back to allCourses if courseConfig is null (pre-setup state).
+ */
+export function getDisplayCourses(services: AppServices): Course[] {
+  if (!services.courseConfig) {
+    // Pre-setup state — show all courses as fallback
+    return services.allCourses;
+  }
+
+  // Map user config to Course objects with custom display names
+  return services.courseConfig.courses.map((uc) => {
+    const original = services.allCourses.find((c) => c.id === uc.id);
+    return {
+      id: uc.id,
+      name: uc.originalName,
+      courseCode: uc.displayName,
+      termName: original?.termName ?? null,
+      isCurrent: true,
+    };
+  });
 }
 
 /**

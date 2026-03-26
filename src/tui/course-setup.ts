@@ -1,0 +1,424 @@
+import readline from "node:readline";
+import { hideCursor, showCursor, createBuffer, clearScreen, C } from "./screen.js";
+import type { Course } from "../domain/models.js";
+import type { UserCourse, CourseConfig } from "./course-config.js";
+import { saveCourseConfig } from "./course-config.js";
+
+/**
+ * Multi-select picker — user toggles courses with space, confirms with enter.
+ * Returns the selected courses.
+ */
+export function showMultiSelect(
+  title: string,
+  subtitle: string,
+  courses: Course[]
+): Promise<Course[]> {
+  return new Promise((resolve) => {
+    let selected = 0;
+    let filter = "";
+    let message = "";
+    const checked = new Set<number>();
+
+    function getFiltered(): Course[] {
+      if (!filter) return courses;
+      const q = filter.toLowerCase();
+      return courses.filter(
+        (c) =>
+          c.courseCode.toLowerCase().includes(q) ||
+          c.name.toLowerCase().includes(q)
+      );
+    }
+
+    function render(): void {
+      const buf = createBuffer();
+      const filtered = getFiltered();
+      if (selected >= filtered.length)
+        selected = Math.max(0, filtered.length - 1);
+
+      buf.push("");
+      buf.push(C.primaryBold(`  ${title}`));
+      buf.push(C.dim(`  ${subtitle}`));
+      buf.push("");
+
+      if (filter) {
+        buf.push(C.dim("  search: ") + C.text(filter) + C.dim("│"));
+        buf.push("");
+      }
+
+      if (filtered.length === 0) {
+        buf.push(C.dim("  No courses match your search."));
+      } else {
+        for (let i = 0; i < filtered.length; i++) {
+          const c = filtered[i];
+          const isSel = i === selected;
+          const isChecked = checked.has(c.id);
+          const box = isChecked ? C.success("◉ ") : C.dim("○ ");
+          const pointer = isSel ? C.primary("❯ ") : "  ";
+          const label = isSel
+            ? C.bold(c.courseCode || c.name)
+            : C.text(c.courseCode || c.name);
+          const sub =
+            c.courseCode !== c.name ? C.dim(` — ${c.name}`) : "";
+          buf.push(`  ${pointer}${box}${label}${sub}`);
+        }
+      }
+
+      buf.push("");
+      if (message) {
+        buf.push(C.warn(`  ${message}`));
+        buf.push("");
+      }
+      const count = checked.size;
+      const doneHint = count > 0
+        ? C.success(`d done (${count} selected)`)
+        : C.dimmer(`d done (${count} selected)`);
+      buf.push(
+        C.dimmer("  enter/space toggle  ↑↓ navigate  ") + doneHint + C.dimmer("  type to filter")
+      );
+
+      buf.flush();
+    }
+
+    hideCursor();
+    render();
+
+    const stdin = process.stdin;
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding("utf8");
+
+    function toggle(): void {
+      const filtered = getFiltered();
+      if (filtered.length > 0 && selected < filtered.length) {
+        const c = filtered[selected];
+        if (checked.has(c.id)) {
+          checked.delete(c.id);
+        } else {
+          checked.add(c.id);
+        }
+        message = "";
+        render();
+      }
+    }
+
+    function onData(key: string): void {
+      const filtered = getFiltered();
+
+      // Enter or Space — toggle the current item
+      if (key === "\r" || key === "\n" || key === " ") {
+        toggle();
+        return;
+      }
+
+      // d — done/confirm (only if at least 1 selected)
+      if (key === "d" || key === "D") {
+        if (checked.size > 0) {
+          cleanup();
+          resolve(courses.filter((c) => checked.has(c.id)));
+          return;
+        }
+        message = "Select at least one course first";
+        render();
+        return;
+      }
+
+      // Arrow up
+      if (key === "\x1B[A") {
+        selected = Math.max(0, selected - 1);
+        message = "";
+        render();
+        return;
+      }
+
+      // Arrow down
+      if (key === "\x1B[B") {
+        selected = Math.min(filtered.length - 1, selected + 1);
+        message = "";
+        render();
+        return;
+      }
+
+      // Backspace
+      if (key === "\x7F" || key === "\b") {
+        if (filter.length > 0) {
+          filter = filter.slice(0, -1);
+          selected = 0;
+          message = "";
+          render();
+        }
+        return;
+      }
+
+      // Escape — cancel (return empty)
+      if (key === "\x1B") {
+        cleanup();
+        resolve([]);
+        return;
+      }
+
+      // Ctrl+C
+      if (key === "\x03") {
+        cleanup();
+        process.exit(0);
+      }
+
+      // Regular character for filtering (skip 'd' since it's the done key)
+      if (key.length === 1 && key > " " && key !== "d" && key !== "D") {
+        filter += key;
+        selected = 0;
+        message = "";
+        render();
+      }
+    }
+
+    function cleanup(): void {
+      stdin.removeListener("data", onData);
+      stdin.setRawMode(false);
+      stdin.pause();
+      showCursor();
+    }
+
+    stdin.on("data", onData);
+  });
+}
+
+/**
+ * Prompt the user to optionally rename each selected course.
+ * Uses a dedicated readline interface that properly handles stdin.
+ */
+export async function promptRenames(
+  selected: Course[]
+): Promise<UserCourse[]> {
+  const result: UserCourse[] = [];
+
+  clearScreen();
+  showCursor();
+  console.log("");
+  console.log(C.primaryBold("  Rename your courses"));
+  console.log(C.dim("  Give them short names, or press enter to keep the original"));
+  console.log("");
+
+  for (const course of selected) {
+    const displayLabel = course.courseCode || course.name;
+    const fullName = course.courseCode !== course.name ? course.name : "";
+
+    console.log(
+      C.text(`  ${displayLabel}`) +
+        (fullName ? C.dim(` — ${fullName}`) : "")
+    );
+
+    const newName = await promptLine(
+      C.dim("  new name (enter to keep): ")
+    );
+
+    result.push({
+      id: course.id,
+      originalCode: course.courseCode,
+      originalName: course.name,
+      displayName: newName.trim() || displayLabel,
+    });
+
+    console.log(
+      C.dim(`  → `) + C.success(result[result.length - 1].displayName)
+    );
+    console.log("");
+  }
+
+  return result;
+}
+
+/**
+ * Run the full first-run course setup flow.
+ */
+export async function runCourseSetup(
+  allCourses: Course[]
+): Promise<CourseConfig> {
+  const selected = await showMultiSelect(
+    "Welcome to canvas",
+    "Select your courses — space to toggle, enter when done",
+    allCourses
+  );
+
+  if (selected.length === 0) {
+    // No courses selected — save empty config but let them know
+    clearScreen();
+    showCursor();
+    console.log("");
+    console.log(
+      C.dim("  No courses selected. Use 'Manage courses' to add some later.")
+    );
+    console.log("");
+    await sleep(2000);
+    const config: CourseConfig = { courses: [] };
+    await saveCourseConfig(config);
+    return config;
+  }
+
+  const userCourses = await promptRenames(selected);
+  const config: CourseConfig = { courses: userCourses };
+  await saveCourseConfig(config);
+  return config;
+}
+
+/**
+ * Course management menu — add, remove, rename.
+ */
+export async function runCourseManagement(
+  currentConfig: CourseConfig,
+  allCanvasCourses: Course[]
+): Promise<CourseConfig> {
+  const { showPicker } = await import("./picker.js");
+
+  const action = await showPicker({
+    title: "Manage courses",
+    items: [
+      {
+        label: "Add courses",
+        sublabel: "select from Canvas",
+        value: "add",
+      },
+      {
+        label: "Remove a course",
+        sublabel: `${currentConfig.courses.length} configured`,
+        value: "remove",
+        dimmed: currentConfig.courses.length === 0,
+      },
+      {
+        label: "Rename a course",
+        sublabel: "change display name",
+        value: "rename",
+        dimmed: currentConfig.courses.length === 0,
+      },
+      { label: "Back", value: "back" },
+    ],
+    backLabel: "back",
+  });
+
+  if (!action || action === "back") return currentConfig;
+
+  if (action === "add") {
+    const existingIds = new Set(currentConfig.courses.map((c) => c.id));
+    const available = allCanvasCourses.filter((c) => !existingIds.has(c.id));
+
+    if (available.length === 0) {
+      clearScreen();
+      console.log(C.dim("\n  All Canvas courses are already added.\n"));
+      await sleep(1500);
+      return currentConfig;
+    }
+
+    const selected = await showMultiSelect(
+      "Add courses",
+      "Select courses to add — space to toggle, enter when done",
+      available
+    );
+
+    if (selected.length === 0) return currentConfig;
+
+    const userCourses = await promptRenames(selected);
+    const updated: CourseConfig = {
+      courses: [...currentConfig.courses, ...userCourses],
+    };
+    await saveCourseConfig(updated);
+    return updated;
+  }
+
+  if (action === "remove") {
+    if (currentConfig.courses.length === 0) return currentConfig;
+
+    const toRemove = await showPicker({
+      title: "Remove a course",
+      subtitle: "Select a course to remove from your list",
+      items: currentConfig.courses.map((c) => ({
+        label: c.displayName,
+        sublabel: c.originalCode !== c.displayName ? c.originalCode : c.originalName,
+        value: String(c.id),
+      })),
+      backLabel: "cancel",
+    });
+
+    if (toRemove) {
+      const updated: CourseConfig = {
+        courses: currentConfig.courses.filter(
+          (c) => String(c.id) !== toRemove
+        ),
+      };
+      await saveCourseConfig(updated);
+      return updated;
+    }
+
+    return currentConfig;
+  }
+
+  if (action === "rename") {
+    if (currentConfig.courses.length === 0) return currentConfig;
+
+    const toRename = await showPicker({
+      title: "Rename a course",
+      items: currentConfig.courses.map((c) => ({
+        label: c.displayName,
+        sublabel: c.originalCode !== c.displayName ? c.originalCode : c.originalName,
+        value: String(c.id),
+      })),
+      backLabel: "cancel",
+    });
+
+    if (toRename) {
+      const course = currentConfig.courses.find(
+        (c) => String(c.id) === toRename
+      );
+      if (course) {
+        clearScreen();
+        showCursor();
+        console.log("");
+        console.log(
+          C.text(`  Current name: ${course.displayName}`) +
+            C.dim(` (${course.originalCode})`)
+        );
+        const newName = await promptLine(C.dim("  New name: "));
+
+        if (newName.trim()) {
+          const updated: CourseConfig = {
+            courses: currentConfig.courses.map((c) =>
+              String(c.id) === toRename
+                ? { ...c, displayName: newName.trim() }
+                : c
+            ),
+          };
+          await saveCourseConfig(updated);
+          return updated;
+        }
+      }
+    }
+
+    return currentConfig;
+  }
+
+  return currentConfig;
+}
+
+// --- Helpers ---
+
+function promptLine(prompt: string): Promise<string> {
+  return new Promise((resolve) => {
+    // Ensure stdin is in the right state for readline
+    if (process.stdin.isPaused()) {
+      process.stdin.resume();
+    }
+
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      terminal: true,
+    });
+
+    rl.question(prompt, (answer) => {
+      rl.close();
+      resolve(answer);
+    });
+  });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

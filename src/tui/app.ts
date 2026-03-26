@@ -5,17 +5,22 @@ import {
   fetchAssignments,
   openWorkspace,
   getRecentWorkspaces,
+  getDisplayCourses,
   formatDueCompact,
   type AppServices,
 } from "./services.js";
+import { loadCourseConfig, type CourseConfig } from "./course-config.js";
+import { runCourseSetup, runCourseManagement } from "./course-setup.js";
 import { loadWorkspace } from "../ask/load-workspace.js";
 import {
   clearScreen,
   showCursor,
   hideCursor,
+  createBuffer,
   CANVAS_ASCII,
   C,
   getTermSize,
+  stripAnsi,
 } from "./screen.js";
 import type { Course } from "../domain/models.js";
 import type { AssignmentWorkup } from "../work/types.js";
@@ -52,8 +57,17 @@ export async function launchApp(): Promise<void> {
     process.exit(1);
   }
 
+  // Load course config — run setup if no config or empty config
+  let courseConfig = await loadCourseConfig();
+
+  if (!courseConfig || courseConfig.courses.length === 0) {
+    clearScreen();
+    courseConfig = await runCourseSetup(services.allCourses);
+  }
+  services.courseConfig = courseConfig;
+
   // Pre-fetch recent workspaces
-  const recent = await getRecentWorkspaces();
+  let recent = await getRecentWorkspaces();
 
   let state: "home" | "assignments" | "workspace" = "home";
   let selectedCourse: Course | null = null;
@@ -67,10 +81,19 @@ export async function launchApp(): Promise<void> {
           clearScreen();
           return;
         }
-        if (action.startsWith("course:")) {
+        if (action === "manage_courses") {
+          clearScreen();
+          const updated = await runCourseManagement(
+            services.courseConfig ?? { courses: [] },
+            services.allCourses
+          );
+          services.courseConfig = updated;
+          recent = await getRecentWorkspaces();
+        } else if (action.startsWith("course:")) {
           const courseId = action.slice("course:".length);
+          const displayCourses = getDisplayCourses(services);
           selectedCourse =
-            services.courses.find((c) => String(c.id) === courseId) ?? null;
+            displayCourses.find((c) => String(c.id) === courseId) ?? null;
           if (selectedCourse) state = "assignments";
         } else if (action.startsWith("workspace:")) {
           const wsPath = action.slice("workspace:".length);
@@ -162,7 +185,8 @@ async function showHomeScreen(
       }
     }
 
-    // Courses
+    // Courses — use configured display courses
+    const displayCourses = getDisplayCourses(services);
     items.push({
       label: "Courses",
       sublabel: "",
@@ -170,7 +194,7 @@ async function showHomeScreen(
       dimmed: false,
       isSection: true,
     });
-    for (const c of services.courses) {
+    for (const c of displayCourses) {
       items.push({
         label: c.courseCode || c.name,
         sublabel: c.courseCode !== c.name ? c.name : "",
@@ -179,6 +203,15 @@ async function showHomeScreen(
         isSection: false,
       });
     }
+
+    // Manage courses option
+    items.push({
+      label: "Manage courses",
+      sublabel: "add, remove, or rename",
+      value: "manage_courses",
+      dimmed: true,
+      isSection: false,
+    });
 
     // Selectable items only (skip section headers)
     const selectableIndices = items
@@ -218,29 +251,23 @@ async function showHomeScreen(
     }
 
     function render(): void {
-      clearScreen();
+      const buf = createBuffer();
       hideCursor();
       const termCols = getTermSize().cols;
 
       // ASCII art
-      console.log("");
-      renderCenteredAscii(termCols);
+      buf.push("");
+      renderCenteredAscii(termCols, buf);
 
-      // Version + divider
-      const versionLine = `v0.1.0`;
-      console.log(centerText(C.dim(versionLine), termCols));
-      console.log("");
-
-      // Info box
-      renderInfoBox(services, recent, termCols);
-      console.log("");
+      // Info box (version is embedded in top border)
+      buf.push("");
+      renderInfoBox(services, recent, termCols, buf);
+      buf.push("");
 
       // Search bar if filtering
       if (filter) {
-        console.log(
-          C.dim("  search: ") + C.text(filter) + C.dim("│")
-        );
-        console.log("");
+        buf.push(C.dim("  search: ") + C.text(filter) + C.dim("│"));
+        buf.push("");
       }
 
       // Items list
@@ -252,8 +279,8 @@ async function showHomeScreen(
         const item = filtered.items[i];
 
         if (item.isSection) {
-          console.log("");
-          console.log(C.primaryBold(`  ${item.label}`));
+          buf.push("");
+          buf.push(C.primaryBold(`  ${item.label}`));
           continue;
         }
 
@@ -263,14 +290,16 @@ async function showHomeScreen(
           ? C.bold(item.label)
           : C.text(item.label);
         const sub = item.sublabel ? C.dim(` — ${item.sublabel}`) : "";
-        console.log(`  ${pointer}${label}${sub}`);
+        buf.push(`  ${pointer}${label}${sub}`);
       }
 
       // Footer
-      console.log("");
-      console.log(
+      buf.push("");
+      buf.push(
         C.dimmer("  ↑↓ navigate  enter select  esc quit  type to filter")
       );
+
+      buf.flush();
     }
 
     render();
@@ -357,13 +386,15 @@ async function showHomeScreen(
 }
 
 // --- Info Box Renderer ---
+// Strategy: build each row as PLAIN TEXT first, pad to exact width, then colorize.
+// This avoids ANSI escape code length miscalculations.
 
 function renderInfoBox(
   services: AppServices,
   recent: Array<{ name: string; course: string; slug: string; path: string }>,
-  termCols: number
+  termCols: number,
+  buf: { push(line: string): void } = { push: (l) => console.log(l) }
 ): void {
-  // Extract school domain from CANVAS_BASE_URL
   const schoolUrl = process.env.CANVAS_BASE_URL ?? "";
   let school = "unknown";
   try {
@@ -373,101 +404,179 @@ function renderInfoBox(
     school = schoolUrl.replace(/https?:\/\//, "").replace(/\/api\/v1.*/, "");
   }
 
-  const aiModel = services.aiConfig
-    ? C.text("claude-sonnet-4")
-    : C.dim("not configured");
+  const aiModelText = services.aiConfig ? "claude-sonnet-4" : "not configured";
+  const displayCourses = getDisplayCourses(services);
+  const courseCount = `${displayCourses.length} active`;
+  const workspaceCount = `${recent.length} saved`;
 
-  const courseCount = `${services.courses.length} active`;
-
-  // Right column: commands
-  const commands = [
-    ["/overview", "show assignment overview"],
+  const commands: [string, string][] = [
+    ["/overview", "assignment overview"],
     ["/plan", "action plan and steps"],
     ["/resources", "key documents and files"],
-    ["/evidence", "confirmed vs inferred sources"],
+    ["/evidence", "confirmed vs inferred"],
     ["/requirements", "deliverables and constraints"],
+    ["/status", "workspace status"],
     ["/help", "all available commands"],
   ];
 
-  // Calculate box width
-  const boxWidth = Math.min(termCols - 4, 78);
-  const leftColWidth = Math.floor(boxWidth * 0.4);
-  const rightColWidth = boxWidth - leftColWidth - 3; // 3 for separator
+  // Box width — max 76, leave room for centering margins
+  const boxInner = Math.min(termCols - 6, 74);
 
-  // Top border
-  console.log(
-    C.dimmer(`  ┌${"─".repeat(boxWidth)}┐`)
-  );
+  if (boxInner < 40) {
+    buf.push(C.dim(`  school: ${school}  ·  courses: ${courseCount}  ·  model: ${aiModelText}`));
+    return;
+  }
 
-  // Build rows
-  const leftLines: string[] = [];
-  const rightLines: string[] = [];
+  const leftW = Math.floor(boxInner * 0.38);
+  const rightW = boxInner - leftW - 1;
+  const totalBorderW = leftW + 1 + rightW + 4; // includes │ separators and spaces
+  const margin = Math.max(0, Math.floor((termCols - totalBorderW) / 2));
+  const pad = " ".repeat(margin);
 
-  // Left column content
-  leftLines.push(`${C.dim("school  ")} ${C.text(school)}`);
-  leftLines.push(`${C.dim("courses ")} ${C.text(courseCount)}`);
-  leftLines.push(`${C.dim("model   ")} ${aiModel}`);
-  leftLines.push("");
+  // --- Top border with centered version label ---
+  const versionLabel = " v0.1.0 ";
+  const topLineTotal = leftW + 1 + rightW + 2; // inner chars of top border
+  const versionStart = Math.floor((topLineTotal - versionLabel.length) / 2);
+  const topLeft = "─".repeat(Math.max(0, versionStart));
+  const topRight = "─".repeat(Math.max(0, topLineTotal - versionStart - versionLabel.length));
+  buf.push(pad + C.dimmer("┌") + C.dimmer(topLeft) + C.dim(versionLabel) + C.dimmer(topRight) + C.dimmer("┐"));
 
+  // --- Build rows ---
+  type RowDef = {
+    left: string;
+    right: string;
+    leftStyle: "kv" | "bold" | "dim" | "empty";
+    rightStyle: "header" | "cmd" | "empty";
+  };
+  const rows: RowDef[] = [];
+
+  // Helper to make a left cell that fits
+  const L = (text: string) => truncPlain(text, leftW);
+
+  // System info rows
+  rows.push({ left: L(`school     ${school}`), right: "Commands", leftStyle: "kv", rightStyle: "header" });
+  rows.push({ left: L(`courses    ${courseCount}`), right: "", leftStyle: "kv", rightStyle: "empty" });
+  rows.push({ left: L(`model      ${aiModelText}`), right: formatCmdRow(commands[0], rightW), leftStyle: "kv", rightStyle: "cmd" });
+  rows.push({ left: L(`workspaces ${workspaceCount}`), right: formatCmdRow(commands[1], rightW), leftStyle: "kv", rightStyle: "cmd" });
+  rows.push({ left: "", right: formatCmdRow(commands[2], rightW), leftStyle: "empty", rightStyle: "cmd" });
+
+  // Recent section
   if (recent.length > 0) {
-    leftLines.push(C.bold("Recent"));
-    for (const ws of recent.slice(0, 3)) {
-      const name = ws.name.length > leftColWidth - 4
-        ? ws.name.slice(0, leftColWidth - 7) + "..."
-        : ws.name;
-      leftLines.push(C.dim(name));
+    rows.push({ left: "Recent Workspaces", right: formatCmdRow(commands[3], rightW), leftStyle: "bold", rightStyle: "cmd" });
+    for (let i = 0; i < Math.min(recent.length, 4); i++) {
+      const name = truncPlain(recent[i].name, leftW - 2);
+      const cmdIdx = 4 + i;
+      rows.push({
+        left: name,
+        right: cmdIdx < commands.length ? formatCmdRow(commands[cmdIdx], rightW) : "",
+        leftStyle: "dim",
+        rightStyle: cmdIdx < commands.length ? "cmd" : "empty",
+      });
     }
+  } else {
+    rows.push({ left: "", right: formatCmdRow(commands[3], rightW), leftStyle: "empty", rightStyle: "cmd" });
+    rows.push({ left: "", right: formatCmdRow(commands[4], rightW), leftStyle: "empty", rightStyle: "cmd" });
+    rows.push({ left: "", right: formatCmdRow(commands[5], rightW), leftStyle: "empty", rightStyle: "cmd" });
+    rows.push({ left: "", right: formatCmdRow(commands[6], rightW), leftStyle: "empty", rightStyle: "cmd" });
   }
 
-  // Right column content
-  rightLines.push(C.bold("Commands"));
-  for (const [cmd, desc] of commands) {
-    rightLines.push(
-      `${C.accent(cmd.padEnd(16))}${C.dim(desc)}`
+  // Pad to minimum 12 rows for vertical height
+  while (rows.length < 12) {
+    rows.push({ left: "", right: "", leftStyle: "empty", rightStyle: "empty" });
+  }
+
+  // --- Render rows ---
+  for (const row of rows) {
+    const leftPadded = row.left + " ".repeat(Math.max(0, leftW - row.left.length));
+    const rightPadded = row.right + " ".repeat(Math.max(0, rightW - row.right.length));
+
+    const leftColored = colorizeCell(leftPadded, row.leftStyle);
+    const rightColored = colorizeCmdCell(rightPadded, row.rightStyle);
+
+    buf.push(
+      pad + C.dimmer("│") + " " + leftColored + C.dimmer("│") + " " + rightColored + C.dimmer("│")
     );
   }
 
-  // Render rows side by side
-  const maxRows = Math.max(leftLines.length, rightLines.length);
-  for (let i = 0; i < maxRows; i++) {
-    const left = leftLines[i] ?? "";
-    const right = rightLines[i] ?? "";
+  // --- Bottom border ---
+  buf.push(pad + C.dimmer(`└${"─".repeat(leftW + 1)}┴${"─".repeat(rightW + 1)}┘`));
+}
 
-    // We need to calculate visible length for padding (strip ANSI)
-    const leftVisible = stripAnsi(left);
-    const rightVisible = stripAnsi(right);
+function formatCmdRow(cmd: [string, string] | undefined, maxW: number): string {
+  if (!cmd) return "";
+  const raw = `${cmd[0].padEnd(16)}${cmd[1]}`;
+  return truncPlain(raw, maxW);
+}
 
-    const leftPad = Math.max(0, leftColWidth - leftVisible.length);
-    const rightPad = Math.max(0, rightColWidth - rightVisible.length);
+function truncPlain(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen - 3) + "...";
+}
 
-    console.log(
-      C.dimmer("  │ ") +
-        left +
-        " ".repeat(leftPad) +
-        C.dimmer(" │ ") +
-        right +
-        " ".repeat(rightPad) +
-        C.dimmer(" │")
-    );
+function colorizeCell(paddedPlain: string, style: string): string {
+  switch (style) {
+    case "kv": {
+      // Key is TEXT (bright), value after the gap is DIM
+      const match = paddedPlain.match(/^(\S+)(\s{2,})(.*)/);
+      if (match) {
+        return C.text(match[1]) + match[2] + C.dim(match[3]);
+      }
+      return C.text(paddedPlain);
+    }
+    case "bold":
+      return C.bold(paddedPlain);
+    case "dim":
+      return C.dim(paddedPlain);
+    case "empty":
+      return paddedPlain;
+    default:
+      return C.text(paddedPlain);
   }
+}
 
-  // Bottom border
-  console.log(
-    C.dimmer(`  └${"─".repeat(boxWidth)}┘`)
-  );
+function colorizeCmdCell(paddedPlain: string, style: string): string {
+  switch (style) {
+    case "header":
+      return C.bold(paddedPlain);
+    case "cmd": {
+      // The command name (starts with /) gets accent, rest gets dim
+      const match = paddedPlain.match(/^(\/\S+)(\s+)(.*)/);
+      if (match) {
+        const cmdPart = match[1];
+        const spacePart = match[2];
+        const descPart = match[3];
+        return C.accent(cmdPart) + spacePart + C.dim(descPart);
+      }
+      return C.dim(paddedPlain);
+    }
+    case "empty":
+      return paddedPlain;
+    default:
+      return C.dim(paddedPlain);
+  }
 }
 
 // --- ASCII Art Renderer ---
 
-function renderCenteredAscii(termCols: number): void {
-  const artLines = CANVAS_ASCII.split("\n").filter((l) => l.trim());
+const MIN_ART_WIDTH = 60; // minimum terminal width to show ASCII art
 
-  // Find the max line length in the ASCII art
+function renderCenteredAscii(
+  termCols: number,
+  buf: { push(line: string): void } = { push: (l) => console.log(l) }
+): void {
+  const artLines = CANVAS_ASCII.split("\n").filter((l) => l.trim());
   const artWidth = Math.max(...artLines.map((l) => l.length));
+
+  if (termCols < MIN_ART_WIDTH) {
+    const simple = "  canvas";
+    const padding = Math.max(0, Math.floor((termCols - simple.length) / 2));
+    buf.push(" ".repeat(padding) + C.primaryBold(simple));
+    return;
+  }
 
   for (const line of artLines) {
     const padding = Math.max(0, Math.floor((termCols - artWidth) / 2));
-    console.log(" ".repeat(padding) + C.primary(line));
+    buf.push(" ".repeat(padding) + C.primary(line));
   }
 }
 
@@ -477,9 +586,7 @@ function centerText(text: string, termCols: number): string {
   return " ".repeat(padding) + text;
 }
 
-function stripAnsi(str: string): string {
-  return str.replace(/\x1B\[[0-9;]*m/g, "");
-}
+// stripAnsi imported from screen.ts
 
 // --- Assignment Picker ---
 

@@ -3,7 +3,7 @@ import type { AssignmentWorkup } from "../work/types.js";
 import type { LoadedWorkspace, WorkspaceAnswer } from "../ask/types.js";
 import type { AIProviderConfig } from "../ai/provider.js";
 import { askWorkspaceQuestion } from "./services.js";
-import { clearScreen, showCursor, hideCursor, divider, wrapText, fmtConfidence, C } from "./screen.js";
+import { clearScreen, showCursor, hideCursor, createBuffer, divider, wrapText, fmtConfidence, C } from "./screen.js";
 
 export interface WorkspaceContext {
   workspacePath: string;
@@ -67,44 +67,45 @@ export async function runWorkspaceUI(
   }
 
   function render(): void {
-    clearScreen();
+    const buf = createBuffer();
 
     // Header
-    renderHeader(ctx);
+    renderHeader(ctx, buf);
 
     // Chat messages
     for (const msg of messages) {
-      renderMessage(msg);
+      renderMessage(msg, buf);
     }
 
     // Processing indicator
     if (isProcessing) {
-      console.log("");
-      console.log(`  ${C.primary("∷")} ${C.dim("Working...")}`);
+      buf.push("");
+      buf.push(`  ${C.primary("∷")} ${C.dim("Working...")}`);
     }
 
     // Slash command popup
     const matches = showSlashMenu ? getSlashMatches() : [];
     if (matches.length > 0 && !isProcessing) {
-      console.log("");
-      console.log(C.dimmer("  ─── commands ───"));
+      buf.push("");
+      buf.push(C.dimmer("  ─── commands ───"));
       for (let i = 0; i < matches.length; i++) {
         const m = matches[i];
         const sel = i === slashSelected;
         const ptr = sel ? C.primary("❯ ") : "  ";
         const cmd = sel ? C.primaryBold(m.cmd) : C.accent(m.cmd);
-        console.log(`  ${ptr}${cmd}  ${C.dim(m.desc)}`);
+        buf.push(`  ${ptr}${cmd}  ${C.dim(m.desc)}`);
       }
     }
 
     // Input area
-    console.log("");
-    console.log(C.dimmer("  ─".repeat(1) + "─".repeat(38)));
-    if (isProcessing) {
-      process.stdout.write(C.dim("  > ") + C.dim(inputBuffer));
-    } else {
-      process.stdout.write(C.dim("  > ") + C.text(inputBuffer));
-    }
+    buf.push("");
+    buf.push(C.dimmer("  ─" + "─".repeat(38)));
+    const inputLine = isProcessing
+      ? C.dim("  > ") + C.dim(inputBuffer)
+      : C.dim("  > ") + C.text(inputBuffer);
+    buf.push(inputLine);
+
+    buf.flush();
   }
 
   render();
@@ -405,108 +406,99 @@ function handleSlashCommand(
   }
 }
 
-// --- Message renderers ---
+// --- Message renderers (buffer-based for flicker-free rendering) ---
 
-function renderHeader(ctx: WorkspaceContext): void {
+type Buf = { push(line: string): void };
+
+function renderHeader(ctx: WorkspaceContext, buf: Buf): void {
   const name = ctx.loaded.assignmentName;
   const course = ctx.loaded.courseName;
   const w = ctx.workup;
 
-  console.log("");
-  console.log(`  ${C.primaryBold(name)}  ${C.dim(course)}`);
+  buf.push("");
+  buf.push(`  ${C.primaryBold(name)}  ${C.dim(course)}`);
 
   if (w) {
     const parts = [`confidence: ${fmtConfidence(w.confidence)}`];
     if (w.dueDate) parts.push(`due: ${C.text(w.dueDate)}`);
-    console.log(`  ${parts.map((p) => C.dim(p)).join(C.dimmer("  ·  "))}`);
+    buf.push(`  ${parts.map((p) => C.dim(p)).join(C.dimmer("  ·  "))}`);
   }
 
-  console.log(divider());
+  buf.push(divider());
 }
 
-function renderMessage(msg: ChatMessage): void {
-  console.log("");
+function renderMessage(msg: ChatMessage, buf: Buf): void {
+  buf.push("");
 
   switch (msg.role) {
     case "user":
-      // User message — highlighted like a chat bubble
-      console.log(`  ${C.bold(msg.content)}`);
+      buf.push(`  ${C.bold(msg.content)}`);
       break;
 
     case "assistant":
-      // Show actions first (like tool calls)
       if (msg.actions && msg.actions.length > 0) {
         for (const action of msg.actions) {
-          console.log(`  ${C.dim("›")} ${C.dim(action)}`);
+          buf.push(`  ${C.dim("›")} ${C.dim(action)}`);
         }
-        console.log("");
+        buf.push("");
       }
 
-      // Main content
-      renderMarkdownContent(msg.content);
+      renderMarkdownContent(msg.content, buf);
 
-      // Bullet points
       if (msg.bulletPoints && msg.bulletPoints.length > 0) {
-        console.log("");
+        buf.push("");
         for (const bp of msg.bulletPoints) {
-          console.log(`  ${C.dim("•")} ${C.text(bp)}`);
+          buf.push(`  ${C.dim("•")} ${C.text(bp)}`);
         }
       }
 
-      // Sources
       if (msg.sources && msg.sources.length > 0) {
-        console.log("");
+        buf.push("");
         for (const src of msg.sources) {
-          console.log(`  ${C.dimmer(`[${src.kind}]`)} ${C.dim(src.title)}`);
+          buf.push(`  ${C.dimmer(`[${src.kind}]`)} ${C.dim(src.title)}`);
         }
       }
 
-      // Confidence
       if (msg.confidence) {
-        console.log(`  ${C.dimmer("confidence:")} ${fmtConfidence(msg.confidence)}`);
+        buf.push(`  ${C.dimmer("confidence:")} ${fmtConfidence(msg.confidence)}`);
       }
       break;
 
     case "system":
-      console.log(`  ${C.dim(msg.content)}`);
+      buf.push(`  ${C.dim(msg.content)}`);
       break;
 
     case "action":
-      console.log(`  ${C.dim("›")} ${C.dim(msg.content)}`);
+      buf.push(`  ${C.dim("›")} ${C.dim(msg.content)}`);
       break;
   }
 }
 
-/** Render content that may contain **bold** markers and bullet lists. */
-function renderMarkdownContent(content: string): void {
+function renderMarkdownContent(content: string, buf: Buf): void {
   const lines = content.split("\n");
   for (const line of lines) {
     if (!line.trim()) {
-      console.log("");
+      buf.push("");
       continue;
     }
 
     let rendered = line;
-
-    // Bold: **text**
     rendered = rendered.replace(/\*\*(.+?)\*\*/g, (_m, t) => C.bold(t));
 
-    // Bullet points
     if (rendered.trim().startsWith("•") || rendered.trim().startsWith("?")) {
       const indent = rendered.match(/^\s*/)?.[0] ?? "";
       const symbol = rendered.trim().startsWith("?")
         ? C.warn("?")
         : C.dim("•");
       const text = rendered.trim().slice(1).trim();
-      console.log(`  ${indent}${symbol} ${C.text(text)}`);
+      buf.push(`  ${indent}${symbol} ${C.text(text)}`);
     } else if (/^\d+\.\s/.test(rendered.trim())) {
-      // Numbered list
       const match = rendered.trim().match(/^(\d+)\.\s(.+)/);
       if (match) {
-        console.log(`  ${C.primaryBold(match[1] + ".")} ${C.text(match[2])}`);
+        buf.push(`  ${C.primaryBold(match[1] + ".")} ${C.text(match[2])}`);
       }
     } else {
-      console.log(`  ${C.text(rendered)}`);
+      buf.push(`  ${C.text(rendered)}`);
     }
   }
 }

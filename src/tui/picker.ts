@@ -1,4 +1,4 @@
-import { clearScreen, hideCursor, showCursor, C } from "./screen.js";
+import { hideCursor, showCursor, createBuffer, C } from "./screen.js";
 
 export interface PickerItem {
   label: string;
@@ -16,8 +16,7 @@ export interface PickerOptions {
 }
 
 /**
- * Show an interactive arrow-key picker with the pale blue theme.
- * Returns the selected item's value, or null if user pressed Escape.
+ * Show an interactive arrow-key picker. Flicker-free via screen buffer.
  */
 export function showPicker(options: PickerOptions): Promise<string | null> {
   return new Promise((resolve) => {
@@ -37,22 +36,22 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
     }
 
     function render(): void {
-      clearScreen();
+      const buf = createBuffer();
       filtered = getFiltered();
       if (selected >= filtered.length) selected = Math.max(0, filtered.length - 1);
 
-      console.log("");
-      console.log(C.primaryBold(`  ${title}`));
-      if (subtitle) console.log(C.dim(`  ${subtitle}`));
-      console.log("");
+      buf.push("");
+      buf.push(C.primaryBold(`  ${title}`));
+      if (subtitle) buf.push(C.dim(`  ${subtitle}`));
+      buf.push("");
 
       if (filterable && filter) {
-        console.log(C.dim("  search: ") + C.text(filter) + C.dim("│"));
-        console.log("");
+        buf.push(C.dim("  search: ") + C.text(filter) + C.dim("│"));
+        buf.push("");
       }
 
       if (filtered.length === 0) {
-        console.log(C.dim("  No items match your search."));
+        buf.push(C.dim("  No items match your search."));
       } else {
         for (let i = 0; i < filtered.length; i++) {
           const item = filtered[i];
@@ -66,16 +65,18 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
           const sub = item.sublabel
             ? C.dim(` — ${item.sublabel}`)
             : "";
-          console.log(`  ${pointer}${label}${sub}`);
+          buf.push(`  ${pointer}${label}${sub}`);
         }
       }
 
-      console.log("");
-      console.log(
+      buf.push("");
+      buf.push(
         C.dimmer(
           `  ↑↓ navigate  enter select${backLabel ? `  esc ${backLabel}` : ""}${filterable ? "  type to filter" : ""}`
         )
       );
+
+      buf.flush();
     }
 
     hideCursor();
@@ -139,7 +140,6 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
       stdin.setRawMode(false);
       stdin.pause();
       showCursor();
-      clearScreen();
     }
 
     stdin.on("data", onData);

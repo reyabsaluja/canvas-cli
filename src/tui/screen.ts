@@ -25,7 +25,52 @@ export const CANVAS_ASCII = `
 ▒▒██████ ▒▒████████ ████ █████  ▒▒█████   ▒▒████████ ██████
  ▒▒▒▒▒▒   ▒▒▒▒▒▒▒▒ ▒▒▒▒ ▒▒▒▒▒    ▒▒▒▒▒     ▒▒▒▒▒▒▒▒ ▒▒▒▒▒▒  `;
 
-/** Clear the terminal screen and move cursor to top-left. */
+/**
+ * Screen buffer — collects lines, then flushes all at once.
+ * Avoids flicker by writing a single large chunk to stdout.
+ */
+class ScreenBuffer {
+  private lines: string[] = [];
+
+  /** Add a line to the buffer (like console.log). */
+  push(line: string = ""): void {
+    this.lines.push(line);
+  }
+
+  /**
+   * Flush the buffer to stdout. Moves cursor to top-left, writes all lines,
+   * clears any remaining old content below, all in one write() call.
+   */
+  flush(): void {
+    const { rows, cols } = getTermSize();
+
+    // Pad lines to terminal width to overwrite old content
+    const padded = this.lines.map((line) => {
+      const visible = stripAnsi(line).length;
+      if (visible < cols) {
+        return line + " ".repeat(cols - visible);
+      }
+      return line;
+    });
+
+    // Fill remaining rows with blank lines to clear old content
+    while (padded.length < rows) {
+      padded.push(" ".repeat(cols));
+    }
+
+    // Move cursor home + write everything in one shot
+    process.stdout.write("\x1B[H" + padded.join("\n"));
+
+    this.lines = [];
+  }
+}
+
+/** Create a new screen buffer for flicker-free rendering. */
+export function createBuffer(): ScreenBuffer {
+  return new ScreenBuffer();
+}
+
+/** Clear the terminal screen and move cursor to top-left (used only for full transitions). */
 export function clearScreen(): void {
   process.stdout.write("\x1B[2J\x1B[H");
 }
@@ -81,4 +126,11 @@ export function fmtConfidence(confidence: string): string {
     case "low": return C.error(confidence);
     default: return C.dim(confidence);
   }
+}
+
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
+
+export function stripAnsi(str: string): string {
+  return str.replace(ANSI_RE, "");
 }
