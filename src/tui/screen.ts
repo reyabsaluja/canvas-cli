@@ -37,6 +37,11 @@ class ScreenBuffer {
     this.lines.push(line);
   }
 
+  /** Get the current number of lines in the buffer. */
+  get length(): number {
+    return this.lines.length;
+  }
+
   /**
    * Flush the buffer to stdout. Moves cursor to top-left, writes all lines,
    * clears any remaining old content below, all in one write() call.

@@ -678,11 +678,14 @@ async function enterNewWorkspace(
   }
 
   clearScreen();
+  // Find the display name for this course from user config
+  const courseDisplayName = findCourseDisplayName(services, wsData.loaded.courseName);
   return runWorkspaceUI({
     workspacePath: wsData.workspacePath,
     workup: wsData.workup,
     loaded: wsData.loaded,
     aiConfig: services.aiConfig,
+    courseDisplayName,
   });
 }
 
@@ -700,12 +703,14 @@ async function enterExistingWorkspace(
       workup = loaded.workupJson as unknown as AssignmentWorkup;
     }
 
+    const courseDisplayName = findCourseDisplayName(services, loaded.courseName);
     clearScreen();
     return runWorkspaceUI({
       workspacePath: wsPath,
       workup,
       loaded,
       aiConfig: services.aiConfig,
+      courseDisplayName,
     });
   } catch (err) {
     console.error(
@@ -716,6 +721,17 @@ async function enterExistingWorkspace(
     await waitForKey();
     return "back";
   }
+}
+
+/**
+ * Find the user's display name for a course by matching the original Canvas name.
+ */
+function findCourseDisplayName(services: AppServices, canvasCourseName: string): string | undefined {
+  if (!services.courseConfig) return undefined;
+  const match = services.courseConfig.courses.find(
+    (c) => c.originalName === canvasCourseName || c.originalCode === canvasCourseName
+  );
+  return match?.displayName;
 }
 
 // --- Utilities ---
