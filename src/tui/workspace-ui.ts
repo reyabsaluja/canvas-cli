@@ -85,6 +85,11 @@ export async function runWorkspaceUI(
   let slashSelected = 0;
   let showSlashMenu = false;
   let isProcessing = false;
+  let currentSpinnerLine = "";
+  let spinnerFrame = 0;
+  const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  const VERBS = ["Working", "Thinking", "Studying", "Reading", "Analyzing", "Exploring", "Reviewing"];
+  let currentVerb = "";
 
   function getSlashMatches(): typeof SLASH_COMMANDS {
     if (!inputBuffer.startsWith("/")) return [];
@@ -111,19 +116,25 @@ export async function runWorkspaceUI(
     buf.push(`  ${C.primaryBold(name)}  ${C.dim(course)}`);
     buf.push("");
 
-    // Chat messages
-    for (const msg of messages) {
+    // Chat messages — only render recent messages to keep buffer small for performance
+    const { rows: termRows } = getTermSize();
+    const maxVisibleMessages = Math.max(5, Math.floor(termRows / 3));
+    const visibleMessages = messages.length > maxVisibleMessages
+      ? messages.slice(-maxVisibleMessages)
+      : messages;
+
+    if (messages.length > maxVisibleMessages) {
+      buf.push(C.dim(`  ... ${messages.length - maxVisibleMessages} earlier messages`));
+    }
+
+    for (const msg of visibleMessages) {
       renderMessage(msg, buf, contentWidth);
     }
 
-    // Processing: ActivityIndicator renders itself directly via cursor positioning,
-    // so we just leave space here — the indicator overlays this area.
-    if (isProcessing) {
-      // Reserve space for the activity indicator (it renders independently)
+    // Working indicator — rendered inline in the buffer (not independently)
+    if (isProcessing && currentSpinnerLine) {
       buf.push("");
-      buf.push("");
-      buf.push("");
-      buf.push("");
+      buf.push(currentSpinnerLine);
       buf.push("");
     }
 
@@ -140,9 +151,9 @@ export async function runWorkspaceUI(
       }
     }
 
-    // Input box
+    // Input box — always shown
     buf.push("");
-    inputBoxRow = buf.length; // row index where input box starts (0-based)
+    inputBoxRow = buf.length;
     renderInputBox(buf, contentWidth);
 
     buf.flush();
@@ -201,63 +212,12 @@ export async function runWorkspaceUI(
   }
 
   /**
-   * Fast path for slash menu: redraws only the slash menu + input box.
-   * Writes directly at the position where the menu starts.
+   * Fast path for slash menu. Uses full render since the slash menu
+   * needs proper layout coordination with the content above it.
+   * The screen buffer approach prevents flicker.
    */
   function renderSlashAndInput(): void {
-    const { cols, rows: termRows } = getTermSize();
-    const contentWidth = Math.min(cols - 4, 100);
-    const boxWidth = Math.max(contentWidth, 40);
-
-    const matches = showSlashMenu ? getSlashMatches() : [];
-    const menuLines: string[] = [];
-
-    // Slash menu
-    if (matches.length > 0) {
-      menuLines.push(""); // blank before menu
-      for (let i = 0; i < matches.length; i++) {
-        const m = matches[i];
-        const sel = i === slashSelected;
-        const ptr = sel ? C.primary("❯ ") : "  ";
-        const cmd = sel ? C.primaryBold(m.cmd) : C.accent(m.cmd);
-        menuLines.push(`  ${ptr}${cmd}  ${C.dim(m.desc)}`);
-      }
-    }
-
-    // Input box
-    menuLines.push("");
-    const inputText = inputBuffer || "";
-    const emptyInputLine = " ".repeat(boxWidth + 1);
-    const displayText = inputText + " ".repeat(Math.max(0, boxWidth - inputText.length));
-    menuLines.push("  " + inputBg(emptyInputLine));
-    menuLines.push("  " + inputBg(` ${displayText}`));
-    menuLines.push("  " + inputBg(emptyInputLine));
-
-    // Calculate start row — position just before the slash menu
-    // The menu area starts where we'd normally put the slash menu (right before inputBoxRow)
-    const totalLines = menuLines.length;
-    let startRow: number;
-    const menuStartRow = inputBoxRow - matches.length - (matches.length > 0 ? 1 : 0);
-    if (menuStartRow > 0 && menuStartRow + totalLines <= termRows) {
-      startRow = menuStartRow;
-    } else {
-      startRow = Math.max(1, termRows - totalLines);
-    }
-
-    const pad = (s: string) => {
-      const vis = stripAnsi(s).length;
-      return vis < cols ? s + " ".repeat(cols - vis) : s;
-    };
-
-    let output = `\x1B[${startRow};1H`;
-    for (const line of menuLines) {
-      output += pad(line) + "\n";
-    }
-    // Clear any leftover lines below
-    for (let i = 0; i < 3; i++) {
-      output += " ".repeat(cols) + "\n";
-    }
-    process.stdout.write(output);
+    render();
   }
 
   render();
@@ -327,11 +287,9 @@ export async function runWorkspaceUI(
         }
 
         isProcessing = true;
-        render(); // Re-render with user message visible + processing space
-
-        // Start spinner AFTER the render so it appears below the user message
-        const activity = new ActivityIndicator(inputBoxRow);
-        activity.start();
+        currentVerb = VERBS[Math.floor(Math.random() * VERBS.length)];
+        currentSpinnerLine = `  ${C.primary(SPINNER[0])} ${C.accent(currentVerb)}${chalk.white("...")}`;
+        render();
 
         try {
           const answer = await askWorkspaceQuestion(
@@ -339,7 +297,6 @@ export async function runWorkspaceUI(
             ctx.loaded,
             input,
             (event: ToolCallEvent) => {
-              activity.stop();
               messages.push({
                 role: "tool",
                 content: event.result,
@@ -347,15 +304,13 @@ export async function runWorkspaceUI(
                 toolTarget: event.target,
                 toolColor: event.color,
               });
+              // Advance spinner frame for visual feedback
+              spinnerFrame = (spinnerFrame + 1) % SPINNER.length;
+              currentSpinnerLine = `  ${C.primary(SPINNER[spinnerFrame])} ${C.accent(currentVerb)}${chalk.white("...")}`;
               render();
-              // Restart spinner at fresh position (after new content)
-              activity.updateBaseRow(inputBoxRow);
-              activity.start();
             },
             ctx.agentContext
           );
-
-          activity.stop();
 
           messages.push({
             role: "assistant",
@@ -365,7 +320,6 @@ export async function runWorkspaceUI(
             confidence: answer.confidence,
           });
         } catch (err) {
-          activity.stop();
           messages.push({
             role: "system",
             content: `Error: ${err instanceof Error ? err.message : "unknown"}`,
@@ -373,6 +327,7 @@ export async function runWorkspaceUI(
         }
 
         isProcessing = false;
+        currentSpinnerLine = "";
         render();
         return;
       }
@@ -586,7 +541,7 @@ function renderMessage(msg: ChatMessage, buf: Buf, maxWidth: number): void {
       if (msg.bulletPoints && msg.bulletPoints.length > 0) {
         buf.push("");
         for (const bp of msg.bulletPoints) {
-          buf.push(`  ${C.dim("•")} ${C.text(bp)}`);
+          buf.push(`  ${C.dim("•")} ${chalk.white(bp)}`);
         }
       }
 
@@ -602,15 +557,18 @@ function renderMessage(msg: ChatMessage, buf: Buf, maxWidth: number): void {
 
     case "system":
       wrapLines(msg.content, maxWidth).forEach((line) => {
-        buf.push(`  ${C.dim(line)}`);
+        buf.push(`  ${chalk.white(line)}`);
       });
       break;
 
     case "tool": {
-      // Tool call block with background box — shows what the agent did
       const bg = msg.toolColor === "red" ? toolBgRed : toolBgGreen;
       const targetColor = msg.toolColor === "red" ? toolTargetRed : toolTargetGreen;
       const boxWidth = Math.max(maxWidth, 40);
+      const empty = " ".repeat(boxWidth);
+
+      // Top padding
+      buf.push("  " + bg(empty));
 
       // Header line: bold action + colored target
       const headerText = `${msg.toolAction ?? "tool"} ${msg.toolTarget ?? ""}`;
@@ -618,26 +576,26 @@ function renderMessage(msg: ChatMessage, buf: Buf, maxWidth: number): void {
       buf.push("  " + bg(` ${toolActionColor(msg.toolAction ?? "tool")} ${targetColor(msg.toolTarget ?? "")}${headerPad}`));
 
       // Content preview — max 8 lines, then "... (N more lines)"
-      const contentLines = msg.content.split("\n");
+      const contentLines = msg.content.split("\n").filter((l) => l.trim());
       const MAX_PREVIEW = 8;
       const previewLines = contentLines.slice(0, MAX_PREVIEW);
       const remaining = contentLines.length - MAX_PREVIEW;
 
-      buf.push("  " + bg(" ".repeat(boxWidth))); // blank line after header
+      buf.push("  " + bg(empty)); // blank line after header
       for (const line of previewLines) {
         const trimmed = line.slice(0, boxWidth - 4);
         const linePad = " ".repeat(Math.max(0, boxWidth - trimmed.length - 3));
-        buf.push("  " + bg(`  ${C.dim(trimmed)}${linePad} `));
+        buf.push("  " + bg(`  ${chalk.white(trimmed)}${linePad} `));
       }
 
       if (remaining > 0) {
         const moreText = `... (${remaining} more lines)`;
         const morePad = " ".repeat(Math.max(0, boxWidth - moreText.length - 3));
-        buf.push("  " + bg(`  ${C.dimmer(moreText)}${morePad} `));
+        buf.push("  " + bg(`  ${C.dim(moreText)}${morePad} `));
       }
 
       // Bottom padding
-      buf.push("  " + bg(" ".repeat(boxWidth)));
+      buf.push("  " + bg(empty));
       break;
     }
   }
@@ -662,25 +620,21 @@ function renderWrappedContent(content: string, buf: Buf, maxWidth: number): void
       const symbol = rendered.trim().startsWith("?") ? C.warn("?") : C.dim("•");
       const text = rendered.trim().slice(1).trim();
       wrapLines(text, maxWidth - 4).forEach((line, i) => {
-        buf.push(i === 0 ? `  ${symbol} ${C.text(line)}` : `    ${C.text(line)}`);
+        buf.push(i === 0 ? `  ${symbol} ${chalk.white(line)}` : `    ${chalk.white(line)}`);
       });
     } else if (/^\d+\.\s/.test(rendered.trim())) {
-      // Numbered list
       const match = rendered.trim().match(/^(\d+)\.\s(.+)/);
       if (match) {
         const num = match[1];
         wrapLines(match[2], maxWidth - 5).forEach((line, i) => {
-          buf.push(i === 0 ? `  ${C.primaryBold(num + ".")} ${C.text(line)}` : `     ${C.text(line)}`);
+          buf.push(i === 0 ? `  ${C.primaryBold(num + ".")} ${chalk.white(line)}` : `     ${chalk.white(line)}`);
         });
       }
     } else {
-      // Regular text — wrap
       wrapLines(stripAnsi(rendered), maxWidth - 2).forEach((line) => {
-        // Re-apply bold after wrapping (since we stripped for measurement)
         let coloredLine = line;
-        // Simple re-bold: if the original had bold markers around this text
-        coloredLine = coloredLine.replace(/\*\*(.+?)\*\*/g, (_m, t) => C.bold(t));
-        buf.push(`  ${C.text(coloredLine)}`);
+        coloredLine = coloredLine.replace(/\*\*(.+?)\*\*/g, (_m, t) => chalk.white.bold(t));
+        buf.push(`  ${chalk.white(coloredLine)}`);
       });
     }
   }

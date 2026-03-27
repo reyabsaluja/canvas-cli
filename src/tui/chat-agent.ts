@@ -14,8 +14,8 @@ import {
 import { buildChunks, retrieveRelevant } from "../ask/retrieve.js";
 import { extractFileText } from "../extract/extract-text.js";
 
-const MAX_ITERATIONS = 6;
-const MAX_DOC_TEXT = 12000;
+const MAX_ITERATIONS = 10;
+const MAX_DOC_TEXT = 15000;
 
 const CHAT_TOOLS: Tool[] = [
   {
@@ -90,6 +90,14 @@ Use tools ONLY when:
 - The question asks about something not covered in the workup
 - You need to read a specific document in detail
 - You need to find information not already summarized
+
+IMPORTANT tool usage rules:
+- If you need to read a file, use read_file ONCE and then answer from what you got. Do NOT keep searching after reading.
+- read_file returns the FULL content of the file. If you called read_file and got text back, USE that text to answer.
+- Do NOT call search_workspace more than 2 times. If you haven't found it after 2 searches, try read_file instead.
+- If a file is inside a zip (e.g., lab4.pdf inside lab4.zip), use read_file with the PDF name — it extracts the content from the zip.
+- Extracted .zip.txt files contain the full text of all files inside the zip, including PDFs.
+- After reading a file, ANSWER the question. Do not make more tool calls unless absolutely necessary.
 
 Rules:
 - Be concise and direct.
@@ -357,15 +365,38 @@ function searchCourse(query: string, ctx: ChatAgentContext): string {
 
 async function readFile(filename: string, ctx: ChatAgentContext): Promise<string> {
   const q = filename.toLowerCase();
+  // Also try without .txt suffix (workspace extracts add .txt to zip names)
+  const qBase = q.endsWith(".txt") ? q.slice(0, -4) : q;
 
-  // Check workspace extracted files
-  for (const ef of ctx.loaded.extractedFiles) {
-    if (ef.name.toLowerCase().includes(q)) {
-      return ef.content.slice(0, MAX_DOC_TEXT);
+  // PRIORITY 1: Read directly from course cache downloaded files.
+  // This gives us the FULL file content (not truncated by the work agent).
+  // Try exact match first, then contains match.
+  if (ctx.cache) {
+    // Exact match
+    for (const att of ctx.cache.attachments) {
+      if (
+        (att.status === "downloaded" || att.status === "skipped") &&
+        (att.originalFilename.toLowerCase() === q ||
+         att.originalFilename.toLowerCase() === qBase)
+      ) {
+        const fullPath = path.join(ctx.cache.coursePath, att.localPath);
+        return await extractFileText(fullPath, att.originalFilename);
+      }
+    }
+    // Contains match
+    for (const att of ctx.cache.attachments) {
+      if (
+        (att.status === "downloaded" || att.status === "skipped") &&
+        (att.originalFilename.toLowerCase().includes(q) ||
+         att.originalFilename.toLowerCase().includes(qBase))
+      ) {
+        const fullPath = path.join(ctx.cache.coursePath, att.localPath);
+        return await extractFileText(fullPath, att.originalFilename);
+      }
     }
   }
 
-  // Check workspace files (assignment.md, plan.md, etc.)
+  // PRIORITY 2: Check workspace files (assignment.md, plan.md, etc.)
   if (q.includes("assignment.md") && ctx.loaded.assignmentMd) {
     return ctx.loaded.assignmentMd.slice(0, MAX_DOC_TEXT);
   }
@@ -379,16 +410,30 @@ async function readFile(filename: string, ctx: ChatAgentContext): Promise<string
     return JSON.stringify(ctx.loaded.workupJson, null, 2).slice(0, MAX_DOC_TEXT);
   }
 
-  // Check course cache downloaded attachments
-  if (ctx.cache) {
-    for (const att of ctx.cache.attachments) {
-      if (
-        (att.status === "downloaded" || att.status === "skipped") &&
-        att.originalFilename.toLowerCase().includes(q)
-      ) {
-        const fullPath = path.join(ctx.cache.coursePath, att.localPath);
-        return await extractFileText(fullPath, att.originalFilename);
+  // PRIORITY 3: Check workspace extracted files (these may be truncated from work agent)
+  for (const ef of ctx.loaded.extractedFiles) {
+    if (ef.name.toLowerCase() === q || ef.name.toLowerCase() === q + ".txt") {
+      return ef.content.slice(0, MAX_DOC_TEXT);
+    }
+  }
+  for (const ef of ctx.loaded.extractedFiles) {
+    if (ef.name.toLowerCase().includes(q)) {
+      return ef.content.slice(0, MAX_DOC_TEXT);
+    }
+  }
+
+  // PRIORITY 4: Check inside zip extracted texts for files matching the query
+  for (const ef of ctx.loaded.extractedFiles) {
+    if (ef.name.toLowerCase().endsWith(".zip.txt") && ef.content.toLowerCase().includes(q)) {
+      const lines = ef.content.split("\n");
+      const fileHeader = lines.findIndex((l) =>
+        l.toLowerCase().includes(`--- ${q}`) ||
+        l.toLowerCase().includes(`/${q}`)
+      );
+      if (fileHeader >= 0) {
+        return lines.slice(fileHeader).join("\n").slice(0, MAX_DOC_TEXT);
       }
+      return ef.content.slice(0, MAX_DOC_TEXT);
     }
   }
 
@@ -405,9 +450,11 @@ function listFiles(ctx: ChatAgentContext): string {
   if (ctx.loaded.workupJson) lines.push("  - workup.json");
 
   if (ctx.loaded.extractedFiles.length > 0) {
-    lines.push("\nExtracted documents:");
+    lines.push("\nExtracted documents (use read_file to access):");
     for (const ef of ctx.loaded.extractedFiles) {
-      lines.push(`  - ${ef.name}`);
+      const isZip = ef.name.endsWith(".zip.txt");
+      const hint = isZip ? " (contains extracted files — PDFs inside are readable)" : "";
+      lines.push(`  - ${ef.name}${hint}`);
     }
   }
 
