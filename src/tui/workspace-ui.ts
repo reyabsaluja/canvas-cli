@@ -2,7 +2,7 @@ import chalk from "chalk";
 import type { AssignmentWorkup } from "../work/types.js";
 import type { LoadedWorkspace, WorkspaceAnswer } from "../ask/types.js";
 import type { AIProviderConfig } from "../ai/provider.js";
-import { askWorkspaceQuestion } from "./services.js";
+import { askWorkspaceQuestion, type ToolCallEvent } from "./services.js";
 import { ActivityIndicator } from "./activity.js";
 import {
   clearScreen,
@@ -30,12 +30,17 @@ export interface WorkspaceContext {
 }
 
 interface ChatMessage {
-  role: "user" | "assistant" | "system" | "action";
+  role: "user" | "assistant" | "system" | "tool";
   content: string;
-  actions?: string[];
   sources?: Array<{ title: string; kind: string }>;
   confidence?: string;
   bulletPoints?: string[];
+  /** For tool messages: the tool action verb (read, search, list, download). */
+  toolAction?: string;
+  /** For tool messages: the target (filename, query, etc). */
+  toolTarget?: string;
+  /** For tool messages: color scheme — green for reads, red for errors. */
+  toolColor?: "green" | "red";
 }
 
 const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
@@ -54,6 +59,13 @@ const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
 
 // Background color for the input box
 const inputBg = chalk.bgHex("#1e2030");
+// Background for tool call blocks (green-tinted for reads, red-tinted for errors)
+const toolBgGreen = chalk.bgHex("#1a2e1a");
+const toolBgRed = chalk.bgHex("#2e1a1a");
+// Tool action text colors
+const toolActionColor = chalk.hex("#e0af68").bold; // bold yellow/tan
+const toolTargetGreen = chalk.hex("#9ece6a"); // green for file targets
+const toolTargetRed = chalk.hex("#f7768e"); // red for errors
 // Background color for user messages
 const userBg = chalk.bgHex("#2a2e3f");
 
@@ -188,6 +200,66 @@ export async function runWorkspaceUI(
     );
   }
 
+  /**
+   * Fast path for slash menu: redraws only the slash menu + input box.
+   * Writes directly at the position where the menu starts.
+   */
+  function renderSlashAndInput(): void {
+    const { cols, rows: termRows } = getTermSize();
+    const contentWidth = Math.min(cols - 4, 100);
+    const boxWidth = Math.max(contentWidth, 40);
+
+    const matches = showSlashMenu ? getSlashMatches() : [];
+    const menuLines: string[] = [];
+
+    // Slash menu
+    if (matches.length > 0) {
+      menuLines.push(""); // blank before menu
+      for (let i = 0; i < matches.length; i++) {
+        const m = matches[i];
+        const sel = i === slashSelected;
+        const ptr = sel ? C.primary("❯ ") : "  ";
+        const cmd = sel ? C.primaryBold(m.cmd) : C.accent(m.cmd);
+        menuLines.push(`  ${ptr}${cmd}  ${C.dim(m.desc)}`);
+      }
+    }
+
+    // Input box
+    menuLines.push("");
+    const inputText = inputBuffer || "";
+    const emptyInputLine = " ".repeat(boxWidth + 1);
+    const displayText = inputText + " ".repeat(Math.max(0, boxWidth - inputText.length));
+    menuLines.push("  " + inputBg(emptyInputLine));
+    menuLines.push("  " + inputBg(` ${displayText}`));
+    menuLines.push("  " + inputBg(emptyInputLine));
+
+    // Calculate start row — position just before the slash menu
+    // The menu area starts where we'd normally put the slash menu (right before inputBoxRow)
+    const totalLines = menuLines.length;
+    let startRow: number;
+    const menuStartRow = inputBoxRow - matches.length - (matches.length > 0 ? 1 : 0);
+    if (menuStartRow > 0 && menuStartRow + totalLines <= termRows) {
+      startRow = menuStartRow;
+    } else {
+      startRow = Math.max(1, termRows - totalLines);
+    }
+
+    const pad = (s: string) => {
+      const vis = stripAnsi(s).length;
+      return vis < cols ? s + " ".repeat(cols - vis) : s;
+    };
+
+    let output = `\x1B[${startRow};1H`;
+    for (const line of menuLines) {
+      output += pad(line) + "\n";
+    }
+    // Clear any leftover lines below
+    for (let i = 0; i < 3; i++) {
+      output += " ".repeat(cols) + "\n";
+    }
+    process.stdout.write(output);
+  }
+
   render();
   showCursor();
 
@@ -255,12 +327,10 @@ export async function runWorkspaceUI(
         }
 
         isProcessing = true;
-        render();
+        render(); // Re-render with user message visible + processing space
 
-        // Start the live activity indicator
-        const { rows: termRows } = getTermSize();
-        const activityRow = Math.min(inputBoxRow, termRows - 6);
-        const activity = new ActivityIndicator(activityRow);
+        // Start spinner AFTER the render so it appears below the user message
+        const activity = new ActivityIndicator(inputBoxRow);
         activity.start();
 
         try {
@@ -268,13 +338,24 @@ export async function runWorkspaceUI(
             ctx.aiConfig,
             ctx.loaded,
             input,
-            (step) => activity.addStep(step),
+            (event: ToolCallEvent) => {
+              activity.stop();
+              messages.push({
+                role: "tool",
+                content: event.result,
+                toolAction: event.action,
+                toolTarget: event.target,
+                toolColor: event.color,
+              });
+              render();
+              // Restart spinner at fresh position (after new content)
+              activity.updateBaseRow(inputBoxRow);
+              activity.start();
+            },
             ctx.agentContext
           );
 
           activity.stop();
-          // Brief pause so user can see "Done"
-          await new Promise((r) => setTimeout(r, 400));
 
           messages.push({
             role: "assistant",
@@ -298,13 +379,13 @@ export async function runWorkspaceUI(
 
       if (key === "\x1B[A" && showSlashMenu) {
         slashSelected = Math.max(0, slashSelected - 1);
-        render();
+        renderSlashAndInput();
         return;
       }
       if (key === "\x1B[B" && showSlashMenu) {
         const matches = getSlashMatches();
         slashSelected = Math.min(matches.length - 1, slashSelected + 1);
-        render();
+        renderSlashAndInput();
         return;
       }
 
@@ -314,9 +395,10 @@ export async function runWorkspaceUI(
           const wasSlash = showSlashMenu;
           showSlashMenu = inputBuffer.startsWith("/");
           slashSelected = 0;
-          // Full render only if slash menu state changed
-          if (wasSlash !== showSlashMenu) {
-            render();
+          if (wasSlash && !showSlashMenu) {
+            render(); // slash menu just closed, full render to remove it
+          } else if (showSlashMenu) {
+            renderSlashAndInput(); // still in slash mode, fast update
           } else if (!showSlashMenu) {
             renderInputOnly();
           } else {
@@ -341,9 +423,13 @@ export async function runWorkspaceUI(
         showSlashMenu = inputBuffer.startsWith("/");
         if (showSlashMenu) {
           slashSelected = 0;
-          render(); // need full render for slash menu
+          if (!wasSlash) {
+            render(); // first time opening slash menu — full render to clear input area
+          } else {
+            renderSlashAndInput(); // already in slash mode, fast update
+          }
         } else if (wasSlash) {
-          render(); // slash menu just closed, full render
+          render(); // slash menu just closed, full render to remove it
         } else {
           renderInputOnly(); // fast path — just update the input box
         }
@@ -515,15 +601,45 @@ function renderMessage(msg: ChatMessage, buf: Buf, maxWidth: number): void {
     }
 
     case "system":
-      // System messages — word-wrapped, dim
       wrapLines(msg.content, maxWidth).forEach((line) => {
         buf.push(`  ${C.dim(line)}`);
       });
       break;
 
-    case "action":
-      buf.push(`  ${C.dim("›")} ${C.dim(msg.content)}`);
+    case "tool": {
+      // Tool call block with background box — shows what the agent did
+      const bg = msg.toolColor === "red" ? toolBgRed : toolBgGreen;
+      const targetColor = msg.toolColor === "red" ? toolTargetRed : toolTargetGreen;
+      const boxWidth = Math.max(maxWidth, 40);
+
+      // Header line: bold action + colored target
+      const headerText = `${msg.toolAction ?? "tool"} ${msg.toolTarget ?? ""}`;
+      const headerPad = " ".repeat(Math.max(0, boxWidth - headerText.length - 1));
+      buf.push("  " + bg(` ${toolActionColor(msg.toolAction ?? "tool")} ${targetColor(msg.toolTarget ?? "")}${headerPad}`));
+
+      // Content preview — max 8 lines, then "... (N more lines)"
+      const contentLines = msg.content.split("\n");
+      const MAX_PREVIEW = 8;
+      const previewLines = contentLines.slice(0, MAX_PREVIEW);
+      const remaining = contentLines.length - MAX_PREVIEW;
+
+      buf.push("  " + bg(" ".repeat(boxWidth))); // blank line after header
+      for (const line of previewLines) {
+        const trimmed = line.slice(0, boxWidth - 4);
+        const linePad = " ".repeat(Math.max(0, boxWidth - trimmed.length - 3));
+        buf.push("  " + bg(`  ${C.dim(trimmed)}${linePad} `));
+      }
+
+      if (remaining > 0) {
+        const moreText = `... (${remaining} more lines)`;
+        const morePad = " ".repeat(Math.max(0, boxWidth - moreText.length - 3));
+        buf.push("  " + bg(`  ${C.dimmer(moreText)}${morePad} `));
+      }
+
+      // Bottom padding
+      buf.push("  " + bg(" ".repeat(boxWidth)));
       break;
+    }
   }
 }
 

@@ -274,15 +274,22 @@ export async function refreshWorkspace(
   };
 }
 
+export interface ToolCallEvent {
+  action: string;
+  target: string;
+  result: string;
+  color: "green" | "red";
+}
+
 /**
  * Ask a question using the tool-calling chat agent.
- * onToolCall fires each time the agent calls a tool (for live activity display).
+ * onToolCall fires after each tool execution with the action, target, result, and color.
  */
 export async function askWorkspaceQuestion(
   aiConfig: AIProviderConfig,
   loaded: LoadedWorkspace,
   question: string,
-  onToolCall?: (toolName: string) => void,
+  onToolCall?: (event: ToolCallEvent) => void,
   extraContext?: {
     cache: CourseCache | null;
     client: CanvasClient | null;
@@ -302,16 +309,7 @@ export async function askWorkspaceQuestion(
       courseId: extraContext?.courseId ?? null,
     },
     question,
-    (toolName, _input) => {
-      const labels: Record<string, string> = {
-        search_workspace: "search workspace",
-        read_file: `read ${(_input?.filename as string) ?? "file"}`,
-        list_files: "list files",
-        search_course: `search course: ${(_input?.query as string) ?? ""}`,
-        download_course_file: `download ${(_input?.title as string) ?? "file"}`,
-      };
-      onToolCall?.(labels[toolName] ?? toolName);
-    }
+    onToolCall ?? (() => {})
   );
 }
 

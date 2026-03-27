@@ -56,6 +56,11 @@ export class ActivityIndicator {
     }
   }
 
+  /** Update the base row (call after re-rendering the main UI). */
+  updateBaseRow(row: number): void {
+    this.baseRow = row;
+  }
+
   /** Add a tool call step (shown as a compact block above the spinner). */
   addStep(label: string): void {
     this.steps.push(label);

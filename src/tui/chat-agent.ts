@@ -164,14 +164,21 @@ export interface ChatAgentContext {
   courseId: number | null;
 }
 
+export interface ToolCallEvent {
+  action: string;
+  target: string;
+  result: string;
+  color: "green" | "red";
+}
+
 /**
  * Run the chat agent with tool calling.
- * onToolCall is fired each time the model calls a tool (for live activity display).
+ * onToolCall is fired after each tool execution with structured event data.
  */
 export async function runChatAgent(
   ctx: ChatAgentContext,
   question: string,
-  onToolCall: (toolName: string, input: Record<string, unknown>) => void
+  onToolCall: (event: ToolCallEvent) => void
 ): Promise<WorkspaceAnswer> {
   const systemPrompt = buildSystemPrompt(ctx);
   const messages: MessageParam[] = [
@@ -199,15 +206,19 @@ export async function runChatAgent(
     const toolResults: Array<{ toolCallId: string; content: string; isError?: boolean }> = [];
 
     for (const tc of response.toolCalls) {
-      onToolCall(tc.name, tc.input);
+      // Map tool name to human-readable action + target
+      const { action, target, color } = mapToolCall(tc.name, tc.input);
 
       try {
         const result = await executeToolCall(tc.name, tc.input, ctx);
         toolResults.push({ toolCallId: tc.id, content: result });
+        onToolCall({ action, target, result, color });
       } catch (err) {
+        const errMsg = `Error: ${err instanceof Error ? err.message : "unknown"}`;
+        onToolCall({ action, target, result: errMsg, color: "red" });
         toolResults.push({
           toolCallId: tc.id,
-          content: `Error: ${err instanceof Error ? err.message : "unknown"}`,
+          content: errMsg,
           isError: true,
         });
       }
@@ -237,6 +248,27 @@ export async function runChatAgent(
     sources: [],
     confidence: "medium",
   };
+}
+
+/** Map tool name + input to a human-readable action/target/color. */
+function mapToolCall(
+  name: string,
+  input: Record<string, unknown>
+): { action: string; target: string; color: "green" | "red" } {
+  switch (name) {
+    case "read_file":
+      return { action: "read", target: (input.filename as string) ?? "file", color: "green" };
+    case "search_workspace":
+      return { action: "search", target: (input.query as string) ?? "workspace", color: "green" };
+    case "search_course":
+      return { action: "search", target: (input.query as string) ?? "course", color: "green" };
+    case "list_files":
+      return { action: "list", target: "files", color: "green" };
+    case "download_course_file":
+      return { action: "download", target: (input.title as string) ?? "file", color: "green" };
+    default:
+      return { action: name, target: "", color: "green" };
+  }
 }
 
 // --- Tool execution ---
