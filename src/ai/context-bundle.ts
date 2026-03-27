@@ -1,13 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { createRequire } from "node:module";
-
-const require = createRequire(import.meta.url);
-const pdfParse: (buffer: Buffer) => Promise<{ text: string }> = require("pdf-parse");
 import type { AssignmentDetail } from "../domain/models.js";
 import type { EnrichmentSummary } from "../enrich/types.js";
 import type { CourseCache } from "../enrich/cache-loader.js";
 import { htmlToText } from "../format/html-to-text.js";
+import { extractFileText } from "../extract/extract-text.js";
 
 /**
  * Assembled context bundle for the AI model.
@@ -106,7 +103,7 @@ export async function buildContextBundle(
 
     const fullPath = path.join(cache.coursePath, att.localPath);
     const text = await extractFileText(fullPath, att.originalFilename);
-    if (text && text.length > 20) {
+    if (text && text.length > 20 && !text.startsWith("[")) {
       const content = truncate(text, MAX_TEXT_PER_SOURCE);
       bundle.extractedTexts.push({
         source: att.originalFilename,
@@ -125,7 +122,7 @@ export async function buildContextBundle(
 
       const fullPath = path.join(cache.coursePath, att.localPath);
       const text = await extractFileText(fullPath, att.filename);
-      if (text && text.length > 20) {
+      if (text && text.length > 20 && !text.startsWith("[")) {
         const content = truncate(text, MAX_TEXT_PER_SOURCE);
         bundle.extractedTexts.push({
           source: att.filename,
@@ -173,45 +170,7 @@ function buildAssignmentList(cache: CourseCache): string | null {
   return lines.join("\n");
 }
 
-/**
- * Extract text from a file. Supports PDF, plain text, HTML, and markdown.
- */
-async function extractFileText(
-  filePath: string,
-  filename: string
-): Promise<string | null> {
-  const ext = path.extname(filename).toLowerCase();
-
-  try {
-    if (ext === ".pdf") {
-      return await extractPdfText(filePath);
-    }
-    if ([".txt", ".md"].includes(ext)) {
-      return await readTextSafe(filePath);
-    }
-    if ([".html", ".htm"].includes(ext)) {
-      const raw = await readTextSafe(filePath);
-      return raw ? htmlToText(raw) : null;
-    }
-    // Skip binary/unsupported formats
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Extract text from a PDF file using pdf-parse.
- */
-async function extractPdfText(filePath: string): Promise<string | null> {
-  try {
-    const buffer = await fs.readFile(filePath);
-    const data = await pdfParse(buffer);
-    return data.text?.trim() || null;
-  } catch {
-    return null;
-  }
-}
+// extractFileText imported from ../extract/extract-text.js
 
 async function readTextSafe(filePath: string): Promise<string | null> {
   try {

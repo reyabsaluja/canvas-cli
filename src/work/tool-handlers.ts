@@ -1,14 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { createRequire } from "node:module";
 import type { CanvasClient } from "../canvas/client.js";
 import type { Config } from "../config/env.js";
 import type { CourseCache } from "../enrich/cache-loader.js";
 import type { InvestigationState } from "./types.js";
-import { htmlToText } from "../format/html-to-text.js";
-
-const require = createRequire(import.meta.url);
-const pdfParse: (buffer: Buffer) => Promise<{ text: string }> = require("pdf-parse");
+import { extractFileText } from "../extract/extract-text.js";
 
 /** Max text returned per document read. */
 const MAX_DOC_TEXT = 15000;
@@ -118,8 +114,6 @@ async function readDocument(filename: string, ctx: ToolContext): Promise<string>
   const fullPath = path.join(cache.coursePath, att.localPath);
   const text = await extractFileText(fullPath, att.originalFilename);
 
-  if (!text) return `Could not extract text from "${filename}".`;
-
   const truncated =
     text.length > MAX_DOC_TEXT
       ? text.slice(0, MAX_DOC_TEXT) + "\n[...truncated]"
@@ -196,9 +190,6 @@ async function downloadModuleFile(
 
   // Extract text
   const text = await extractFileText(localFilePath, fileMeta.display_name);
-  if (!text) {
-    return `Downloaded "${fileMeta.display_name}" but could not extract text from it.`;
-  }
 
   const truncated =
     text.length > MAX_DOC_TEXT
@@ -293,26 +284,5 @@ function searchFiles(query: string, cache: CourseCache): string {
   return lines.join("\n");
 }
 
-async function extractFileText(
-  filePath: string,
-  filename: string
-): Promise<string | null> {
-  const ext = path.extname(filename).toLowerCase();
-  try {
-    if (ext === ".pdf") {
-      const buffer = await fs.readFile(filePath);
-      const data = await pdfParse(buffer);
-      return data.text?.trim() || null;
-    }
-    if ([".txt", ".md"].includes(ext)) {
-      return await fs.readFile(filePath, "utf-8");
-    }
-    if ([".html", ".htm"].includes(ext)) {
-      const raw = await fs.readFile(filePath, "utf-8");
-      return htmlToText(raw);
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
+// extractFileText imported from ../extract/extract-text.js
+// Handles PDF, text, HTML, ZIP, and code files

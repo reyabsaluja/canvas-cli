@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { createRequire } from "node:module";
 import type { Tool, MessageParam } from "@anthropic-ai/sdk/resources/messages.js";
 import type { LoadedWorkspace } from "../ask/types.js";
 import type { CourseCache } from "../enrich/cache-loader.js";
@@ -13,10 +12,7 @@ import {
   type AIProviderConfig,
 } from "../ai/provider.js";
 import { buildChunks, retrieveRelevant } from "../ask/retrieve.js";
-import { htmlToText } from "../format/html-to-text.js";
-
-const require = createRequire(import.meta.url);
-const pdfParse: (buffer: Buffer) => Promise<{ text: string }> = require("pdf-parse");
+import { extractFileText } from "../extract/extract-text.js";
 
 const MAX_ITERATIONS = 6;
 const MAX_DOC_TEXT = 12000;
@@ -460,26 +456,5 @@ async function downloadCourseFile(title: string, ctx: ChatAgentContext): Promise
   return `Downloaded "${fileMeta.display_name}" (${buffer.length} bytes):\n\n${text}`;
 }
 
-async function extractFileText(filePath: string, filename: string): Promise<string> {
-  const ext = path.extname(filename).toLowerCase();
-  try {
-    if (ext === ".pdf") {
-      const buffer = await fs.readFile(filePath);
-      const data = await pdfParse(buffer);
-      const text = data.text?.trim() ?? "";
-      return text.slice(0, MAX_DOC_TEXT) || "Could not extract text from PDF.";
-    }
-    if ([".txt", ".md"].includes(ext)) {
-      const text = await fs.readFile(filePath, "utf-8");
-      return text.slice(0, MAX_DOC_TEXT);
-    }
-    if ([".html", ".htm"].includes(ext)) {
-      const raw = await fs.readFile(filePath, "utf-8");
-      return htmlToText(raw).slice(0, MAX_DOC_TEXT);
-    }
-    // For zip and other binary files, just note their presence
-    return `Binary file: ${filename} (cannot extract text directly)`;
-  } catch {
-    return `Error reading "${filename}".`;
-  }
-}
+// extractFileText imported from ../extract/extract-text.js
+// Handles PDF, text, HTML, ZIP, and code files
