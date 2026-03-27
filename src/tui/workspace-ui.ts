@@ -3,6 +3,7 @@ import type { AssignmentWorkup } from "../work/types.js";
 import type { LoadedWorkspace, WorkspaceAnswer } from "../ask/types.js";
 import type { AIProviderConfig } from "../ai/provider.js";
 import { askWorkspaceQuestion } from "./services.js";
+import { ActivityIndicator } from "./activity.js";
 import {
   clearScreen,
   showCursor,
@@ -96,10 +97,15 @@ export async function runWorkspaceUI(
       renderMessage(msg, buf, contentWidth);
     }
 
-    // Processing indicator
+    // Processing: ActivityIndicator renders itself directly via cursor positioning,
+    // so we just leave space here — the indicator overlays this area.
     if (isProcessing) {
+      // Reserve space for the activity indicator (it renders independently)
       buf.push("");
-      buf.push(`  ${C.primary("∷")} ${C.dim("Working...")}`);
+      buf.push("");
+      buf.push("");
+      buf.push("");
+      buf.push("");
     }
 
     // Slash command popup
@@ -136,11 +142,22 @@ export async function runWorkspaceUI(
 
   /**
    * Fast path: only rewrite the input box lines in-place.
-   * Moves cursor to the input box row and overwrites just those 3 lines.
-   * No full screen redraw — eliminates typing lag.
+   * Uses the stored row if it fits, otherwise uses a fixed offset
+   * from the bottom of the terminal. Never falls back to full render.
    */
   function renderInputOnly(): void {
-    const { cols } = getTermSize();
+    const { cols, rows: termRows } = getTermSize();
+
+    // Determine which row to write to.
+    // If inputBoxRow fits on screen, use it. Otherwise, pin to bottom.
+    let row: number;
+    if (inputBoxRow + 3 <= termRows) {
+      row = inputBoxRow + 1; // ANSI rows are 1-based
+    } else {
+      // Pin to 3 rows from the bottom of the terminal
+      row = Math.max(1, termRows - 2);
+    }
+
     const contentWidth = Math.min(cols - 4, 100);
     const boxWidth = Math.max(contentWidth, 40);
     const inputText = inputBuffer || "";
@@ -151,14 +168,11 @@ export async function runWorkspaceUI(
     const line2 = "  " + inputBg(` ${displayText}`);
     const line3 = "  " + inputBg(emptyInputLine);
 
-    // Pad each line to terminal width to clear any old content
     const pad = (s: string) => {
       const vis = stripAnsi(s).length;
       return vis < cols ? s + " ".repeat(cols - vis) : s;
     };
 
-    // Move to input box row (1-indexed) and overwrite 3 lines
-    const row = inputBoxRow + 1; // ANSI rows are 1-based
     process.stdout.write(
       `\x1B[${row};1H` +
       pad(line1) + "\n" +
@@ -236,17 +250,33 @@ export async function runWorkspaceUI(
         isProcessing = true;
         render();
 
+        // Start the live activity indicator
+        const { rows: termRows } = getTermSize();
+        const activityRow = Math.min(inputBoxRow, termRows - 6);
+        const activity = new ActivityIndicator(activityRow);
+        activity.start();
+
         try {
-          const answer = await askWorkspaceQuestion(ctx.aiConfig, ctx.loaded, input);
+          const answer = await askWorkspaceQuestion(
+            ctx.aiConfig,
+            ctx.loaded,
+            input,
+            (step) => activity.addStep(step)
+          );
+
+          activity.stop();
+          // Brief pause so user can see "Done"
+          await new Promise((r) => setTimeout(r, 400));
+
           messages.push({
             role: "assistant",
             content: answer.answer,
             bulletPoints: answer.bulletPoints,
             sources: answer.sources,
             confidence: answer.confidence,
-            actions: ["searched workspace", "retrieved context", "generated answer"],
           });
         } catch (err) {
+          activity.stop();
           messages.push({
             role: "system",
             content: `Error: ${err instanceof Error ? err.message : "unknown"}`,
@@ -453,14 +483,6 @@ function renderMessage(msg: ChatMessage, buf: Buf, maxWidth: number): void {
     }
 
     case "assistant": {
-      // Actions (tool calls) shown dimly above
-      if (msg.actions && msg.actions.length > 0) {
-        for (const action of msg.actions) {
-          buf.push(`  ${C.dim("›")} ${C.dim(action)}`);
-        }
-        buf.push("");
-      }
-
       // Main content — word-wrapped, no box
       renderWrappedContent(msg.content, buf, maxWidth);
 

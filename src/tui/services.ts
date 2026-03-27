@@ -207,15 +207,24 @@ export async function openWorkspace(
 
 /**
  * Ask a question against a loaded workspace.
+ * Accepts optional onStep callback for live activity streaming.
  */
 export async function askWorkspaceQuestion(
   aiConfig: AIProviderConfig,
   loaded: LoadedWorkspace,
-  question: string
+  question: string,
+  onStep?: (label: string) => void
 ): Promise<WorkspaceAnswer> {
+  onStep?.("searching workspace");
   const chunks = buildChunks(loaded);
+
+  onStep?.("retrieving context");
   const relevant = retrieveRelevant(question, chunks);
-  return answerQuestion(aiConfig, question, relevant);
+
+  onStep?.("generating answer");
+  const answer = await answerQuestion(aiConfig, question, relevant);
+
+  return answer;
 }
 
 /**
