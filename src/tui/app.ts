@@ -253,10 +253,19 @@ async function showHomeScreen(
     function render(): void {
       const buf = createBuffer();
       hideCursor();
-      const termCols = getTermSize().cols;
+      const { cols: termCols, rows: termRows } = getTermSize();
+
+      // Estimate content height to vertically center
+      const artLines = CANVAS_ASCII.split("\n").filter((l) => l.trim()).length;
+      const preFiltered = getFiltered();
+      const itemLines = preFiltered.items.length + 4; // items + section headers + footer
+      const boxLines = 14; // info box height
+      const totalContent = artLines + boxLines + itemLines + 6;
+      const topPad = Math.max(0, Math.floor((termRows - totalContent) / 2));
+
+      for (let p = 0; p < topPad; p++) buf.push("");
 
       // ASCII art
-      buf.push("");
       renderCenteredAscii(termCols, buf);
 
       // Info box (version is embedded in top border)

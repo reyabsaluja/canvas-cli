@@ -40,13 +40,19 @@ class ScreenBuffer {
   /**
    * Flush the buffer to stdout. Moves cursor to top-left, writes all lines,
    * clears any remaining old content below, all in one write() call.
+   *
+   * Truncates lines that would wrap to prevent row-count mismatches.
    */
   flush(): void {
     const { rows, cols } = getTermSize();
 
-    // Pad lines to terminal width to overwrite old content
+    // Truncate lines to terminal width so they never wrap
     const padded = this.lines.map((line) => {
       const visible = stripAnsi(line).length;
+      if (visible > cols) {
+        // Truncate: find the cut point accounting for ANSI codes
+        return truncateToWidth(line, cols - 1) + " ";
+      }
       if (visible < cols) {
         return line + " ".repeat(cols - visible);
       }
@@ -133,4 +139,39 @@ const ANSI_RE = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZ
 
 export function stripAnsi(str: string): string {
   return str.replace(ANSI_RE, "");
+}
+
+/**
+ * Truncate a string with ANSI codes to a visible width.
+ * Walks through characters, skipping ANSI escapes, until
+ * the visible width reaches maxWidth.
+ */
+function truncateToWidth(str: string, maxWidth: number): string {
+  let visible = 0;
+  let i = 0;
+
+  while (i < str.length && visible < maxWidth) {
+    // Check for ANSI escape sequence
+    if (str[i] === "\x1B") {
+      const match = str.slice(i).match(/^[\x1B\x9B][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/);
+      if (match) {
+        i += match[0].length;
+        continue;
+      }
+    }
+    visible++;
+    i++;
+  }
+
+  // Include any trailing ANSI reset sequences
+  while (i < str.length && str[i] === "\x1B") {
+    const match = str.slice(i).match(/^[\x1B\x9B][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/);
+    if (match) {
+      i += match[0].length;
+    } else {
+      break;
+    }
+  }
+
+  return str.slice(0, i);
 }
