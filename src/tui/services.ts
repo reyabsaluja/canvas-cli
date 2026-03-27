@@ -13,8 +13,7 @@ import { ingestCourse } from "../ingest/ingest-course.js";
 import { runInvestigation } from "../work/orchestrator.js";
 import { createWorkWorkspace } from "../work/workspace.js";
 import { loadWorkspace } from "../ask/load-workspace.js";
-import { buildChunks, retrieveRelevant } from "../ask/retrieve.js";
-import { answerQuestion } from "../ask/answer.js";
+// buildChunks, retrieveRelevant, answerQuestion now used by chat-agent.ts
 import { getAIConfig, type AIProviderConfig } from "../ai/provider.js";
 import { makeSessionSlug, getWorkspacePath } from "../workspace/paths.js";
 import { listWorkspaces } from "../ask/resolve-workspace.js";
@@ -206,25 +205,114 @@ export async function openWorkspace(
 }
 
 /**
- * Ask a question against a loaded workspace.
- * Accepts optional onStep callback for live activity streaming.
+ * Refresh a workspace — re-runs ingest (with --refresh) + work pipeline.
+ * Returns the updated workspace data.
+ */
+export async function refreshWorkspace(
+  services: AppServices,
+  course: Course,
+  assignmentName: string,
+  onProgress: (stage: string) => void
+): Promise<{
+  workspacePath: string;
+  workup: AssignmentWorkup | null;
+  loaded: LoadedWorkspace;
+}> {
+  // Step 1: Resolve assignment
+  onProgress("resolving assignment");
+  const rawAssignments = await services.client.getAssignments(course.id);
+  const allAssignments = rawAssignments.map((a) =>
+    normalizeAssignment(a, course.name)
+  );
+  const matches = matchAssignments(assignmentName, allAssignments);
+  if (matches.length === 0) {
+    throw new Error(`No assignment matching "${assignmentName}" found.`);
+  }
+  const match = matches[0];
+  const rawDetail = await services.client.getAssignmentDetail(course.id, match.id);
+  const detail = normalizeAssignmentDetail(rawDetail, course.name);
+
+  // Step 2: Force re-ingest
+  onProgress("re-ingesting course data");
+  await ingestCourse(course, services.client, services.config, { refresh: true });
+
+  // Step 3: Load fresh cache
+  onProgress("loading fresh course cache");
+  const cache = await loadCourseCache(course.courseCode, course.id);
+  if (!cache) throw new Error("Failed to load course cache after re-ingestion");
+
+  // Step 4: Re-run work pipeline
+  if (!services.aiConfig) {
+    throw new Error("ANTHROPIC_API_KEY not set — cannot run assignment workup");
+  }
+
+  onProgress("enriching assignment");
+  const enriched = enrichAssignmentDetail(detail, cache);
+
+  onProgress("investigating assignment");
+  const investigation = await runInvestigation(
+    services.aiConfig,
+    detail,
+    course,
+    enriched.enrichment,
+    cache,
+    services.client,
+    services.config,
+    (phase) => onProgress(phase)
+  );
+
+  onProgress("creating workspace");
+  const result = await createWorkWorkspace(detail, course, investigation.workup, investigation.state);
+
+  onProgress("workspace refreshed");
+  const loaded = await loadWorkspace(result.workspacePath);
+
+  return {
+    workspacePath: result.workspacePath,
+    workup: investigation.workup,
+    loaded,
+  };
+}
+
+/**
+ * Ask a question using the tool-calling chat agent.
+ * onToolCall fires each time the agent calls a tool (for live activity display).
  */
 export async function askWorkspaceQuestion(
   aiConfig: AIProviderConfig,
   loaded: LoadedWorkspace,
   question: string,
-  onStep?: (label: string) => void
+  onToolCall?: (toolName: string) => void,
+  extraContext?: {
+    cache: CourseCache | null;
+    client: CanvasClient | null;
+    config: Config | null;
+    courseId: number | null;
+  }
 ): Promise<WorkspaceAnswer> {
-  onStep?.("searching workspace");
-  const chunks = buildChunks(loaded);
+  const { runChatAgent } = await import("./chat-agent.js");
 
-  onStep?.("retrieving context");
-  const relevant = retrieveRelevant(question, chunks);
-
-  onStep?.("generating answer");
-  const answer = await answerQuestion(aiConfig, question, relevant);
-
-  return answer;
+  return runChatAgent(
+    {
+      aiConfig,
+      loaded,
+      cache: extraContext?.cache ?? null,
+      client: extraContext?.client ?? null,
+      config: extraContext?.config ?? null,
+      courseId: extraContext?.courseId ?? null,
+    },
+    question,
+    (toolName, _input) => {
+      const labels: Record<string, string> = {
+        search_workspace: "search workspace",
+        read_file: `read ${(_input?.filename as string) ?? "file"}`,
+        list_files: "list files",
+        search_course: `search course: ${(_input?.query as string) ?? ""}`,
+        download_course_file: `download ${(_input?.title as string) ?? "file"}`,
+      };
+      onToolCall?.(labels[toolName] ?? toolName);
+    }
+  );
 }
 
 /**

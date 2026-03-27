@@ -21,6 +21,12 @@ export interface WorkspaceContext {
   loaded: LoadedWorkspace;
   aiConfig: AIProviderConfig | null;
   courseDisplayName?: string;
+  agentContext?: {
+    cache: any;
+    client: any;
+    config: any;
+    courseId: number | null;
+  };
 }
 
 interface ChatMessage {
@@ -39,6 +45,7 @@ const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
   { cmd: "/resources", desc: "Show key resources" },
   { cmd: "/evidence", desc: "Show confirmed vs inferred sources" },
   { cmd: "/status", desc: "Show workspace status" },
+  { cmd: "/refresh", desc: "Re-ingest course and rebuild workspace" },
   { cmd: "/help", desc: "Show available commands" },
   { cmd: "/back", desc: "Return to assignment selection" },
   { cmd: "/courses", desc: "Return to course selection" },
@@ -52,7 +59,7 @@ const userBg = chalk.bgHex("#2a2e3f");
 
 export async function runWorkspaceUI(
   ctx: WorkspaceContext
-): Promise<"back" | "courses" | "quit"> {
+): Promise<"back" | "courses" | "quit" | "refresh"> {
   const messages: ChatMessage[] = [];
 
   if (ctx.workup?.overview) {
@@ -261,7 +268,8 @@ export async function runWorkspaceUI(
             ctx.aiConfig,
             ctx.loaded,
             input,
-            (step) => activity.addStep(step)
+            (step) => activity.addStep(step),
+            ctx.agentContext
           );
 
           activity.stop();
@@ -364,7 +372,7 @@ function handleSlashCommand(
   cmd: string,
   ctx: WorkspaceContext,
   messages: ChatMessage[]
-): "back" | "courses" | "quit" | null {
+): "back" | "courses" | "quit" | "refresh" | null {
   switch (cmd) {
     case "/overview":
       if (ctx.workup) {
@@ -447,6 +455,8 @@ function handleSlashCommand(
       });
       return null;
 
+    case "/refresh":
+      return "refresh";
     case "/back":
       return "back";
     case "/courses":

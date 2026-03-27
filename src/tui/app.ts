@@ -10,6 +10,8 @@ import {
   type AppServices,
 } from "./services.js";
 import { loadCourseConfig, type CourseConfig } from "./course-config.js";
+import { loadCourseCache } from "../enrich/cache-loader.js";
+import { refreshWorkspace } from "./services.js";
 import { runCourseSetup, runCourseManagement } from "./course-setup.js";
 import { loadWorkspace } from "../ask/load-workspace.js";
 import {
@@ -649,77 +651,170 @@ async function enterNewWorkspace(
   course: Course,
   assignmentName: string
 ): Promise<"back" | "courses" | "quit"> {
-  clearScreen();
-  console.log("");
-  console.log(C.primaryBold(`  ${assignmentName}`));
-  console.log(C.dim(`  ${course.name}`));
-  console.log("");
+  // Loop handles /refresh — re-runs pipeline and re-enters workspace
+  while (true) {
+    clearScreen();
+    console.log("");
+    console.log(C.primaryBold(`  ${assignmentName}`));
+    console.log(C.dim(`  ${course.name}`));
+    console.log("");
 
-  let wsData;
-  try {
-    wsData = await openWorkspace(
-      services,
-      course,
-      assignmentName,
-      (stage) => {
-        console.log(`  ${C.dim("›")} ${C.dim(stage)}`);
+    let wsData;
+    try {
+      wsData = await openWorkspace(
+        services,
+        course,
+        assignmentName,
+        (stage) => {
+          console.log(`  ${C.dim("›")} ${C.dim(stage)}`);
+        }
+      );
+    } catch (err) {
+      console.error(
+        C.error(
+          `\n  Failed: ${err instanceof Error ? err.message : "unknown"}`
+        )
+      );
+      showCursor();
+      console.log(C.dim("\n  Press any key to continue..."));
+      await waitForKey();
+      return "back";
+    }
+
+    clearScreen();
+    const courseDisplayName = findCourseDisplayName(services, wsData.loaded.courseName);
+    const cache = await loadCourseCache(course.courseCode, course.id);
+    const result = await runWorkspaceUI({
+      workspacePath: wsData.workspacePath,
+      workup: wsData.workup,
+      loaded: wsData.loaded,
+      aiConfig: services.aiConfig,
+      courseDisplayName,
+      agentContext: {
+        cache,
+        client: services.client,
+        config: services.config,
+        courseId: course.id,
+      },
+    });
+
+    if (result === "refresh") {
+      // Re-run ingest + work
+      clearScreen();
+      console.log("");
+      console.log(C.primaryBold(`  Refreshing ${assignmentName}`));
+      console.log(C.dim(`  ${course.name}`));
+      console.log("");
+      try {
+        await refreshWorkspace(services, course, assignmentName, (stage) => {
+          console.log(`  ${C.dim("›")} ${C.dim(stage)}`);
+        });
+      } catch (err) {
+        console.error(
+          C.error(`\n  Refresh failed: ${err instanceof Error ? err.message : "unknown"}`)
+        );
+        showCursor();
+        console.log(C.dim("\n  Press any key to continue..."));
+        await waitForKey();
       }
-    );
-  } catch (err) {
-    console.error(
-      C.error(
-        `\n  Failed: ${err instanceof Error ? err.message : "unknown"}`
-      )
-    );
-    showCursor();
-    console.log(C.dim("\n  Press any key to continue..."));
-    await waitForKey();
-    return "back";
-  }
+      // Loop back to re-enter workspace with fresh data
+      continue;
+    }
 
-  clearScreen();
-  // Find the display name for this course from user config
-  const courseDisplayName = findCourseDisplayName(services, wsData.loaded.courseName);
-  return runWorkspaceUI({
-    workspacePath: wsData.workspacePath,
-    workup: wsData.workup,
-    loaded: wsData.loaded,
-    aiConfig: services.aiConfig,
-    courseDisplayName,
-  });
+    return result;
+  }
 }
 
 async function enterExistingWorkspace(
   wsPath: string,
   services: AppServices
 ): Promise<"back" | "courses" | "quit"> {
-  clearScreen();
-  console.log(C.dim("\n  loading workspace..."));
+  while (true) {
+    clearScreen();
+    console.log(C.dim("\n  loading workspace..."));
 
-  try {
-    const loaded = await loadWorkspace(wsPath);
+    let loaded;
+    try {
+      loaded = await loadWorkspace(wsPath);
+    } catch (err) {
+      console.error(
+        C.error(`\n  Failed to load workspace: ${err instanceof Error ? err.message : "unknown"}`)
+      );
+      await waitForKey();
+      return "back";
+    }
+
     let workup: AssignmentWorkup | null = null;
     if (loaded.workupJson) {
       workup = loaded.workupJson as unknown as AssignmentWorkup;
     }
 
     const courseDisplayName = findCourseDisplayName(services, loaded.courseName);
+    let agentCache = null;
+    let courseId: number | null = null;
+    let matchedCourse: Course | null = null;
+
+    // Find course from config or allCourses
+    if (services.courseConfig) {
+      const uc = services.courseConfig.courses.find(
+        (c) => c.originalName === loaded.courseName
+      );
+      if (uc) {
+        courseId = uc.id;
+        agentCache = await loadCourseCache(uc.originalCode, uc.id);
+        matchedCourse = services.allCourses.find((c) => c.id === uc.id) ?? null;
+      }
+    }
+
     clearScreen();
-    return runWorkspaceUI({
+    const result = await runWorkspaceUI({
       workspacePath: wsPath,
       workup,
       loaded,
       aiConfig: services.aiConfig,
       courseDisplayName,
+      agentContext: {
+        cache: agentCache,
+        client: services.client,
+        config: services.config,
+        courseId,
+      },
     });
-  } catch (err) {
-    console.error(
-      C.error(
-        `\n  Failed to load workspace: ${err instanceof Error ? err.message : "unknown"}`
-      )
-    );
-    await waitForKey();
-    return "back";
+
+    if (result === "refresh" && matchedCourse) {
+      clearScreen();
+      console.log("");
+      console.log(C.primaryBold(`  Refreshing ${loaded.assignmentName}`));
+      console.log(C.dim(`  ${loaded.courseName}`));
+      console.log("");
+      try {
+        const refreshed = await refreshWorkspace(
+          services,
+          matchedCourse,
+          loaded.assignmentName,
+          (stage) => console.log(`  ${C.dim("›")} ${C.dim(stage)}`)
+        );
+        wsPath = refreshed.workspacePath;
+      } catch (err) {
+        console.error(
+          C.error(`\n  Refresh failed: ${err instanceof Error ? err.message : "unknown"}`)
+        );
+        showCursor();
+        console.log(C.dim("\n  Press any key to continue..."));
+        await waitForKey();
+      }
+      continue;
+    }
+
+    if (result === "refresh") {
+      // Can't refresh without course info
+      clearScreen();
+      console.log(C.dim("\n  Cannot refresh — course not found in config."));
+      await sleep(2000);
+      continue;
+    }
+
+    return result;
   }
 }
 

@@ -8,6 +8,8 @@ import type {
   DownloadedAttachmentEntry,
 } from "./types.js";
 import type { SelectedAttachment } from "./attachment-selection.js";
+import type { CanvasAssignment } from "../canvas/types.js";
+import { extractLinkedFiles } from "../workspace/attachments.js";
 import { makeCourseSlug, getCoursePath } from "./slug.js";
 import { fetchCourseContent } from "./fetch-course-content.js";
 import { normalizeCourseContent } from "./normalize-content.js";
@@ -68,7 +70,18 @@ export async function ingestCourse(
     client
   );
 
-  const allSelected = [...heuristicAttachments, ...moduleAttachments];
+  // Step 5b: Also download files linked in assignment descriptions
+  // These have verifier tokens making them downloadable even when Files API is blocked
+  const descriptionAttachments = selectDescriptionLinkedFiles(
+    raw.assignments,
+    [...heuristicAttachments, ...moduleAttachments]
+  );
+
+  const allSelected = [
+    ...heuristicAttachments,
+    ...moduleAttachments,
+    ...descriptionAttachments,
+  ];
 
   // Step 6: Download all attachments
   const attachmentsDir = path.join(coursePath, "attachments");
@@ -189,6 +202,43 @@ async function selectModuleFiles(
         contentType: file.contentType,
         size: file.size,
         subfolder: "modules",
+      });
+    }
+  }
+
+  return selected;
+}
+
+/**
+ * Extract files linked in assignment descriptions (with verifier tokens).
+ * These are often instruction PDFs, rubrics, etc. that Canvas links directly
+ * in the assignment body with download-ready URLs.
+ */
+function selectDescriptionLinkedFiles(
+  assignments: CanvasAssignment[],
+  alreadySelected: SelectedAttachment[]
+): SelectedAttachment[] {
+  const selected: SelectedAttachment[] = [];
+  const alreadyUrls = new Set(alreadySelected.map((a) => a.downloadUrl));
+
+  for (const assignment of assignments) {
+    const desc = (assignment as any).description;
+    if (!desc || typeof desc !== "string") continue;
+
+    const linked = extractLinkedFiles(desc);
+    for (const file of linked) {
+      if (alreadyUrls.has(file.downloadUrl)) continue;
+      alreadyUrls.add(file.downloadUrl);
+
+      selected.push({
+        sourceType: "assignment_linked",
+        fileId: null,
+        filename: file.title,
+        downloadUrl: file.downloadUrl,
+        reason: `linked in "${assignment.name}" description`,
+        contentType: null,
+        size: null,
+        subfolder: "assignments",
       });
     }
   }
