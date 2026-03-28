@@ -317,11 +317,11 @@ export async function askWorkspaceQuestion(
     config: Config | null;
     courseId: number | null;
   },
-  chatContext?: any
+  chatContext?: any,
+  onTextDelta?: (delta: string) => void
 ): Promise<WorkspaceAnswer> {
   const { runChatAgent } = await import("./chat-agent.js");
 
-  // Use persistent context if provided, otherwise create a fresh one
   const ctx = chatContext ?? {
     aiConfig,
     loaded,
@@ -332,7 +332,7 @@ export async function askWorkspaceQuestion(
     conversationHistory: [],
   };
 
-  return runChatAgent(ctx, question, onToolCall ?? (() => {}));
+  return runChatAgent(ctx, question, onToolCall ?? (() => {}), onTextDelta);
 }
 
 /**

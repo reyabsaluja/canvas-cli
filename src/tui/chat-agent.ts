@@ -6,7 +6,7 @@ import type { CanvasClient } from "../canvas/client.js";
 import type { Config } from "../config/env.js";
 import type { WorkspaceAnswer } from "../ask/types.js";
 import {
-  generateWithTools,
+  streamWithTools,
   type AIProviderConfig,
   type ToolDefinition,
 } from "../ai/provider.js";
@@ -97,6 +97,8 @@ Rules:
 - Cite sources when relevant.
 - Do NOT solve the assignment — help the student understand it.
 - For simple questions, keep it brief. For "explain" or "in depth" questions, be thorough and specific.
+
+When you use a tool, briefly say what you're doing first (e.g., "Let me read the lab document..." or "Searching for that information..."). This helps the student see your thought process.
 
 When you have enough information, respond with your answer directly (no tool calls).`);
 
@@ -197,35 +199,41 @@ function mapToolCall(
  * Run the chat agent using the AI SDK's built-in tool loop.
  * Maintains conversation history across calls for multi-turn context.
  */
+/**
+ * Run the chat agent with streaming text output.
+ * Tool calls fire onToolCall. The final text streams via onTextDelta.
+ */
 export async function runChatAgent(
   ctx: ChatAgentContext,
   question: string,
-  onToolCall: (event: ToolCallEvent) => void
+  onToolCall: (event: ToolCallEvent) => void,
+  onTextDelta?: (delta: string) => void
 ): Promise<WorkspaceAnswer> {
   const systemPrompt = buildSystemPrompt(ctx);
 
-  // Add user message to persistent history
   ctx.conversationHistory.push({ role: "user", content: question });
 
-  const result = await generateWithTools(
+  const fullText = await streamWithTools(
     ctx.aiConfig,
     systemPrompt,
     ctx.conversationHistory,
     CHAT_TOOLS,
     async (name, input) => executeToolCall(name, input, ctx),
-    (name, input, toolResult) => {
-      const { action, target, color } = mapToolCall(name, input);
-      onToolCall({ action, target, result: toolResult, color });
+    {
+      onToolCall: (name, input, toolResult) => {
+        const { action, target, color } = mapToolCall(name, input);
+        onToolCall({ action, target, result: toolResult, color });
+      },
+      onTextDelta,
     },
     10
   );
 
-  // Add assistant response to persistent history for next turn
-  ctx.conversationHistory.push({ role: "assistant", content: result.text });
+  ctx.conversationHistory.push({ role: "assistant", content: fullText });
 
   return {
     question,
-    answer: result.text || "I wasn't able to find a clear answer.",
+    answer: fullText || "I wasn't able to find a clear answer.",
     bulletPoints: [],
     sources: [],
     confidence: "medium",

@@ -101,11 +101,14 @@ export async function runWorkspaceUI(
 
   /** Start the spinner animation timer. Writes directly to spinnerRow. */
   function startSpinner(): void {
-    if (spinnerTimer) return;
+    // Always clear any existing timer first
+    if (spinnerTimer) {
+      clearInterval(spinnerTimer);
+      spinnerTimer = null;
+    }
     spinnerTimer = setInterval(() => {
       spinnerFrame = (spinnerFrame + 1) % SPINNER.length;
       currentSpinnerLine = `  ${C.primary(SPINNER[spinnerFrame])} ${C.accent(currentVerb)}${chalk.white("...")}`;
-      // Write the spinner line directly at its row (no full render)
       if (spinnerRow > 0) {
         const { cols } = getTermSize();
         const vis = stripAnsi(currentSpinnerLine).length;
@@ -121,6 +124,7 @@ export async function runWorkspaceUI(
       clearInterval(spinnerTimer);
       spinnerTimer = null;
     }
+    spinnerRow = 0;
   }
 
   function getSlashMatches(): typeof SLASH_COMMANDS {
@@ -326,13 +330,28 @@ export async function runWorkspaceUI(
         render(); // This sets spinnerRow
         startSpinner(); // Start the independent animation timer
 
+        // Streaming state
+        let streamingStarted = false;
+        let streamedText = "";
+        let lastRenderTime = 0;
+        const RENDER_INTERVAL = 80; // ms between stream renders
+
         try {
           const answer = await askWorkspaceQuestion(
             ctx.aiConfig,
             ctx.loaded,
             input,
             (event: ToolCallEvent) => {
-              stopSpinner(); // Pause spinner during re-render
+              // If text was streaming before this tool call, save it
+              if (streamingStarted && streamedText.trim()) {
+                messages[messages.length - 1] = {
+                  role: "system",
+                  content: streamedText.trim(),
+                };
+                streamingStarted = false;
+                streamedText = "";
+              }
+              stopSpinner();
               messages.push({
                 role: "tool",
                 content: event.result,
@@ -340,21 +359,55 @@ export async function runWorkspaceUI(
                 toolTarget: event.target,
                 toolColor: event.color,
               });
-              render(); // Re-render with new tool block (updates spinnerRow)
-              startSpinner(); // Resume spinner at new position
+              // Keep isProcessing true, restore spinner line for next render
+              currentSpinnerLine = `  ${C.primary(SPINNER[spinnerFrame])} ${C.accent(currentVerb)}${chalk.white("...")}`;
+              render();
+              startSpinner();
             },
             ctx.agentContext,
-            chatCtx
+            chatCtx,
+            (delta: string) => {
+              // First delta: stop spinner, switch to streaming mode
+              if (!streamingStarted) {
+                streamingStarted = true;
+                stopSpinner();
+                // Clear spinner but keep isProcessing true (hides input box)
+                currentSpinnerLine = "";
+                messages.push({ role: "assistant", content: "" });
+              }
+
+              streamedText += delta;
+
+              // Throttled render: update message content periodically
+              const now = Date.now();
+              if (now - lastRenderTime > RENDER_INTERVAL) {
+                lastRenderTime = now;
+                messages[messages.length - 1] = {
+                  role: "assistant",
+                  content: streamedText,
+                };
+                render();
+              }
+            }
           );
 
           stopSpinner();
-          messages.push({
-            role: "assistant",
-            content: answer.answer,
-            bulletPoints: answer.bulletPoints,
-            sources: answer.sources,
-            confidence: answer.confidence,
-          });
+
+          // Final render with complete text
+          if (streamingStarted) {
+            messages[messages.length - 1] = {
+              role: "assistant",
+              content: answer.answer || streamedText,
+            };
+          } else {
+            messages.push({
+              role: "assistant",
+              content: answer.answer,
+              bulletPoints: answer.bulletPoints,
+              sources: answer.sources,
+              confidence: answer.confidence,
+            });
+          }
         } catch (err) {
           stopSpinner();
           messages.push({
@@ -365,6 +418,7 @@ export async function runWorkspaceUI(
 
         isProcessing = false;
         currentSpinnerLine = "";
+        spinnerRow = 0;
         render();
         return;
       }

@@ -1,4 +1,4 @@
-import { generateText, tool, jsonSchema, stepCountIs } from "ai";
+import { generateText, streamText, tool, jsonSchema, stepCountIs } from "ai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
@@ -135,4 +135,70 @@ export async function generateWithTools(
     text: result.text,
     responseMessages: result.response.messages ?? [],
   };
+}
+
+/**
+ * Stream tool-calling generation. Tool calls execute synchronously and
+ * fire onToolCall. The final text response streams token-by-token via onTextDelta.
+ *
+ * Returns the complete text when done.
+ */
+export async function streamWithTools(
+  config: AIProviderConfig,
+  systemPrompt: string,
+  messages: Array<{ role: string; content: string }>,
+  toolDefs: ToolDefinition[],
+  executeTool: (name: string, input: Record<string, unknown>) => Promise<string>,
+  callbacks: {
+    onToolCall?: (name: string, input: Record<string, unknown>, result: string) => void;
+    onTextDelta?: (delta: string) => void;
+  },
+  maxSteps: number = 10
+): Promise<string> {
+  const aiTools: Record<string, any> = {};
+  for (const t of toolDefs) {
+    aiTools[t.name] = tool({
+      description: t.description,
+      inputSchema: jsonSchema(t.parameters as any),
+      execute: async (input: any) => {
+        const result = await executeTool(t.name, input);
+        callbacks.onToolCall?.(t.name, input, result);
+        return result;
+      },
+    } as any);
+  }
+
+  const result = streamText({
+    model: getModel(config),
+    system: systemPrompt,
+    messages: messages as any,
+    tools: aiTools,
+    stopWhen: stepCountIs(maxSteps),
+  } as any);
+
+  // Consume the fullStream to get text deltas.
+  // Tool calls are handled by SDK's execute functions automatically.
+  let fullText = "";
+  try {
+    for await (const part of result.fullStream) {
+      if (part.type === "text-delta") {
+        const delta = (part as any).text ?? "";
+        if (delta) {
+          fullText += delta;
+          callbacks.onTextDelta?.(delta);
+        }
+      }
+      // "error" parts indicate stream-level errors
+      if (part.type === "error") {
+        console.error("Stream error:", (part as any).error);
+      }
+    }
+  } catch (err) {
+    // If streaming fails partway, return whatever text we got
+    if (!fullText) {
+      throw err;
+    }
+  }
+
+  return fullText;
 }
