@@ -92,9 +92,36 @@ export async function runWorkspaceUI(
   let isProcessing = false;
   let currentSpinnerLine = "";
   let spinnerFrame = 0;
+  let spinnerTimer: ReturnType<typeof setInterval> | null = null;
+  /** Row where the spinner line was last rendered (1-based for ANSI). */
+  let spinnerRow = 0;
   const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   const VERBS = ["Working", "Thinking", "Studying", "Reading", "Analyzing", "Exploring", "Reviewing"];
   let currentVerb = "";
+
+  /** Start the spinner animation timer. Writes directly to spinnerRow. */
+  function startSpinner(): void {
+    if (spinnerTimer) return;
+    spinnerTimer = setInterval(() => {
+      spinnerFrame = (spinnerFrame + 1) % SPINNER.length;
+      currentSpinnerLine = `  ${C.primary(SPINNER[spinnerFrame])} ${C.accent(currentVerb)}${chalk.white("...")}`;
+      // Write the spinner line directly at its row (no full render)
+      if (spinnerRow > 0) {
+        const { cols } = getTermSize();
+        const vis = stripAnsi(currentSpinnerLine).length;
+        const padded = vis < cols ? currentSpinnerLine + " ".repeat(cols - vis) : currentSpinnerLine;
+        process.stdout.write(`\x1B[${spinnerRow};1H` + padded);
+      }
+    }, 80);
+  }
+
+  /** Stop the spinner animation timer. */
+  function stopSpinner(): void {
+    if (spinnerTimer) {
+      clearInterval(spinnerTimer);
+      spinnerTimer = null;
+    }
+  }
 
   function getSlashMatches(): typeof SLASH_COMMANDS {
     if (!inputBuffer.startsWith("/")) return [];
@@ -136,9 +163,10 @@ export async function runWorkspaceUI(
       renderMessage(msg, buf, contentWidth);
     }
 
-    // Working indicator — rendered inline in the buffer (not independently)
+    // Working indicator — rendered inline in the buffer
     if (isProcessing && currentSpinnerLine) {
       buf.push("");
+      spinnerRow = buf.length + 1; // +1 because ANSI rows are 1-based
       buf.push(currentSpinnerLine);
       buf.push("");
     }
@@ -293,8 +321,10 @@ export async function runWorkspaceUI(
 
         isProcessing = true;
         currentVerb = VERBS[Math.floor(Math.random() * VERBS.length)];
+        spinnerFrame = 0;
         currentSpinnerLine = `  ${C.primary(SPINNER[0])} ${C.accent(currentVerb)}${chalk.white("...")}`;
-        render();
+        render(); // This sets spinnerRow
+        startSpinner(); // Start the independent animation timer
 
         try {
           const answer = await askWorkspaceQuestion(
@@ -302,6 +332,7 @@ export async function runWorkspaceUI(
             ctx.loaded,
             input,
             (event: ToolCallEvent) => {
+              stopSpinner(); // Pause spinner during re-render
               messages.push({
                 role: "tool",
                 content: event.result,
@@ -309,14 +340,14 @@ export async function runWorkspaceUI(
                 toolTarget: event.target,
                 toolColor: event.color,
               });
-              spinnerFrame = (spinnerFrame + 1) % SPINNER.length;
-              currentSpinnerLine = `  ${C.primary(SPINNER[spinnerFrame])} ${C.accent(currentVerb)}${chalk.white("...")}`;
-              render();
+              render(); // Re-render with new tool block (updates spinnerRow)
+              startSpinner(); // Resume spinner at new position
             },
             ctx.agentContext,
-            chatCtx // persistent conversation context
+            chatCtx
           );
 
+          stopSpinner();
           messages.push({
             role: "assistant",
             content: answer.answer,
@@ -325,6 +356,7 @@ export async function runWorkspaceUI(
             confidence: answer.confidence,
           });
         } catch (err) {
+          stopSpinner();
           messages.push({
             role: "system",
             content: `Error: ${err instanceof Error ? err.message : "unknown"}`,
@@ -401,6 +433,7 @@ export async function runWorkspaceUI(
     }
 
     function cleanup(): void {
+      stopSpinner();
       stdin.removeListener("data", onData);
       stdin.setRawMode(false);
       stdin.pause();
