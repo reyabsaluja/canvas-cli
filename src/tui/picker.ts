@@ -1,3 +1,4 @@
+import chalk from "chalk";
 import { hideCursor, showCursor, createBuffer, C } from "./screen.js";
 
 export interface PickerItem {
@@ -46,7 +47,7 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
       buf.push("");
 
       if (filterable && filter) {
-        buf.push(C.dim("  search: ") + C.text(filter) + C.dim("│"));
+        buf.push(C.dim("  search: ") + C.text(filter) + chalk.white("█"));
         buf.push("");
       }
 

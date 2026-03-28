@@ -1,3 +1,4 @@
+import chalk from "chalk";
 import { showPicker, type PickerItem } from "./picker.js";
 import { runWorkspaceUI } from "./workspace-ui.js";
 import {
@@ -296,7 +297,7 @@ async function showHomeScreen(
 
       // Search bar if filtering
       if (filter) {
-        buf.push(C.dim("  search: ") + C.text(filter) + C.dim("│"));
+        buf.push(C.dim("  search: ") + C.text(filter) + chalk.white("█"));
         buf.push("");
       }
 

@@ -1,3 +1,4 @@
+import chalk from "chalk";
 import readline from "node:readline";
 import { hideCursor, showCursor, createBuffer, clearScreen, C } from "./screen.js";
 import type { Course } from "../domain/models.js";
@@ -41,7 +42,7 @@ export function showMultiSelect(
       buf.push("");
 
       if (filter) {
-        buf.push(C.dim("  search: ") + C.text(filter) + C.dim("│"));
+        buf.push(C.dim("  search: ") + C.text(filter) + chalk.white("█"));
         buf.push("");
       }
 

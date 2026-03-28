@@ -92,6 +92,27 @@ export async function runWorkspaceUI(
   let isProcessing = false;
   let toolOutputExpanded = false;
   let currentSpinnerLine = "";
+  let pinSelected = 0;
+
+  // Build pin options from workspace + cache
+  const pinOptions: Array<{ name: string; label: string }> = [];
+  for (const ef of ctx.loaded.extractedFiles) {
+    const label = ef.name.replace(/\.txt$/, "").replace(/[._]/g, "_").toLowerCase();
+    pinOptions.push({ name: ef.name, label });
+  }
+  if (ctx.agentContext?.cache) {
+    for (const att of (ctx.agentContext.cache as any).attachments ?? []) {
+      if (att.status === "downloaded" || att.status === "skipped") {
+        const label = att.originalFilename.replace(/\.[^.]+$/, "").replace(/[.\s-]/g, "_").toLowerCase();
+        if (!pinOptions.some((p) => p.label === label)) {
+          pinOptions.push({ name: att.originalFilename, label });
+        }
+      }
+    }
+  }
+  if (ctx.loaded.assignmentMd) pinOptions.push({ name: "assignment.md", label: "assignment" });
+  if (ctx.loaded.planMd) pinOptions.push({ name: "plan.md", label: "plan" });
+  if (ctx.loaded.workupJson) pinOptions.push({ name: "workup.json", label: "workup" });
   let spinnerFrame = 0;
   let spinnerTimer: ReturnType<typeof setInterval> | null = null;
   /** Row where the spinner line was last rendered (1-based for ANSI). */
@@ -130,8 +151,30 @@ export async function runWorkspaceUI(
     spinnerRow = 0;
   }
 
+  /**
+   * Check if there's an active /pin being typed mid-message.
+   * Returns the partial text after "/pin " if active, null otherwise.
+   * e.g., "explain part 1 /pin lab" → "lab"
+   * e.g., "explain part 1 /pin" → ""
+   */
+  function getActivePinPartial(): string | null {
+    const match = inputBuffer.match(/\/pin(\s+(\S*))?$/);
+    if (!match) return null;
+    return match[2] ?? "";
+  }
+
+  /** Get matching pin files for the active /pin partial. */
+  function getPinMatches(): typeof pinOptions {
+    const partial = getActivePinPartial();
+    if (partial === null) return [];
+    if (!partial) return pinOptions;
+    return pinOptions.filter((p) => p.label.includes(partial.toLowerCase()));
+  }
+
   function getSlashMatches(): typeof SLASH_COMMANDS {
+    // Only show slash menu when / is at the START of input
     if (!inputBuffer.startsWith("/")) return [];
+    if (getActivePinPartial() !== null && !inputBuffer.startsWith("/pin")) return [];
     const partial = inputBuffer.toLowerCase();
     return SLASH_COMMANDS.filter((c) => c.cmd.startsWith(partial));
   }
@@ -180,86 +223,112 @@ export async function runWorkspaceUI(
       spinnerRow = 0;
     }
 
-    // Slash command popup
-    const matches = showSlashMenu ? getSlashMatches() : [];
-    if (matches.length > 0 && !isProcessing) {
-      buf.push("");
-      for (let i = 0; i < matches.length; i++) {
-        const m = matches[i];
-        const sel = i === slashSelected;
-        const ptr = sel ? C.primary("❯ ") : "  ";
-        const cmd = sel ? C.primaryBold(m.cmd) : C.accent(m.cmd);
-        buf.push(`  ${ptr}${cmd}  ${C.dim(m.desc)}`);
+    // Pin/slash dropdowns (rendered above the sticky input area)
+    if (!isProcessing) {
+      const pinMatches = getPinMatches();
+      if (pinMatches.length > 0) {
+        buf.push("");
+        const maxShow = Math.min(pinMatches.length, 8);
+        for (let i = 0; i < maxShow; i++) {
+          const p = pinMatches[i];
+          const sel = i === pinSelected;
+          const ptr = sel ? C.primary("❯ ") : "  ";
+          const label = sel ? C.primaryBold(p.label) : C.accent(p.label);
+          buf.push(`  ${ptr}${label}  ${C.dim(p.name)}`);
+        }
+        if (pinMatches.length > 8) buf.push(C.dim(`  ... ${pinMatches.length - 8} more`));
+      } else {
+        const matches = showSlashMenu ? getSlashMatches() : [];
+        if (matches.length > 0) {
+          buf.push("");
+          for (let i = 0; i < matches.length; i++) {
+            const m = matches[i];
+            const sel = i === slashSelected;
+            const ptr = sel ? C.primary("❯ ") : "  ";
+            const cmd = sel ? C.primaryBold(m.cmd) : C.accent(m.cmd);
+            buf.push(`  ${ptr}${cmd}  ${C.dim(m.desc)}`);
+          }
+        }
       }
     }
 
-    // Input box — hidden during processing (spinner occupies this area)
-    if (!isProcessing) {
-      buf.push("");
-      inputBoxRow = buf.length;
-      renderInputBox(buf, contentWidth);
-    }
-
     buf.flush();
+
+    // Sticky input box + status bar at bottom of terminal
+    renderStickyBottom();
   }
 
-  /** Render just the 3 input box lines into a buffer. */
-  function renderInputBox(buf: { push(line: string): void }, contentWidth: number): void {
-    const inputText = inputBuffer || "";
-    const boxWidth = Math.max(contentWidth, 40);
-    const emptyInputLine = " ".repeat(boxWidth + 1);
-    // Show cursor as │ after the text
-    const cursor = C.dim("│");
-    const textWithCursor = inputText + cursor;
-    const remaining = Math.max(0, boxWidth - inputText.length - 1);
-    const displayText = textWithCursor + " ".repeat(remaining);
-    buf.push("  " + inputBg(emptyInputLine));
-    buf.push("  " + inputBg(` ${displayText}`));
-    buf.push("  " + inputBg(emptyInputLine));
-  }
-
-  /**
-   * Fast path: only rewrite the input box lines in-place.
-   * Uses the stored row if it fits, otherwise uses a fixed offset
-   * from the bottom of the terminal. Never falls back to full render.
-   */
-  function renderInputOnly(): void {
+  /** Render the sticky input box + status bar at the bottom of the terminal. */
+  function renderStickyBottom(): void {
     const { cols, rows: termRows } = getTermSize();
-
-    // Determine which row to write to.
-    // If inputBoxRow fits on screen, use it. Otherwise, pin to bottom.
-    let row: number;
-    if (inputBoxRow + 3 <= termRows) {
-      row = inputBoxRow + 1; // ANSI rows are 1-based
-    } else {
-      // Pin to 3 rows from the bottom of the terminal
-      row = Math.max(1, termRows - 2);
-    }
-
     const contentWidth = Math.min(cols - 4, 100);
     const boxWidth = Math.max(contentWidth, 40);
-    const inputText = inputBuffer || "";
-    const emptyInputLine = " ".repeat(boxWidth + 1);
-    const cursor = C.dim("│");
-    const textWithCursor = inputText + cursor;
-    const remaining = Math.max(0, boxWidth - inputText.length - 1);
-    const displayText = textWithCursor + " ".repeat(remaining);
+    const cursor = chalk.white("█");
 
-    const line1 = "  " + inputBg(emptyInputLine);
-    const line2 = "  " + inputBg(` ${displayText}`);
-    const line3 = "  " + inputBg(emptyInputLine);
+    // Input box: 3 lines (empty, text, empty)
+    const inputText = inputBuffer || "";
+    const colored = inputText.replace(/\/pin\s+\S+/g, (m) => C.accent(m));
+    const coloredWithPartial = colored.replace(/\/pin(\s+\S*)?$/, (m) => C.accent(m));
+    const visibleLen = stripAnsi(coloredWithPartial).length;
+    const emptyLine = " ".repeat(boxWidth + 1);
+    const remaining = Math.max(0, boxWidth - visibleLen - 1);
+    const displayText = coloredWithPartial + cursor + " ".repeat(remaining);
+
+    // Status bar: course > assignment on left, model on right
+    const courseName = ctx.courseDisplayName ?? ctx.loaded.courseName;
+    const assignmentName = ctx.loaded.assignmentName;
+    const leftStatus = `${courseName} > ${assignmentName}`;
+    const modelName = ctx.aiConfig?.model ?? "no model";
+    const statusGap = Math.max(1, cols - leftStatus.length - modelName.length - 4);
+    const statusLine = `  ${C.dim(leftStatus)}${" ".repeat(statusGap)}${C.dim(modelName)}`;
+
+    // Position: input box starts at termRows - 4
+    // Row layout: termRows-4=emptyBg, termRows-3=textBg, termRows-2=emptyBg, termRows-1=statusBar
+    const startRow = termRows - 3;
 
     const pad = (s: string) => {
       const vis = stripAnsi(s).length;
       return vis < cols ? s + " ".repeat(cols - vis) : s;
     };
 
+    // Record input box position for fast path
+    inputBoxRow = startRow;
+
     process.stdout.write(
-      `\x1B[${row};1H` +
-      pad(line1) + "\n" +
-      pad(line2) + "\n" +
-      pad(line3)
+      `\x1B[${startRow};1H` +
+      pad("  " + inputBg(emptyLine)) + "\n" +
+      pad("  " + inputBg(` ${displayText}`)) + "\n" +
+      pad("  " + inputBg(emptyLine)) + "\n" +
+      pad(statusLine)
     );
+  }
+
+  /** Render just the 3 input box lines into a buffer (used by non-sticky contexts). */
+  function renderInputBox(buf: { push(line: string): void }, contentWidth: number): void {
+    const inputText = inputBuffer || "";
+    const boxWidth = Math.max(contentWidth, 40);
+    const emptyInputLine = " ".repeat(boxWidth + 1);
+    const cursor = chalk.white("█");
+
+    // Color /pin parts in accent
+    const colored = inputText.replace(/\/pin\s+\S+/g, (m) => C.accent(m));
+    // Also highlight partial /pin being typed
+    const coloredWithPartial = colored.replace(/\/pin(\s+\S*)?$/, (m) => C.accent(m));
+
+    const visibleLen = stripAnsi(coloredWithPartial).length;
+    const remaining = Math.max(0, boxWidth - visibleLen - 1);
+    const displayText = coloredWithPartial + cursor + " ".repeat(remaining);
+
+    buf.push("  " + inputBg(emptyInputLine));
+    buf.push("  " + inputBg(` ${displayText}`));
+    buf.push("  " + inputBg(emptyInputLine));
+  }
+
+  /**
+   * Fast path: only rewrite the sticky input box at the bottom.
+   */
+  function renderInputOnly(): void {
+    renderStickyBottom();
   }
 
   /**
@@ -332,6 +401,23 @@ export async function runWorkspaceUI(
       }
 
       if (key === "\r" || key === "\n") {
+        // If pin dropdown is showing, check if the pin is already complete
+        const pinPartial = getActivePinPartial();
+        if (pinPartial !== null) {
+          const pinMatches = getPinMatches();
+          // Check if the partial is already a complete label (pin is finished)
+          const isComplete = pinOptions.some((p) => p.label === pinPartial);
+          if (!isComplete && pinMatches.length > 0) {
+            // Autocomplete the pin
+            const selected = pinMatches[pinSelected];
+            inputBuffer = inputBuffer.replace(/\/pin(\s+\S*)?$/, `/pin ${selected.label}`);
+            pinSelected = 0;
+            render();
+            return;
+          }
+          // If complete or no matches, fall through to send the message
+        }
+
         if (showSlashMenu && getSlashMatches().length > 0) {
           const matches = getSlashMatches();
           inputBuffer = matches[slashSelected].cmd;
@@ -361,6 +447,41 @@ export async function runWorkspaceUI(
           return;
         }
 
+        // Parse /pin <label> from the input and resolve file content
+        const pinRegex = /\/pin\s+(\S+)/g;
+        const pins: Array<{ label: string; name: string }> = [];
+        let pinMatch;
+        while ((pinMatch = pinRegex.exec(input)) !== null) {
+          const label = pinMatch[1].toLowerCase();
+          const opt = pinOptions.find((p) => p.label === label || p.label.includes(label));
+          if (opt) pins.push(opt);
+        }
+
+        // Build the question: strip /pin parts from visible text, prepend file content
+        const cleanInput = input.replace(/\/pin\s+\S+/g, "").replace(/\s+/g, " ").trim();
+        let fullQuestion = cleanInput;
+
+        if (pins.length > 0) {
+          const pinContext: string[] = [];
+          for (const pin of pins) {
+            let content = "";
+            for (const ef of ctx.loaded.extractedFiles) {
+              if (ef.name === pin.name || ef.name.includes(pin.label)) {
+                content = ef.content.slice(0, 15000);
+                break;
+              }
+            }
+            if (!content && pin.name === "assignment.md" && ctx.loaded.assignmentMd) content = ctx.loaded.assignmentMd.slice(0, 15000);
+            if (!content && pin.name === "plan.md" && ctx.loaded.planMd) content = ctx.loaded.planMd.slice(0, 15000);
+            if (!content && pin.name === "workup.json" && ctx.loaded.workupJson) content = JSON.stringify(ctx.loaded.workupJson, null, 2).slice(0, 15000);
+            if (content) pinContext.push(`--- Attached file: ${pin.name} ---\n${content}\n--- End ${pin.name} ---`);
+          }
+          if (pinContext.length > 0) {
+            fullQuestion = pinContext.join("\n\n") + "\n\nUser question: " + cleanInput;
+          }
+        }
+
+        // Show the original input (with colored /pin parts) as user message
         messages.push({ role: "user", content: input });
 
         if (!ctx.aiConfig) {
@@ -389,7 +510,7 @@ export async function runWorkspaceUI(
           const answer = await askWorkspaceQuestion(
             ctx.aiConfig,
             ctx.loaded,
-            input,
+            fullQuestion,
             (event: ToolCallEvent) => {
               // If text was streaming before this tool call, save it
               if (streamingStarted && streamedText.trim()) {
@@ -472,6 +593,17 @@ export async function runWorkspaceUI(
         return;
       }
 
+      // Arrow keys — pin dropdown or slash menu
+      if (key === "\x1B[A" && getActivePinPartial() !== null && getPinMatches().length > 0) {
+        pinSelected = Math.max(0, pinSelected - 1);
+        render();
+        return;
+      }
+      if (key === "\x1B[B" && getActivePinPartial() !== null && getPinMatches().length > 0) {
+        pinSelected = Math.min(getPinMatches().length - 1, pinSelected + 1);
+        render();
+        return;
+      }
       if (key === "\x1B[A" && showSlashMenu) {
         slashSelected = Math.max(0, slashSelected - 1);
         renderSlashAndInput();
@@ -516,17 +648,23 @@ export async function runWorkspaceUI(
         inputBuffer += key;
         const wasSlash = showSlashMenu;
         showSlashMenu = inputBuffer.startsWith("/");
-        if (showSlashMenu) {
+        const hasPinPartial = getActivePinPartial() !== null;
+
+        if (hasPinPartial) {
+          // Pin dropdown needs full render to show/update
+          pinSelected = 0;
+          render();
+        } else if (showSlashMenu) {
           slashSelected = 0;
           if (!wasSlash) {
-            render(); // first time opening slash menu — full render to clear input area
+            render();
           } else {
-            renderSlashAndInput(); // already in slash mode, fast update
+            renderSlashAndInput();
           }
         } else if (wasSlash) {
-          render(); // slash menu just closed, full render to remove it
+          render();
         } else {
-          renderInputOnly(); // fast path — just update the input box
+          renderInputOnly();
         }
       }
     }
