@@ -72,12 +72,14 @@ const toolBgRed = chalk.bgHex("#2e1a1a");
 const toolActionColor = chalk.hex("#e0af68").bold; // bold yellow/tan
 const toolTargetGreen = chalk.hex("#9ece6a"); // green for file targets
 const toolTargetRed = chalk.hex("#f7768e"); // red for errors
-// Background color for user messages
-const userBg = chalk.bgHex("#2a2e3f");
 /** Neutral grey for workspace footer (course/assignment + model); avoids bluish C.dim. */
 const statusBarGrey = chalk.hex("#9ca3af");
 /** Sticky footer: 3 input rows + 1 status row (overdrawn after main buffer flush). */
 const STICKY_BOTTOM_ROWS = 4;
+/** Blank lines between chat and the input bar (included in main buffer + flush reserve). */
+const CHAT_GAP_ROWS = 2;
+/** Rows reserved at bottom of main view: gap + sticky (flush leaves these; sticky redraws last 4). */
+const MAIN_VIEW_BOTTOM_RESERVE = STICKY_BOTTOM_ROWS + CHAT_GAP_ROWS;
 
 export async function runWorkspaceUI(
   ctx: WorkspaceContext
@@ -231,11 +233,15 @@ export async function runWorkspaceUI(
       spinnerRow = 0;
     }
 
+    for (let g = 0; g < CHAT_GAP_ROWS; g++) {
+      buf.push("");
+    }
+
     // Pin/slash menus are drawn in renderSlashPinOverlay() (fixed above the input, not in scrollback)
 
     const bufLenBeforeFlush = buf.length;
     const { rows: tr } = getTermSize();
-    const maxContent = Math.max(1, tr - STICKY_BOTTOM_ROWS);
+    const maxContent = Math.max(1, tr - MAIN_VIEW_BOTTOM_RESERVE);
     const maxScroll = Math.max(0, bufLenBeforeFlush - maxContent);
     chatScrollOffset = Math.min(Math.max(0, chatScrollOffset), maxScroll);
 
@@ -243,7 +249,7 @@ export async function runWorkspaceUI(
     const end = bufLenBeforeFlush - off;
     const start = Math.max(0, end - maxContent);
 
-    buf.flush(STICKY_BOTTOM_ROWS, chatScrollOffset);
+    buf.flush(MAIN_VIEW_BOTTOM_RESERVE, chatScrollOffset);
 
     // Map spinner line from pre-slice buffer row to on-screen row
     if (spinnerRow > 0) {
@@ -500,14 +506,14 @@ export async function runWorkspaceUI(
       // Scroll chat transcript (viewport is shorter than full history)
       if (key === "\x1b[5~" || key === "\x1B[5~") {
         const { rows: rowsT } = getTermSize();
-        const step = Math.max(2, Math.floor((rowsT - STICKY_BOTTOM_ROWS) * 0.65));
+        const step = Math.max(2, Math.floor((rowsT - MAIN_VIEW_BOTTOM_RESERVE) * 0.65));
         chatScrollOffset += step;
         render();
         return;
       }
       if (key === "\x1b[6~" || key === "\x1B[6~") {
         const { rows: rowsT } = getTermSize();
-        const step = Math.max(2, Math.floor((rowsT - STICKY_BOTTOM_ROWS) * 0.65));
+        const step = Math.max(2, Math.floor((rowsT - MAIN_VIEW_BOTTOM_RESERVE) * 0.65));
         chatScrollOffset = Math.max(0, chatScrollOffset - step);
         render();
         return;
@@ -933,14 +939,24 @@ function renderMessage(msg: ChatMessage, buf: Buf, maxWidth: number, expanded: b
 
   switch (msg.role) {
     case "user": {
-      // User message in a highlighted background box with vertical padding
-      const text = msg.content;
-      const boxWidth = Math.max(maxWidth, 40);
+      // Same full-width bar as sticky input (inputBg + boxWidth = cols − 1 inner text)
+      const { cols: termCols } = getTermSize();
+      const boxWidth = Math.max(1, termCols - 1);
       const emptyLine = " ".repeat(boxWidth + 1);
-      const padded = text + " ".repeat(Math.max(0, boxWidth - text.length));
-      buf.push("  " + userBg(emptyLine));
-      buf.push("  " + userBg(` ${padded}`));
-      buf.push("  " + userBg(emptyLine));
+      const padRow = (s: string) => {
+        const v = stripAnsi(s).length;
+        return v < termCols ? s + " ".repeat(termCols - v) : s;
+      };
+      const padInner = (line: string) => {
+        const v = stripAnsi(line).length;
+        return line + " ".repeat(Math.max(0, boxWidth - v));
+      };
+      const lines = wrapLines(msg.content, boxWidth);
+      buf.push(padRow(inputBg(emptyLine)));
+      for (const wl of lines) {
+        buf.push(padRow(inputBg(` ${padInner(wl)}`)));
+      }
+      buf.push(padRow(inputBg(emptyLine)));
       break;
     }
 
