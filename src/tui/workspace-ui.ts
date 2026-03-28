@@ -208,7 +208,11 @@ export async function runWorkspaceUI(
     const inputText = inputBuffer || "";
     const boxWidth = Math.max(contentWidth, 40);
     const emptyInputLine = " ".repeat(boxWidth + 1);
-    const displayText = inputText + " ".repeat(Math.max(0, boxWidth - inputText.length));
+    // Show cursor as │ after the text
+    const cursor = C.dim("│");
+    const textWithCursor = inputText + cursor;
+    const remaining = Math.max(0, boxWidth - inputText.length - 1);
+    const displayText = textWithCursor + " ".repeat(remaining);
     buf.push("  " + inputBg(emptyInputLine));
     buf.push("  " + inputBg(` ${displayText}`));
     buf.push("  " + inputBg(emptyInputLine));
@@ -236,7 +240,10 @@ export async function runWorkspaceUI(
     const boxWidth = Math.max(contentWidth, 40);
     const inputText = inputBuffer || "";
     const emptyInputLine = " ".repeat(boxWidth + 1);
-    const displayText = inputText + " ".repeat(Math.max(0, boxWidth - inputText.length));
+    const cursor = C.dim("│");
+    const textWithCursor = inputText + cursor;
+    const remaining = Math.max(0, boxWidth - inputText.length - 1);
+    const displayText = textWithCursor + " ".repeat(remaining);
 
     const line1 = "  " + inputBg(emptyInputLine);
     const line2 = "  " + inputBg(` ${displayText}`);
