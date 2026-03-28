@@ -90,6 +90,7 @@ export async function runWorkspaceUI(
   let slashSelected = 0;
   let showSlashMenu = false;
   let isProcessing = false;
+  let toolOutputExpanded = false;
   let currentSpinnerLine = "";
   let spinnerFrame = 0;
   let spinnerTimer: ReturnType<typeof setInterval> | null = null;
@@ -107,10 +108,12 @@ export async function runWorkspaceUI(
       spinnerTimer = null;
     }
     spinnerTimer = setInterval(() => {
+      // Only animate if we have a valid position and are still in processing mode
+      if (!isProcessing || !currentSpinnerLine || spinnerRow <= 0) return;
       spinnerFrame = (spinnerFrame + 1) % SPINNER.length;
       currentSpinnerLine = `  ${C.primary(SPINNER[spinnerFrame])} ${C.accent(currentVerb)}${chalk.white("...")}`;
-      if (spinnerRow > 0) {
-        const { cols } = getTermSize();
+      const { cols, rows: termRows } = getTermSize();
+      if (spinnerRow <= termRows && spinnerRow < (inputBoxRow > 0 ? inputBoxRow : termRows)) {
         const vis = stripAnsi(currentSpinnerLine).length;
         const padded = vis < cols ? currentSpinnerLine + " ".repeat(cols - vis) : currentSpinnerLine;
         process.stdout.write(`\x1B[${spinnerRow};1H` + padded);
@@ -164,15 +167,17 @@ export async function runWorkspaceUI(
     }
 
     for (const msg of visibleMessages) {
-      renderMessage(msg, buf, contentWidth);
+      renderMessage(msg, buf, contentWidth, toolOutputExpanded);
     }
 
-    // Working indicator — rendered inline in the buffer
+    // Working indicator — reserve space in buffer, timer handles actual rendering
     if (isProcessing && currentSpinnerLine) {
       buf.push("");
       spinnerRow = buf.length + 1; // +1 because ANSI rows are 1-based
-      buf.push(currentSpinnerLine);
+      buf.push(""); // empty line — timer will overwrite this with the spinner
       buf.push("");
+    } else {
+      spinnerRow = 0;
     }
 
     // Slash command popup
@@ -188,10 +193,12 @@ export async function runWorkspaceUI(
       }
     }
 
-    // Input box — always shown
-    buf.push("");
-    inputBoxRow = buf.length;
-    renderInputBox(buf, contentWidth);
+    // Input box — hidden during processing (spinner occupies this area)
+    if (!isProcessing) {
+      buf.push("");
+      inputBoxRow = buf.length;
+      renderInputBox(buf, contentWidth);
+    }
 
     buf.flush();
   }
@@ -272,6 +279,41 @@ export async function runWorkspaceUI(
       if (key === "\x03") {
         cleanup();
         process.exit(0);
+      }
+
+      // Ctrl+O — toggle detailed transcript view
+      if (key === "\x0F") {
+        toolOutputExpanded = !toolOutputExpanded;
+
+        if (toolOutputExpanded) {
+          // Show detailed transcript: all messages, all tool output, no input box
+          clearScreen();
+          const { cols } = getTermSize();
+          const cw = Math.min(cols - 4, 100);
+          console.log("");
+          console.log("");
+          const name = ctx.loaded.assignmentName;
+          const course = ctx.courseDisplayName ?? ctx.loaded.courseName;
+          console.log(`  ${C.primaryBold(name)}  ${C.dim(course)}`);
+          console.log("");
+
+          // Show ALL messages (no limit) with expanded tool output
+          for (const msg of messages) {
+            const tmpBuf = { lines: [] as string[], push(l: string) { this.lines.push(l); } };
+            renderMessage(msg, tmpBuf, cw, true);
+            for (const l of tmpBuf.lines) console.log(l);
+          }
+
+          // Transcript footer instead of input box
+          console.log("");
+          console.log(`  ${C.dimmer("─".repeat(Math.min(cw, 50)))}`);
+          console.log(`  ${C.dim("Showing detailed transcript")}  ${C.dimmer("·")}  ${C.dimmer("ctrl+o")} ${C.dim("to toggle")}`);
+          console.log("");
+        } else {
+          // Return to normal view
+          render();
+        }
+        return;
       }
 
       if (key === "\x1B") {
@@ -609,7 +651,7 @@ function handleSlashCommand(
 
 type Buf = { push(line: string): void };
 
-function renderMessage(msg: ChatMessage, buf: Buf, maxWidth: number): void {
+function renderMessage(msg: ChatMessage, buf: Buf, maxWidth: number, expanded: boolean = false): void {
   buf.push("");
 
   switch (msg.role) {
@@ -667,23 +709,27 @@ function renderMessage(msg: ChatMessage, buf: Buf, maxWidth: number): void {
       const headerPad = " ".repeat(Math.max(0, boxWidth - headerText.length - 1));
       buf.push("  " + bg(` ${toolActionColor(msg.toolAction ?? "tool")} ${targetColor(msg.toolTarget ?? "")}${headerPad}`));
 
-      // Content preview — max 8 lines, then "... (N more lines)"
-      const contentLines = msg.content.split("\n").filter((l) => l.trim());
+      // Content preview — show all if expanded, otherwise max 8 lines
+      // Use ALL lines (including empty) for accurate count
+      const contentLines = msg.content.split("\n");
       const MAX_PREVIEW = 8;
-      const previewLines = contentLines.slice(0, MAX_PREVIEW);
-      const remaining = contentLines.length - MAX_PREVIEW;
+      const showLines = expanded ? contentLines : contentLines.slice(0, MAX_PREVIEW);
+      const remaining = expanded ? 0 : Math.max(0, contentLines.length - MAX_PREVIEW);
 
       buf.push("  " + bg(empty)); // blank line after header
-      for (const line of previewLines) {
+      for (const line of showLines) {
         const trimmed = line.slice(0, boxWidth - 4);
         const linePad = " ".repeat(Math.max(0, boxWidth - trimmed.length - 3));
         buf.push("  " + bg(`  ${chalk.white(trimmed)}${linePad} `));
       }
 
       if (remaining > 0) {
-        const moreText = `... (${remaining} more lines)`;
-        const morePad = " ".repeat(Math.max(0, boxWidth - moreText.length - 3));
-        buf.push("  " + bg(`  ${C.dim(moreText)}${morePad} `));
+        const moreText = `... (${remaining} more lines, `;
+        const ctrlO = "ctrl+o";
+        const toExpand = " to expand)";
+        const totalLen = moreText.length + ctrlO.length + toExpand.length;
+        const morePad = " ".repeat(Math.max(0, boxWidth - totalLen - 3));
+        buf.push("  " + bg(`  ${C.dim(moreText)}${C.dimmer(ctrlO)}${C.dim(toExpand)}${morePad} `));
       }
 
       // Bottom padding
@@ -695,41 +741,81 @@ function renderMessage(msg: ChatMessage, buf: Buf, maxWidth: number): void {
 
 /** Render content with markdown-like formatting, word-wrapped to maxWidth. */
 function renderWrappedContent(content: string, buf: Buf, maxWidth: number): void {
-  const paragraphs = content.split("\n");
+  const lines = content.split("\n");
 
-  for (const para of paragraphs) {
-    if (!para.trim()) {
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // Empty lines
+    if (!trimmed) {
       buf.push("");
       continue;
     }
 
-    let rendered = para;
-    // Bold: **text**
-    rendered = rendered.replace(/\*\*(.+?)\*\*/g, (_m, t) => C.bold(t));
-
-    // Bullet points
-    if (rendered.trim().startsWith("•") || rendered.trim().startsWith("?")) {
-      const symbol = rendered.trim().startsWith("?") ? C.warn("?") : C.dim("•");
-      const text = rendered.trim().slice(1).trim();
-      wrapLines(text, maxWidth - 4).forEach((line, i) => {
-        buf.push(i === 0 ? `  ${symbol} ${chalk.white(line)}` : `    ${chalk.white(line)}`);
-      });
-    } else if (/^\d+\.\s/.test(rendered.trim())) {
-      const match = rendered.trim().match(/^(\d+)\.\s(.+)/);
-      if (match) {
-        const num = match[1];
-        wrapLines(match[2], maxWidth - 5).forEach((line, i) => {
-          buf.push(i === 0 ? `  ${C.primaryBold(num + ".")} ${chalk.white(line)}` : `     ${chalk.white(line)}`);
-        });
-      }
-    } else {
-      wrapLines(stripAnsi(rendered), maxWidth - 2).forEach((line) => {
-        let coloredLine = line;
-        coloredLine = coloredLine.replace(/\*\*(.+?)\*\*/g, (_m, t) => chalk.white.bold(t));
-        buf.push(`  ${chalk.white(coloredLine)}`);
-      });
+    // --- Horizontal rule ---
+    if (/^[-*_]{3,}$/.test(trimmed) || trimmed === "***") {
+      buf.push(`  ${C.dimmer("─".repeat(Math.min(maxWidth - 4, 40)))}`);
+      continue;
     }
+
+    // ### Headings
+    const headingMatch = trimmed.match(/^(#{1,4})\s+(.+)/);
+    if (headingMatch) {
+      const text = applyInlineFormatting(headingMatch[2]);
+      buf.push("");
+      buf.push(`  ${C.primaryBold(text)}`);
+      continue;
+    }
+
+    // Bullet points: *, -, •
+    const bulletMatch = trimmed.match(/^[*\-•]\s+(.+)/);
+    if (bulletMatch) {
+      const text = applyInlineFormatting(bulletMatch[1]);
+      const indent = line.match(/^\s*/)?.[0]?.length ?? 0;
+      const indentStr = indent > 2 ? "      " : "    ";
+      const symbol = indent > 2 ? C.dim("◦") : C.dim("•");
+      wrapLines(stripAnsi(text), maxWidth - indentStr.length - 2).forEach((wl, i) => {
+        const colored = applyInlineFormatting(wl);
+        buf.push(i === 0 ? `  ${indentStr.slice(2)}${symbol} ${colored}` : `  ${indentStr}  ${colored}`);
+      });
+      continue;
+    }
+
+    // Numbered lists
+    const numMatch = trimmed.match(/^(\d+)\.\s+(.+)/);
+    if (numMatch) {
+      const num = numMatch[1];
+      const text = applyInlineFormatting(numMatch[2]);
+      wrapLines(stripAnsi(text), maxWidth - 6).forEach((wl, i) => {
+        const colored = applyInlineFormatting(wl);
+        buf.push(i === 0 ? `  ${C.primaryBold(num + ".")} ${colored}` : `      ${colored}`);
+      });
+      continue;
+    }
+
+    // Regular text — wrap and apply inline formatting
+    const plainText = stripAnsi(trimmed);
+    wrapLines(plainText, maxWidth - 2).forEach((wl) => {
+      buf.push(`  ${applyInlineFormatting(wl)}`);
+    });
   }
+}
+
+/** Apply inline markdown formatting: **bold**, `code`, *italic* */
+function applyInlineFormatting(text: string): string {
+  let result = text;
+  // Bold: **text** or __text__
+  result = result.replace(/\*\*(.+?)\*\*/g, (_m, t) => chalk.white.bold(t));
+  result = result.replace(/__(.+?)__/g, (_m, t) => chalk.white.bold(t));
+  // Inline code: `code`
+  result = result.replace(/`([^`]+)`/g, (_m, t) => C.accent(t));
+  // Italic: *text* (but not ** which is bold)
+  result = result.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, (_m, t) => chalk.white.italic(t));
+  // If no formatting was applied, make it white
+  if (result === text) {
+    result = chalk.white(text);
+  }
+  return result;
 }
 
 /** Word-wrap plain text to a given width. Returns array of lines. */
