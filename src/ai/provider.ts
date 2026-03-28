@@ -86,18 +86,22 @@ export interface ToolDefinition {
   parameters: Record<string, unknown>;
 }
 
+export interface GenerateWithToolsResult {
+  text: string;
+  /** All messages from this interaction (for appending to conversation history). */
+  responseMessages: any[];
+}
+
 /**
  * Execute tool-calling generation with the AI SDK's built-in tool loop.
  *
- * Instead of manually managing message arrays and tool results,
- * this uses maxSteps + execute functions so the SDK handles everything.
- *
- * @param onToolCall - called each time a tool executes (for UI updates)
+ * Accepts a message history for multi-turn conversations.
+ * Returns the response text + response messages for accumulating context.
  */
 export async function generateWithTools(
   config: AIProviderConfig,
   systemPrompt: string,
-  userMessage: string,
+  messages: Array<{ role: string; content: string }>,
   toolDefs: ToolDefinition[],
   executeTool: (
     name: string,
@@ -105,8 +109,7 @@ export async function generateWithTools(
   ) => Promise<string>,
   onToolCall?: (name: string, input: Record<string, unknown>, result: string) => void,
   maxSteps: number = 10
-): Promise<string> {
-  // Build AI SDK tools with execute functions
+): Promise<GenerateWithToolsResult> {
   const aiTools: Record<string, any> = {};
   for (const t of toolDefs) {
     aiTools[t.name] = tool({
@@ -123,10 +126,13 @@ export async function generateWithTools(
   const result = await generateText({
     model: getModel(config),
     system: systemPrompt,
-    messages: [{ role: "user", content: userMessage }],
+    messages: messages as any,
     tools: aiTools,
     stopWhen: stepCountIs(maxSteps),
   } as any);
 
-  return result.text;
+  return {
+    text: result.text,
+    responseMessages: result.response.messages ?? [],
+  };
 }

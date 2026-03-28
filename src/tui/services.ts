@@ -278,8 +278,33 @@ export async function refreshWorkspace(
 export type { ToolCallEvent } from "./chat-agent.js";
 
 /**
+ * Create a persistent chat agent context for a workspace session.
+ * The context maintains conversation history across multiple questions.
+ */
+export function createChatContext(
+  aiConfig: AIProviderConfig,
+  loaded: LoadedWorkspace,
+  extraContext?: {
+    cache: CourseCache | null;
+    client: CanvasClient | null;
+    config: Config | null;
+    courseId: number | null;
+  }
+): any {
+  return {
+    aiConfig,
+    loaded,
+    cache: extraContext?.cache ?? null,
+    client: extraContext?.client ?? null,
+    config: extraContext?.config ?? null,
+    courseId: extraContext?.courseId ?? null,
+    conversationHistory: [],
+  };
+}
+
+/**
  * Ask a question using the tool-calling chat agent.
- * onToolCall fires after each tool execution with the action, target, result, and color.
+ * Pass a persistent chatContext to maintain conversation history.
  */
 export async function askWorkspaceQuestion(
   aiConfig: AIProviderConfig,
@@ -291,22 +316,23 @@ export async function askWorkspaceQuestion(
     client: CanvasClient | null;
     config: Config | null;
     courseId: number | null;
-  }
+  },
+  chatContext?: any
 ): Promise<WorkspaceAnswer> {
   const { runChatAgent } = await import("./chat-agent.js");
 
-  return runChatAgent(
-    {
-      aiConfig,
-      loaded,
-      cache: extraContext?.cache ?? null,
-      client: extraContext?.client ?? null,
-      config: extraContext?.config ?? null,
-      courseId: extraContext?.courseId ?? null,
-    },
-    question,
-    onToolCall ?? (() => {})
-  );
+  // Use persistent context if provided, otherwise create a fresh one
+  const ctx = chatContext ?? {
+    aiConfig,
+    loaded,
+    cache: extraContext?.cache ?? null,
+    client: extraContext?.client ?? null,
+    config: extraContext?.config ?? null,
+    courseId: extraContext?.courseId ?? null,
+    conversationHistory: [],
+  };
+
+  return runChatAgent(ctx, question, onToolCall ?? (() => {}));
 }
 
 /**

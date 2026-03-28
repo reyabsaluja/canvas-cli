@@ -11,8 +11,9 @@ const pdfParse: (buffer: Buffer) => Promise<{ text: string }> = require("pdf-par
  * Handles: PDF, TXT, MD, HTML, ZIP (extracts text from files inside the zip).
  */
 
-const MAX_TEXT = 15000;
-const MAX_ZIP_TEXT = 30000; // Higher limit for zips since they contain multiple files
+const MAX_TEXT = 30000;
+const MAX_ZIP_TEXT = 50000; // Higher limit for zips since they contain multiple files
+const MAX_ZIP_FILE_TEXT = 30000; // Per-file limit inside zips
 
 /**
  * Extract text from a file by path and filename.
@@ -96,7 +97,7 @@ export async function extractZip(
             text = htmlToText(text);
           }
           if (text.trim().length > 0) {
-            const truncated = text.slice(0, 10000);
+            const truncated = text.slice(0, MAX_ZIP_FILE_TEXT);
             textContents.push({ name: entry.filename, content: truncated });
             totalText += truncated.length;
           }
@@ -116,7 +117,7 @@ export async function extractZip(
           const data = await pdfParse(buffer);
           const text = data.text?.trim() ?? "";
           if (text.length > 0) {
-            const truncated = text.slice(0, 10000);
+            const truncated = text.slice(0, MAX_ZIP_FILE_TEXT);
             textContents.push({ name: entry.filename, content: truncated });
             totalText += truncated.length;
           }

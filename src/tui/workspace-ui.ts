@@ -2,7 +2,7 @@ import chalk from "chalk";
 import type { AssignmentWorkup } from "../work/types.js";
 import type { LoadedWorkspace, WorkspaceAnswer } from "../ask/types.js";
 import type { AIProviderConfig } from "../ai/provider.js";
-import { askWorkspaceQuestion, type ToolCallEvent } from "./services.js";
+import { askWorkspaceQuestion, createChatContext, type ToolCallEvent } from "./services.js";
 import { ActivityIndicator } from "./activity.js";
 import {
   clearScreen,
@@ -73,6 +73,11 @@ export async function runWorkspaceUI(
   ctx: WorkspaceContext
 ): Promise<"back" | "courses" | "quit" | "refresh"> {
   const messages: ChatMessage[] = [];
+
+  // Create a persistent chat context that maintains conversation history
+  const chatCtx = ctx.aiConfig
+    ? createChatContext(ctx.aiConfig, ctx.loaded, ctx.agentContext)
+    : null;
 
   if (ctx.workup?.overview) {
     messages.push({
@@ -304,12 +309,12 @@ export async function runWorkspaceUI(
                 toolTarget: event.target,
                 toolColor: event.color,
               });
-              // Advance spinner frame for visual feedback
               spinnerFrame = (spinnerFrame + 1) % SPINNER.length;
               currentSpinnerLine = `  ${C.primary(SPINNER[spinnerFrame])} ${C.accent(currentVerb)}${chalk.white("...")}`;
               render();
             },
-            ctx.agentContext
+            ctx.agentContext,
+            chatCtx // persistent conversation context
           );
 
           messages.push({

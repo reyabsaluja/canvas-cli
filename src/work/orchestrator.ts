@@ -84,10 +84,10 @@ export async function runInvestigation(
   // Run investigation using AI SDK's built-in tool loop
   let investigationSummary = "";
 
-  const resultText = await generateWithTools(
+  const result = await generateWithTools(
     aiConfig,
     INVESTIGATION_SYSTEM_PROMPT,
-    initialMessage,
+    [{ role: "user", content: initialMessage }],
     INVESTIGATION_TOOLS,
     async (name, input) => {
       state.toolCallCount++;
@@ -102,13 +102,12 @@ export async function runInvestigation(
 
       return executeTool(name, input, toolCtx);
     },
-    undefined, // no UI callback needed for work agent
+    undefined,
     MAX_ITERATIONS
   );
 
-  // Use the complete_investigation summary if available, otherwise use the final text
-  if (!investigationSummary && resultText) {
-    investigationSummary = resultText;
+  if (!investigationSummary && result.text) {
+    investigationSummary = result.text;
   }
 
   // Synthesis phase

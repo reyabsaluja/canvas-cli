@@ -13,7 +13,7 @@ import {
 import { buildChunks, retrieveRelevant } from "../ask/retrieve.js";
 import { extractFileText } from "../extract/extract-text.js";
 
-const MAX_DOC_TEXT = 15000;
+const MAX_DOC_TEXT = 30000;
 
 const CHAT_TOOLS: ToolDefinition[] = [
   {
@@ -84,19 +84,19 @@ Use tools ONLY when:
 - You need to find information not already summarized
 
 IMPORTANT tool usage rules:
-- If you need to read a file, use read_file ONCE and then answer from what you got. Do NOT keep searching after reading.
-- read_file returns the FULL content of the file. If you called read_file and got text back, USE that text to answer.
-- Do NOT call search_workspace more than 2 times. If you haven't found it after 2 searches, try read_file instead.
+- If you already read a file earlier in this conversation, DO NOT read it again. Use the content from the earlier read.
+- read_file returns the FULL content of the file. After reading, IMMEDIATELY use that content to answer in detail.
 - If a file is inside a zip (e.g., lab4.pdf inside lab4.zip), use read_file with the PDF name — it extracts the content from the zip.
-- Extracted .zip.txt files contain the full text of all files inside the zip, including PDFs.
-- After reading a file, ANSWER the question. Do not make more tool calls unless absolutely necessary.
+- After reading a file, give a DETAILED and SPECIFIC answer based on what you read. Do not give vague summaries.
+- When the user asks to "explain part X in depth", find the specific section in the document and quote the actual requirements, addresses, functionality needed, etc.
+- Do NOT re-read files you already have in the conversation. Just reference the earlier content.
 
 Rules:
-- Be concise and direct.
+- When the user asks for detail or "in depth", give thorough answers with specific requirements, addresses, values, and steps from the documents.
 - If the workup already contains the answer, respond immediately (no tool calls needed).
 - Cite sources when relevant.
 - Do NOT solve the assignment — help the student understand it.
-- Keep answers to 2-5 sentences unless the student asks for detail.
+- For simple questions, keep it brief. For "explain" or "in depth" questions, be thorough and specific.
 
 When you have enough information, respond with your answer directly (no tool calls).`);
 
@@ -162,6 +162,8 @@ export interface ChatAgentContext {
   client: CanvasClient | null;
   config: Config | null;
   courseId: number | null;
+  /** Persistent conversation history for multi-turn context. */
+  conversationHistory: Array<{ role: string; content: string }>;
 }
 
 export interface ToolCallEvent {
@@ -193,7 +195,7 @@ function mapToolCall(
 
 /**
  * Run the chat agent using the AI SDK's built-in tool loop.
- * The SDK handles tool execution and multi-turn conversation automatically.
+ * Maintains conversation history across calls for multi-turn context.
  */
 export async function runChatAgent(
   ctx: ChatAgentContext,
@@ -202,22 +204,28 @@ export async function runChatAgent(
 ): Promise<WorkspaceAnswer> {
   const systemPrompt = buildSystemPrompt(ctx);
 
-  const text = await generateWithTools(
+  // Add user message to persistent history
+  ctx.conversationHistory.push({ role: "user", content: question });
+
+  const result = await generateWithTools(
     ctx.aiConfig,
     systemPrompt,
-    question,
+    ctx.conversationHistory,
     CHAT_TOOLS,
     async (name, input) => executeToolCall(name, input, ctx),
-    (name, input, result) => {
+    (name, input, toolResult) => {
       const { action, target, color } = mapToolCall(name, input);
-      onToolCall({ action, target, result, color });
+      onToolCall({ action, target, result: toolResult, color });
     },
-    10 // maxSteps
+    10
   );
+
+  // Add assistant response to persistent history for next turn
+  ctx.conversationHistory.push({ role: "assistant", content: result.text });
 
   return {
     question,
-    answer: text || "I wasn't able to find a clear answer.",
+    answer: result.text || "I wasn't able to find a clear answer.",
     bulletPoints: [],
     sources: [],
     confidence: "medium",
@@ -290,45 +298,58 @@ function searchCourse(query: string, ctx: ChatAgentContext): string {
 }
 
 async function readFile(filename: string, ctx: ChatAgentContext): Promise<string> {
-  const q = filename.toLowerCase();
-  const qBase = q.endsWith(".txt") ? q.slice(0, -4) : q;
+  const q = filename.toLowerCase().trim();
+  // Strip .txt suffix (workspace extracts add .txt)
+  const qClean = q.endsWith(".txt") ? q.slice(0, -4) : q;
+  // Base name without any extension: "lab4.pdf" -> "lab4"
+  const qBase = qClean.replace(/\.[^.]+$/, "");
 
-  // PRIORITY 1: Course cache downloaded files (full fresh extraction)
-  if (ctx.cache) {
+  // Helper: find a downloaded file in course cache
+  const findInCache = (test: (name: string) => boolean) => {
+    if (!ctx.cache) return null;
     for (const att of ctx.cache.attachments) {
-      if ((att.status === "downloaded" || att.status === "skipped") &&
-          (att.originalFilename.toLowerCase() === q || att.originalFilename.toLowerCase() === qBase)) {
-        return await extractFileText(path.join(ctx.cache.coursePath, att.localPath), att.originalFilename);
+      if ((att.status === "downloaded" || att.status === "skipped") && test(att.originalFilename.toLowerCase())) {
+        return { path: path.join(ctx.cache.coursePath, att.localPath), name: att.originalFilename };
       }
     }
-    for (const att of ctx.cache.attachments) {
-      if ((att.status === "downloaded" || att.status === "skipped") &&
-          (att.originalFilename.toLowerCase().includes(q) || att.originalFilename.toLowerCase().includes(qBase))) {
-        return await extractFileText(path.join(ctx.cache.coursePath, att.localPath), att.originalFilename);
-      }
+    return null;
+  };
+
+  // 1. Direct match in course cache (e.g., "lab4_rubric.pdf" -> "lab4_rubric.pdf")
+  const direct = findInCache((n) => n === qClean || n === q);
+  if (direct) return extractFileText(direct.path, direct.name);
+
+  // 2. Contains match in course cache (e.g., "rubric" -> "lab4_rubric-1.pdf")
+  const contains = findInCache((n) => n.includes(qClean) || n.includes(q));
+  if (contains) return extractFileText(contains.path, contains.name);
+
+  // 3. Zip match: requested file might be INSIDE a zip (e.g., "lab4.pdf" is inside "lab4.zip")
+  const zipMatch = findInCache((n) => n.endsWith(".zip") && n.includes(qBase));
+  if (zipMatch) {
+    const fullContent = await extractFileText(zipMatch.path, zipMatch.name);
+    // Extract just the specific file section from the zip output
+    const lines = fullContent.split("\n");
+    const hdr = lines.findIndex((l) => {
+      const ll = l.toLowerCase();
+      return ll.includes(`--- ${qClean}`) || ll.includes(`/${qClean} ---`) || ll.includes(`/${qClean}`);
+    });
+    if (hdr >= 0) {
+      // Return from this header to end (the PDF text section)
+      return lines.slice(hdr).join("\n").slice(0, MAX_DOC_TEXT);
     }
+    return fullContent.slice(0, MAX_DOC_TEXT);
   }
 
-  // PRIORITY 2: Workspace files
-  if (q.includes("assignment.md") && ctx.loaded.assignmentMd) return ctx.loaded.assignmentMd.slice(0, MAX_DOC_TEXT);
-  if (q.includes("plan.md") && ctx.loaded.planMd) return ctx.loaded.planMd.slice(0, MAX_DOC_TEXT);
-  if (q.includes("notes.md") && ctx.loaded.notesMd) return ctx.loaded.notesMd.slice(0, MAX_DOC_TEXT);
-  if (q.includes("workup") && ctx.loaded.workupJson) return JSON.stringify(ctx.loaded.workupJson, null, 2).slice(0, MAX_DOC_TEXT);
+  // 4. Workspace markdown files
+  if (qClean.includes("assignment.md") && ctx.loaded.assignmentMd) return ctx.loaded.assignmentMd.slice(0, MAX_DOC_TEXT);
+  if (qClean.includes("plan.md") && ctx.loaded.planMd) return ctx.loaded.planMd.slice(0, MAX_DOC_TEXT);
+  if (qClean.includes("notes.md") && ctx.loaded.notesMd) return ctx.loaded.notesMd.slice(0, MAX_DOC_TEXT);
+  if (qClean.includes("workup") && ctx.loaded.workupJson) return JSON.stringify(ctx.loaded.workupJson, null, 2).slice(0, MAX_DOC_TEXT);
 
-  // PRIORITY 3: Workspace extracted files
+  // 5. Workspace extracted files
   for (const ef of ctx.loaded.extractedFiles) {
-    if (ef.name.toLowerCase() === q || ef.name.toLowerCase() === q + ".txt") return ef.content.slice(0, MAX_DOC_TEXT);
-  }
-  for (const ef of ctx.loaded.extractedFiles) {
-    if (ef.name.toLowerCase().includes(q)) return ef.content.slice(0, MAX_DOC_TEXT);
-  }
-
-  // PRIORITY 4: Search inside zip extracts
-  for (const ef of ctx.loaded.extractedFiles) {
-    if (ef.name.toLowerCase().endsWith(".zip.txt") && ef.content.toLowerCase().includes(q)) {
-      const lines = ef.content.split("\n");
-      const hdr = lines.findIndex((l) => l.toLowerCase().includes(`--- ${q}`) || l.toLowerCase().includes(`/${q}`));
-      if (hdr >= 0) return lines.slice(hdr).join("\n").slice(0, MAX_DOC_TEXT);
+    const en = ef.name.toLowerCase();
+    if (en === q || en === qClean || en === qClean + ".txt" || en.includes(qClean)) {
       return ef.content.slice(0, MAX_DOC_TEXT);
     }
   }
