@@ -25,7 +25,9 @@ export async function writeIngestionArtifacts(
   pages: PageIndexEntry[],
   syllabusCandidates: SyllabusCandidate[],
   attachments: DownloadedAttachmentEntry[],
-  ingestion: IngestionMeta
+  ingestion: IngestionMeta,
+  frontPageBody?: string | null,
+  fetchedPages?: Array<{ slug: string; title: string; body: string }>
 ): Promise<void> {
   // Ensure directory structure
   await fs.mkdir(path.join(coursePath, "extracted"), { recursive: true });
@@ -57,6 +59,31 @@ export async function writeIngestionArtifacts(
     const textContent = htmlToText(courseMeta.syllabusBody);
     const txtPath = path.join(coursePath, "extracted", "syllabus-body.txt");
     await writeAtomic(txtPath, textContent + "\n");
+  }
+
+  // Extract front page (course home page) if present
+  if (frontPageBody) {
+    await writeAtomic(
+      path.join(coursePath, "extracted", "front-page.html"),
+      frontPageBody
+    );
+    await writeAtomic(
+      path.join(coursePath, "extracted", "front-page.txt"),
+      htmlToText(frontPageBody) + "\n"
+    );
+  }
+
+  // Extract individually fetched page bodies
+  if (fetchedPages && fetchedPages.length > 0) {
+    const pagesDir = path.join(coursePath, "extracted", "pages");
+    await fs.mkdir(pagesDir, { recursive: true });
+    for (const page of fetchedPages) {
+      const safeName = page.slug.replace(/[^a-zA-Z0-9._-]/g, "_");
+      await writeAtomic(
+        path.join(pagesDir, `${safeName}.txt`),
+        `# ${page.title}\n\n${htmlToText(page.body)}\n`
+      );
+    }
   }
 }
 

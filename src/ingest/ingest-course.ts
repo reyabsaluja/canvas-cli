@@ -116,7 +116,7 @@ export async function ingestCourse(
     },
   };
 
-  // Step 8: Write all artifacts
+  // Step 8: Write all artifacts (including front page and fetched pages)
   await writeIngestionArtifacts(
     coursePath,
     courseMeta,
@@ -126,7 +126,9 @@ export async function ingestCourse(
     pages,
     syllabusCandidates,
     attachmentResults,
-    ingestion
+    ingestion,
+    raw.frontPageBody,
+    raw.fetchedPages
   );
 
   return {

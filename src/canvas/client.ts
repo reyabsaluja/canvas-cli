@@ -103,6 +103,32 @@ export class CanvasClient {
   }
 
   /**
+   * Get the course front page (home page) content. Returns null if not available.
+   */
+  async getFrontPageSafe(courseId: number): Promise<{ title: string; body: string } | null> {
+    try {
+      const url = `${this.baseUrl}/courses/${courseId}/front_page`;
+      const page = await this.fetchOne<{ title: string; body: string }>(url);
+      return page?.body ? page : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Get a specific page by slug. Returns null if not accessible.
+   */
+  async getPageBySlugSafe(courseId: number, slug: string): Promise<{ title: string; body: string; url: string } | null> {
+    try {
+      const url = `${this.baseUrl}/courses/${courseId}/pages/${slug}`;
+      const page = await this.fetchOne<{ title: string; body: string; url: string }>(url);
+      return page?.body ? page : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Get modules for a course. Returns empty array if modules are disabled/inaccessible.
    */
   async getModulesSafe(courseId: number): Promise<CanvasModule[]> {

@@ -62,13 +62,14 @@ export function getDisplayCourses(services: AppServices): Course[] {
     return services.allCourses;
   }
 
-  // Map user config to Course objects with custom display names
+  // Map user config to Course objects with custom display names.
+  // courseCode keeps the ORIGINAL code (for slugs/cache), name shows the display name.
   return services.courseConfig.courses.map((uc) => {
     const original = services.allCourses.find((c) => c.id === uc.id);
     return {
       id: uc.id,
-      name: uc.originalName,
-      courseCode: uc.displayName,
+      name: uc.displayName, // display name shown in UI
+      courseCode: uc.originalCode, // original code used for slugs/cache
       termName: original?.termName ?? null,
       isCurrent: true,
     };

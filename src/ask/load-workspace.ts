@@ -29,16 +29,31 @@ export async function loadWorkspace(wsPath: string): Promise<LoadedWorkspace> {
     // malformed
   }
 
-  // Load extracted text files
+  // Load extracted text files (including subdirectories like pages/)
   const extractedFiles: Array<{ name: string; content: string }> = [];
   const extractedDir = path.join(wsPath, "extracted");
   try {
-    const entries = await fs.readdir(extractedDir);
+    const entries = await fs.readdir(extractedDir, { withFileTypes: true });
     for (const entry of entries) {
-      if (!entry.endsWith(".txt")) continue;
-      const content = await readSafe(path.join(extractedDir, entry));
-      if (content && content.trim().length > 0) {
-        extractedFiles.push({ name: entry, content });
+      if (entry.isFile() && entry.name.endsWith(".txt")) {
+        const content = await readSafe(path.join(extractedDir, entry.name));
+        if (content && content.trim().length > 0) {
+          extractedFiles.push({ name: entry.name, content });
+        }
+      } else if (entry.isDirectory()) {
+        // Read .txt files from subdirectories (e.g., pages/)
+        try {
+          const subEntries = await fs.readdir(path.join(extractedDir, entry.name));
+          for (const sub of subEntries) {
+            if (!sub.endsWith(".txt")) continue;
+            const content = await readSafe(path.join(extractedDir, entry.name, sub));
+            if (content && content.trim().length > 0) {
+              extractedFiles.push({ name: `${entry.name}/${sub}`, content });
+            }
+          }
+        } catch {
+          // skip unreadable subdirectory
+        }
       }
     }
   } catch {

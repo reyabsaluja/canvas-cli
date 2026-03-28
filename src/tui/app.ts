@@ -83,7 +83,17 @@ export async function launchApp(): Promise<void> {
           clearScreen();
           return;
         }
-        if (action === "manage_courses") {
+        if (action === "all_workspaces") {
+          const wsAction = await showAllWorkspaces(recent, services);
+          if (wsAction?.startsWith("workspace:")) {
+            const wsPath = wsAction.slice("workspace:".length);
+            const result = await enterExistingWorkspace(wsPath, services);
+            if (result === "courses") state = "home";
+            else if (result === "back") state = "home";
+            else { showCursor(); clearScreen(); return; }
+          }
+          recent = await getRecentWorkspaces(); // refresh in case of deletes
+        } else if (action === "manage_courses") {
           clearScreen();
           const updated = await runCourseManagement(
             services.courseConfig ?? { courses: [] },
@@ -167,7 +177,7 @@ async function showHomeScreen(
       isSection: boolean;
     }> = [];
 
-    // Recent workspaces
+    // Recent workspaces (max 3)
     if (recent.length > 0) {
       items.push({
         label: "Recent",
@@ -176,12 +186,21 @@ async function showHomeScreen(
         dimmed: false,
         isSection: true,
       });
-      for (const ws of recent.slice(0, 4)) {
+      for (const ws of recent.slice(0, 3)) {
         items.push({
           label: ws.name,
           sublabel: ws.course,
           value: `workspace:${ws.path}`,
           dimmed: false,
+          isSection: false,
+        });
+      }
+      if (recent.length > 3) {
+        items.push({
+          label: "See all workspaces",
+          sublabel: `${recent.length} total`,
+          value: "all_workspaces",
+          dimmed: true,
           isSection: false,
         });
       }
@@ -198,8 +217,8 @@ async function showHomeScreen(
     });
     for (const c of displayCourses) {
       items.push({
-        label: c.courseCode || c.name,
-        sublabel: c.courseCode !== c.name ? c.name : "",
+        label: c.name || c.courseCode,
+        sublabel: c.name !== c.courseCode ? c.courseCode : "",
         value: `course:${c.id}`,
         dimmed: false,
         isSection: false,
@@ -394,6 +413,85 @@ async function showHomeScreen(
 
     stdin.on("data", onData);
   });
+}
+
+// --- All Workspaces Screen ---
+
+async function showAllWorkspaces(
+  workspaces: Array<{ name: string; course: string; slug: string; path: string }>,
+  services: AppServices
+): Promise<string | null> {
+  const items: PickerItem[] = [];
+
+  for (const ws of workspaces) {
+    items.push({
+      label: ws.name,
+      sublabel: ws.course,
+      value: `workspace:${ws.path}`,
+    });
+  }
+
+  items.push({
+    label: "Manage workspaces",
+    sublabel: "rename or delete",
+    value: "manage_workspaces",
+    dimmed: true,
+  });
+
+  const action = await showPicker({
+    title: "All workspaces",
+    subtitle: `${workspaces.length} workspaces`,
+    items,
+    filterable: true,
+    backLabel: "back",
+  });
+
+  if (!action) return null;
+
+  if (action === "manage_workspaces") {
+    await manageWorkspaces(workspaces);
+    return null; // return to home to refresh
+  }
+
+  return action;
+}
+
+async function manageWorkspaces(
+  workspaces: Array<{ name: string; course: string; slug: string; path: string }>
+): Promise<void> {
+  const action = await showPicker({
+    title: "Manage workspaces",
+    items: [
+      { label: "Delete a workspace", sublabel: "remove from disk", value: "delete" },
+      { label: "Back", value: "back" },
+    ],
+    backLabel: "back",
+  });
+
+  if (!action || action === "back") return;
+
+  if (action === "delete") {
+    const toDelete = await showPicker({
+      title: "Delete workspace",
+      subtitle: "This permanently removes the workspace folder",
+      items: workspaces.map((ws) => ({
+        label: ws.name,
+        sublabel: ws.course,
+        value: ws.path,
+      })),
+      filterable: true,
+      backLabel: "cancel",
+    });
+
+    if (toDelete) {
+      const fs = await import("node:fs/promises");
+      try {
+        await fs.rm(toDelete, { recursive: true, force: true });
+      } catch {
+        // ignore errors
+      }
+    }
+  }
 }
 
 // --- Info Box Renderer ---

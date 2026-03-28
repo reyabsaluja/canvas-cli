@@ -14,6 +14,10 @@ export interface RawCourseContent {
   modules: Array<CanvasModule & { items: CanvasModuleItem[] }>;
   files: CanvasFile[];
   pages: CanvasPage[];
+  /** Front page (home page) HTML body, if accessible. */
+  frontPageBody: string | null;
+  /** Individual page bodies fetched from module item page slugs. */
+  fetchedPages: Array<{ slug: string; title: string; body: string }>;
   warnings: string[];
 }
 
@@ -62,5 +66,28 @@ export async function fetchCourseContent(
     warnings.push("Pages API not accessible — page index will be empty");
   }
 
-  return { courseDetail, assignments, modules, files, pages, warnings };
+  // Fetch front page (course home page content)
+  let frontPageBody: string | null = null;
+  const frontPage = await client.getFrontPageSafe(courseId);
+  if (frontPage?.body) {
+    frontPageBody = frontPage.body;
+  }
+
+  // Fetch individual page bodies from module item page slugs
+  // Even when the Pages list API is blocked, individual pages may be accessible by slug
+  const fetchedPages: Array<{ slug: string; title: string; body: string }> = [];
+  const seenSlugs = new Set<string>();
+  for (const mod of modules) {
+    for (const item of mod.items) {
+      if (item.type === "Page" && item.page_url && !seenSlugs.has(item.page_url)) {
+        seenSlugs.add(item.page_url);
+        const page = await client.getPageBySlugSafe(courseId, item.page_url);
+        if (page?.body) {
+          fetchedPages.push({ slug: item.page_url, title: page.title, body: page.body });
+        }
+      }
+    }
+  }
+
+  return { courseDetail, assignments, modules, files, pages, frontPageBody, fetchedPages, warnings };
 }
