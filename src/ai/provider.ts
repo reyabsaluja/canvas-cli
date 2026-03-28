@@ -1,23 +1,64 @@
-import Anthropic from "@anthropic-ai/sdk";
-import type {
-  MessageParam,
-  Tool,
-  ContentBlock,
-  ToolResultBlockParam,
-} from "@anthropic-ai/sdk/resources/messages.js";
+import { generateText, tool, jsonSchema, stepCountIs } from "ai";
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { createOpenAI } from "@ai-sdk/openai";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 
 export interface AIProviderConfig {
-  apiKey: string;
+  provider: "anthropic" | "openai" | "google";
+  model: string;
 }
 
 /**
- * Check if an AI provider API key is configured.
- * Returns the key or null if not set.
+ * Detect which AI provider is configured from environment variables.
+ * Checks in order: ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY.
+ * Model can be overridden with AI_MODEL env var.
  */
 export function getAIConfig(): AIProviderConfig | null {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
-  return { apiKey };
+  const modelOverride = process.env.AI_MODEL;
+
+  if (process.env.ANTHROPIC_API_KEY) {
+    return {
+      provider: "anthropic",
+      model: modelOverride ?? "claude-sonnet-4-20250514",
+    };
+  }
+
+  if (process.env.OPENAI_API_KEY) {
+    return {
+      provider: "openai",
+      model: modelOverride ?? "gpt-4o",
+    };
+  }
+
+  if (process.env.GOOGLE_API_KEY) {
+    return {
+      provider: "google",
+      model: modelOverride ?? "gemini-2.0-flash",
+    };
+  }
+
+  return null;
+}
+
+function getModel(config: AIProviderConfig) {
+  switch (config.provider) {
+    case "anthropic": {
+      const anthropic = createAnthropic({
+        apiKey: process.env.ANTHROPIC_API_KEY!,
+      });
+      return anthropic(config.model);
+    }
+    case "openai": {
+      const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+      return openai(config.model);
+    }
+    case "google": {
+      const google = createGoogleGenerativeAI({
+        apiKey: process.env.GOOGLE_API_KEY!,
+      });
+      return google(config.model);
+    }
+  }
 }
 
 /**
@@ -29,88 +70,63 @@ export async function callModel(
   systemPrompt: string,
   userMessage: string
 ): Promise<string> {
-  const client = new Anthropic({ apiKey: config.apiKey });
-
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 2048,
+  const result = await generateText({
+    model: getModel(config),
     system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
   });
 
-  const textBlock = response.content.find((b) => b.type === "text");
-  if (!textBlock || textBlock.type !== "text") {
-    throw new Error("No text response from model");
-  }
-  return textBlock.text;
+  return result.text;
 }
 
-export interface ToolCallRequest {
-  id: string;
+/** Provider-agnostic tool definition with an execute function. */
+export interface ToolDefinition {
   name: string;
-  input: Record<string, unknown>;
-}
-
-export interface ToolCallResponse {
-  stopReason: "end_turn" | "tool_use" | "max_tokens" | string;
-  textContent: string | null;
-  toolCalls: ToolCallRequest[];
-  rawContent: ContentBlock[];
+  description: string;
+  parameters: Record<string, unknown>;
 }
 
 /**
- * Call the AI model with tool definitions, supporting multi-turn tool use.
- * Returns the model's response including any tool calls.
+ * Execute tool-calling generation with the AI SDK's built-in tool loop.
+ *
+ * Instead of manually managing message arrays and tool results,
+ * this uses maxSteps + execute functions so the SDK handles everything.
+ *
+ * @param onToolCall - called each time a tool executes (for UI updates)
  */
-export async function callModelWithTools(
+export async function generateWithTools(
   config: AIProviderConfig,
   systemPrompt: string,
-  messages: MessageParam[],
-  tools: Tool[],
-  maxTokens: number = 4096
-): Promise<ToolCallResponse> {
-  const client = new Anthropic({ apiKey: config.apiKey });
+  userMessage: string,
+  toolDefs: ToolDefinition[],
+  executeTool: (
+    name: string,
+    input: Record<string, unknown>
+  ) => Promise<string>,
+  onToolCall?: (name: string, input: Record<string, unknown>, result: string) => void,
+  maxSteps: number = 10
+): Promise<string> {
+  // Build AI SDK tools with execute functions
+  const aiTools: Record<string, any> = {};
+  for (const t of toolDefs) {
+    aiTools[t.name] = tool({
+      description: t.description,
+      inputSchema: jsonSchema(t.parameters as any),
+      execute: async (input: any) => {
+        const result = await executeTool(t.name, input);
+        onToolCall?.(t.name, input, result);
+        return result;
+      },
+    } as any);
+  }
 
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: maxTokens,
+  const result = await generateText({
+    model: getModel(config),
     system: systemPrompt,
-    messages,
-    tools,
-  });
+    messages: [{ role: "user", content: userMessage }],
+    tools: aiTools,
+    stopWhen: stepCountIs(maxSteps),
+  } as any);
 
-  const textBlock = response.content.find((b) => b.type === "text");
-  const toolCalls: ToolCallRequest[] = response.content
-    .filter((b): b is Extract<ContentBlock, { type: "tool_use" }> => b.type === "tool_use")
-    .map((b) => ({
-      id: b.id,
-      name: b.name,
-      input: b.input as Record<string, unknown>,
-    }));
-
-  return {
-    stopReason: response.stop_reason ?? "end_turn",
-    textContent: textBlock && textBlock.type === "text" ? textBlock.text : null,
-    toolCalls,
-    rawContent: response.content,
-  };
-}
-
-/**
- * Build a tool_result message from executed tool results.
- */
-export function buildToolResultMessage(
-  results: Array<{ toolCallId: string; content: string; isError?: boolean }>
-): MessageParam {
-  return {
-    role: "user",
-    content: results.map(
-      (r): ToolResultBlockParam => ({
-        type: "tool_result",
-        tool_use_id: r.toolCallId,
-        content: r.content,
-        is_error: r.isError,
-      })
-    ),
-  };
+  return result.text;
 }

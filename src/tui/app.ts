@@ -415,7 +415,7 @@ function renderInfoBox(
     school = schoolUrl.replace(/https?:\/\//, "").replace(/\/api\/v1.*/, "");
   }
 
-  const aiModelText = services.aiConfig ? "claude-sonnet-4" : "not configured";
+  const aiModelText = services.aiConfig ? services.aiConfig.model : "not configured";
   const displayCourses = getDisplayCourses(services);
   const courseCount = `${displayCourses.length} active`;
   const workspaceCount = `${recent.length} saved`;

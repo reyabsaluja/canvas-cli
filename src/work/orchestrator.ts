@@ -1,4 +1,3 @@
-import type { MessageParam } from "@anthropic-ai/sdk/resources/messages.js";
 import type { AssignmentDetail, Course } from "../domain/models.js";
 import type { EnrichmentSummary } from "../enrich/types.js";
 import type { CourseCache } from "../enrich/cache-loader.js";
@@ -7,8 +6,7 @@ import type { CanvasClient } from "../canvas/client.js";
 import type { AssignmentWorkup, InvestigationState } from "./types.js";
 import type { ToolContext } from "./tool-handlers.js";
 import {
-  callModelWithTools,
-  buildToolResultMessage,
+  generateWithTools,
   type AIProviderConfig,
 } from "../ai/provider.js";
 import { INVESTIGATION_TOOLS } from "./tools.js";
@@ -78,68 +76,39 @@ export async function runInvestigation(
     courseId: course.id,
   };
 
-  // Build initial context message — include full module structure
+  // Build initial context message
   const initialMessage = buildInitialMessage(detail, enrichment, cache);
-  const messages: MessageParam[] = [
-    { role: "user", content: initialMessage },
-  ];
 
   onProgress("investigating course materials");
 
-  // Investigation loop
+  // Run investigation using AI SDK's built-in tool loop
   let investigationSummary = "";
-  for (let i = 0; i < MAX_ITERATIONS; i++) {
-    const response = await callModelWithTools(
-      aiConfig,
-      INVESTIGATION_SYSTEM_PROMPT,
-      messages,
-      INVESTIGATION_TOOLS
-    );
 
-    if (response.toolCalls.length === 0) {
-      investigationSummary = response.textContent ?? "";
-      break;
-    }
-
-    const completionCall = response.toolCalls.find(
-      (tc) => tc.name === "complete_investigation"
-    );
-
-    const toolResults: Array<{
-      toolCallId: string;
-      content: string;
-      isError?: boolean;
-    }> = [];
-
-    for (const tc of response.toolCalls) {
+  const resultText = await generateWithTools(
+    aiConfig,
+    INVESTIGATION_SYSTEM_PROMPT,
+    initialMessage,
+    INVESTIGATION_TOOLS,
+    async (name, input) => {
       state.toolCallCount++;
 
-      if (tc.name === "complete_investigation") {
-        investigationSummary = (tc.input as any).summary ?? "";
-        toolResults.push({
-          toolCallId: tc.id,
-          content: "Investigation complete. Proceeding to synthesis.",
-        });
-      } else {
-        const label = tc.input.query ?? tc.input.filename ?? tc.input.item_title ?? tc.input.module_name ?? "";
-        onProgress(`${tc.name}${label ? ` (${label})` : ""}`);
-        try {
-          const result = await executeTool(tc.name, tc.input, toolCtx);
-          toolResults.push({ toolCallId: tc.id, content: result });
-        } catch (err) {
-          toolResults.push({
-            toolCallId: tc.id,
-            content: `Error: ${err instanceof Error ? err.message : "unknown error"}`,
-            isError: true,
-          });
-        }
+      if (name === "complete_investigation") {
+        investigationSummary = (input as any).summary ?? "";
+        return "Investigation complete. Proceeding to synthesis.";
       }
-    }
 
-    messages.push({ role: "assistant", content: response.rawContent });
-    messages.push(buildToolResultMessage(toolResults));
+      const label = input.query ?? input.filename ?? input.item_title ?? input.module_name ?? "";
+      onProgress(`${name}${label ? ` (${label})` : ""}`);
 
-    if (completionCall) break;
+      return executeTool(name, input, toolCtx);
+    },
+    undefined, // no UI callback needed for work agent
+    MAX_ITERATIONS
+  );
+
+  // Use the complete_investigation summary if available, otherwise use the final text
+  if (!investigationSummary && resultText) {
+    investigationSummary = resultText;
   }
 
   // Synthesis phase

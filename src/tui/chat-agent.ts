@@ -1,28 +1,26 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { Tool, MessageParam } from "@anthropic-ai/sdk/resources/messages.js";
 import type { LoadedWorkspace } from "../ask/types.js";
 import type { CourseCache } from "../enrich/cache-loader.js";
 import type { CanvasClient } from "../canvas/client.js";
 import type { Config } from "../config/env.js";
 import type { WorkspaceAnswer } from "../ask/types.js";
 import {
-  callModelWithTools,
-  buildToolResultMessage,
+  generateWithTools,
   type AIProviderConfig,
+  type ToolDefinition,
 } from "../ai/provider.js";
 import { buildChunks, retrieveRelevant } from "../ask/retrieve.js";
 import { extractFileText } from "../extract/extract-text.js";
 
-const MAX_ITERATIONS = 10;
 const MAX_DOC_TEXT = 15000;
 
-const CHAT_TOOLS: Tool[] = [
+const CHAT_TOOLS: ToolDefinition[] = [
   {
     name: "search_workspace",
     description: "Search the workspace for content relevant to a query. Returns the most relevant sections from assignment.md, workup.json, plan.md, and extracted documents.",
-    input_schema: {
-      type: "object" as const,
+    parameters: {
+      type: "object",
       properties: {
         query: { type: "string", description: "Search query" },
       },
@@ -31,11 +29,11 @@ const CHAT_TOOLS: Tool[] = [
   },
   {
     name: "read_file",
-    description: "Read a file from the workspace or ingested course cache. Supports PDFs, text, HTML. Use for reading extracted documents, assignment files, or downloaded course materials.",
-    input_schema: {
-      type: "object" as const,
+    description: "Read a file from the workspace or ingested course cache. Supports PDFs, text, HTML, ZIP. Use for reading extracted documents, assignment files, or downloaded course materials.",
+    parameters: {
+      type: "object",
       properties: {
-        filename: { type: "string", description: "Filename to read (e.g. 'Lab4_Second-order-Circuits.pdf', 'assignment.md')" },
+        filename: { type: "string", description: "Filename to read (e.g. 'lab4.pdf', 'assignment.md', 'lab4.zip')" },
       },
       required: ["filename"],
     },
@@ -43,8 +41,8 @@ const CHAT_TOOLS: Tool[] = [
   {
     name: "list_files",
     description: "List all available files in the workspace and course cache (extracted docs, downloaded attachments, workspace files).",
-    input_schema: {
-      type: "object" as const,
+    parameters: {
+      type: "object",
       properties: {},
       required: [],
     },
@@ -52,8 +50,8 @@ const CHAT_TOOLS: Tool[] = [
   {
     name: "search_course",
     description: "Search the course structure — modules, module items, and file index. Use when you need to find specific course materials, documents, or content not in the workspace.",
-    input_schema: {
-      type: "object" as const,
+    parameters: {
+      type: "object",
       properties: {
         query: { type: "string", description: "Search keyword to match against module names, item titles, and file names" },
       },
@@ -63,8 +61,8 @@ const CHAT_TOOLS: Tool[] = [
   {
     name: "download_course_file",
     description: "Download a file from the Canvas course by module item title. Use when you find a file via search_course that hasn't been downloaded yet.",
-    input_schema: {
-      type: "object" as const,
+    parameters: {
+      type: "object",
       properties: {
         title: { type: "string", description: "Module item title of the file to download" },
       },
@@ -73,12 +71,6 @@ const CHAT_TOOLS: Tool[] = [
   },
 ];
 
-/**
- * Build the system prompt with pre-loaded workup context.
- * This means the agent can answer most questions WITHOUT tool calls —
- * the ingestion + work pipeline already gathered the information.
- * Tools are only needed for deeper investigation.
- */
 function buildSystemPrompt(ctx: ChatAgentContext): string {
   const parts: string[] = [];
 
@@ -108,7 +100,6 @@ Rules:
 
 When you have enough information, respond with your answer directly (no tool calls).`);
 
-  // Pre-load workup context into system prompt
   if (ctx.loaded.workupJson) {
     const w = ctx.loaded.workupJson;
     parts.push("\n--- PRE-LOADED ASSIGNMENT CONTEXT ---\n");
@@ -152,11 +143,12 @@ When you have enough information, respond with your answer directly (no tool cal
     parts.push("\n--- END PRE-LOADED CONTEXT ---");
   }
 
-  // List what extracted docs are available (so the agent knows it can read them)
   if (ctx.loaded.extractedFiles.length > 0) {
     parts.push(`\nExtracted documents available (use read_file to access):`);
     for (const ef of ctx.loaded.extractedFiles) {
-      parts.push(`- ${ef.name}`);
+      const isZip = ef.name.endsWith(".zip.txt");
+      const hint = isZip ? " (contains extracted files — PDFs inside are readable)" : "";
+      parts.push(`- ${ef.name}${hint}`);
     }
   }
 
@@ -179,86 +171,6 @@ export interface ToolCallEvent {
   color: "green" | "red";
 }
 
-/**
- * Run the chat agent with tool calling.
- * onToolCall is fired after each tool execution with structured event data.
- */
-export async function runChatAgent(
-  ctx: ChatAgentContext,
-  question: string,
-  onToolCall: (event: ToolCallEvent) => void
-): Promise<WorkspaceAnswer> {
-  const systemPrompt = buildSystemPrompt(ctx);
-  const messages: MessageParam[] = [
-    { role: "user", content: question },
-  ];
-
-  let finalText = "";
-
-  for (let i = 0; i < MAX_ITERATIONS; i++) {
-    const response = await callModelWithTools(
-      ctx.aiConfig,
-      systemPrompt,
-      messages,
-      CHAT_TOOLS,
-      4096
-    );
-
-    // If no tool calls, the model is done — extract the text response
-    if (response.toolCalls.length === 0) {
-      finalText = response.textContent ?? "";
-      break;
-    }
-
-    // Execute tool calls
-    const toolResults: Array<{ toolCallId: string; content: string; isError?: boolean }> = [];
-
-    for (const tc of response.toolCalls) {
-      // Map tool name to human-readable action + target
-      const { action, target, color } = mapToolCall(tc.name, tc.input);
-
-      try {
-        const result = await executeToolCall(tc.name, tc.input, ctx);
-        toolResults.push({ toolCallId: tc.id, content: result });
-        onToolCall({ action, target, result, color });
-      } catch (err) {
-        const errMsg = `Error: ${err instanceof Error ? err.message : "unknown"}`;
-        onToolCall({ action, target, result: errMsg, color: "red" });
-        toolResults.push({
-          toolCallId: tc.id,
-          content: errMsg,
-          isError: true,
-        });
-      }
-    }
-
-    // Add to conversation and continue
-    messages.push({ role: "assistant", content: response.rawContent });
-    messages.push(buildToolResultMessage(toolResults));
-  }
-
-  // If we exhausted iterations without a text response, do one final call
-  if (!finalText) {
-    const final = await callModelWithTools(
-      ctx.aiConfig,
-      systemPrompt,
-      messages,
-      [],
-      4096
-    );
-    finalText = final.textContent ?? "I wasn't able to find a clear answer.";
-  }
-
-  return {
-    question,
-    answer: finalText,
-    bulletPoints: [],
-    sources: [],
-    confidence: "medium",
-  };
-}
-
-/** Map tool name + input to a human-readable action/target/color. */
 function mapToolCall(
   name: string,
   input: Record<string, unknown>
@@ -277,6 +189,39 @@ function mapToolCall(
     default:
       return { action: name, target: "", color: "green" };
   }
+}
+
+/**
+ * Run the chat agent using the AI SDK's built-in tool loop.
+ * The SDK handles tool execution and multi-turn conversation automatically.
+ */
+export async function runChatAgent(
+  ctx: ChatAgentContext,
+  question: string,
+  onToolCall: (event: ToolCallEvent) => void
+): Promise<WorkspaceAnswer> {
+  const systemPrompt = buildSystemPrompt(ctx);
+
+  const text = await generateWithTools(
+    ctx.aiConfig,
+    systemPrompt,
+    question,
+    CHAT_TOOLS,
+    async (name, input) => executeToolCall(name, input, ctx),
+    (name, input, result) => {
+      const { action, target, color } = mapToolCall(name, input);
+      onToolCall({ action, target, result, color });
+    },
+    10 // maxSteps
+  );
+
+  return {
+    question,
+    answer: text || "I wasn't able to find a clear answer.",
+    bulletPoints: [],
+    sources: [],
+    confidence: "medium",
+  };
 }
 
 // --- Tool execution ---
@@ -305,9 +250,7 @@ async function executeToolCall(
 function searchWorkspace(query: string, ctx: ChatAgentContext): string {
   const chunks = buildChunks(ctx.loaded);
   const relevant = retrieveRelevant(query, chunks, 5);
-
   if (relevant.length === 0) return "No relevant content found for that query.";
-
   const results: string[] = [];
   for (const chunk of relevant) {
     results.push(`--- ${chunk.source} / ${chunk.section} ---`);
@@ -318,12 +261,9 @@ function searchWorkspace(query: string, ctx: ChatAgentContext): string {
 }
 
 function searchCourse(query: string, ctx: ChatAgentContext): string {
-  if (!ctx.cache) return "Course cache not available. Cannot search course structure.";
-
+  if (!ctx.cache) return "Course cache not available.";
   const q = query.toLowerCase();
   const results: string[] = [];
-
-  // Search modules and module items
   for (const mod of ctx.cache.modules) {
     if (mod.name.toLowerCase().includes(q)) {
       results.push(`Module: "${mod.name}" (${mod.items.length} items)`);
@@ -335,104 +275,60 @@ function searchCourse(query: string, ctx: ChatAgentContext): string {
       }
     }
   }
-
-  // Search file index
   for (const f of ctx.cache.files) {
-    if (
-      f.displayName.toLowerCase().includes(q) ||
-      f.filename.toLowerCase().includes(q)
-    ) {
-      const size = f.size < 1024 * 1024
-        ? `${(f.size / 1024).toFixed(0)}KB`
-        : `${(f.size / (1024 * 1024)).toFixed(1)}MB`;
-      results.push(`File: "${f.displayName}" (${f.contentType}, ${size})`);
+    if (f.displayName.toLowerCase().includes(q) || f.filename.toLowerCase().includes(q)) {
+      results.push(`File: "${f.displayName}" (${f.contentType})`);
     }
   }
-
-  // Search downloaded attachments
   for (const att of ctx.cache.attachments) {
-    if (
-      att.originalFilename.toLowerCase().includes(q) &&
-      (att.status === "downloaded" || att.status === "skipped")
-    ) {
-      results.push(`Downloaded: "${att.originalFilename}" [${att.sourceType}] — ${att.reason}`);
+    if (att.originalFilename.toLowerCase().includes(q) && (att.status === "downloaded" || att.status === "skipped")) {
+      results.push(`Downloaded: "${att.originalFilename}" [${att.sourceType}]`);
     }
   }
-
   if (results.length === 0) return `No course materials matching "${query}" found.`;
   return results.join("\n");
 }
 
 async function readFile(filename: string, ctx: ChatAgentContext): Promise<string> {
   const q = filename.toLowerCase();
-  // Also try without .txt suffix (workspace extracts add .txt to zip names)
   const qBase = q.endsWith(".txt") ? q.slice(0, -4) : q;
 
-  // PRIORITY 1: Read directly from course cache downloaded files.
-  // This gives us the FULL file content (not truncated by the work agent).
-  // Try exact match first, then contains match.
+  // PRIORITY 1: Course cache downloaded files (full fresh extraction)
   if (ctx.cache) {
-    // Exact match
     for (const att of ctx.cache.attachments) {
-      if (
-        (att.status === "downloaded" || att.status === "skipped") &&
-        (att.originalFilename.toLowerCase() === q ||
-         att.originalFilename.toLowerCase() === qBase)
-      ) {
-        const fullPath = path.join(ctx.cache.coursePath, att.localPath);
-        return await extractFileText(fullPath, att.originalFilename);
+      if ((att.status === "downloaded" || att.status === "skipped") &&
+          (att.originalFilename.toLowerCase() === q || att.originalFilename.toLowerCase() === qBase)) {
+        return await extractFileText(path.join(ctx.cache.coursePath, att.localPath), att.originalFilename);
       }
     }
-    // Contains match
     for (const att of ctx.cache.attachments) {
-      if (
-        (att.status === "downloaded" || att.status === "skipped") &&
-        (att.originalFilename.toLowerCase().includes(q) ||
-         att.originalFilename.toLowerCase().includes(qBase))
-      ) {
-        const fullPath = path.join(ctx.cache.coursePath, att.localPath);
-        return await extractFileText(fullPath, att.originalFilename);
+      if ((att.status === "downloaded" || att.status === "skipped") &&
+          (att.originalFilename.toLowerCase().includes(q) || att.originalFilename.toLowerCase().includes(qBase))) {
+        return await extractFileText(path.join(ctx.cache.coursePath, att.localPath), att.originalFilename);
       }
     }
   }
 
-  // PRIORITY 2: Check workspace files (assignment.md, plan.md, etc.)
-  if (q.includes("assignment.md") && ctx.loaded.assignmentMd) {
-    return ctx.loaded.assignmentMd.slice(0, MAX_DOC_TEXT);
-  }
-  if (q.includes("plan.md") && ctx.loaded.planMd) {
-    return ctx.loaded.planMd.slice(0, MAX_DOC_TEXT);
-  }
-  if (q.includes("notes.md") && ctx.loaded.notesMd) {
-    return ctx.loaded.notesMd.slice(0, MAX_DOC_TEXT);
-  }
-  if (q.includes("workup") && ctx.loaded.workupJson) {
-    return JSON.stringify(ctx.loaded.workupJson, null, 2).slice(0, MAX_DOC_TEXT);
-  }
+  // PRIORITY 2: Workspace files
+  if (q.includes("assignment.md") && ctx.loaded.assignmentMd) return ctx.loaded.assignmentMd.slice(0, MAX_DOC_TEXT);
+  if (q.includes("plan.md") && ctx.loaded.planMd) return ctx.loaded.planMd.slice(0, MAX_DOC_TEXT);
+  if (q.includes("notes.md") && ctx.loaded.notesMd) return ctx.loaded.notesMd.slice(0, MAX_DOC_TEXT);
+  if (q.includes("workup") && ctx.loaded.workupJson) return JSON.stringify(ctx.loaded.workupJson, null, 2).slice(0, MAX_DOC_TEXT);
 
-  // PRIORITY 3: Check workspace extracted files (these may be truncated from work agent)
+  // PRIORITY 3: Workspace extracted files
   for (const ef of ctx.loaded.extractedFiles) {
-    if (ef.name.toLowerCase() === q || ef.name.toLowerCase() === q + ".txt") {
-      return ef.content.slice(0, MAX_DOC_TEXT);
-    }
+    if (ef.name.toLowerCase() === q || ef.name.toLowerCase() === q + ".txt") return ef.content.slice(0, MAX_DOC_TEXT);
   }
   for (const ef of ctx.loaded.extractedFiles) {
-    if (ef.name.toLowerCase().includes(q)) {
-      return ef.content.slice(0, MAX_DOC_TEXT);
-    }
+    if (ef.name.toLowerCase().includes(q)) return ef.content.slice(0, MAX_DOC_TEXT);
   }
 
-  // PRIORITY 4: Check inside zip extracted texts for files matching the query
+  // PRIORITY 4: Search inside zip extracts
   for (const ef of ctx.loaded.extractedFiles) {
     if (ef.name.toLowerCase().endsWith(".zip.txt") && ef.content.toLowerCase().includes(q)) {
       const lines = ef.content.split("\n");
-      const fileHeader = lines.findIndex((l) =>
-        l.toLowerCase().includes(`--- ${q}`) ||
-        l.toLowerCase().includes(`/${q}`)
-      );
-      if (fileHeader >= 0) {
-        return lines.slice(fileHeader).join("\n").slice(0, MAX_DOC_TEXT);
-      }
+      const hdr = lines.findIndex((l) => l.toLowerCase().includes(`--- ${q}`) || l.toLowerCase().includes(`/${q}`));
+      if (hdr >= 0) return lines.slice(hdr).join("\n").slice(0, MAX_DOC_TEXT);
       return ef.content.slice(0, MAX_DOC_TEXT);
     }
   }
@@ -442,98 +338,46 @@ async function readFile(filename: string, ctx: ChatAgentContext): Promise<string
 
 function listFiles(ctx: ChatAgentContext): string {
   const lines: string[] = [];
-
   lines.push("Workspace files:");
   if (ctx.loaded.assignmentMd) lines.push("  - assignment.md");
   if (ctx.loaded.planMd) lines.push("  - plan.md");
   if (ctx.loaded.notesMd) lines.push("  - notes.md");
   if (ctx.loaded.workupJson) lines.push("  - workup.json");
-
   if (ctx.loaded.extractedFiles.length > 0) {
     lines.push("\nExtracted documents (use read_file to access):");
     for (const ef of ctx.loaded.extractedFiles) {
       const isZip = ef.name.endsWith(".zip.txt");
-      const hint = isZip ? " (contains extracted files — PDFs inside are readable)" : "";
-      lines.push(`  - ${ef.name}${hint}`);
+      lines.push(`  - ${ef.name}${isZip ? " (contains extracted files — PDFs inside are readable)" : ""}`);
     }
   }
-
   if (ctx.cache) {
-    const downloaded = ctx.cache.attachments.filter(
-      (a) => a.status === "downloaded" || a.status === "skipped"
-    );
+    const downloaded = ctx.cache.attachments.filter((a) => a.status === "downloaded" || a.status === "skipped");
     if (downloaded.length > 0) {
       lines.push("\nCourse attachments (downloaded):");
-      for (const a of downloaded) {
-        lines.push(`  - ${a.originalFilename} [${a.sourceType}]`);
-      }
-    }
-
-    // Module files not yet downloaded
-    const downloadedIds = new Set(downloaded.map((a) => a.canvasFileId).filter(Boolean));
-    const moduleFiles: string[] = [];
-    for (const mod of ctx.cache.modules) {
-      for (const item of mod.items) {
-        if (item.type === "File" && item.contentId && !downloadedIds.has(item.contentId)) {
-          moduleFiles.push(`  - ${item.title} (in "${mod.name}", downloadable)`);
-        }
-      }
-    }
-    if (moduleFiles.length > 0) {
-      lines.push("\nModule files (not yet downloaded — use download_course_file):");
-      lines.push(...moduleFiles);
+      for (const a of downloaded) lines.push(`  - ${a.originalFilename} [${a.sourceType}]`);
     }
   }
-
   return lines.join("\n");
 }
 
 async function downloadCourseFile(title: string, ctx: ChatAgentContext): Promise<string> {
-  if (!ctx.cache || !ctx.client) {
-    return "Cannot download files — no course cache or Canvas client available.";
-  }
-
+  if (!ctx.cache || !ctx.client) return "Cannot download files — no course cache or Canvas client available.";
   const q = title.toLowerCase();
   let foundItem = null;
-  let modName = "";
-
   for (const mod of ctx.cache.modules) {
     for (const item of mod.items) {
-      if (item.type === "File" && item.title.toLowerCase().includes(q)) {
-        foundItem = item;
-        modName = mod.name;
-        break;
-      }
+      if (item.type === "File" && item.title.toLowerCase().includes(q)) { foundItem = item; break; }
     }
     if (foundItem) break;
   }
-
-  if (!foundItem || !foundItem.contentId) {
-    return `No downloadable file matching "${title}" found in modules.`;
-  }
-
-  // Get file metadata
+  if (!foundItem || !foundItem.contentId) return `No downloadable file matching "${title}" found.`;
   const fileMeta = await ctx.client.getFileSafe(foundItem.contentId);
-  if (!fileMeta) {
-    return `Could not access file "${title}" from Canvas.`;
-  }
-
-  // Download
+  if (!fileMeta) return `Could not access file "${title}" from Canvas.`;
   const buffer = await ctx.client.downloadFile(fileMeta.url);
-  if (!buffer) {
-    return `Failed to download "${fileMeta.display_name}".`;
-  }
-
-  // Save locally
+  if (!buffer) return `Failed to download "${fileMeta.display_name}".`;
   const downloadDir = path.join(ctx.cache.coursePath, "attachments", "modules");
   await fs.mkdir(downloadDir, { recursive: true });
   const localPath = path.join(downloadDir, fileMeta.display_name);
   await fs.writeFile(localPath, buffer);
-
-  // Extract text
-  const text = await extractFileText(localPath, fileMeta.display_name);
-  return `Downloaded "${fileMeta.display_name}" (${buffer.length} bytes):\n\n${text}`;
+  return await extractFileText(localPath, fileMeta.display_name);
 }
-
-// extractFileText imported from ../extract/extract-text.js
-// Handles PDF, text, HTML, ZIP, and code files

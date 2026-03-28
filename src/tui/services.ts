@@ -274,12 +274,8 @@ export async function refreshWorkspace(
   };
 }
 
-export interface ToolCallEvent {
-  action: string;
-  target: string;
-  result: string;
-  color: "green" | "red";
-}
+// ToolCallEvent is defined in chat-agent.ts
+export type { ToolCallEvent } from "./chat-agent.js";
 
 /**
  * Ask a question using the tool-calling chat agent.
@@ -289,7 +285,7 @@ export async function askWorkspaceQuestion(
   aiConfig: AIProviderConfig,
   loaded: LoadedWorkspace,
   question: string,
-  onToolCall?: (event: ToolCallEvent) => void,
+  onToolCall?: (event: { action: string; target: string; result: string; color: "green" | "red" }) => void,
   extraContext?: {
     cache: CourseCache | null;
     client: CanvasClient | null;
