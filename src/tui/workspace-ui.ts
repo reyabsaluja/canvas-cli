@@ -13,6 +13,7 @@ import {
   fmtConfidence,
   C,
   stripAnsi,
+  truncateAnsiToWidth,
 } from "./screen.js";
 
 export interface WorkspaceContext {
@@ -57,8 +58,13 @@ const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
   { cmd: "/quit", desc: "Exit canvas-cli" },
 ];
 
-// Background color for the input box
-const inputBg = chalk.bgHex("#1e2030");
+// Background color for the input box (soft neutral blue-gray, not saturated navy)
+const inputBg = chalk.bgHex("#2d3342");
+/** Foreground for workspace assignment title — same hue family as the input bar. */
+const workspaceTitleBold = chalk.hex("#a8b8d8").bold;
+/** Dim placeholder inside the input row */
+const INPUT_PLACEHOLDER = "Type your message or /help for commands";
+const inputPlaceholderFg = chalk.hex("#8b95a8");
 // Background for tool call blocks (green-tinted for reads, red-tinted for errors)
 const toolBgGreen = chalk.bgHex("#1a2e1a");
 const toolBgRed = chalk.bgHex("#2e1a1a");
@@ -68,6 +74,10 @@ const toolTargetGreen = chalk.hex("#9ece6a"); // green for file targets
 const toolTargetRed = chalk.hex("#f7768e"); // red for errors
 // Background color for user messages
 const userBg = chalk.bgHex("#2a2e3f");
+/** Neutral grey for workspace footer (course/assignment + model); avoids bluish C.dim. */
+const statusBarGrey = chalk.hex("#9ca3af");
+/** Sticky footer: 3 input rows + 1 status row (overdrawn after main buffer flush). */
+const STICKY_BOTTOM_ROWS = 4;
 
 export async function runWorkspaceUI(
   ctx: WorkspaceContext
@@ -117,6 +127,8 @@ export async function runWorkspaceUI(
   let spinnerTimer: ReturnType<typeof setInterval> | null = null;
   /** Row where the spinner line was last rendered (1-based for ANSI). */
   let spinnerRow = 0;
+  /** Lines scrolled up from the bottom of the chat viewport (PgUp/PgDn). */
+  let chatScrollOffset = 0;
   const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   const VERBS = ["Working", "Thinking", "Studying", "Reading", "Analyzing", "Exploring", "Reviewing"];
   let currentVerb = "";
@@ -195,21 +207,17 @@ export async function runWorkspaceUI(
     buf.push("");
     const name = ctx.loaded.assignmentName;
     const course = ctx.courseDisplayName ?? ctx.loaded.courseName;
-    buf.push(`  ${C.primaryBold(name)}  ${C.dim(course)}`);
+    buf.push(`  ${workspaceTitleBold(name)}  ${statusBarGrey(course)}`);
     buf.push("");
 
-    // Chat messages — only render recent messages to keep buffer small for performance
-    const { rows: termRows } = getTermSize();
-    const maxVisibleMessages = Math.max(5, Math.floor(termRows / 3));
-    const visibleMessages = messages.length > maxVisibleMessages
-      ? messages.slice(-maxVisibleMessages)
-      : messages;
-
-    if (messages.length > maxVisibleMessages) {
-      buf.push(C.dim(`  ... ${messages.length - maxVisibleMessages} earlier messages`));
+    if (chatScrollOffset > 0) {
+      buf.push(
+        C.dim(`  ↑ Older messages above · PgUp/PgDn scroll · End = jump to latest`)
+      );
     }
 
-    for (const msg of visibleMessages) {
+    // Full message history — flush() + chatScrollOffset clip to the viewport above the sticky input
+    for (const msg of messages) {
       renderMessage(msg, buf, contentWidth, toolOutputExpanded);
     }
 
@@ -223,46 +231,110 @@ export async function runWorkspaceUI(
       spinnerRow = 0;
     }
 
-    // Pin/slash dropdowns (rendered above the sticky input area)
-    if (!isProcessing) {
-      const pinMatches = getPinMatches();
-      if (pinMatches.length > 0) {
-        buf.push("");
-        const maxShow = Math.min(pinMatches.length, 8);
-        for (let i = 0; i < maxShow; i++) {
-          const p = pinMatches[i];
-          const sel = i === pinSelected;
-          const ptr = sel ? C.primary("❯ ") : "  ";
-          const label = sel ? C.primaryBold(p.label) : C.accent(p.label);
-          buf.push(`  ${ptr}${label}  ${C.dim(p.name)}`);
-        }
-        if (pinMatches.length > 8) buf.push(C.dim(`  ... ${pinMatches.length - 8} more`));
+    // Pin/slash menus are drawn in renderSlashPinOverlay() (fixed above the input, not in scrollback)
+
+    const bufLenBeforeFlush = buf.length;
+    const { rows: tr } = getTermSize();
+    const maxContent = Math.max(1, tr - STICKY_BOTTOM_ROWS);
+    const maxScroll = Math.max(0, bufLenBeforeFlush - maxContent);
+    chatScrollOffset = Math.min(Math.max(0, chatScrollOffset), maxScroll);
+
+    const off = chatScrollOffset;
+    const end = bufLenBeforeFlush - off;
+    const start = Math.max(0, end - maxContent);
+
+    buf.flush(STICKY_BOTTOM_ROWS, chatScrollOffset);
+
+    // Map spinner line from pre-slice buffer row to on-screen row
+    if (spinnerRow > 0) {
+      const sIdx = spinnerRow - 1;
+      if (sIdx < start || sIdx >= end) {
+        spinnerRow = 0;
       } else {
-        const matches = showSlashMenu ? getSlashMatches() : [];
-        if (matches.length > 0) {
-          buf.push("");
-          for (let i = 0; i < matches.length; i++) {
-            const m = matches[i];
-            const sel = i === slashSelected;
-            const ptr = sel ? C.primary("❯ ") : "  ";
-            const cmd = sel ? C.primaryBold(m.cmd) : C.accent(m.cmd);
-            buf.push(`  ${ptr}${cmd}  ${C.dim(m.desc)}`);
-          }
-        }
+        spinnerRow = spinnerRow - start;
       }
     }
 
-    buf.flush();
-
     // Sticky input box + status bar at bottom of terminal
     renderStickyBottom();
+    renderSlashPinOverlay();
+  }
+
+  /** Draw slash / pin menus just above the input, aligned with the `/` column. */
+  function renderSlashPinOverlay(): void {
+    if (isProcessing) return;
+    const { cols, rows: termRows } = getTermSize();
+    const lastRowAboveInput = termRows - STICKY_BOTTOM_ROWS;
+    if (lastRowAboveInput < 1) return;
+
+    const padToCols = (s: string): string => {
+      const v = stripAnsi(s).length;
+      if (v > cols) return truncateAnsiToWidth(s, cols);
+      return s + " ".repeat(cols - v);
+    };
+
+    const maxVis = lastRowAboveInput;
+    const pinMatches = getPinMatches();
+
+    if (pinMatches.length > 0) {
+      const cap = Math.min(pinMatches.length, 8);
+      const maxShow = Math.min(cap, maxVis);
+      let start = 0;
+      if (pinMatches.length > maxShow) {
+        start = Math.max(0, Math.min(pinSelected - Math.floor(maxShow / 2), pinMatches.length - maxShow));
+      }
+      const pinIdx = inputBuffer.search(/\/pin/i);
+      const colStart = pinIdx >= 0 ? 2 + pinIdx : 2;
+      const indent = " ".repeat(Math.max(0, colStart - 1));
+      const menuRows = Math.min(maxShow, maxVis);
+      const firstMenuRow = lastRowAboveInput - menuRows + 1;
+      for (let i = 0; i < menuRows; i++) {
+        const p = pinMatches[start + i];
+        const sel = start + i === pinSelected;
+        const ptr = sel ? C.primary("❯ ") : "  ";
+        const label = sel ? C.primaryBold(p.label) : C.accent(p.label);
+        const inner = `${ptr}${label}  ${C.dim(p.name)}`;
+        const row = firstMenuRow + i;
+        process.stdout.write(`\x1B[${row};1H` + padToCols(indent + inner));
+      }
+      if (pinMatches.length > maxShow && menuRows < maxVis) {
+        const row = firstMenuRow + menuRows;
+        if (row >= 1 && row <= lastRowAboveInput) {
+          const more = indent + C.dim(`... ${pinMatches.length - maxShow} more`);
+          process.stdout.write(`\x1B[${row};1H` + padToCols(more));
+        }
+      }
+      return;
+    }
+
+    const matches = showSlashMenu ? getSlashMatches() : [];
+    if (matches.length === 0) return;
+
+    const maxShow = Math.min(matches.length, maxVis);
+    let start = 0;
+    if (matches.length > maxShow) {
+      start = Math.max(0, Math.min(slashSelected - Math.floor(maxShow / 2), matches.length - maxShow));
+    }
+    const colStart = 2;
+    const indent = " ".repeat(Math.max(0, colStart - 1));
+    const menuRows = Math.min(maxShow, maxVis);
+    const firstMenuRow = lastRowAboveInput - menuRows + 1;
+    for (let i = 0; i < menuRows; i++) {
+      const m = matches[start + i];
+      const sel = start + i === slashSelected;
+      const ptr = sel ? C.primary("❯ ") : "  ";
+      const cmd = sel ? C.primaryBold(m.cmd) : C.accent(m.cmd);
+      const inner = `${ptr}${cmd}  ${C.dim(m.desc)}`;
+      const row = firstMenuRow + i;
+      process.stdout.write(`\x1B[${row};1H` + padToCols(indent + inner));
+    }
   }
 
   /** Render the sticky input box + status bar at the bottom of the terminal. */
   function renderStickyBottom(): void {
     const { cols, rows: termRows } = getTermSize();
-    const contentWidth = Math.min(cols - 4, 100);
-    const boxWidth = Math.max(contentWidth, 40);
+    // Full-width input: inner row is ` ${displayText}` with displayText length boxWidth = cols - 1
+    const boxWidth = Math.max(1, cols - 1);
     const cursor = chalk.white("█");
 
     // Input box: 3 lines (empty, text, empty)
@@ -272,15 +344,47 @@ export async function runWorkspaceUI(
     const visibleLen = stripAnsi(coloredWithPartial).length;
     const emptyLine = " ".repeat(boxWidth + 1);
     const remaining = Math.max(0, boxWidth - visibleLen - 1);
-    const displayText = coloredWithPartial + cursor + " ".repeat(remaining);
+    let displayText: string;
+    if (!inputText) {
+      const phMax = Math.max(0, boxWidth - 1);
+      let phPlain = INPUT_PLACEHOLDER;
+      if (phPlain.length > phMax) {
+        phPlain = phMax > 3 ? phPlain.slice(0, phMax - 3) + "..." : phPlain.slice(0, phMax);
+      }
+      const phStyled = inputPlaceholderFg(phPlain);
+      const phVis = stripAnsi(phStyled).length;
+      const padAfter = Math.max(0, boxWidth - 1 - phVis);
+      displayText = cursor + phStyled + " ".repeat(padAfter);
+    } else {
+      displayText = coloredWithPartial + cursor + " ".repeat(remaining);
+    }
 
-    // Status bar: course > assignment on left, model on right
+    // Status bar: course/assignment on left, model on right (same width as input; truncate left if needed)
     const courseName = ctx.courseDisplayName ?? ctx.loaded.courseName;
     const assignmentName = ctx.loaded.assignmentName;
-    const leftStatus = `${courseName} > ${assignmentName}`;
-    const modelName = ctx.aiConfig?.model ?? "no model";
-    const statusGap = Math.max(1, cols - leftStatus.length - modelName.length - 4);
-    const statusLine = `  ${C.dim(leftStatus)}${" ".repeat(statusGap)}${C.dim(modelName)}`;
+    let leftStatus = `${courseName}/${assignmentName}`;
+    let modelName = ctx.aiConfig?.model ?? "no model";
+    const gapMin = 1;
+    if (leftStatus.length + gapMin + modelName.length > cols) {
+      if (modelName.length + gapMin + 4 > cols) {
+        modelName = modelName.slice(0, Math.max(0, cols - gapMin - 3)) + "...";
+      }
+      const maxLeft = cols - gapMin - modelName.length;
+      if (leftStatus.length > maxLeft && maxLeft > 3) {
+        leftStatus = leftStatus.slice(0, maxLeft - 3) + "...";
+      } else if (leftStatus.length > maxLeft) {
+        leftStatus = leftStatus.slice(0, Math.max(0, maxLeft));
+      }
+    }
+    let statusGap = cols - leftStatus.length - modelName.length;
+    if (statusGap < gapMin) {
+      const take = Math.max(0, cols - gapMin - leftStatus.length);
+      modelName = take > 3 ? modelName.slice(0, take - 3) + "..." : modelName.slice(0, take);
+      statusGap = cols - leftStatus.length - modelName.length;
+    }
+    statusGap = Math.max(0, cols - leftStatus.length - modelName.length);
+    const statusLine =
+      statusBarGrey(leftStatus) + " ".repeat(statusGap) + statusBarGrey(modelName);
 
     // Position: input box starts at termRows - 4
     // Row layout: termRows-4=emptyBg, termRows-3=textBg, termRows-2=emptyBg, termRows-1=statusBar
@@ -296,9 +400,9 @@ export async function runWorkspaceUI(
 
     process.stdout.write(
       `\x1B[${startRow};1H` +
-      pad("  " + inputBg(emptyLine)) + "\n" +
-      pad("  " + inputBg(` ${displayText}`)) + "\n" +
-      pad("  " + inputBg(emptyLine)) + "\n" +
+      pad(inputBg(emptyLine)) + "\n" +
+      pad(inputBg(` ${displayText}`)) + "\n" +
+      pad(inputBg(emptyLine)) + "\n" +
       pad(statusLine)
     );
   }
@@ -370,7 +474,7 @@ export async function runWorkspaceUI(
           console.log("");
           const name = ctx.loaded.assignmentName;
           const course = ctx.courseDisplayName ?? ctx.loaded.courseName;
-          console.log(`  ${C.primaryBold(name)}  ${C.dim(course)}`);
+          console.log(`  ${workspaceTitleBold(name)}  ${statusBarGrey(course)}`);
           console.log("");
 
           // Show ALL messages (no limit) with expanded tool output
@@ -386,9 +490,36 @@ export async function runWorkspaceUI(
           console.log(`  ${C.dim("Showing detailed transcript")}  ${C.dimmer("·")}  ${C.dimmer("ctrl+o")} ${C.dim("to toggle")}`);
           console.log("");
         } else {
+          chatScrollOffset = 0;
           // Return to normal view
           render();
         }
+        return;
+      }
+
+      // Scroll chat transcript (viewport is shorter than full history)
+      if (key === "\x1b[5~" || key === "\x1B[5~") {
+        const { rows: rowsT } = getTermSize();
+        const step = Math.max(2, Math.floor((rowsT - STICKY_BOTTOM_ROWS) * 0.65));
+        chatScrollOffset += step;
+        render();
+        return;
+      }
+      if (key === "\x1b[6~" || key === "\x1B[6~") {
+        const { rows: rowsT } = getTermSize();
+        const step = Math.max(2, Math.floor((rowsT - STICKY_BOTTOM_ROWS) * 0.65));
+        chatScrollOffset = Math.max(0, chatScrollOffset - step);
+        render();
+        return;
+      }
+      if (key === "\x1b[4~" || key === "\x1B[4~") {
+        chatScrollOffset = 0;
+        render();
+        return;
+      }
+      if (key === "\x1b[1~" || key === "\x1B[1~") {
+        chatScrollOffset = 999999;
+        render();
         return;
       }
 
@@ -401,6 +532,7 @@ export async function runWorkspaceUI(
       }
 
       if (key === "\r" || key === "\n") {
+        chatScrollOffset = 0;
         // If pin dropdown is showing, check if the pin is already complete
         const pinPartial = getActivePinPartial();
         if (pinPartial !== null) {

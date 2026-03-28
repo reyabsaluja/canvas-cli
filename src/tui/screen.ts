@@ -47,22 +47,37 @@ class ScreenBuffer {
    * clears any remaining old content below, all in one write() call.
    *
    * Truncates lines that would wrap to prevent row-count mismatches.
+   *
+   * @param bottomReserveRows — Lines left blank at the bottom (overdrawn by a sticky
+   *   footer). Content is sliced to at most `rows - bottomReserveRows` so it is not
+   *   hidden under that region.
+   * @param scrollOffsetFromBottom — When content exceeds the viewport, how many lines
+   *   to scroll up from the bottom (0 = show the latest lines).
    */
-  flush(): void {
+  flush(bottomReserveRows: number = 0, scrollOffsetFromBottom: number = 0): void {
     const { rows, cols } = getTermSize();
+    const reserve = Math.max(0, bottomReserveRows);
+    const maxContentLines = Math.max(1, rows - reserve);
 
     // Truncate lines to terminal width so they never wrap
-    const padded = this.lines.map((line) => {
+    let padded = this.lines.map((line) => {
       const visible = stripAnsi(line).length;
       if (visible > cols) {
-        // Truncate: find the cut point accounting for ANSI codes
-        return truncateToWidth(line, cols - 1) + " ";
+        return truncateAnsiToWidth(line, cols - 1) + " ";
       }
       if (visible < cols) {
         return line + " ".repeat(cols - visible);
       }
       return line;
     });
+
+    if (padded.length > maxContentLines) {
+      const maxScroll = padded.length - maxContentLines;
+      const off = Math.max(0, Math.min(scrollOffsetFromBottom, maxScroll));
+      const end = padded.length - off;
+      const start = Math.max(0, end - maxContentLines);
+      padded = padded.slice(start, end);
+    }
 
     // Fill remaining rows with blank lines to clear old content
     while (padded.length < rows) {
@@ -151,7 +166,7 @@ export function stripAnsi(str: string): string {
  * Walks through characters, skipping ANSI escapes, until
  * the visible width reaches maxWidth.
  */
-function truncateToWidth(str: string, maxWidth: number): string {
+export function truncateAnsiToWidth(str: string, maxWidth: number): string {
   let visible = 0;
   let i = 0;
 
