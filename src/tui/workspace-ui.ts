@@ -71,6 +71,9 @@ const NORMAL_FOOTER_ROWS = 4;
 const TRANSCRIPT_FOOTER_ROWS = 3;
 const MAX_OVERLAY_ROWS = 8;
 const MAX_TOOL_CONTENT_CHARS = 8000;
+const MAX_UI_MESSAGES = 120;
+const MIN_UI_MESSAGES = 80;
+const MAX_UI_MESSAGE_CHARS = 140000;
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const VERBS = ["Working", "Thinking", "Studying", "Reading", "Analyzing", "Exploring", "Reviewing"];
 
@@ -108,6 +111,10 @@ export async function runWorkspaceUI(
   let destroyed = false;
   let renderQueued = false;
   let renderTimer: ReturnType<typeof setTimeout> | null = null;
+  let totalMessageChars = 0;
+  let archivedMessageCount = 0;
+  let archivedMessageChars = 0;
+  let archiveNoticeMessage: ChatMessage | null = null;
 
   let renderCache = new WeakMap<ChatMessage, RenderCacheEntry>();
   const transcriptIndexes = {
@@ -185,17 +192,71 @@ export async function runWorkspaceUI(
 
   function appendMessage(message: ChatMessage): void {
     messages.push(message);
+    totalMessageChars += message.content.length;
     markTranscriptDirty(messages.length - 1);
+    compactMessagesIfNeeded();
   }
 
   function replaceLastMessage(message: ChatMessage): void {
     const index = Math.max(0, messages.length - 1);
     if (messages.length === 0) {
       messages.push(message);
+      totalMessageChars += message.content.length;
     } else {
+      totalMessageChars += message.content.length - messages[index].content.length;
       messages[index] = message;
     }
     markTranscriptDirty(index);
+    compactMessagesIfNeeded();
+  }
+
+  function updateArchiveNotice(): void {
+    if (archivedMessageCount <= 0) {
+      if (archiveNoticeMessage && messages[0] === archiveNoticeMessage) {
+        totalMessageChars -= archiveNoticeMessage.content.length;
+        messages.shift();
+        archiveNoticeMessage = null;
+        markTranscriptDirty(0);
+      }
+      return;
+    }
+
+    const content =
+      `Earlier transcript compacted for performance.\n` +
+      `${archivedMessageCount} messages hidden from live scrollback ` +
+      `(${archivedMessageChars.toLocaleString()} chars).`;
+
+    if (archiveNoticeMessage && messages[0] === archiveNoticeMessage) {
+      totalMessageChars += content.length - archiveNoticeMessage.content.length;
+      archiveNoticeMessage = { role: "system", content };
+      messages[0] = archiveNoticeMessage;
+    } else {
+      archiveNoticeMessage = { role: "system", content };
+      messages.unshift(archiveNoticeMessage);
+      totalMessageChars += archiveNoticeMessage.content.length;
+    }
+
+    markTranscriptDirty(0);
+  }
+
+  function compactMessagesIfNeeded(): void {
+    const archiveOffset = archiveNoticeMessage && messages[0] === archiveNoticeMessage ? 1 : 0;
+
+    while (
+      ((messages.length - archiveOffset > MAX_UI_MESSAGES) ||
+        totalMessageChars > MAX_UI_MESSAGE_CHARS) &&
+      messages.length - archiveOffset > MIN_UI_MESSAGES
+    ) {
+      const removed = messages.splice(archiveOffset, 1)[0];
+      totalMessageChars -= removed.content.length;
+      archivedMessageCount += 1;
+      archivedMessageChars += removed.content.length;
+      markTranscriptDirty(archiveOffset);
+    }
+
+    if (archivedMessageCount > 0) {
+      updateArchiveNotice();
+    }
   }
 
   function ensureTranscriptIndex(

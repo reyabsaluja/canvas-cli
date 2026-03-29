@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { createBuffer, C, keepLineVisible } from "./screen.js";
+import { createBuffer, C } from "./screen.js";
 import { startTerminalSession } from "./terminal.js";
 
 export interface PickerItem {
@@ -26,7 +26,7 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
     let selected = 0;
     let filter = "";
     let filtered = items;
-    let scrollTop = 0;
+    let windowTop = 0;
 
     function getFiltered(): PickerItem[] {
       if (!filter) return items;
@@ -55,12 +55,37 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
       }
 
       const itemStartLine = buf.length;
+      const footerRows = 2;
+      const availableItemRows = Math.max(1, viewRows - itemStartLine - footerRows);
       if (filtered.length === 0) {
         buf.push(C.dim("  No items match your search."));
       } else {
-        for (let i = 0; i < filtered.length; i++) {
-          const item = filtered[i];
-          const isSelected = i === selected;
+        const selectedLine = selected;
+        const totalVirtualRows = filtered.length;
+        const margin = 2;
+        const minTop = Math.max(0, selectedLine - Math.max(0, availableItemRows - 1 - margin));
+        const maxTop = Math.max(0, selectedLine - margin);
+        windowTop = Math.max(minTop, Math.min(windowTop, maxTop));
+        windowTop = Math.max(0, Math.min(windowTop, Math.max(0, totalVirtualRows - availableItemRows)));
+
+        const hiddenAbove = windowTop;
+        const hiddenBelow = Math.max(0, totalVirtualRows - (windowTop + availableItemRows));
+        let visibleSlots = availableItemRows;
+
+        if (hiddenAbove > 0 && visibleSlots > 0) {
+          buf.push(C.dim(`  ... ${hiddenAbove} more above`));
+          visibleSlots -= 1;
+        }
+
+        const visibleCount = Math.max(
+          0,
+          Math.min(filtered.length - windowTop, visibleSlots - (hiddenBelow > 0 ? 1 : 0))
+        );
+
+        for (let i = 0; i < visibleCount; i++) {
+          const item = filtered[windowTop + i];
+          const itemIndex = windowTop + i;
+          const isSelected = itemIndex === selected;
           const pointer = isSelected ? C.primary("❯ ") : "  ";
           const label = item.dimmed
             ? C.dim(item.label)
@@ -72,6 +97,10 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
             : "";
           buf.push(`  ${pointer}${label}${sub}`);
         }
+
+        if (hiddenBelow > 0 && visibleSlots > 0) {
+          buf.push(C.dim(`  ... ${hiddenBelow} more below`));
+        }
       }
 
       buf.push("");
@@ -81,13 +110,7 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
         )
       );
 
-      const selectedLine =
-        filtered.length > 0 ? itemStartLine + selected : itemStartLine;
-      scrollTop = keepLineVisible(selectedLine, scrollTop, viewRows, buf.length, 2);
-      const maxScroll = Math.max(0, buf.length - viewRows);
-      const scrollFromBottom = maxScroll - scrollTop;
-
-      buf.flush(0, scrollFromBottom);
+      buf.flush();
     }
 
     const cleanupSession = startTerminalSession(onData, {

@@ -41,121 +41,127 @@ export async function launchApp(): Promise<void> {
     process.exit(1);
   }
 
-  process.on("SIGINT", () => {
+  const handleSigint = (): void => {
     showCursor();
     clearScreen();
-    process.exit(0);
-  });
+    process.exit(130);
+  };
 
-  // Show splash while loading
-  clearScreen();
-  hideCursor();
-  renderSplashLoading();
+  process.once("SIGINT", handleSigint);
 
-  let services: AppServices;
   try {
-    services = await initServices();
-  } catch (err) {
-    showCursor();
+    // Show splash while loading
     clearScreen();
-    console.error(
-      C.error(
-        `\n  Failed to connect: ${err instanceof Error ? err.message : "unknown error"}`
-      )
-    );
-    console.error(
-      C.dim("  Check your CANVAS_BASE_URL and CANVAS_ACCESS_TOKEN in .env")
-    );
-    process.exit(1);
-  }
+    hideCursor();
+    renderSplashLoading();
 
-  // Load course config — run setup if no config or empty config
-  let courseConfig = await loadCourseConfig();
+    let services: AppServices;
+    try {
+      services = await initServices();
+    } catch (err) {
+      showCursor();
+      clearScreen();
+      console.error(
+        C.error(
+          `\n  Failed to connect: ${err instanceof Error ? err.message : "unknown error"}`
+        )
+      );
+      console.error(
+        C.dim("  Check your CANVAS_BASE_URL and CANVAS_ACCESS_TOKEN in .env")
+      );
+      process.exit(1);
+    }
 
-  if (!courseConfig || courseConfig.courses.length === 0) {
-    clearScreen();
-    courseConfig = await runCourseSetup(services.allCourses);
-  }
-  services.courseConfig = courseConfig;
+    // Load course config — run setup if no config or empty config
+    let courseConfig = await loadCourseConfig();
 
-  // Pre-fetch recent workspaces
-  let recent = await getRecentWorkspaces();
+    if (!courseConfig || courseConfig.courses.length === 0) {
+      clearScreen();
+      courseConfig = await runCourseSetup(services.allCourses);
+    }
+    services.courseConfig = courseConfig;
 
-  let state: "home" | "assignments" | "workspace" = "home";
-  let selectedCourse: Course | null = null;
+    // Pre-fetch recent workspaces
+    let recent = await getRecentWorkspaces();
 
-  while (true) {
-    switch (state) {
-      case "home": {
-        const action = await showHomeScreen(services, recent);
-        if (action === null) {
-          showCursor();
-          clearScreen();
-          return;
-        }
-        if (action === "all_workspaces") {
-          const wsAction = await showAllWorkspaces(recent, services);
-          if (wsAction?.startsWith("workspace:")) {
-            const wsPath = wsAction.slice("workspace:".length);
+    let state: "home" | "assignments" | "workspace" = "home";
+    let selectedCourse: Course | null = null;
+
+    while (true) {
+      switch (state) {
+        case "home": {
+          const action = await showHomeScreen(services, recent);
+          if (action === null) {
+            showCursor();
+            clearScreen();
+            return;
+          }
+          if (action === "all_workspaces") {
+            const wsAction = await showAllWorkspaces(recent, services);
+            if (wsAction?.startsWith("workspace:")) {
+              const wsPath = wsAction.slice("workspace:".length);
+              const result = await enterExistingWorkspace(wsPath, services);
+              if (result === "courses") state = "home";
+              else if (result === "back") state = "home";
+              else { showCursor(); clearScreen(); return; }
+            }
+            recent = await getRecentWorkspaces(); // refresh in case of deletes
+          } else if (action === "manage_courses") {
+            clearScreen();
+            const updated = await runCourseManagement(
+              services.courseConfig ?? { courses: [] },
+              services.allCourses
+            );
+            services.courseConfig = updated;
+            recent = await getRecentWorkspaces();
+          } else if (action.startsWith("course:")) {
+            const courseId = action.slice("course:".length);
+            const displayCourses = getDisplayCourses(services);
+            selectedCourse =
+              displayCourses.find((c) => String(c.id) === courseId) ?? null;
+            if (selectedCourse) state = "assignments";
+          } else if (action.startsWith("workspace:")) {
+            const wsPath = action.slice("workspace:".length);
             const result = await enterExistingWorkspace(wsPath, services);
             if (result === "courses") state = "home";
             else if (result === "back") state = "home";
-            else { showCursor(); clearScreen(); return; }
+            else {
+              showCursor();
+              clearScreen();
+              return;
+            }
           }
-          recent = await getRecentWorkspaces(); // refresh in case of deletes
-        } else if (action === "manage_courses") {
-          clearScreen();
-          const updated = await runCourseManagement(
-            services.courseConfig ?? { courses: [] },
-            services.allCourses
+          break;
+        }
+
+        case "assignments": {
+          if (!selectedCourse) {
+            state = "home";
+            break;
+          }
+          const result = await showAssignmentPicker(services, selectedCourse);
+          if (result === null) {
+            state = "home";
+            break;
+          }
+          const wsResult = await enterNewWorkspace(
+            services,
+            selectedCourse,
+            result
           );
-          services.courseConfig = updated;
-          recent = await getRecentWorkspaces();
-        } else if (action.startsWith("course:")) {
-          const courseId = action.slice("course:".length);
-          const displayCourses = getDisplayCourses(services);
-          selectedCourse =
-            displayCourses.find((c) => String(c.id) === courseId) ?? null;
-          if (selectedCourse) state = "assignments";
-        } else if (action.startsWith("workspace:")) {
-          const wsPath = action.slice("workspace:".length);
-          const result = await enterExistingWorkspace(wsPath, services);
-          if (result === "courses") state = "home";
-          else if (result === "back") state = "home";
+          if (wsResult === "back") state = "assignments";
+          else if (wsResult === "courses") state = "home";
           else {
             showCursor();
             clearScreen();
             return;
           }
-        }
-        break;
-      }
-
-      case "assignments": {
-        if (!selectedCourse) {
-          state = "home";
           break;
         }
-        const result = await showAssignmentPicker(services, selectedCourse);
-        if (result === null) {
-          state = "home";
-          break;
-        }
-        const wsResult = await enterNewWorkspace(
-          services,
-          selectedCourse,
-          result
-        );
-        if (wsResult === "back") state = "assignments";
-        else if (wsResult === "courses") state = "home";
-        else {
-          showCursor();
-          clearScreen();
-          return;
-        }
-        break;
       }
     }
+  } finally {
+    process.removeListener("SIGINT", handleSigint);
   }
 }
 
