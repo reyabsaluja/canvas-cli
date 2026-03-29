@@ -3,13 +3,28 @@
   "version": "0.1.0",
   "description": "A terminal interface for Canvas LMS",
   "type": "module",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "canvas",
+    "cli",
+    "lms",
+    "terminal",
+    "typescript"
+  ],
   "bin": {
     "canvas-cli": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist",
+    "check": "npm run typecheck && npm run test && npm run build",
     "dev": "tsx src/cli.ts",
-    "start": "node dist/cli.js"
+    "start": "node dist/cli.js",
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.64",
