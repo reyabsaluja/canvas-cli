@@ -51,3 +51,8 @@ src/
 - Keep regression tests in `test/`.
 - Add tests for parsing, formatting, and other logic that can run without live Canvas credentials.
 - Favor tests around boundary-heavy code such as TUI input parsing and workspace generation helpers.
+
+## Tooling Notes
+
+- Treat `.agents/`, `.claude/`, and `skills-lock.json` as local development tooling for this repo.
+- Keep them out of git unless you intentionally decide to standardize and support a shared skill workflow for all contributors.
