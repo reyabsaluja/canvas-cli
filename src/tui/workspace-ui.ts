@@ -10,12 +10,12 @@ import {
   getTermSize,
   padAnsiToWidth,
   stripAnsi,
-  tailPlainToWidth,
   truncatePlainToWidth,
   visibleWidth,
   wrapPlainText,
 } from "./screen.js";
 import { startTerminalSession } from "./terminal.js";
+import { getActivePinPartial, getPinOverlayIndent, getVisibleInputSegment } from "./workspace-input.js";
 
 export interface WorkspaceContext {
   workspacePath: string;
@@ -155,14 +155,8 @@ export async function runWorkspaceUI(
           `\n\n[truncated ${content.length - MAX_TOOL_CONTENT_CHARS} chars for UI performance]`;
   }
 
-  function getActivePinPartial(): string | null {
-    const match = inputBuffer.match(/\/pin(\s+(\S*))?$/);
-    if (!match) return null;
-    return match[2] ?? "";
-  }
-
   function getPinMatches(): typeof pinOptions {
-    const partial = getActivePinPartial();
+    const partial = getActivePinPartial(inputBuffer);
     if (partial === null) return [];
     if (!partial) return pinOptions;
     return pinOptions.filter((p) => p.label.includes(partial.toLowerCase()));
@@ -170,7 +164,7 @@ export async function runWorkspaceUI(
 
   function getSlashMatches(): typeof SLASH_COMMANDS {
     if (!inputBuffer.startsWith("/")) return [];
-    if (getActivePinPartial() !== null && !inputBuffer.startsWith("/pin")) return [];
+    if (getActivePinPartial(inputBuffer) !== null && !inputBuffer.startsWith("/pin")) return [];
     const partial = inputBuffer.toLowerCase();
     return SLASH_COMMANDS.filter((c) => c.cmd.startsWith(partial));
   }
@@ -415,7 +409,7 @@ export async function runWorkspaceUI(
     const boxWidth = Math.max(1, cols - 1);
     const cursor = chalk.white("█");
     const inputText = inputBuffer || "";
-    const visibleInput = tailPlainToWidth(inputText, Math.max(0, boxWidth - 1));
+    const visibleInput = getVisibleInputSegment(inputText, boxWidth).text;
     const colored = visibleInput.replace(/\/pin\s+\S+/g, (m) => C.accent(m));
     const coloredWithPartial = colored.replace(/\/pin(\s+\S*)?$/, (m) => C.accent(m));
     const visibleLen = visibleWidth(coloredWithPartial);
@@ -482,9 +476,7 @@ export async function runWorkspaceUI(
       if (pinMatches.length > maxShow) {
         start = Math.max(0, Math.min(pinSelected - Math.floor(maxShow / 2), pinMatches.length - maxShow));
       }
-      const pinIdx = inputBuffer.search(/\/pin/i);
-      const colStart = pinIdx >= 0 ? 2 + pinIdx : 2;
-      const indent = " ".repeat(Math.max(0, colStart - 1));
+      const indent = " ".repeat(Math.max(0, getPinOverlayIndent(inputBuffer, Math.max(1, cols - 1))));
       const lines: string[] = [];
       for (let i = 0; i < maxShow; i++) {
         const p = pinMatches[start + i];
@@ -678,7 +670,7 @@ export async function runWorkspaceUI(
       if (key === "\r" || key === "\n") {
         chatScrollOffset = 0;
 
-        const pinPartial = getActivePinPartial();
+        const pinPartial = getActivePinPartial(inputBuffer);
         if (pinPartial !== null) {
           const pinMatches = getPinMatches();
           const isComplete = pinOptions.some((p) => p.label === pinPartial);
@@ -826,12 +818,12 @@ export async function runWorkspaceUI(
         return;
       }
 
-      if (key === "\x1B[A" && getActivePinPartial() !== null && getPinMatches().length > 0) {
+      if (key === "\x1B[A" && getActivePinPartial(inputBuffer) !== null && getPinMatches().length > 0) {
         pinSelected = Math.max(0, pinSelected - 1);
         scheduleRender(true);
         return;
       }
-      if (key === "\x1B[B" && getActivePinPartial() !== null && getPinMatches().length > 0) {
+      if (key === "\x1B[B" && getActivePinPartial(inputBuffer) !== null && getPinMatches().length > 0) {
         pinSelected = Math.min(getPinMatches().length - 1, pinSelected + 1);
         scheduleRender(true);
         return;
@@ -882,7 +874,7 @@ export async function runWorkspaceUI(
       if (key.length === 1 && key >= " ") {
         inputBuffer += key;
         showSlashMenu = inputBuffer.startsWith("/");
-        if (getActivePinPartial() !== null) {
+        if (getActivePinPartial(inputBuffer) !== null) {
           pinSelected = 0;
         } else if (showSlashMenu) {
           slashSelected = 0;

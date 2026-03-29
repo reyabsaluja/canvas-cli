@@ -21,12 +21,13 @@ export function isInteractiveTerminal(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
-export function createKeyParser(onKey: (key: string) => void): (data: string) => void {
+type KeyParser = ((data: string) => void) & { cancelPending: () => void };
+
+export function createKeyParser(onKey: (key: string) => void): KeyParser {
   let escHold = "";
 
-  return (data: string): void => {
-    let input = escHold + data;
-    escHold = "";
+  const parseInput = (data: string): void => {
+    let input = data;
 
     while (input.length > 0) {
       const escIdx = input.indexOf("\x1b");
@@ -86,6 +87,18 @@ export function createKeyParser(onKey: (key: string) => void): (data: string) =>
       input = input.slice(2);
     }
   };
+
+  const handleData = ((data: string): void => {
+    const buffered = escHold;
+    escHold = "";
+    parseInput(buffered + data);
+  }) as KeyParser;
+
+  handleData.cancelPending = (): void => {
+    escHold = "";
+  };
+
+  return handleData;
 }
 
 export function startTerminalSession(
@@ -130,6 +143,7 @@ export function startTerminalSession(
 
   return (): void => {
     stdin.removeListener("data", handleData);
+    handleData.cancelPending();
     stdin.setRawMode?.(false);
     stdin.pause();
 

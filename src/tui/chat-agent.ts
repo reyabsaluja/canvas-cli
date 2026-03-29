@@ -177,6 +177,9 @@ export interface ToolCallEvent {
   color: "green" | "red";
 }
 
+type ConversationEntry = ChatAgentContext["conversationHistory"][number];
+type ConversationTurn = [ConversationEntry, ConversationEntry];
+
 function mapToolCall(
   name: string,
   input: Record<string, unknown>
@@ -245,18 +248,75 @@ export async function runChatAgent(
 }
 
 function trimConversationHistory(ctx: ChatAgentContext): void {
-  while (ctx.conversationHistory.length > MAX_CONVERSATION_MESSAGES) {
-    ctx.conversationHistory.shift();
+  const { turns, pendingUser } = normalizeConversationHistory(ctx.conversationHistory);
+
+  while (conversationMessageCount(turns, pendingUser) > MAX_CONVERSATION_MESSAGES) {
+    turns.shift();
   }
 
-  let totalChars = ctx.conversationHistory.reduce(
-    (sum, entry) => sum + entry.content.length,
-    0
-  );
-  while (totalChars > MAX_CONVERSATION_CHARS && ctx.conversationHistory.length > 2) {
-    const removed = ctx.conversationHistory.shift();
-    totalChars -= removed?.content.length ?? 0;
+  let totalChars = conversationCharCount(turns, pendingUser);
+  while (totalChars > MAX_CONVERSATION_CHARS && turns.length > 0) {
+    const removedTurn = turns.shift();
+    if (!removedTurn) {
+      break;
+    }
+    totalChars -= removedTurn[0].content.length + removedTurn[1].content.length;
   }
+
+  ctx.conversationHistory.splice(
+    0,
+    ctx.conversationHistory.length,
+    ...flattenConversationHistory(turns, pendingUser)
+  );
+}
+
+function normalizeConversationHistory(
+  history: ConversationEntry[]
+): { turns: ConversationTurn[]; pendingUser?: ConversationEntry } {
+  const turns: ConversationTurn[] = [];
+  let pendingUser: ConversationEntry | undefined;
+
+  for (const entry of history) {
+    if (entry.role === "user") {
+      pendingUser = entry;
+      continue;
+    }
+
+    if (entry.role === "assistant" && pendingUser) {
+      turns.push([pendingUser, entry]);
+      pendingUser = undefined;
+    }
+  }
+
+  return { turns, pendingUser };
+}
+
+function flattenConversationHistory(
+  turns: ConversationTurn[],
+  pendingUser?: ConversationEntry
+): ConversationEntry[] {
+  const history = turns.flatMap(([user, assistant]) => [user, assistant]);
+  if (pendingUser) {
+    history.push(pendingUser);
+  }
+  return history;
+}
+
+function conversationMessageCount(
+  turns: ConversationTurn[],
+  pendingUser?: ConversationEntry
+): number {
+  return turns.length * 2 + (pendingUser ? 1 : 0);
+}
+
+function conversationCharCount(
+  turns: ConversationTurn[],
+  pendingUser?: ConversationEntry
+): number {
+  return turns.reduce(
+    (sum, [user, assistant]) => sum + user.content.length + assistant.content.length,
+    pendingUser?.content.length ?? 0
+  );
 }
 
 // --- Tool execution ---
