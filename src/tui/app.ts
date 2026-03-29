@@ -170,6 +170,7 @@ async function showHomeScreen(
   recent: Array<{ name: string; course: string; slug: string; path: string }>
 ): Promise<string | null> {
   return new Promise((resolve) => {
+    const HOME_TOP_MARGIN_ROWS = 3;
     const { cols } = getTermSize();
 
     // Build the item list: recent workspaces first, then courses
@@ -286,9 +287,11 @@ async function showHomeScreen(
       const preFiltered = getFiltered();
       const itemLines = preFiltered.items.length + 4; // items + section headers + footer
       const boxLines = countInfoBoxLines(services, recent, termCols);
-      const totalContent = artLines + boxLines + itemLines + 6;
+      const totalContent =
+        artLines + boxLines + itemLines + 6 + HOME_TOP_MARGIN_ROWS;
       const topPad = Math.max(0, Math.floor((termRows - totalContent) / 2));
 
+      for (let p = 0; p < HOME_TOP_MARGIN_ROWS; p++) buf.push("");
       for (let p = 0; p < topPad; p++) buf.push("");
 
       // ASCII art
@@ -358,10 +361,10 @@ async function showHomeScreen(
       if (sgrMatch) {
         const btn = parseInt(sgrMatch[1], 10);
         if (btn === 64) {
-          scrollTop += 3;
+          scrollTop = Math.max(0, scrollTop - 3);
           render();
         } else if (btn === 65) {
-          scrollTop = Math.max(0, scrollTop - 3);
+          scrollTop += 3;
           render();
         }
         return;
