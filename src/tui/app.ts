@@ -25,6 +25,8 @@ import {
   MenuBox,
   getTermSize,
   stripAnsi,
+  enableMouseTracking,
+  disableMouseTracking,
 } from "./screen.js";
 import type { Course } from "../domain/models.js";
 import type { AssignmentWorkup } from "../work/types.js";
@@ -242,6 +244,7 @@ async function showHomeScreen(
       .filter((i) => i >= 0);
     let selectedIdx = 0; // index into selectableIndices
     let filter = "";
+    let scrollTop = 0; // lines scrolled from the top of content
 
     function getFiltered() {
       if (!filter) return { items, selectableIndices };
@@ -331,10 +334,16 @@ async function showHomeScreen(
         C.dimmer("  ↑↓ navigate  enter select  esc quit  type to filter")
       );
 
-      buf.flush(0, Infinity);
+      const totalLines = buf.length;
+      const { rows: viewRows } = getTermSize();
+      const maxScroll = Math.max(0, totalLines - viewRows);
+      scrollTop = Math.min(scrollTop, maxScroll);
+      const scrollFromBottom = maxScroll - scrollTop;
+      buf.flush(0, scrollFromBottom);
     }
 
     render();
+    enableMouseTracking();
 
     const stdin = process.stdin;
     stdin.setRawMode(true);
@@ -343,6 +352,20 @@ async function showHomeScreen(
 
     function onData(key: string): void {
       const filtered = getFiltered();
+
+      // SGR mouse events: \x1B[<btn;col;rowM or \x1B[<btn;col;rowm
+      const sgrMatch = key.match(/\x1B\[<(\d+);\d+;\d+[Mm]/);
+      if (sgrMatch) {
+        const btn = parseInt(sgrMatch[1], 10);
+        if (btn === 64) {
+          scrollTop += 3;
+          render();
+        } else if (btn === 65) {
+          scrollTop = Math.max(0, scrollTop - 3);
+          render();
+        }
+        return;
+      }
 
       // Escape — quit
       if (key === "\x1B" || key === "\x1B\x1B") {
@@ -406,6 +429,7 @@ async function showHomeScreen(
     }
 
     function cleanup(): void {
+      disableMouseTracking();
       stdin.removeListener("data", onData);
       stdin.setRawMode(false);
       stdin.pause();
