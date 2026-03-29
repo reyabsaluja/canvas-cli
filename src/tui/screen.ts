@@ -18,18 +18,17 @@ export const C = {
   bold: chalk.hex("#c0caf5").bold,
 };
 
-/** Main menu info panel fill (#536878); fg tuned for contrast on this background. */
-const MENU_BOX_BG = "#536878";
+/** Menu box text styles (no background — inherits terminal default). Border uses `#536878` (`C.secondary`). */
 export const MenuBox = {
-  edge: (s: string) => chalk.bgHex(MENU_BOX_BG).hex("#a8bac6")(s),
-  version: (s: string) => chalk.bgHex(MENU_BOX_BG).hex("#c8d8e2")(s),
-  primary: (s: string) => chalk.bgHex(MENU_BOX_BG).hex("#b8d4ff")(s),
-  primaryBold: (s: string) => chalk.bgHex(MENU_BOX_BG).hex("#b8d4ff").bold(s),
-  secondary: (s: string) => chalk.bgHex(MENU_BOX_BG).hex("#dce6ec")(s),
-  dim: (s: string) => chalk.bgHex(MENU_BOX_BG).hex("#b4c2cc")(s),
-  text: (s: string) => chalk.bgHex(MENU_BOX_BG).hex("#eef3f6")(s),
-  bold: (s: string) => chalk.bgHex(MENU_BOX_BG).hex("#eef3f6").bold(s),
-  fill: (s: string) => chalk.bgHex(MENU_BOX_BG)(s),
+  edge: (s: string) => C.secondary(s),
+  version: (s: string) => C.secondary(s),
+  primary: (s: string) => C.primary(s),
+  primaryBold: (s: string) => C.primaryBold(s),
+  secondary: (s: string) => C.secondary(s),
+  dim: (s: string) => C.dim(s),
+  text: (s: string) => C.text(s),
+  bold: (s: string) => C.bold(s),
+  fill: (s: string) => s,
 };
 
 // --- ASCII art ---

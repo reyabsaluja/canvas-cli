@@ -585,7 +585,7 @@ function renderInfoBox(
   type RowDef = {
     left: string;
     right: string;
-    leftStyle: "kv" | "bold" | "dim" | "empty";
+    leftStyle: "kv" | "sectionHeader" | "desc" | "empty";
     rightStyle: "header" | "cmd" | "empty";
   };
   const rows: RowDef[] = [];
@@ -602,14 +602,19 @@ function renderInfoBox(
 
   // Recent section
   if (recent.length > 0) {
-    rows.push({ left: "Recent Workspaces", right: formatCmdRow(commands[3], rightW), leftStyle: "bold", rightStyle: "cmd" });
+    rows.push({
+      left: "Recent Workspaces",
+      right: formatCmdRow(commands[3], rightW),
+      leftStyle: "sectionHeader",
+      rightStyle: "cmd",
+    });
     for (let i = 0; i < Math.min(recent.length, 4); i++) {
       const name = truncPlain(recent[i].name, leftW - 2);
       const cmdIdx = 4 + i;
       rows.push({
         left: name,
         right: cmdIdx < commands.length ? formatCmdRow(commands[cmdIdx], rightW) : "",
-        leftStyle: "dim",
+        leftStyle: "desc",
         rightStyle: cmdIdx < commands.length ? "cmd" : "empty",
       });
     }
@@ -705,10 +710,10 @@ function colorizeCell(paddedPlain: string, style: string, onMenuBox = false): st
       }
       return P.text(paddedPlain);
     }
-    case "bold":
-      return P.bold(paddedPlain);
-    case "dim":
-      return P.dim(paddedPlain);
+    case "sectionHeader":
+      return P.primaryBold(paddedPlain);
+    case "desc":
+      return P.secondary(paddedPlain);
     case "empty":
       return onMenuBox ? MenuBox.fill(paddedPlain) : paddedPlain;
     default:
