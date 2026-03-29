@@ -76,18 +76,23 @@ const VERBS = ["Working", "Thinking", "Studying", "Reading", "Analyzing", "Explo
 
 type Buf = { push(line: string): void };
 type RenderCacheEntry = { width: number; expanded: boolean; lines: string[] };
+type TranscriptBlock = { message: ChatMessage; lines: string[]; lineCount: number };
+type TranscriptIndexState = {
+  width: number;
+  blocks: TranscriptBlock[];
+  cumulativeEnds: number[];
+  totalLines: number;
+  dirtyFrom: number;
+};
 
 export async function runWorkspaceUI(
   ctx: WorkspaceContext
 ): Promise<"back" | "courses" | "quit" | "refresh"> {
   const messages: ChatMessage[] = [];
+  const CLEAN_INDEX = Number.MAX_SAFE_INTEGER;
   const chatCtx = ctx.aiConfig
     ? createChatContext(ctx.aiConfig, ctx.loaded, ctx.agentContext)
     : null;
-
-  if (ctx.workup?.overview) {
-    messages.push({ role: "system", content: ctx.workup.overview });
-  }
 
   let inputBuffer = "";
   let slashSelected = 0;
@@ -105,6 +110,10 @@ export async function runWorkspaceUI(
   let renderTimer: ReturnType<typeof setTimeout> | null = null;
 
   let renderCache = new WeakMap<ChatMessage, RenderCacheEntry>();
+  const transcriptIndexes = {
+    normal: createTranscriptIndexState(),
+    expanded: createTranscriptIndexState(),
+  };
 
   const pinOptions: Array<{ name: string; label: string }> = [];
   for (const ef of ctx.loaded.extractedFiles) {
@@ -128,12 +137,8 @@ export async function runWorkspaceUI(
   if (ctx.loaded.planMd) pinOptions.push({ name: "plan.md", label: "plan" });
   if (ctx.loaded.workupJson) pinOptions.push({ name: "workup.json", label: "workup" });
 
-  function invalidateRender(message?: ChatMessage): void {
-    if (message) {
-      renderCache.delete(message);
-      return;
-    }
-    renderCache = new WeakMap<ChatMessage, RenderCacheEntry>();
+  if (ctx.workup?.overview) {
+    appendMessage({ role: "system", content: ctx.workup.overview });
   }
 
   function clipToolContent(content: string): string {
@@ -161,6 +166,130 @@ export async function runWorkspaceUI(
     if (getActivePinPartial() !== null && !inputBuffer.startsWith("/pin")) return [];
     const partial = inputBuffer.toLowerCase();
     return SLASH_COMMANDS.filter((c) => c.cmd.startsWith(partial));
+  }
+
+  function createTranscriptIndexState(): TranscriptIndexState {
+    return {
+      width: -1,
+      blocks: [],
+      cumulativeEnds: [],
+      totalLines: 0,
+      dirtyFrom: 0,
+    };
+  }
+
+  function markTranscriptDirty(index: number): void {
+    transcriptIndexes.normal.dirtyFrom = Math.min(transcriptIndexes.normal.dirtyFrom, index);
+    transcriptIndexes.expanded.dirtyFrom = Math.min(transcriptIndexes.expanded.dirtyFrom, index);
+  }
+
+  function appendMessage(message: ChatMessage): void {
+    messages.push(message);
+    markTranscriptDirty(messages.length - 1);
+  }
+
+  function replaceLastMessage(message: ChatMessage): void {
+    const index = Math.max(0, messages.length - 1);
+    if (messages.length === 0) {
+      messages.push(message);
+    } else {
+      messages[index] = message;
+    }
+    markTranscriptDirty(index);
+  }
+
+  function ensureTranscriptIndex(
+    state: TranscriptIndexState,
+    width: number,
+    expanded: boolean
+  ): void {
+    if (state.width !== width) {
+      state.width = width;
+      state.blocks = [];
+      state.cumulativeEnds = [];
+      state.totalLines = 0;
+      state.dirtyFrom = 0;
+    }
+
+    if (messages.length === 0) {
+      state.blocks = [];
+      state.cumulativeEnds = [];
+      state.totalLines = 0;
+      state.dirtyFrom = CLEAN_INDEX;
+      return;
+    }
+
+    if (state.dirtyFrom === CLEAN_INDEX && state.blocks.length === messages.length) {
+      return;
+    }
+
+    const start = Math.min(state.dirtyFrom, messages.length - 1);
+    for (let i = start; i < messages.length; i++) {
+      const message = messages[i];
+      const lines = getRenderedMessageLines(message, width, expanded);
+      state.blocks[i] = {
+        message,
+        lines,
+        lineCount: lines.length,
+      };
+      const prevEnd = i === 0 ? 0 : state.cumulativeEnds[i - 1];
+      state.cumulativeEnds[i] = prevEnd + lines.length;
+    }
+
+    state.blocks.length = messages.length;
+    state.cumulativeEnds.length = messages.length;
+    state.totalLines = state.cumulativeEnds[messages.length - 1] ?? 0;
+    state.dirtyFrom = CLEAN_INDEX;
+  }
+
+  function findFirstBlockEndingAfter(cumulativeEnds: number[], lineIndex: number): number {
+    let lo = 0;
+    let hi = cumulativeEnds.length - 1;
+    let found = cumulativeEnds.length;
+
+    while (lo <= hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (cumulativeEnds[mid] > lineIndex) {
+        found = mid;
+        hi = mid - 1;
+      } else {
+        lo = mid + 1;
+      }
+    }
+
+    return found;
+  }
+
+  function collectTranscriptRange(
+    state: TranscriptIndexState,
+    startLine: number,
+    endLine: number
+  ): string[] {
+    if (startLine >= endLine || state.blocks.length === 0) {
+      return [];
+    }
+
+    const lines: string[] = [];
+    let blockIndex = findFirstBlockEndingAfter(state.cumulativeEnds, startLine);
+    if (blockIndex >= state.blocks.length) {
+      return lines;
+    }
+
+    while (blockIndex < state.blocks.length) {
+      const block = state.blocks[blockIndex];
+      const blockStart = blockIndex === 0 ? 0 : state.cumulativeEnds[blockIndex - 1];
+      if (blockStart >= endLine) break;
+
+      const sliceStart = Math.max(0, startLine - blockStart);
+      const sliceEnd = Math.min(block.lineCount, endLine - blockStart);
+      if (sliceStart < sliceEnd) {
+        lines.push(...block.lines.slice(sliceStart, sliceEnd));
+      }
+
+      blockIndex += 1;
+    }
+
+    return lines;
   }
 
   function startSpinner(): void {
@@ -361,34 +490,25 @@ export async function runWorkspaceUI(
     offsetFromBottom: number,
     expanded: boolean
   ): { lines: string[]; totalLines: number } {
-    const blocks = messages.map((msg) => getRenderedMessageLines(msg, width, expanded));
-    if (isProcessing && currentSpinnerLine) {
-      blocks.push(["", currentSpinnerLine, ""]);
-    }
+    const state = expanded ? transcriptIndexes.expanded : transcriptIndexes.normal;
+    ensureTranscriptIndex(state, width, expanded);
 
-    const totalLines = blocks.reduce((sum, block) => sum + block.length, 0);
+    const spinnerLines = isProcessing && currentSpinnerLine ? ["", currentSpinnerLine, ""] : [];
+    const totalLines = state.totalLines + spinnerLines.length;
     const maxScroll = Math.max(0, totalLines - maxRows);
     chatScrollOffset = Math.max(0, Math.min(offsetFromBottom, maxScroll));
 
-    let remainingSkip = chatScrollOffset;
-    let remainingRows = maxRows;
-    const collected: string[][] = [];
+    const startLine = Math.max(0, totalLines - maxRows - chatScrollOffset);
+    const endLine = Math.min(totalLines, startLine + maxRows);
+    const messageEndLine = Math.min(endLine, state.totalLines);
 
-    for (let i = blocks.length - 1; i >= 0 && remainingRows > 0; i--) {
-      const block = blocks[i];
-      if (remainingSkip >= block.length) {
-        remainingSkip -= block.length;
-        continue;
-      }
-
-      const endExclusive = block.length - remainingSkip;
-      remainingSkip = 0;
-      const startInclusive = Math.max(0, endExclusive - remainingRows);
-      collected.push(block.slice(startInclusive, endExclusive));
-      remainingRows -= endExclusive - startInclusive;
+    const lines = collectTranscriptRange(state, startLine, messageEndLine);
+    if (spinnerLines.length > 0 && endLine > state.totalLines) {
+      const spinnerStart = Math.max(0, startLine - state.totalLines);
+      const spinnerEnd = Math.min(spinnerLines.length, endLine - state.totalLines);
+      lines.push(...spinnerLines.slice(spinnerStart, spinnerEnd));
     }
 
-    const lines = collected.reverse().flat();
     while (lines.length < maxRows) {
       lines.unshift("");
     }
@@ -528,9 +648,8 @@ export async function runWorkspaceUI(
 
         if (input.startsWith("/")) {
           const msg: ChatMessage = { role: "user", content: input };
-          messages.push(msg);
-          invalidateRender(msg);
-          const navResult = handleSlashCommand(cmdFromInput(input), ctx, messages, invalidateRender);
+          appendMessage(msg);
+          const navResult = handleSlashCommand(cmdFromInput(input), ctx, appendMessage);
           if (navResult) {
             cleanup();
             resolve(navResult);
@@ -543,16 +662,14 @@ export async function runWorkspaceUI(
         const fullQuestion = buildPinnedQuestion(input, ctx, pinOptions);
 
         const userMessage: ChatMessage = { role: "user", content: input };
-        messages.push(userMessage);
-        invalidateRender(userMessage);
+        appendMessage(userMessage);
 
         if (!ctx.aiConfig) {
           const systemMessage: ChatMessage = {
             role: "system",
             content: "AI unavailable (no ANTHROPIC_API_KEY). Slash commands still work — type /help",
           };
-          messages.push(systemMessage);
-          invalidateRender(systemMessage);
+          appendMessage(systemMessage);
           scheduleRender(true);
           return;
         }
@@ -578,8 +695,7 @@ export async function runWorkspaceUI(
                   role: "assistant",
                   content: streamedText.trim(),
                 };
-                messages[messages.length - 1] = partialMessage;
-                invalidateRender();
+                replaceLastMessage(partialMessage);
                 streamingStarted = false;
                 streamedText = "";
               }
@@ -591,8 +707,7 @@ export async function runWorkspaceUI(
                 toolTarget: event.target,
                 toolColor: event.color,
               };
-              messages.push(toolMessage);
-              invalidateRender(toolMessage);
+              appendMessage(toolMessage);
               currentSpinnerLine = `  ${C.primary(SPINNER[spinnerFrame])} ${C.accent(currentVerb)}${chalk.white("...")}`;
               scheduleRender();
             },
@@ -604,8 +719,7 @@ export async function runWorkspaceUI(
                 stopSpinner();
                 currentSpinnerLine = "";
                 const assistantMessage: ChatMessage = { role: "assistant", content: "" };
-                messages.push(assistantMessage);
-                invalidateRender(assistantMessage);
+                appendMessage(assistantMessage);
               }
 
               streamedText += delta;
@@ -613,8 +727,7 @@ export async function runWorkspaceUI(
                 role: "assistant",
                 content: streamedText,
               };
-              messages[messages.length - 1] = assistantMessage;
-              invalidateRender();
+              replaceLastMessage(assistantMessage);
               scheduleRender();
             }
           );
@@ -626,8 +739,7 @@ export async function runWorkspaceUI(
               role: "assistant",
               content: answer.answer || streamedText,
             };
-            messages[messages.length - 1] = finalAssistant;
-            invalidateRender();
+            replaceLastMessage(finalAssistant);
           } else {
             const assistantMessage: ChatMessage = {
               role: "assistant",
@@ -636,8 +748,7 @@ export async function runWorkspaceUI(
               sources: answer.sources,
               confidence: answer.confidence,
             };
-            messages.push(assistantMessage);
-            invalidateRender(assistantMessage);
+            appendMessage(assistantMessage);
           }
         } catch (err) {
           stopSpinner();
@@ -645,8 +756,7 @@ export async function runWorkspaceUI(
             role: "system",
             content: `Error: ${err instanceof Error ? err.message : "unknown"}`,
           };
-          messages.push(errorMessage);
-          invalidateRender(errorMessage);
+          appendMessage(errorMessage);
         }
 
         isProcessing = false;
@@ -796,12 +906,10 @@ function buildPinnedQuestion(
 function handleSlashCommand(
   cmd: string,
   ctx: WorkspaceContext,
-  messages: ChatMessage[],
-  invalidateRender: (message?: ChatMessage) => void
+  appendMessage: (message: ChatMessage) => void
 ): "back" | "courses" | "quit" | "refresh" | null {
   const pushMessage = (message: ChatMessage): null => {
-    messages.push(message);
-    invalidateRender(message);
+    appendMessage(message);
     return null;
   };
 
