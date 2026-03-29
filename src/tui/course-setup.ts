@@ -1,9 +1,16 @@
 import chalk from "chalk";
 import readline from "node:readline";
-import { hideCursor, showCursor, createBuffer, clearScreen, C } from "./screen.js";
+import {
+  showCursor,
+  createBuffer,
+  clearScreen,
+  C,
+  keepLineVisible,
+} from "./screen.js";
 import type { Course } from "../domain/models.js";
 import type { UserCourse, CourseConfig } from "./course-config.js";
 import { saveCourseConfig } from "./course-config.js";
+import { startTerminalSession } from "./terminal.js";
 
 /**
  * Multi-select picker — user toggles courses with space, confirms with enter.
@@ -19,6 +26,7 @@ export function showMultiSelect(
     let filter = "";
     let message = "";
     const checked = new Set<number>();
+    let scrollTop = 0;
 
     function getFiltered(): Course[] {
       if (!filter) return courses;
@@ -32,6 +40,7 @@ export function showMultiSelect(
 
     function render(): void {
       const buf = createBuffer();
+      const viewRows = process.stdout.rows || 24;
       const filtered = getFiltered();
       if (selected >= filtered.length)
         selected = Math.max(0, filtered.length - 1);
@@ -46,6 +55,7 @@ export function showMultiSelect(
         buf.push("");
       }
 
+      const itemStartLine = buf.length;
       if (filtered.length === 0) {
         buf.push(C.dim("  No courses match your search."));
       } else {
@@ -77,16 +87,19 @@ export function showMultiSelect(
         C.dimmer("  enter/space toggle  ↑↓ navigate  ") + doneHint + C.dimmer("  type to filter")
       );
 
-      buf.flush();
+      const selectedLine =
+        filtered.length > 0 ? itemStartLine + selected : itemStartLine;
+      scrollTop = keepLineVisible(selectedLine, scrollTop, viewRows, buf.length, 2);
+      const maxScroll = Math.max(0, buf.length - viewRows);
+      const scrollFromBottom = maxScroll - scrollTop;
+      buf.flush(0, scrollFromBottom);
     }
 
-    hideCursor();
+    const cleanupSession = startTerminalSession(onData, {
+      alternateScreen: true,
+      onResize: render,
+    });
     render();
-
-    const stdin = process.stdin;
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.setEncoding("utf8");
 
     function toggle(): void {
       const filtered = getFiltered();
@@ -173,13 +186,8 @@ export function showMultiSelect(
     }
 
     function cleanup(): void {
-      stdin.removeListener("data", onData);
-      stdin.setRawMode(false);
-      stdin.pause();
-      showCursor();
+      cleanupSession();
     }
-
-    stdin.on("data", onData);
   });
 }
 

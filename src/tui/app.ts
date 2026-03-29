@@ -25,11 +25,12 @@ import {
   MenuBox,
   getTermSize,
   stripAnsi,
-  enableMouseTracking,
-  disableMouseTracking,
+  keepLineVisible,
+  truncatePlainToWidth,
 } from "./screen.js";
 import type { Course } from "../domain/models.js";
 import type { AssignmentWorkup } from "../work/types.js";
+import { startTerminalSession } from "./terminal.js";
 
 /**
  * Main interactive TUI application.
@@ -170,6 +171,7 @@ async function showHomeScreen(
   recent: Array<{ name: string; course: string; slug: string; path: string }>
 ): Promise<string | null> {
   return new Promise((resolve) => {
+    const HOME_TOP_MARGIN_ROWS = 3;
     const { cols } = getTermSize();
 
     // Build the item list: recent workspaces first, then courses
@@ -278,7 +280,6 @@ async function showHomeScreen(
 
     function render(): void {
       const buf = createBuffer();
-      hideCursor();
       const { cols: termCols, rows: termRows } = getTermSize();
 
       // Estimate content height to vertically center
@@ -286,9 +287,10 @@ async function showHomeScreen(
       const preFiltered = getFiltered();
       const itemLines = preFiltered.items.length + 4; // items + section headers + footer
       const boxLines = countInfoBoxLines(services, recent, termCols);
-      const totalContent = artLines + boxLines + itemLines + 6;
+      const totalContent = artLines + boxLines + itemLines + 6 + HOME_TOP_MARGIN_ROWS;
       const topPad = Math.max(0, Math.floor((termRows - totalContent) / 2));
 
+      for (let p = 0; p < HOME_TOP_MARGIN_ROWS; p++) buf.push("");
       for (let p = 0; p < topPad; p++) buf.push("");
 
       // ASCII art
@@ -309,6 +311,7 @@ async function showHomeScreen(
       const filtered = getFiltered();
       const currentSelectableIdx =
         filtered.selectableIndices[selectedIdx] ?? -1;
+      let selectedLine = buf.length;
 
       for (let i = 0; i < filtered.items.length; i++) {
         const item = filtered.items[i];
@@ -320,6 +323,9 @@ async function showHomeScreen(
         }
 
         const isSelected = i === currentSelectableIdx;
+        if (isSelected) {
+          selectedLine = buf.length;
+        }
         const pointer = isSelected ? C.primary("❯ ") : "  ";
         const label = isSelected
           ? C.bold(item.label)
@@ -337,18 +343,18 @@ async function showHomeScreen(
       const totalLines = buf.length;
       const { rows: viewRows } = getTermSize();
       const maxScroll = Math.max(0, totalLines - viewRows);
+      scrollTop = keepLineVisible(selectedLine, scrollTop, viewRows, totalLines, 2);
       scrollTop = Math.min(scrollTop, maxScroll);
       const scrollFromBottom = maxScroll - scrollTop;
       buf.flush(0, scrollFromBottom);
     }
 
+    const cleanupSession = startTerminalSession(onData, {
+      alternateScreen: true,
+      mouseTracking: true,
+      onResize: render,
+    });
     render();
-    enableMouseTracking();
-
-    const stdin = process.stdin;
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.setEncoding("utf8");
 
     function onData(key: string): void {
       const filtered = getFiltered();
@@ -429,15 +435,8 @@ async function showHomeScreen(
     }
 
     function cleanup(): void {
-      disableMouseTracking();
-      stdin.removeListener("data", onData);
-      stdin.setRawMode(false);
-      stdin.pause();
-      showCursor();
-      clearScreen();
+      cleanupSession();
     }
-
-    stdin.on("data", onData);
   });
 }
 
@@ -759,8 +758,7 @@ function formatShortcutRow(sc: [string, string], maxW: number): string {
 }
 
 function truncPlain(text: string, maxLen: number): string {
-  if (text.length <= maxLen) return text;
-  return text.slice(0, maxLen - 3) + "...";
+  return truncatePlainToWidth(text, maxLen);
 }
 
 type InfoBoxPalette = {

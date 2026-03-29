@@ -3,22 +3,20 @@ import type { AssignmentWorkup } from "../work/types.js";
 import type { LoadedWorkspace, WorkspaceAnswer } from "../ask/types.js";
 import type { AIProviderConfig } from "../ai/provider.js";
 import { askWorkspaceQuestion, createChatContext, type ToolCallEvent } from "./services.js";
-import { ActivityIndicator } from "./activity.js";
 import {
   clearScreen,
-  showCursor,
-  hideCursor,
-  enterAlternateScreen,
-  leaveAlternateScreen,
-  enableMouseTracking,
-  disableMouseTracking,
   createBuffer,
   getTermSize,
   fmtConfidence,
   C,
   stripAnsi,
-  truncateAnsiToWidth,
+  truncatePlainToWidth,
+  visibleWidth,
+  padAnsiToWidth,
+  tailPlainToWidth,
+  wrapPlainText,
 } from "./screen.js";
+import { startTerminalSession } from "./terminal.js";
 
 export interface WorkspaceContext {
   workspacePath: string;
@@ -153,8 +151,7 @@ export async function runWorkspaceUI(
       currentSpinnerLine = `  ${C.primary(SPINNER[spinnerFrame])} ${C.accent(currentVerb)}${chalk.white("...")}`;
       const { cols, rows: termRows } = getTermSize();
       if (spinnerRow <= termRows && spinnerRow < (inputBoxRow > 0 ? inputBoxRow : termRows)) {
-        const vis = stripAnsi(currentSpinnerLine).length;
-        const padded = vis < cols ? currentSpinnerLine + " ".repeat(cols - vis) : currentSpinnerLine;
+        const padded = padAnsiToWidth(currentSpinnerLine, cols);
         process.stdout.write(`\x1B[${spinnerRow};1H` + padded);
       }
     }, 80);
@@ -200,6 +197,37 @@ export async function runWorkspaceUI(
   // Track the row where the input box starts so we can update it in-place
   let inputBoxRow = 0;
   let lastContentWidth = 80;
+
+  function renderTranscriptView(): void {
+    clearScreen();
+    const { cols } = getTermSize();
+    const cw = Math.min(cols - 4, 100);
+    console.log("");
+    console.log("");
+    const name = ctx.loaded.assignmentName;
+    const course = ctx.courseDisplayName ?? ctx.loaded.courseName;
+    console.log(`  ${workspaceTitleBold(name)}  ${statusBarGrey(course)}`);
+    console.log("");
+
+    for (const msg of messages) {
+      const tmpBuf = { lines: [] as string[], push(l: string) { this.lines.push(l); } };
+      renderMessage(msg, tmpBuf, cw, true);
+      for (const l of tmpBuf.lines) console.log(l);
+    }
+
+    console.log("");
+    console.log(`  ${C.dimmer("─".repeat(Math.min(cw, 50)))}`);
+    console.log(`  ${C.dim("Showing detailed transcript")}  ${C.dimmer("·")}  ${C.dimmer("ctrl+o")} ${C.dim("to toggle")}`);
+    console.log("");
+  }
+
+  function renderCurrentView(): void {
+    if (toolOutputExpanded) {
+      renderTranscriptView();
+      return;
+    }
+    render();
+  }
 
   function render(): void {
     const buf = createBuffer();
@@ -280,9 +308,7 @@ export async function runWorkspaceUI(
     if (lastRowAboveInput < 1) return;
 
     const padToCols = (s: string): string => {
-      const v = stripAnsi(s).length;
-      if (v > cols) return truncateAnsiToWidth(s, cols);
-      return s + " ".repeat(cols - v);
+      return padAnsiToWidth(s, cols);
     };
 
     const maxVis = lastRowAboveInput;
@@ -351,20 +377,18 @@ export async function runWorkspaceUI(
 
     // Input box: 3 lines (empty, text, empty)
     const inputText = inputBuffer || "";
-    const colored = inputText.replace(/\/pin\s+\S+/g, (m) => C.accent(m));
+    const visibleInput = tailPlainToWidth(inputText, Math.max(0, boxWidth - 1));
+    const colored = visibleInput.replace(/\/pin\s+\S+/g, (m) => C.accent(m));
     const coloredWithPartial = colored.replace(/\/pin(\s+\S*)?$/, (m) => C.accent(m));
-    const visibleLen = stripAnsi(coloredWithPartial).length;
+    const visibleLen = visibleWidth(coloredWithPartial);
     const emptyLine = " ".repeat(boxWidth + 1);
     const remaining = Math.max(0, boxWidth - visibleLen - 1);
     let displayText: string;
     if (!inputText) {
       const phMax = Math.max(0, boxWidth - 1);
-      let phPlain = INPUT_PLACEHOLDER;
-      if (phPlain.length > phMax) {
-        phPlain = phMax > 3 ? phPlain.slice(0, phMax - 3) + "..." : phPlain.slice(0, phMax);
-      }
+      const phPlain = truncatePlainToWidth(INPUT_PLACEHOLDER, phMax);
       const phStyled = inputPlaceholderFg(phPlain);
-      const phVis = stripAnsi(phStyled).length;
+      const phVis = visibleWidth(phStyled);
       const padAfter = Math.max(0, boxWidth - 1 - phVis);
       displayText = cursor + phStyled + " ".repeat(padAfter);
     } else {
@@ -377,24 +401,20 @@ export async function runWorkspaceUI(
     let leftStatus = `${courseName}/${assignmentName}`;
     let modelName = ctx.aiConfig?.model ?? "no model";
     const gapMin = 1;
-    if (leftStatus.length + gapMin + modelName.length > cols) {
-      if (modelName.length + gapMin + 4 > cols) {
-        modelName = modelName.slice(0, Math.max(0, cols - gapMin - 3)) + "...";
+    if (visibleWidth(leftStatus) + gapMin + visibleWidth(modelName) > cols) {
+      if (visibleWidth(modelName) + gapMin + 4 > cols) {
+        modelName = truncatePlainToWidth(modelName, Math.max(0, cols - gapMin));
       }
-      const maxLeft = cols - gapMin - modelName.length;
-      if (leftStatus.length > maxLeft && maxLeft > 3) {
-        leftStatus = leftStatus.slice(0, maxLeft - 3) + "...";
-      } else if (leftStatus.length > maxLeft) {
-        leftStatus = leftStatus.slice(0, Math.max(0, maxLeft));
-      }
+      const maxLeft = cols - gapMin - visibleWidth(modelName);
+      leftStatus = truncatePlainToWidth(leftStatus, Math.max(0, maxLeft));
     }
-    let statusGap = cols - leftStatus.length - modelName.length;
+    let statusGap = cols - visibleWidth(leftStatus) - visibleWidth(modelName);
     if (statusGap < gapMin) {
-      const take = Math.max(0, cols - gapMin - leftStatus.length);
-      modelName = take > 3 ? modelName.slice(0, take - 3) + "..." : modelName.slice(0, take);
-      statusGap = cols - leftStatus.length - modelName.length;
+      const take = Math.max(0, cols - gapMin - visibleWidth(leftStatus));
+      modelName = truncatePlainToWidth(modelName, take);
+      statusGap = cols - visibleWidth(leftStatus) - visibleWidth(modelName);
     }
-    statusGap = Math.max(0, cols - leftStatus.length - modelName.length);
+    statusGap = Math.max(0, cols - visibleWidth(leftStatus) - visibleWidth(modelName));
     const statusLine =
       statusBarGrey(leftStatus) + " ".repeat(statusGap) + statusBarGrey(modelName);
 
@@ -403,8 +423,7 @@ export async function runWorkspaceUI(
     const startRow = termRows - 3;
 
     const pad = (s: string) => {
-      const vis = stripAnsi(s).length;
-      return vis < cols ? s + " ".repeat(cols - vis) : s;
+      return padAnsiToWidth(s, cols);
     };
 
     // Record input box position for fast path
@@ -427,11 +446,12 @@ export async function runWorkspaceUI(
     const cursor = chalk.white("█");
 
     // Color /pin parts in accent
-    const colored = inputText.replace(/\/pin\s+\S+/g, (m) => C.accent(m));
+    const visibleInput = tailPlainToWidth(inputText, Math.max(0, boxWidth - 1));
+    const colored = visibleInput.replace(/\/pin\s+\S+/g, (m) => C.accent(m));
     // Also highlight partial /pin being typed
     const coloredWithPartial = colored.replace(/\/pin(\s+\S*)?$/, (m) => C.accent(m));
 
-    const visibleLen = stripAnsi(coloredWithPartial).length;
+    const visibleLen = visibleWidth(coloredWithPartial);
     const remaining = Math.max(0, boxWidth - visibleLen - 1);
     const displayText = coloredWithPartial + cursor + " ".repeat(remaining);
 
@@ -444,6 +464,10 @@ export async function runWorkspaceUI(
    * Fast path: only rewrite the sticky input box at the bottom.
    */
   function renderInputOnly(): void {
+    if (toolOutputExpanded) {
+      renderTranscriptView();
+      return;
+    }
     renderStickyBottom();
   }
 
@@ -453,20 +477,8 @@ export async function runWorkspaceUI(
    * The screen buffer approach prevents flicker.
    */
   function renderSlashAndInput(): void {
-    render();
+    renderCurrentView();
   }
-
-  enterAlternateScreen();
-  enableMouseTracking();
-  clearScreen();
-  hideCursor();
-  render();
-  showCursor();
-
-  const stdin = process.stdin;
-  stdin.setRawMode(true);
-  stdin.resume();
-  stdin.setEncoding("utf8");
 
   return new Promise((resolve) => {
     /** Must work while streaming — otherwise the view feels “stuck” at the bottom. */
@@ -495,6 +507,19 @@ export async function runWorkspaceUI(
     }
 
     async function handleKey(key: string): Promise<void> {
+      const mouseMatch = key.match(/^\x1b\[<(\d+);\d+;\d+[Mm]/);
+      if (mouseMatch) {
+        const btn = parseInt(mouseMatch[1], 10);
+        if (btn === 64) {
+          chatScrollOffset += 3;
+          renderCurrentView();
+        } else if (btn === 65) {
+          chatScrollOffset = Math.max(0, chatScrollOffset - 3);
+          renderCurrentView();
+        }
+        return;
+      }
+
       if (isProcessing && !keyOkWhileProcessing(key)) return;
 
       if (key === "\x03") {
@@ -507,33 +532,10 @@ export async function runWorkspaceUI(
         toolOutputExpanded = !toolOutputExpanded;
 
         if (toolOutputExpanded) {
-          // Show detailed transcript: all messages, all tool output, no input box
-          clearScreen();
-          const { cols } = getTermSize();
-          const cw = Math.min(cols - 4, 100);
-          console.log("");
-          console.log("");
-          const name = ctx.loaded.assignmentName;
-          const course = ctx.courseDisplayName ?? ctx.loaded.courseName;
-          console.log(`  ${workspaceTitleBold(name)}  ${statusBarGrey(course)}`);
-          console.log("");
-
-          // Show ALL messages (no limit) with expanded tool output
-          for (const msg of messages) {
-            const tmpBuf = { lines: [] as string[], push(l: string) { this.lines.push(l); } };
-            renderMessage(msg, tmpBuf, cw, true);
-            for (const l of tmpBuf.lines) console.log(l);
-          }
-
-          // Transcript footer instead of input box
-          console.log("");
-          console.log(`  ${C.dimmer("─".repeat(Math.min(cw, 50)))}`);
-          console.log(`  ${C.dim("Showing detailed transcript")}  ${C.dimmer("·")}  ${C.dimmer("ctrl+o")} ${C.dim("to toggle")}`);
-          console.log("");
+          renderTranscriptView();
         } else {
           chatScrollOffset = 0;
-          // Return to normal view
-          render();
+          renderCurrentView();
         }
         return;
       }
@@ -541,29 +543,29 @@ export async function runWorkspaceUI(
       // Scroll chat transcript (viewport is shorter than full history)
       if (key === "\x1b[5~" || key === "\x1B[5~" || key === "\x10") {
         chatScrollOffset += scrollPageStep();
-        render();
+        renderCurrentView();
         return;
       }
       if (key === "\x1b[6~" || key === "\x1B[6~" || key === "\x0e") {
         chatScrollOffset = Math.max(0, chatScrollOffset - scrollPageStep());
-        render();
+        renderCurrentView();
         return;
       }
       if (key === "\x1b[4~" || key === "\x1B[4~") {
         chatScrollOffset = 0;
-        render();
+        renderCurrentView();
         return;
       }
       if (key === "\x1b[1~" || key === "\x1B[1~") {
         chatScrollOffset = 999999;
-        render();
+        renderCurrentView();
         return;
       }
 
       if (key === "\x1B") {
         if (showSlashMenu) {
           showSlashMenu = false;
-          render();
+          renderCurrentView();
         }
         return;
       }
@@ -581,7 +583,7 @@ export async function runWorkspaceUI(
             const selected = pinMatches[pinSelected];
             inputBuffer = inputBuffer.replace(/\/pin(\s+\S*)?$/, `/pin ${selected.label}`);
             pinSelected = 0;
-            render();
+            renderCurrentView();
             return;
           }
           // If complete or no matches, fall through to send the message
@@ -599,7 +601,7 @@ export async function runWorkspaceUI(
         showSlashMenu = false;
 
         if (!input) {
-          render();
+          renderCurrentView();
           return;
         }
 
@@ -612,7 +614,7 @@ export async function runWorkspaceUI(
             resolve(navResult);
             return;
           }
-          render();
+          renderCurrentView();
           return;
         }
 
@@ -658,7 +660,7 @@ export async function runWorkspaceUI(
             role: "system",
             content: "AI unavailable (no ANTHROPIC_API_KEY). Slash commands still work — type /help",
           });
-          render();
+          renderCurrentView();
           return;
         }
 
@@ -666,7 +668,7 @@ export async function runWorkspaceUI(
         currentVerb = VERBS[Math.floor(Math.random() * VERBS.length)];
         spinnerFrame = 0;
         currentSpinnerLine = `  ${C.primary(SPINNER[0])} ${C.accent(currentVerb)}${chalk.white("...")}`;
-        render(); // This sets spinnerRow
+        renderCurrentView(); // This sets spinnerRow
         startSpinner(); // Start the independent animation timer
 
         // Streaming state
@@ -700,7 +702,7 @@ export async function runWorkspaceUI(
               });
               // Keep isProcessing true, restore spinner line for next render
               currentSpinnerLine = `  ${C.primary(SPINNER[spinnerFrame])} ${C.accent(currentVerb)}${chalk.white("...")}`;
-              render();
+              renderCurrentView();
               startSpinner();
             },
             ctx.agentContext,
@@ -725,7 +727,7 @@ export async function runWorkspaceUI(
                   role: "assistant",
                   content: streamedText,
                 };
-                render();
+                renderCurrentView();
               }
             }
           );
@@ -758,42 +760,42 @@ export async function runWorkspaceUI(
         isProcessing = false;
         currentSpinnerLine = "";
         spinnerRow = 0;
-        render();
+        renderCurrentView();
         return;
       }
 
       // Arrow keys — pin dropdown or slash menu
       if (key === "\x1B[A" && getActivePinPartial() !== null && getPinMatches().length > 0) {
         pinSelected = Math.max(0, pinSelected - 1);
-        render();
+        renderCurrentView();
         return;
       }
       if (key === "\x1B[B" && getActivePinPartial() !== null && getPinMatches().length > 0) {
         pinSelected = Math.min(getPinMatches().length - 1, pinSelected + 1);
-        render();
+        renderCurrentView();
         return;
       }
       if (key === "\x1B[A" && showSlashMenu) {
         slashSelected = Math.max(0, slashSelected - 1);
-        renderSlashAndInput();
+        renderCurrentView();
         return;
       }
       if (key === "\x1B[B" && showSlashMenu) {
         const matches = getSlashMatches();
         slashSelected = Math.min(matches.length - 1, slashSelected + 1);
-        renderSlashAndInput();
+        renderCurrentView();
         return;
       }
 
       // Arrow up/down → scroll chat when no menu is active
       if (key === "\x1B[A") {
         chatScrollOffset += 3;
-        render();
+        renderCurrentView();
         return;
       }
       if (key === "\x1B[B") {
         chatScrollOffset = Math.max(0, chatScrollOffset - 3);
-        render();
+        renderCurrentView();
         return;
       }
 
@@ -804,13 +806,13 @@ export async function runWorkspaceUI(
           showSlashMenu = inputBuffer.startsWith("/");
           slashSelected = 0;
           if (wasSlash && !showSlashMenu) {
-            render(); // slash menu just closed, full render to remove it
+            renderCurrentView();
           } else if (showSlashMenu) {
             renderSlashAndInput(); // still in slash mode, fast update
           } else if (!showSlashMenu) {
             renderInputOnly();
           } else {
-            render();
+            renderCurrentView();
           }
         }
         return;
@@ -820,7 +822,7 @@ export async function runWorkspaceUI(
         const matches = getSlashMatches();
         if (matches.length > 0) {
           inputBuffer = matches[slashSelected].cmd;
-          render();
+          renderCurrentView();
         }
         return;
       }
@@ -834,97 +836,38 @@ export async function runWorkspaceUI(
         if (hasPinPartial) {
           // Pin dropdown needs full render to show/update
           pinSelected = 0;
-          render();
+          renderCurrentView();
         } else if (showSlashMenu) {
           slashSelected = 0;
           if (!wasSlash) {
-            render();
+            renderCurrentView();
           } else {
             renderSlashAndInput();
           }
         } else if (wasSlash) {
-          render();
+          renderCurrentView();
         } else {
           renderInputOnly();
         }
       }
     }
 
-    /**
-     * Reassemble CSI keys split across stdin reads (e.g. ESC then "[5~"),
-     * otherwise Page Up never matches and scrolling appears broken.
-     */
-    let stdinEscHold = "";
-    function onData(data: string): void {
-      let input = stdinEscHold + data;
-      stdinEscHold = "";
-      while (input.length > 0) {
-        const escIdx = input.indexOf("\x1b");
-        if (escIdx < 0) {
-          for (let i = 0; i < input.length; i++) {
-            handleKey(input[i]!).catch(() => {});
-          }
-          return;
-        }
-        for (let i = 0; i < escIdx; i++) {
-          handleKey(input[i]!).catch(() => {});
-        }
-        input = input.slice(escIdx);
-        if (input.length === 1) {
-          stdinEscHold = input;
-          return;
-        }
-        if (input[1] === "[") {
-          // SGR mouse events: \x1B[<button;col;row[Mm]
-          const mouseMatch = input.match(/^\x1b\[<(\d+);\d+;\d+[Mm]/);
-          if (mouseMatch) {
-            const btn = parseInt(mouseMatch[1], 10);
-            if (btn === 64) {
-              chatScrollOffset += 3;
-              render();
-            } else if (btn === 65) {
-              chatScrollOffset = Math.max(0, chatScrollOffset - 3);
-              render();
-            }
-            input = input.slice(mouseMatch[0].length);
-            continue;
-          }
-          const m = input.match(/^\x1b\[[\d;]*[~A-Za-z]/);
-          if (m) {
-            handleKey(m[0]).catch(() => {});
-            input = input.slice(m[0].length);
-            continue;
-          }
-          if (input.length > 48) {
-            handleKey("\x1b").catch(() => {});
-            input = input.slice(1);
-            continue;
-          }
-          stdinEscHold = input;
-          return;
-        }
-        if (input[1] === "O" && input.length >= 3) {
-          handleKey(input.slice(0, 3)).catch(() => {});
-          input = input.slice(3);
-          continue;
-        }
-        handleKey(input.slice(0, 2)).catch(() => {});
-        input = input.slice(2);
+    const cleanupSession = startTerminalSession(
+      (key) => {
+        void handleKey(key);
+      },
+      {
+        alternateScreen: true,
+        mouseTracking: true,
+        onResize: renderCurrentView,
       }
-    }
+    );
+    renderCurrentView();
 
     function cleanup(): void {
       stopSpinner();
-      stdin.removeListener("data", onData);
-      stdin.setRawMode(false);
-      stdin.pause();
-      disableMouseTracking();
-      leaveAlternateScreen();
-      showCursor();
-      clearScreen();
+      cleanupSession();
     }
-
-    stdin.on("data", onData);
   });
 }
 
@@ -1048,12 +991,10 @@ function renderMessage(msg: ChatMessage, buf: Buf, maxWidth: number, expanded: b
       const boxWidth = Math.max(1, termCols - 1);
       const emptyLine = " ".repeat(boxWidth + 1);
       const padRow = (s: string) => {
-        const v = stripAnsi(s).length;
-        return v < termCols ? s + " ".repeat(termCols - v) : s;
+        return padAnsiToWidth(s, termCols);
       };
       const padInner = (line: string) => {
-        const v = stripAnsi(line).length;
-        return line + " ".repeat(Math.max(0, boxWidth - v));
+        return line + " ".repeat(Math.max(0, boxWidth - visibleWidth(line)));
       };
       const lines = wrapLines(msg.content, boxWidth);
       buf.push(padRow(inputBg(emptyLine)));
@@ -1103,7 +1044,9 @@ function renderMessage(msg: ChatMessage, buf: Buf, maxWidth: number, expanded: b
 
       // Header line: bold action + colored target
       const headerText = `${msg.toolAction ?? "tool"} ${msg.toolTarget ?? ""}`;
-      const headerPad = " ".repeat(Math.max(0, boxWidth - headerText.length - 1));
+      const headerPad = " ".repeat(
+        Math.max(0, boxWidth - visibleWidth(headerText) - 1)
+      );
       buf.push("  " + bg(` ${toolActionColor(msg.toolAction ?? "tool")} ${targetColor(msg.toolTarget ?? "")}${headerPad}`));
 
       // Content preview — show all if expanded, otherwise max 8 lines
@@ -1115,8 +1058,10 @@ function renderMessage(msg: ChatMessage, buf: Buf, maxWidth: number, expanded: b
 
       buf.push("  " + bg(empty)); // blank line after header
       for (const line of showLines) {
-        const trimmed = line.slice(0, boxWidth - 4);
-        const linePad = " ".repeat(Math.max(0, boxWidth - trimmed.length - 3));
+        const trimmed = truncatePlainToWidth(line, boxWidth - 3);
+        const linePad = " ".repeat(
+          Math.max(0, boxWidth - visibleWidth(trimmed) - 3)
+        );
         buf.push("  " + bg(`  ${chalk.white(trimmed)}${linePad} `));
       }
 
@@ -1217,21 +1162,5 @@ function applyInlineFormatting(text: string): string {
 
 /** Word-wrap plain text to a given width. Returns array of lines. */
 function wrapLines(text: string, maxWidth: number): string[] {
-  if (maxWidth <= 0) return [text];
-  const words = text.split(/\s+/);
-  const lines: string[] = [];
-  let current = "";
-
-  for (const word of words) {
-    if (!word) continue;
-    if (current.length + word.length + 1 > maxWidth && current.length > 0) {
-      lines.push(current);
-      current = word;
-    } else {
-      current = current ? current + " " + word : word;
-    }
-  }
-  if (current) lines.push(current);
-  if (lines.length === 0) lines.push("");
-  return lines;
+  return wrapPlainText(text, maxWidth);
 }

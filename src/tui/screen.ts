@@ -200,6 +200,10 @@ export function stripAnsi(str: string): string {
   return str.replace(ANSI_RE, "");
 }
 
+export function visibleWidth(str: string): number {
+  return stripAnsi(str).length;
+}
+
 /**
  * Truncate a string with ANSI codes to a visible width.
  * Walks through characters, skipping ANSI escapes, until
@@ -233,4 +237,100 @@ export function truncateAnsiToWidth(str: string, maxWidth: number): string {
   }
 
   return str.slice(0, i);
+}
+
+export function padAnsiToWidth(str: string, width: number): string {
+  const visible = visibleWidth(str);
+  if (visible >= width) {
+    return visible > width ? truncateAnsiToWidth(str, width) : str;
+  }
+  return str + " ".repeat(width - visible);
+}
+
+export function truncatePlainToWidth(str: string, maxWidth: number): string {
+  if (maxWidth <= 0) return "";
+  if (str.length <= maxWidth) return str;
+  if (maxWidth <= 3) return str.slice(0, maxWidth);
+  return str.slice(0, maxWidth - 3) + "...";
+}
+
+export function tailPlainToWidth(str: string, maxWidth: number): string {
+  if (maxWidth <= 0) return "";
+  if (str.length <= maxWidth) return str;
+  return str.slice(str.length - maxWidth);
+}
+
+export function wrapPlainText(text: string, maxWidth: number): string[] {
+  if (maxWidth <= 0) return [text];
+
+  const rawLines = text.split("\n");
+  const wrapped: string[] = [];
+
+  for (const rawLine of rawLines) {
+    if (!rawLine.trim()) {
+      wrapped.push("");
+      continue;
+    }
+
+    const words = rawLine.split(/\s+/).filter(Boolean);
+    let current = "";
+
+    const flushCurrent = (): void => {
+      if (current) {
+        wrapped.push(current);
+        current = "";
+      }
+    };
+
+    for (const word of words) {
+      if (word.length > maxWidth) {
+        flushCurrent();
+        let start = 0;
+        while (start < word.length) {
+          wrapped.push(word.slice(start, start + maxWidth));
+          start += maxWidth;
+        }
+        continue;
+      }
+
+      const next = current ? `${current} ${word}` : word;
+      if (next.length > maxWidth) {
+        flushCurrent();
+        current = word;
+      } else {
+        current = next;
+      }
+    }
+
+    flushCurrent();
+  }
+
+  return wrapped.length > 0 ? wrapped : [""];
+}
+
+export function keepLineVisible(
+  lineIndex: number,
+  scrollTop: number,
+  viewportRows: number,
+  totalRows: number,
+  paddingRows: number = 1
+): number {
+  if (viewportRows <= 0 || totalRows <= viewportRows) {
+    return 0;
+  }
+
+  const maxScroll = Math.max(0, totalRows - viewportRows);
+  const padding = Math.max(0, Math.min(paddingRows, Math.floor(viewportRows / 2)));
+  let nextScrollTop = Math.max(0, Math.min(scrollTop, maxScroll));
+
+  if (lineIndex < nextScrollTop + padding) {
+    nextScrollTop = Math.max(0, lineIndex - padding);
+  } else if (lineIndex >= nextScrollTop + viewportRows - padding) {
+    nextScrollTop = Math.min(
+      maxScroll,
+      lineIndex - viewportRows + padding + 1
+    );
+  }
+
+  return nextScrollTop;
 }
