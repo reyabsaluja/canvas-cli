@@ -1,9 +1,15 @@
 import chalk from "chalk";
 import readline from "node:readline";
-import { hideCursor, showCursor, createBuffer, clearScreen, C } from "./screen.js";
+import {
+  showCursor,
+  createBuffer,
+  clearScreen,
+  C,
+} from "./screen.js";
 import type { Course } from "../domain/models.js";
 import type { UserCourse, CourseConfig } from "./course-config.js";
 import { saveCourseConfig } from "./course-config.js";
+import { startTerminalSession } from "./terminal.js";
 
 /**
  * Multi-select picker — user toggles courses with space, confirms with enter.
@@ -19,6 +25,7 @@ export function showMultiSelect(
     let filter = "";
     let message = "";
     const checked = new Set<number>();
+    let windowTop = 0;
 
     function getFiltered(): Course[] {
       if (!filter) return courses;
@@ -32,6 +39,7 @@ export function showMultiSelect(
 
     function render(): void {
       const buf = createBuffer();
+      const viewRows = process.stdout.rows || 24;
       const filtered = getFiltered();
       if (selected >= filtered.length)
         selected = Math.max(0, filtered.length - 1);
@@ -46,12 +54,38 @@ export function showMultiSelect(
         buf.push("");
       }
 
+      const itemStartLine = buf.length;
+      const footerRows = message ? 3 : 2;
+      const availableItemRows = Math.max(1, viewRows - itemStartLine - footerRows);
       if (filtered.length === 0) {
         buf.push(C.dim("  No courses match your search."));
       } else {
-        for (let i = 0; i < filtered.length; i++) {
-          const c = filtered[i];
-          const isSel = i === selected;
+        const selectedLine = selected;
+        const totalVirtualRows = filtered.length;
+        const margin = 2;
+        const minTop = Math.max(0, selectedLine - Math.max(0, availableItemRows - 1 - margin));
+        const maxTop = Math.max(0, selectedLine - margin);
+        windowTop = Math.max(minTop, Math.min(windowTop, maxTop));
+        windowTop = Math.max(0, Math.min(windowTop, Math.max(0, totalVirtualRows - availableItemRows)));
+
+        const hiddenAbove = windowTop;
+        const hiddenBelow = Math.max(0, totalVirtualRows - (windowTop + availableItemRows));
+        let visibleSlots = availableItemRows;
+
+        if (hiddenAbove > 0 && visibleSlots > 0) {
+          buf.push(C.dim(`  ... ${hiddenAbove} more above`));
+          visibleSlots -= 1;
+        }
+
+        const visibleCount = Math.max(
+          0,
+          Math.min(filtered.length - windowTop, visibleSlots - (hiddenBelow > 0 ? 1 : 0))
+        );
+
+        for (let i = 0; i < visibleCount; i++) {
+          const c = filtered[windowTop + i];
+          const itemIndex = windowTop + i;
+          const isSel = itemIndex === selected;
           const isChecked = checked.has(c.id);
           const box = isChecked ? C.success("◉ ") : C.dim("○ ");
           const pointer = isSel ? C.primary("❯ ") : "  ";
@@ -61,6 +95,10 @@ export function showMultiSelect(
           const sub =
             c.courseCode !== c.name ? C.dim(` — ${c.name}`) : "";
           buf.push(`  ${pointer}${box}${label}${sub}`);
+        }
+
+        if (hiddenBelow > 0 && visibleSlots > 0) {
+          buf.push(C.dim(`  ... ${hiddenBelow} more below`));
         }
       }
 
@@ -80,13 +118,12 @@ export function showMultiSelect(
       buf.flush();
     }
 
-    hideCursor();
+    const cleanupSession = startTerminalSession(onData, {
+      onResize: render,
+      clearOnEnter: false,
+      clearOnExit: false,
+    });
     render();
-
-    const stdin = process.stdin;
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.setEncoding("utf8");
 
     function toggle(): void {
       const filtered = getFiltered();
@@ -173,13 +210,8 @@ export function showMultiSelect(
     }
 
     function cleanup(): void {
-      stdin.removeListener("data", onData);
-      stdin.setRawMode(false);
-      stdin.pause();
-      showCursor();
+      cleanupSession();
     }
-
-    stdin.on("data", onData);
   });
 }
 
