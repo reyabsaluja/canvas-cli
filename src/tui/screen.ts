@@ -111,6 +111,30 @@ export function showCursor(): void {
   process.stdout.write("\x1B[?25h");
 }
 
+/**
+ * Alternate screen buffer (DEC 1049). Full-screen TUIs that redraw the whole
+ * terminal should use this so the host scrollbar does not browse stale frames
+ * from past writes (which looks like “scrolling” hides your prompt).
+ */
+export function enterAlternateScreen(): void {
+  process.stdout.write("\x1B[?1049h");
+}
+
+/** Restore the normal screen buffer; call when leaving a full-screen TUI. */
+export function leaveAlternateScreen(): void {
+  process.stdout.write("\x1B[?1049l");
+}
+
+/** Enable SGR mouse tracking (scroll wheel + click events sent as escape sequences). */
+export function enableMouseTracking(): void {
+  process.stdout.write("\x1B[?1000h\x1B[?1006h");
+}
+
+/** Disable mouse tracking; call when leaving a full-screen TUI. */
+export function disableMouseTracking(): void {
+  process.stdout.write("\x1B[?1000l\x1B[?1006l");
+}
+
 /** Get terminal dimensions. */
 export function getTermSize(): { rows: number; cols: number } {
   return {

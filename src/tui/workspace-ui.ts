@@ -8,6 +8,10 @@ import {
   clearScreen,
   showCursor,
   hideCursor,
+  enterAlternateScreen,
+  leaveAlternateScreen,
+  enableMouseTracking,
+  disableMouseTracking,
   createBuffer,
   getTermSize,
   fmtConfidence,
@@ -214,7 +218,9 @@ export async function runWorkspaceUI(
 
     if (chatScrollOffset > 0) {
       buf.push(
-        C.dim(`  ↑ Older messages above · PgUp/PgDn scroll · End = jump to latest`)
+        C.dim(
+          `  ↑ Older · PgUp / PgDn · Ctrl+P up / Ctrl+N down · End latest · Home oldest`
+        )
       );
     }
 
@@ -450,6 +456,10 @@ export async function runWorkspaceUI(
     render();
   }
 
+  enterAlternateScreen();
+  enableMouseTracking();
+  clearScreen();
+  hideCursor();
   render();
   showCursor();
 
@@ -459,8 +469,33 @@ export async function runWorkspaceUI(
   stdin.setEncoding("utf8");
 
   return new Promise((resolve) => {
+    /** Must work while streaming — otherwise the view feels “stuck” at the bottom. */
+    function keyOkWhileProcessing(key: string): boolean {
+      if (key === "\x03" || key === "\x0F") return true;
+      if (key === "\x10" || key === "\x0e") return true;
+      if (key === "\x1B[A" || key === "\x1B[B") return true;
+      if (
+        key === "\x1b[5~" ||
+        key === "\x1B[5~" ||
+        key === "\x1b[6~" ||
+        key === "\x1B[6~" ||
+        key === "\x1b[4~" ||
+        key === "\x1B[4~" ||
+        key === "\x1b[1~" ||
+        key === "\x1B[1~"
+      ) {
+        return true;
+      }
+      return false;
+    }
+
+    function scrollPageStep(): number {
+      const { rows: rowsT } = getTermSize();
+      return Math.max(2, Math.floor((rowsT - MAIN_VIEW_BOTTOM_RESERVE) * 0.65));
+    }
+
     async function handleKey(key: string): Promise<void> {
-      if (isProcessing) return;
+      if (isProcessing && !keyOkWhileProcessing(key)) return;
 
       if (key === "\x03") {
         cleanup();
@@ -504,17 +539,13 @@ export async function runWorkspaceUI(
       }
 
       // Scroll chat transcript (viewport is shorter than full history)
-      if (key === "\x1b[5~" || key === "\x1B[5~") {
-        const { rows: rowsT } = getTermSize();
-        const step = Math.max(2, Math.floor((rowsT - MAIN_VIEW_BOTTOM_RESERVE) * 0.65));
-        chatScrollOffset += step;
+      if (key === "\x1b[5~" || key === "\x1B[5~" || key === "\x10") {
+        chatScrollOffset += scrollPageStep();
         render();
         return;
       }
-      if (key === "\x1b[6~" || key === "\x1B[6~") {
-        const { rows: rowsT } = getTermSize();
-        const step = Math.max(2, Math.floor((rowsT - MAIN_VIEW_BOTTOM_RESERVE) * 0.65));
-        chatScrollOffset = Math.max(0, chatScrollOffset - step);
+      if (key === "\x1b[6~" || key === "\x1B[6~" || key === "\x0e") {
+        chatScrollOffset = Math.max(0, chatScrollOffset - scrollPageStep());
         render();
         return;
       }
@@ -754,6 +785,18 @@ export async function runWorkspaceUI(
         return;
       }
 
+      // Arrow up/down → scroll chat when no menu is active
+      if (key === "\x1B[A") {
+        chatScrollOffset += 3;
+        render();
+        return;
+      }
+      if (key === "\x1B[B") {
+        chatScrollOffset = Math.max(0, chatScrollOffset - 3);
+        render();
+        return;
+      }
+
       if (key === "\x7F" || key === "\b") {
         if (inputBuffer.length > 0) {
           inputBuffer = inputBuffer.slice(0, -1);
@@ -807,8 +850,67 @@ export async function runWorkspaceUI(
       }
     }
 
-    function onData(key: string): void {
-      handleKey(key).catch(() => {});
+    /**
+     * Reassemble CSI keys split across stdin reads (e.g. ESC then "[5~"),
+     * otherwise Page Up never matches and scrolling appears broken.
+     */
+    let stdinEscHold = "";
+    function onData(data: string): void {
+      let input = stdinEscHold + data;
+      stdinEscHold = "";
+      while (input.length > 0) {
+        const escIdx = input.indexOf("\x1b");
+        if (escIdx < 0) {
+          for (let i = 0; i < input.length; i++) {
+            handleKey(input[i]!).catch(() => {});
+          }
+          return;
+        }
+        for (let i = 0; i < escIdx; i++) {
+          handleKey(input[i]!).catch(() => {});
+        }
+        input = input.slice(escIdx);
+        if (input.length === 1) {
+          stdinEscHold = input;
+          return;
+        }
+        if (input[1] === "[") {
+          // SGR mouse events: \x1B[<button;col;row[Mm]
+          const mouseMatch = input.match(/^\x1b\[<(\d+);\d+;\d+[Mm]/);
+          if (mouseMatch) {
+            const btn = parseInt(mouseMatch[1], 10);
+            if (btn === 64) {
+              chatScrollOffset += 3;
+              render();
+            } else if (btn === 65) {
+              chatScrollOffset = Math.max(0, chatScrollOffset - 3);
+              render();
+            }
+            input = input.slice(mouseMatch[0].length);
+            continue;
+          }
+          const m = input.match(/^\x1b\[[\d;]*[~A-Za-z]/);
+          if (m) {
+            handleKey(m[0]).catch(() => {});
+            input = input.slice(m[0].length);
+            continue;
+          }
+          if (input.length > 48) {
+            handleKey("\x1b").catch(() => {});
+            input = input.slice(1);
+            continue;
+          }
+          stdinEscHold = input;
+          return;
+        }
+        if (input[1] === "O" && input.length >= 3) {
+          handleKey(input.slice(0, 3)).catch(() => {});
+          input = input.slice(3);
+          continue;
+        }
+        handleKey(input.slice(0, 2)).catch(() => {});
+        input = input.slice(2);
+      }
     }
 
     function cleanup(): void {
@@ -816,6 +918,8 @@ export async function runWorkspaceUI(
       stdin.removeListener("data", onData);
       stdin.setRawMode(false);
       stdin.pause();
+      disableMouseTracking();
+      leaveAlternateScreen();
       showCursor();
       clearScreen();
     }
