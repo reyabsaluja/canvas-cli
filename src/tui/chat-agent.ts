@@ -14,6 +14,8 @@ import { buildChunks, retrieveRelevant } from "../ask/retrieve.js";
 import { extractFileText } from "../extract/extract-text.js";
 
 const MAX_DOC_TEXT = 30000;
+const MAX_CONVERSATION_MESSAGES = 12;
+const MAX_CONVERSATION_CHARS = 80000;
 
 const CHAT_TOOLS: ToolDefinition[] = [
   {
@@ -212,6 +214,7 @@ export async function runChatAgent(
   const systemPrompt = buildSystemPrompt(ctx);
 
   ctx.conversationHistory.push({ role: "user", content: question });
+  trimConversationHistory(ctx);
 
   const fullText = await streamWithTools(
     ctx.aiConfig,
@@ -230,6 +233,7 @@ export async function runChatAgent(
   );
 
   ctx.conversationHistory.push({ role: "assistant", content: fullText });
+  trimConversationHistory(ctx);
 
   return {
     question,
@@ -238,6 +242,21 @@ export async function runChatAgent(
     sources: [],
     confidence: "medium",
   };
+}
+
+function trimConversationHistory(ctx: ChatAgentContext): void {
+  while (ctx.conversationHistory.length > MAX_CONVERSATION_MESSAGES) {
+    ctx.conversationHistory.shift();
+  }
+
+  let totalChars = ctx.conversationHistory.reduce(
+    (sum, entry) => sum + entry.content.length,
+    0
+  );
+  while (totalChars > MAX_CONVERSATION_CHARS && ctx.conversationHistory.length > 2) {
+    const removed = ctx.conversationHistory.shift();
+    totalChars -= removed?.content.length ?? 0;
+  }
 }
 
 // --- Tool execution ---

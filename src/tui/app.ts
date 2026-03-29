@@ -25,16 +25,22 @@ import {
   MenuBox,
   getTermSize,
   stripAnsi,
-  enableMouseTracking,
-  disableMouseTracking,
+  keepLineVisible,
+  truncatePlainToWidth,
 } from "./screen.js";
 import type { Course } from "../domain/models.js";
 import type { AssignmentWorkup } from "../work/types.js";
+import { isInteractiveTerminal, startTerminalSession } from "./terminal.js";
 
 /**
  * Main interactive TUI application.
  */
 export async function launchApp(): Promise<void> {
+  if (!isInteractiveTerminal()) {
+    console.error("canvas-cli interactive mode requires a TTY.");
+    process.exit(1);
+  }
+
   process.on("SIGINT", () => {
     showCursor();
     clearScreen();
@@ -277,9 +283,8 @@ async function showHomeScreen(
       return { items: cleaned, selectableIndices: selectable };
     }
 
-    function render(): void {
+    function render(keepSelectionVisible: boolean = false): void {
       const buf = createBuffer();
-      hideCursor();
       const { cols: termCols, rows: termRows } = getTermSize();
 
       // Estimate content height to vertically center
@@ -312,6 +317,7 @@ async function showHomeScreen(
       const filtered = getFiltered();
       const currentSelectableIdx =
         filtered.selectableIndices[selectedIdx] ?? -1;
+      let selectedLine = buf.length;
 
       for (let i = 0; i < filtered.items.length; i++) {
         const item = filtered.items[i];
@@ -323,6 +329,9 @@ async function showHomeScreen(
         }
 
         const isSelected = i === currentSelectableIdx;
+        if (isSelected) {
+          selectedLine = buf.length;
+        }
         const pointer = isSelected ? C.primary("❯ ") : "  ";
         const label = isSelected
           ? C.bold(item.label)
@@ -340,18 +349,21 @@ async function showHomeScreen(
       const totalLines = buf.length;
       const { rows: viewRows } = getTermSize();
       const maxScroll = Math.max(0, totalLines - viewRows);
+      if (keepSelectionVisible) {
+        scrollTop = keepLineVisible(selectedLine, scrollTop, viewRows, totalLines, 2);
+      }
       scrollTop = Math.min(scrollTop, maxScroll);
       const scrollFromBottom = maxScroll - scrollTop;
       buf.flush(0, scrollFromBottom);
     }
 
-    render();
-    enableMouseTracking();
-
-    const stdin = process.stdin;
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.setEncoding("utf8");
+    const cleanupSession = startTerminalSession(onData, {
+      mouseTracking: true,
+      onResize: () => render(false),
+      clearOnEnter: false,
+      clearOnExit: false,
+    });
+    render(false);
 
     function onData(key: string): void {
       const filtered = getFiltered();
@@ -362,10 +374,10 @@ async function showHomeScreen(
         const btn = parseInt(sgrMatch[1], 10);
         if (btn === 64) {
           scrollTop = Math.max(0, scrollTop - 3);
-          render();
+          render(false);
         } else if (btn === 65) {
           scrollTop += 3;
-          render();
+          render(false);
         }
         return;
       }
@@ -393,7 +405,7 @@ async function showHomeScreen(
       // Arrow up
       if (key === "\x1B[A") {
         selectedIdx = Math.max(0, selectedIdx - 1);
-        render();
+        render(true);
         return;
       }
 
@@ -403,7 +415,7 @@ async function showHomeScreen(
           filtered.selectableIndices.length - 1,
           selectedIdx + 1
         );
-        render();
+        render(true);
         return;
       }
 
@@ -412,7 +424,8 @@ async function showHomeScreen(
         if (filter.length > 0) {
           filter = filter.slice(0, -1);
           selectedIdx = 0;
-          render();
+          scrollTop = 0;
+          render(false);
         }
         return;
       }
@@ -427,20 +440,14 @@ async function showHomeScreen(
       if (key.length === 1 && key >= " ") {
         filter += key;
         selectedIdx = 0;
-        render();
+        scrollTop = 0;
+        render(false);
       }
     }
 
     function cleanup(): void {
-      disableMouseTracking();
-      stdin.removeListener("data", onData);
-      stdin.setRawMode(false);
-      stdin.pause();
-      showCursor();
-      clearScreen();
+      cleanupSession();
     }
-
-    stdin.on("data", onData);
   });
 }
 
@@ -762,8 +769,7 @@ function formatShortcutRow(sc: [string, string], maxW: number): string {
 }
 
 function truncPlain(text: string, maxLen: number): string {
-  if (text.length <= maxLen) return text;
-  return text.slice(0, maxLen - 3) + "...";
+  return truncatePlainToWidth(text, maxLen);
 }
 
 type InfoBoxPalette = {
@@ -1110,13 +1116,15 @@ function sleep(ms: number): Promise<void> {
 
 function waitForKey(): Promise<void> {
   return new Promise((resolve) => {
-    const stdin = process.stdin;
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.once("data", () => {
-      stdin.setRawMode(false);
-      stdin.pause();
-      resolve();
-    });
+    const cleanup = startTerminalSession(
+      () => {
+        cleanup();
+        resolve();
+      },
+      {
+        clearOnEnter: false,
+        clearOnExit: false,
+      }
+    );
   });
 }

@@ -1,5 +1,6 @@
 import chalk from "chalk";
-import { hideCursor, showCursor, createBuffer, C } from "./screen.js";
+import { createBuffer, C, keepLineVisible } from "./screen.js";
+import { startTerminalSession } from "./terminal.js";
 
 export interface PickerItem {
   label: string;
@@ -25,6 +26,7 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
     let selected = 0;
     let filter = "";
     let filtered = items;
+    let scrollTop = 0;
 
     function getFiltered(): PickerItem[] {
       if (!filter) return items;
@@ -38,6 +40,7 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
 
     function render(): void {
       const buf = createBuffer();
+      const viewRows = process.stdout.rows || 24;
       filtered = getFiltered();
       if (selected >= filtered.length) selected = Math.max(0, filtered.length - 1);
 
@@ -51,6 +54,7 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
         buf.push("");
       }
 
+      const itemStartLine = buf.length;
       if (filtered.length === 0) {
         buf.push(C.dim("  No items match your search."));
       } else {
@@ -77,16 +81,21 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
         )
       );
 
-      buf.flush();
+      const selectedLine =
+        filtered.length > 0 ? itemStartLine + selected : itemStartLine;
+      scrollTop = keepLineVisible(selectedLine, scrollTop, viewRows, buf.length, 2);
+      const maxScroll = Math.max(0, buf.length - viewRows);
+      const scrollFromBottom = maxScroll - scrollTop;
+
+      buf.flush(0, scrollFromBottom);
     }
 
-    hideCursor();
+    const cleanupSession = startTerminalSession(onData, {
+      onResize: render,
+      clearOnEnter: false,
+      clearOnExit: false,
+    });
     render();
-
-    const stdin = process.stdin;
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.setEncoding("utf8");
 
     function onData(key: string): void {
       if (key === "\x1B" || key === "\x1B\x1B") {
@@ -137,12 +146,7 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
     }
 
     function cleanup(): void {
-      stdin.removeListener("data", onData);
-      stdin.setRawMode(false);
-      stdin.pause();
-      showCursor();
+      cleanupSession();
     }
-
-    stdin.on("data", onData);
   });
 }
