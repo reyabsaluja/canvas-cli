@@ -22,6 +22,7 @@ import {
   createBuffer,
   CANVAS_ASCII,
   C,
+  MenuBox,
   getTermSize,
   stripAnsi,
 } from "./screen.js";
@@ -281,7 +282,7 @@ async function showHomeScreen(
       const artLines = CANVAS_ASCII.split("\n").filter((l) => l.trim()).length;
       const preFiltered = getFiltered();
       const itemLines = preFiltered.items.length + 4; // items + section headers + footer
-      const boxLines = 14; // info box height
+      const boxLines = 15; // info box height (incl. inner top pad row)
       const totalContent = artLines + boxLines + itemLines + 6;
       const topPad = Math.max(0, Math.floor((termRows - totalContent) / 2));
 
@@ -534,12 +535,12 @@ function renderInfoBox(
 
   if (boxInner < 40) {
     buf.push(
-      C.secondary("  school: ") +
-        C.dim(school) +
-        C.secondary("  ·  courses: ") +
-        C.dim(courseCount) +
-        C.secondary("  ·  model: ") +
-        C.dim(aiModelText)
+      MenuBox.secondary("  school: ") +
+        MenuBox.dim(school) +
+        MenuBox.secondary("  ·  courses: ") +
+        MenuBox.dim(courseCount) +
+        MenuBox.secondary("  ·  model: ") +
+        MenuBox.dim(aiModelText)
     );
     return;
   }
@@ -556,7 +557,26 @@ function renderInfoBox(
   const versionStart = Math.floor((topLineTotal - versionLabel.length) / 2);
   const topLeft = "─".repeat(Math.max(0, versionStart));
   const topRight = "─".repeat(Math.max(0, topLineTotal - versionStart - versionLabel.length));
-  buf.push(pad + C.dimmer("┌") + C.dimmer(topLeft) + C.dim(versionLabel) + C.dimmer(topRight) + C.dimmer("┐"));
+  buf.push(
+    pad +
+      MenuBox.edge("╭") +
+      MenuBox.edge(topLeft) +
+      MenuBox.version(versionLabel) +
+      MenuBox.edge(topRight) +
+      MenuBox.edge("╮")
+  );
+
+  // Subtle inner top padding (~one row ≈ line-height; avoids large blank bands)
+  buf.push(
+    pad +
+      MenuBox.edge("│") +
+      MenuBox.fill(" ") +
+      MenuBox.fill(" ".repeat(leftW)) +
+      MenuBox.edge("│") +
+      MenuBox.fill(" ") +
+      MenuBox.fill(" ".repeat(rightW)) +
+      MenuBox.edge("│")
+  );
 
   // --- Build rows ---
   type RowDef = {
@@ -607,16 +627,30 @@ function renderInfoBox(
     const leftPadded = row.left + " ".repeat(Math.max(0, leftW - row.left.length));
     const rightPadded = row.right + " ".repeat(Math.max(0, rightW - row.right.length));
 
-    const leftColored = colorizeCell(leftPadded, row.leftStyle);
-    const rightColored = colorizeCmdCell(rightPadded, row.rightStyle);
+    const leftColored = colorizeCell(leftPadded, row.leftStyle, true);
+    const rightColored = colorizeCmdCell(rightPadded, row.rightStyle, true);
 
     buf.push(
-      pad + C.dimmer("│") + " " + leftColored + C.dimmer("│") + " " + rightColored + C.dimmer("│")
+      pad +
+        MenuBox.edge("│") +
+        MenuBox.fill(" ") +
+        leftColored +
+        MenuBox.edge("│") +
+        MenuBox.fill(" ") +
+        rightColored +
+        MenuBox.edge("│")
     );
   }
 
-  // --- Bottom border ---
-  buf.push(pad + C.dimmer(`└${"─".repeat(leftW + 1)}┴${"─".repeat(rightW + 1)}┘`));
+  // --- Bottom border (rounded corners; ┴ matches column split) ---
+  buf.push(
+    pad +
+      MenuBox.edge("╰") +
+      MenuBox.edge("─".repeat(leftW + 1)) +
+      MenuBox.edge("┴") +
+      MenuBox.edge("─".repeat(rightW + 1)) +
+      MenuBox.edge("╯")
+  );
 }
 
 function formatCmdRow(cmd: [string, string] | undefined, maxW: number): string {
@@ -630,46 +664,73 @@ function truncPlain(text: string, maxLen: number): string {
   return text.slice(0, maxLen - 3) + "...";
 }
 
-function colorizeCell(paddedPlain: string, style: string): string {
+type InfoBoxPalette = {
+  secondary: (s: string) => string;
+  dim: (s: string) => string;
+  text: (s: string) => string;
+  bold: (s: string) => string;
+  primary: (s: string) => string;
+  primaryBold: (s: string) => string;
+  fill: (s: string) => string;
+};
+
+const infoPalDefault: InfoBoxPalette = {
+  secondary: (s) => C.secondary(s),
+  dim: (s) => C.dim(s),
+  text: (s) => C.text(s),
+  bold: (s) => C.bold(s),
+  primary: (s) => C.primary(s),
+  primaryBold: (s) => C.primaryBold(s),
+  fill: (s) => s,
+};
+
+const infoPalMenu: InfoBoxPalette = {
+  secondary: (s) => MenuBox.secondary(s),
+  dim: (s) => MenuBox.dim(s),
+  text: (s) => MenuBox.text(s),
+  bold: (s) => MenuBox.bold(s),
+  primary: (s) => MenuBox.primary(s),
+  primaryBold: (s) => MenuBox.primaryBold(s),
+  fill: (s) => MenuBox.fill(s),
+};
+
+function colorizeCell(paddedPlain: string, style: string, onMenuBox = false): string {
+  const P = onMenuBox ? infoPalMenu : infoPalDefault;
   switch (style) {
     case "kv": {
-      // Key is TEXT (bright), value after the gap is DIM
       const match = paddedPlain.match(/^(\S+)(\s{2,})(.*)/);
       if (match) {
-        return C.secondary(match[1]) + match[2] + C.dim(match[3]);
+        return P.secondary(match[1]) + P.fill(match[2]) + P.dim(match[3]);
       }
-      return C.text(paddedPlain);
+      return P.text(paddedPlain);
     }
     case "bold":
-      return C.bold(paddedPlain);
+      return P.bold(paddedPlain);
     case "dim":
-      return C.dim(paddedPlain);
+      return P.dim(paddedPlain);
     case "empty":
-      return paddedPlain;
+      return onMenuBox ? MenuBox.fill(paddedPlain) : paddedPlain;
     default:
-      return C.text(paddedPlain);
+      return P.text(paddedPlain);
   }
 }
 
-function colorizeCmdCell(paddedPlain: string, style: string): string {
+function colorizeCmdCell(paddedPlain: string, style: string, onMenuBox = false): string {
+  const P = onMenuBox ? infoPalMenu : infoPalDefault;
   switch (style) {
     case "header":
-      return C.primaryBold(paddedPlain);
+      return P.primaryBold(paddedPlain);
     case "cmd": {
-      // Command names match CANVAS_ASCII logo color (C.primary); descriptions use C.secondary
       const match = paddedPlain.match(/^(\/\S+)(\s+)(.*)/);
       if (match) {
-        const cmdPart = match[1];
-        const spacePart = match[2];
-        const descPart = match[3];
-        return C.primary(cmdPart) + spacePart + C.secondary(descPart);
+        return P.primary(match[1]) + P.fill(match[2]) + P.secondary(match[3]);
       }
-      return C.dim(paddedPlain);
+      return P.dim(paddedPlain);
     }
     case "empty":
-      return paddedPlain;
+      return onMenuBox ? MenuBox.fill(paddedPlain) : paddedPlain;
     default:
-      return C.dim(paddedPlain);
+      return P.dim(paddedPlain);
   }
 }
 
