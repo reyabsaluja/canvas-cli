@@ -6,6 +6,8 @@ export const C = {
   primaryBold: chalk.hex("#7aa2f7").bold,
   accent: chalk.hex("#7dcfff"),
   text: chalk.hex("#c0caf5"),
+  /** Home info: command descriptions, school/courses/model/workspaces labels */
+  secondary: chalk.hex("#536878"),
   dim: chalk.hex("#565f89"),
   dimmer: chalk.hex("#3b4261"),
   success: chalk.hex("#9ece6a"),

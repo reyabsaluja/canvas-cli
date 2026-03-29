@@ -533,7 +533,14 @@ function renderInfoBox(
   const boxInner = Math.min(termCols - 6, 74);
 
   if (boxInner < 40) {
-    buf.push(C.dim(`  school: ${school}  ·  courses: ${courseCount}  ·  model: ${aiModelText}`));
+    buf.push(
+      C.secondary("  school: ") +
+        C.dim(school) +
+        C.secondary("  ·  courses: ") +
+        C.dim(courseCount) +
+        C.secondary("  ·  model: ") +
+        C.dim(aiModelText)
+    );
     return;
   }
 
@@ -629,7 +636,7 @@ function colorizeCell(paddedPlain: string, style: string): string {
       // Key is TEXT (bright), value after the gap is DIM
       const match = paddedPlain.match(/^(\S+)(\s{2,})(.*)/);
       if (match) {
-        return C.text(match[1]) + match[2] + C.dim(match[3]);
+        return C.secondary(match[1]) + match[2] + C.dim(match[3]);
       }
       return C.text(paddedPlain);
     }
@@ -647,15 +654,15 @@ function colorizeCell(paddedPlain: string, style: string): string {
 function colorizeCmdCell(paddedPlain: string, style: string): string {
   switch (style) {
     case "header":
-      return C.primary(paddedPlain);
+      return C.primaryBold(paddedPlain);
     case "cmd": {
-      // Command names match CANVAS_ASCII logo color (C.primary); descriptions stay dim
+      // Command names match CANVAS_ASCII logo color (C.primary); descriptions use C.secondary
       const match = paddedPlain.match(/^(\/\S+)(\s+)(.*)/);
       if (match) {
         const cmdPart = match[1];
         const spacePart = match[2];
         const descPart = match[3];
-        return C.primary(cmdPart) + spacePart + C.dim(descPart);
+        return C.primary(cmdPart) + spacePart + C.secondary(descPart);
       }
       return C.dim(paddedPlain);
     }
