@@ -647,15 +647,15 @@ function colorizeCell(paddedPlain: string, style: string): string {
 function colorizeCmdCell(paddedPlain: string, style: string): string {
   switch (style) {
     case "header":
-      return C.bold(paddedPlain);
+      return C.primary(paddedPlain);
     case "cmd": {
-      // The command name (starts with /) gets accent, rest gets dim
+      // Command names match CANVAS_ASCII logo color (C.primary); descriptions stay dim
       const match = paddedPlain.match(/^(\/\S+)(\s+)(.*)/);
       if (match) {
         const cmdPart = match[1];
         const spacePart = match[2];
         const descPart = match[3];
-        return C.accent(cmdPart) + spacePart + C.dim(descPart);
+        return C.primary(cmdPart) + spacePart + C.dim(descPart);
       }
       return C.dim(paddedPlain);
     }
