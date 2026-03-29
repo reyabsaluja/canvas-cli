@@ -282,7 +282,7 @@ async function showHomeScreen(
       const artLines = CANVAS_ASCII.split("\n").filter((l) => l.trim()).length;
       const preFiltered = getFiltered();
       const itemLines = preFiltered.items.length + 4; // items + section headers + footer
-      const boxLines = 15; // info box height (incl. inner top pad row)
+      const boxLines = countInfoBoxLines(services, recent, termCols);
       const totalContent = artLines + boxLines + itemLines + 6;
       const topPad = Math.max(0, Math.floor((termRows - totalContent) / 2));
 
@@ -331,7 +331,7 @@ async function showHomeScreen(
         C.dimmer("  ↑↓ navigate  enter select  esc quit  type to filter")
       );
 
-      buf.flush();
+      buf.flush(0, Infinity);
     }
 
     render();
@@ -500,6 +500,16 @@ async function manageWorkspaces(
 // Strategy: build each row as PLAIN TEXT first, pad to exact width, then colorize.
 // This avoids ANSI escape code length miscalculations.
 
+function countInfoBoxLines(
+  services: AppServices,
+  recent: Array<{ name: string; course: string; slug: string; path: string }>,
+  termCols: number,
+): number {
+  let count = 0;
+  renderInfoBox(services, recent, termCols, { push: () => { count++; } });
+  return count;
+}
+
 function renderInfoBox(
   services: AppServices,
   recent: Array<{ name: string; course: string; slug: string; path: string }>,
@@ -527,11 +537,12 @@ function renderInfoBox(
     ["/evidence", "confirmed vs inferred"],
     ["/requirements", "deliverables and constraints"],
     ["/status", "workspace status"],
+    ["/refresh", "re-fetch from Canvas"],
     ["/help", "all available commands"],
   ];
 
-  // Box width — max 76, leave room for centering margins
-  const boxInner = Math.min(termCols - 6, 74);
+  // Box width — max 90, leave room for centering margins
+  const boxInner = Math.min(termCols - 6, 88);
 
   /** Center box row; margins use default terminal bg, grey stays inside the borders. */
   function pushMenuRow(core: string): void {
@@ -553,7 +564,7 @@ function renderInfoBox(
     return;
   }
 
-  const leftW = Math.floor(boxInner * 0.38);
+  const leftW = Math.floor(boxInner * 0.40);
   const rightW = boxInner - leftW - 1;
 
   // --- Top border with centered version label ---
@@ -598,35 +609,88 @@ function renderInfoBox(
   rows.push({ left: L(`courses    ${courseCount}`), right: "", leftStyle: "kv", rightStyle: "empty" });
   rows.push({ left: L(`model      ${aiModelText}`), right: formatCmdRow(commands[0], rightW), leftStyle: "kv", rightStyle: "cmd" });
   rows.push({ left: L(`workspaces ${workspaceCount}`), right: formatCmdRow(commands[1], rightW), leftStyle: "kv", rightStyle: "cmd" });
+
+  // Spacer
   rows.push({ left: "", right: formatCmdRow(commands[2], rightW), leftStyle: "empty", rightStyle: "cmd" });
 
-  // Recent section
-  if (recent.length > 0) {
+  // Courses section (left) alongside remaining commands (right)
+  let cmdIdx = 3;
+  if (displayCourses.length > 0) {
     rows.push({
-      left: "Recent Workspaces",
-      right: formatCmdRow(commands[3], rightW),
+      left: "Courses",
+      right: formatCmdRow(commands[cmdIdx], rightW),
       leftStyle: "sectionHeader",
       rightStyle: "cmd",
     });
-    for (let i = 0; i < Math.min(recent.length, 4); i++) {
-      const name = truncPlain(recent[i].name, leftW - 2);
-      const cmdIdx = 4 + i;
+    cmdIdx++;
+    for (let i = 0; i < Math.min(displayCourses.length, 5); i++) {
+      const cName = displayCourses[i].name || displayCourses[i].courseCode;
       rows.push({
-        left: name,
+        left: truncPlain(cName, leftW - 2),
         right: cmdIdx < commands.length ? formatCmdRow(commands[cmdIdx], rightW) : "",
         leftStyle: "desc",
         rightStyle: cmdIdx < commands.length ? "cmd" : "empty",
       });
+      cmdIdx++;
     }
-  } else {
-    rows.push({ left: "", right: formatCmdRow(commands[3], rightW), leftStyle: "empty", rightStyle: "cmd" });
-    rows.push({ left: "", right: formatCmdRow(commands[4], rightW), leftStyle: "empty", rightStyle: "cmd" });
-    rows.push({ left: "", right: formatCmdRow(commands[5], rightW), leftStyle: "empty", rightStyle: "cmd" });
-    rows.push({ left: "", right: formatCmdRow(commands[6], rightW), leftStyle: "empty", rightStyle: "cmd" });
   }
 
-  // Pad to minimum 12 rows for vertical height
-  while (rows.length < 12) {
+  // Fill any remaining commands
+  while (cmdIdx < commands.length) {
+    rows.push({ left: "", right: formatCmdRow(commands[cmdIdx], rightW), leftStyle: "empty", rightStyle: "cmd" });
+    cmdIdx++;
+  }
+
+  // Spacer
+  rows.push({ left: "", right: "", leftStyle: "empty", rightStyle: "empty" });
+
+  // Recent workspaces section
+  if (recent.length > 0) {
+    rows.push({
+      left: "Recent Workspaces",
+      right: "Shortcuts",
+      leftStyle: "sectionHeader",
+      rightStyle: "header",
+    });
+    const shortcuts: [string, string][] = [
+      ["enter", "select"],
+      ["esc", "quit"],
+      ["/", "type to filter"],
+    ];
+    for (let i = 0; i < Math.max(recent.length, shortcuts.length); i++) {
+      const wsName = i < recent.length ? truncPlain(recent[i].name, leftW - 2) : "";
+      const sc = i < shortcuts.length ? formatShortcutRow(shortcuts[i], rightW) : "";
+      rows.push({
+        left: wsName,
+        right: sc,
+        leftStyle: wsName ? "desc" : "empty",
+        rightStyle: sc ? "cmd" : "empty",
+      });
+    }
+  } else {
+    rows.push({
+      left: "",
+      right: "Shortcuts",
+      leftStyle: "empty",
+      rightStyle: "header",
+    });
+    const shortcuts: [string, string][] = [
+      ["enter", "select"],
+      ["esc", "quit"],
+      ["/", "type to filter"],
+    ];
+    for (const sc of shortcuts) {
+      rows.push({
+        left: "",
+        right: formatShortcutRow(sc, rightW),
+        leftStyle: "empty",
+        rightStyle: "cmd",
+      });
+    }
+  }
+
+  // Pad to minimum 16 rows for vertical height
+  while (rows.length < 16) {
     rows.push({ left: "", right: "", leftStyle: "empty", rightStyle: "empty" });
   }
 
@@ -662,6 +726,11 @@ function renderInfoBox(
 function formatCmdRow(cmd: [string, string] | undefined, maxW: number): string {
   if (!cmd) return "";
   const raw = `${cmd[0].padEnd(16)}${cmd[1]}`;
+  return truncPlain(raw, maxW);
+}
+
+function formatShortcutRow(sc: [string, string], maxW: number): string {
+  const raw = `${sc[0].padEnd(16)}${sc[1]}`;
   return truncPlain(raw, maxW);
 }
 
@@ -727,9 +796,13 @@ function colorizeCmdCell(paddedPlain: string, style: string, onMenuBox = false):
     case "header":
       return P.primaryBold(paddedPlain);
     case "cmd": {
-      const match = paddedPlain.match(/^(\/\S+)(\s+)(.*)/);
-      if (match) {
-        return P.primary(match[1]) + P.fill(match[2]) + P.secondary(match[3]);
+      const slashMatch = paddedPlain.match(/^(\/\S+)(\s+)(.*)/);
+      if (slashMatch) {
+        return P.primary(slashMatch[1]) + P.fill(slashMatch[2]) + P.secondary(slashMatch[3]);
+      }
+      const kvMatch = paddedPlain.match(/^(\S+)(\s{2,})(.*)/);
+      if (kvMatch) {
+        return P.primary(kvMatch[1]) + P.fill(kvMatch[2]) + P.secondary(kvMatch[3]);
       }
       return P.dim(paddedPlain);
     }
