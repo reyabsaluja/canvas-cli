@@ -533,8 +533,16 @@ function renderInfoBox(
   // Box width — max 76, leave room for centering margins
   const boxInner = Math.min(termCols - 6, 74);
 
+  /** Center box row; margins use default terminal bg, grey stays inside the borders. */
+  function pushMenuRow(core: string): void {
+    const w = stripAnsi(core).length;
+    const gap = Math.max(0, termCols - w);
+    const left = Math.floor(gap / 2);
+    buf.push(" ".repeat(left) + core);
+  }
+
   if (boxInner < 40) {
-    buf.push(
+    pushMenuRow(
       MenuBox.secondary("  school: ") +
         MenuBox.dim(school) +
         MenuBox.secondary("  ·  courses: ") +
@@ -547,9 +555,6 @@ function renderInfoBox(
 
   const leftW = Math.floor(boxInner * 0.38);
   const rightW = boxInner - leftW - 1;
-  const totalBorderW = leftW + 1 + rightW + 4; // includes │ separators and spaces
-  const margin = Math.max(0, Math.floor((termCols - totalBorderW) / 2));
-  const pad = " ".repeat(margin);
 
   // --- Top border with centered version label ---
   const versionLabel = " v0.1.0 ";
@@ -557,9 +562,8 @@ function renderInfoBox(
   const versionStart = Math.floor((topLineTotal - versionLabel.length) / 2);
   const topLeft = "─".repeat(Math.max(0, versionStart));
   const topRight = "─".repeat(Math.max(0, topLineTotal - versionStart - versionLabel.length));
-  buf.push(
-    pad +
-      MenuBox.edge("╭") +
+  pushMenuRow(
+    MenuBox.edge("╭") +
       MenuBox.edge(topLeft) +
       MenuBox.version(versionLabel) +
       MenuBox.edge(topRight) +
@@ -567,9 +571,8 @@ function renderInfoBox(
   );
 
   // Subtle inner top padding (~one row ≈ line-height; avoids large blank bands)
-  buf.push(
-    pad +
-      MenuBox.edge("│") +
+  pushMenuRow(
+    MenuBox.edge("│") +
       MenuBox.fill(" ") +
       MenuBox.fill(" ".repeat(leftW)) +
       MenuBox.edge("│") +
@@ -630,9 +633,8 @@ function renderInfoBox(
     const leftColored = colorizeCell(leftPadded, row.leftStyle, true);
     const rightColored = colorizeCmdCell(rightPadded, row.rightStyle, true);
 
-    buf.push(
-      pad +
-        MenuBox.edge("│") +
+    pushMenuRow(
+      MenuBox.edge("│") +
         MenuBox.fill(" ") +
         leftColored +
         MenuBox.edge("│") +
@@ -643,9 +645,8 @@ function renderInfoBox(
   }
 
   // --- Bottom border (rounded corners; ┴ matches column split) ---
-  buf.push(
-    pad +
-      MenuBox.edge("╰") +
+  pushMenuRow(
+    MenuBox.edge("╰") +
       MenuBox.edge("─".repeat(leftW + 1)) +
       MenuBox.edge("┴") +
       MenuBox.edge("─".repeat(rightW + 1)) +
