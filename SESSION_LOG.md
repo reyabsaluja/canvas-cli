@@ -187,7 +187,7 @@
 - Each tool call renders as a colored background block
 - Header: bold yellow action + green target (e.g., `read lab4.pdf`)
 - Content: first 8 lines of tool result in white text
-- Overflow: `... (N more lines, ctrl+o to expand)` with ctrl+o in darker grey
+- Overflow: `... (N more lines, ctrl+o to expand)` with ctrl+o in darker gray
 - Ctrl+O toggles "detailed transcript" view showing all content
 
 ### 4.5 Typing Performance
