@@ -1,7 +1,7 @@
 import { CanvasClient } from "../canvas/client.js";
 import { loadConfig } from "../config/env.js";
 import { normalizeCourse } from "../domain/normalize.js";
-import { renderCourseList } from "../format/renderCourses.js";
+import { renderCourseList } from "../format/render-courses.js";
 import { handleError } from "../errors.js";
 
 interface CoursesOptions {
