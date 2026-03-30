@@ -1,5 +1,14 @@
 import chalk from "chalk";
-import { hideCursor, showCursor, createBuffer, C, getTermSize } from "./screen.js";
+import {
+  clearScreen,
+  createBuffer,
+  C,
+  enterAlternateScreen,
+  getTermSize,
+  hideCursor,
+  leaveAlternateScreen,
+  showCursor,
+} from "./screen.js";
 import { USER_ABORT_EXIT_CODE } from "./chat-shell-exit.js";
 
 export interface PickerItem {
@@ -107,6 +116,8 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
       buf.flush();
     }
 
+    enterAlternateScreen();
+    clearScreen();
     hideCursor();
     render();
 
@@ -165,9 +176,21 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
 
     function cleanup(): void {
       stdin.removeListener("data", onData);
-      stdin.setRawMode(false);
-      stdin.pause();
-      showCursor();
+      try {
+        stdin.setRawMode(false);
+      } catch {}
+      try {
+        stdin.pause();
+      } catch {}
+      try {
+        leaveAlternateScreen();
+      } catch {}
+      try {
+        clearScreen();
+      } catch {}
+      try {
+        showCursor();
+      } catch {}
     }
 
     stdin.on("data", onData);
