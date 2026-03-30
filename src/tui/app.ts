@@ -279,6 +279,64 @@ async function showHomeScreen(
       return { items: cleaned, selectableIndices: selectable };
     }
 
+    function buildHomeListLines(
+      renderedItems: typeof items,
+      currentSelectableIdx: number,
+      termCols: number,
+    ): string[] {
+      const lines: string[] = [];
+      const contentWidth = Math.max(24, termCols - 8);
+      const detailWidth = Math.max(20, contentWidth - 4);
+
+      if (filter) {
+        lines.push(C.dim("  filter ") + C.text(filter) + chalk.white("█"));
+        lines.push("");
+      }
+
+      let firstSection = true;
+      for (let i = 0; i < renderedItems.length; i++) {
+        const item = renderedItems[i];
+
+        if (item.isSection) {
+          if (!firstSection) lines.push("");
+          const divider = C.dimmer("─".repeat(Math.max(8, Math.min(18, contentWidth - item.label.length - 4))));
+          lines.push(`  ${C.primaryBold(item.label)} ${divider}`);
+          firstSection = false;
+          continue;
+        }
+
+        const isSelected = i === currentSelectableIdx;
+        const pointer = isSelected ? C.primary("❯") : C.dimmer("•");
+        const labelLines = wrapWords(item.label, contentWidth - 4);
+        const labelColor = item.dimmed
+          ? isSelected ? C.bold : C.dim
+          : isSelected ? C.bold : C.text;
+
+        lines.push(`  ${pointer} ${labelColor(labelLines[0])}`);
+        for (let j = 1; j < labelLines.length; j++) {
+          lines.push(`    ${labelColor(labelLines[j])}`);
+        }
+
+        if (item.sublabel) {
+          const subLines = wrapWords(item.sublabel, detailWidth);
+          for (const subLine of subLines) {
+            lines.push(`    ${isSelected ? C.muted(subLine) : C.dim(subLine)}`);
+          }
+        }
+      }
+
+      lines.push("");
+      lines.push(
+        "  " +
+          C.primary("↑↓") + C.dimmer(" move   ") +
+          C.primary("enter") + C.dimmer(" open   ") +
+          C.primary("esc") + C.dimmer(" quit   ") +
+          C.primary("type") + C.dimmer(" to filter")
+      );
+
+      return lines;
+    }
+
     function render(): void {
       const buf = createBuffer();
       hideCursor();
@@ -287,7 +345,13 @@ async function showHomeScreen(
       // Estimate content height to vertically center
       const artLines = CANVAS_ASCII.split("\n").filter((l) => l.trim()).length;
       const preFiltered = getFiltered();
-      const itemLines = preFiltered.items.length + 4; // items + section headers + footer
+      const preCurrentSelectableIdx =
+        preFiltered.selectableIndices[selectedIdx] ?? -1;
+      const itemLines = buildHomeListLines(
+        preFiltered.items,
+        preCurrentSelectableIdx,
+        termCols
+      ).length;
       const boxLines = countInfoBoxLines(services, recent, termCols);
       const totalContent =
         artLines + boxLines + itemLines + 6 + HOME_TOP_MARGIN_ROWS;
@@ -304,40 +368,18 @@ async function showHomeScreen(
       renderInfoBox(services, recent, termCols, buf);
       buf.push("");
 
-      // Search bar if filtering
-      if (filter) {
-        buf.push(C.dim("  search: ") + C.text(filter) + chalk.white("█"));
-        buf.push("");
-      }
-
       // Items list
       const filtered = getFiltered();
       const currentSelectableIdx =
         filtered.selectableIndices[selectedIdx] ?? -1;
-
-      for (let i = 0; i < filtered.items.length; i++) {
-        const item = filtered.items[i];
-
-        if (item.isSection) {
-          buf.push("");
-          buf.push(C.primaryBold(`  ${item.label}`));
-          continue;
-        }
-
-        const isSelected = i === currentSelectableIdx;
-        const pointer = isSelected ? C.primary("❯ ") : "  ";
-        const label = isSelected
-          ? C.bold(item.label)
-          : C.text(item.label);
-        const sub = item.sublabel ? C.dim(` — ${item.sublabel}`) : "";
-        buf.push(`  ${pointer}${label}${sub}`);
-      }
-
-      // Footer
-      buf.push("");
-      buf.push(
-        C.dimmer("  ↑↓ navigate  enter select  esc quit  type to filter")
+      const listLines = buildHomeListLines(
+        filtered.items,
+        currentSelectableIdx,
+        termCols
       );
+      for (const line of listLines) {
+        buf.push(line);
+      }
 
       const totalLines = buf.length;
       const { rows: viewRows } = getTermSize();
