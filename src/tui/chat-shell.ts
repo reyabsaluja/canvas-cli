@@ -21,6 +21,7 @@ import {
 } from "./chat-shell-render.js";
 import { ChatShellPersistence } from "./chat-shell-persistence.js";
 import { enterChatShell, leaveChatShell } from "./chat-shell-terminal.js";
+import { createSerialTaskQueue } from "./serial-task-queue.js";
 
 interface ChatShellApi<TExit> {
   addMessage: (message: ChatMessage) => Promise<void>;
@@ -243,6 +244,10 @@ export async function runChatShell<TExit>(
   const stdin = enterChatShell(render);
 
   return new Promise((resolve) => {
+    const keyQueue = createSerialTaskQueue();
+    let shellClosed = false;
+    let closingPromise: Promise<string | null> | null = null;
+
     const api: ChatShellApi<TExit> = {
       addMessage: async (message) => {
         markTranscriptDirty();
@@ -257,6 +262,16 @@ export async function runChatShell<TExit>(
       session,
       runtime: options.runtime,
     };
+
+    async function closeShellOnce(): Promise<string | null> {
+      if (closingPromise) {
+        return closingPromise;
+      }
+      shellClosed = true;
+      keyQueue.close();
+      closingPromise = cleanup(stdin, onData);
+      return closingPromise;
+    }
 
     function scrollPageStep(): number {
       const { rows } = getTermSize();
@@ -415,10 +430,11 @@ export async function runChatShell<TExit>(
     }
 
     async function handleKey(key: string): Promise<void> {
+      if (shellClosed) return;
       if (isProcessing && !keyOkWhileProcessing(key)) return;
 
       if (key === "\x03") {
-        const persistError = await cleanup(stdin, onData);
+        const persistError = await closeShellOnce();
         if (persistError) {
           console.error(`Failed to save chat session: ${persistError}`);
         }
@@ -544,7 +560,7 @@ export async function runChatShell<TExit>(
           try {
             const exit = await options.onCommand(commandName, rest.join(" "), api);
             if (exit !== undefined) {
-              const persistError = await cleanup(stdin, onData);
+              const persistError = await closeShellOnce();
               if (persistError) {
                 console.error(`Failed to save chat session: ${persistError}`);
               }
@@ -655,6 +671,7 @@ export async function runChatShell<TExit>(
 
     let stdinEscHold = "";
     function onData(data: string): void {
+      if (shellClosed) return;
       let input = stdinEscHold + data;
       stdinEscHold = "";
 
@@ -662,13 +679,15 @@ export async function runChatShell<TExit>(
         const escIdx = input.indexOf("\x1b");
         if (escIdx < 0) {
           for (let index = 0; index < input.length; index++) {
-            void handleKey(input[index]!);
+            const key = input[index]!;
+            keyQueue.enqueue(() => handleKey(key));
           }
           return;
         }
 
         for (let index = 0; index < escIdx; index++) {
-          void handleKey(input[index]!);
+          const key = input[index]!;
+          keyQueue.enqueue(() => handleKey(key));
         }
         input = input.slice(escIdx);
 
@@ -681,19 +700,23 @@ export async function runChatShell<TExit>(
           const mouseMatch = input.match(/^\x1b\[<(\d+);\d+;\d+[Mm]/);
           if (mouseMatch) {
             const button = parseInt(mouseMatch[1]!, 10);
-            if (button === 64) {
-              chatScrollOffset += 3;
-            } else if (button === 65) {
-              chatScrollOffset = Math.max(0, chatScrollOffset - 3);
-            }
-            render();
+            keyQueue.enqueue(async () => {
+              if (shellClosed) return;
+              if (button === 64) {
+                chatScrollOffset += 3;
+              } else if (button === 65) {
+                chatScrollOffset = Math.max(0, chatScrollOffset - 3);
+              }
+              render();
+            });
             input = input.slice(mouseMatch[0].length);
             continue;
           }
 
           const match = input.match(/^\x1b\[[\d;]*[~A-Za-z]/);
           if (match) {
-            void handleKey(match[0]);
+            const key = match[0];
+            keyQueue.enqueue(() => handleKey(key));
             input = input.slice(match[0].length);
             continue;
           }
@@ -702,12 +725,14 @@ export async function runChatShell<TExit>(
         }
 
         if (input[1] === "O" && input.length >= 3) {
-          void handleKey(input.slice(0, 3));
+          const key = input.slice(0, 3);
+          keyQueue.enqueue(() => handleKey(key));
           input = input.slice(3);
           continue;
         }
 
-        void handleKey(input.slice(0, 2));
+        const key = input.slice(0, 2);
+        keyQueue.enqueue(() => handleKey(key));
         input = input.slice(2);
       }
     }
