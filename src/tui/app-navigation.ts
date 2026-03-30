@@ -13,7 +13,7 @@ import {
   type AppServices,
 } from "./services.js";
 import { listChatSessions } from "./chat-sessions.js";
-import type { AppScope } from "./chat-state.js";
+import type { AppScope, ChatSessionSummary } from "./chat-state.js";
 import type { Course, Assignment } from "../domain/models.js";
 import { clearScreen, C } from "./screen.js";
 import { loadWorkspace } from "../ask/load-workspace.js";
@@ -112,14 +112,7 @@ export async function pickRecentScope(
     const selected = await showPicker({
       title: "Recent sessions",
       subtitle: `${sessions.length} recent items`,
-      items: sessions.slice(0, 20).map((session) => ({
-        label: session.title,
-        sublabel:
-          session.scope.type === "course"
-            ? `Course · ${session.metadata.courseName ?? ""}`
-            : `Workspace · ${session.metadata.courseName ?? ""}`,
-        value: session.id,
-      })),
+      items: buildRecentSessionPickerItems(sessions),
       filterable: true,
       backLabel: "back",
     });
@@ -161,6 +154,19 @@ export async function pickRecentScope(
   } catch {
     return null;
   }
+}
+
+export function buildRecentSessionPickerItems(
+  sessions: ChatSessionSummary[]
+): Array<{ label: string; sublabel: string; value: string }> {
+  return sessions.map((session) => ({
+    label: session.title,
+    sublabel:
+      session.scope.type === "course"
+        ? `Course · ${session.metadata.courseName ?? ""}`
+        : `Workspace · ${session.metadata.courseName ?? ""}`,
+    value: session.id,
+  }));
 }
 
 export async function resolveGlobalOpen(

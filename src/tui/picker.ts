@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { hideCursor, showCursor, createBuffer, C } from "./screen.js";
+import { hideCursor, showCursor, createBuffer, C, getTermSize } from "./screen.js";
 
 export interface PickerItem {
   label: string;
@@ -25,6 +25,7 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
     let selected = 0;
     let filter = "";
     let filtered = items;
+    let windowStart = 0;
 
     function getFiltered(): PickerItem[] {
       if (!filter) return items;
@@ -40,6 +41,21 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
       const buf = createBuffer();
       filtered = getFiltered();
       if (selected >= filtered.length) selected = Math.max(0, filtered.length - 1);
+      if (selected < windowStart) {
+        windowStart = selected;
+      }
+
+      const { rows } = getTermSize();
+      const reservedRows =
+        5 + (subtitle ? 1 : 0) + (filterable && filter ? 2 : 0) + 2;
+      const visibleCount = Math.max(4, rows - reservedRows);
+      if (selected >= windowStart + visibleCount) {
+        windowStart = selected - visibleCount + 1;
+      }
+      const maxWindowStart = Math.max(0, filtered.length - visibleCount);
+      windowStart = Math.max(0, Math.min(windowStart, maxWindowStart));
+      const windowEnd = Math.min(filtered.length, windowStart + visibleCount);
+      const visibleItems = filtered.slice(windowStart, windowEnd);
 
       buf.push("");
       buf.push(C.primaryBold(`  ${title}`));
@@ -54,9 +70,14 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
       if (filtered.length === 0) {
         buf.push(C.dim("  No items match your search."));
       } else {
-        for (let i = 0; i < filtered.length; i++) {
-          const item = filtered[i];
-          const isSelected = i === selected;
+        if (windowStart > 0) {
+          buf.push(C.dim(`  ↑ ${windowStart} earlier item${windowStart === 1 ? "" : "s"}`));
+        }
+
+        for (let i = 0; i < visibleItems.length; i++) {
+          const item = visibleItems[i];
+          const absoluteIndex = windowStart + i;
+          const isSelected = absoluteIndex === selected;
           const pointer = isSelected ? C.primary("❯ ") : "  ";
           const label = item.dimmed
             ? C.dim(item.label)
@@ -67,6 +88,11 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
             ? C.dim(` — ${item.sublabel}`)
             : "";
           buf.push(`  ${pointer}${label}${sub}`);
+        }
+
+        const remaining = filtered.length - windowEnd;
+        if (remaining > 0) {
+          buf.push(C.dim(`  ↓ ${remaining} more item${remaining === 1 ? "" : "s"}`));
         }
       }
 

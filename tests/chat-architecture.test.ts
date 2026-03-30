@@ -28,6 +28,7 @@ import {
   refreshWorkspace,
 } from "../src/tui/services.js";
 import { createShellContext } from "../src/tui/app-runtime.js";
+import { buildRecentSessionPickerItems } from "../src/tui/app-navigation.js";
 import { makeCourseSlug } from "../src/ingest/slug.js";
 import type { Course } from "../src/domain/models.js";
 import { loadWorkspaceSessionMeta } from "../src/workspace/session.js";
@@ -200,6 +201,32 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
       assert.equal(listed[0]?.title, "Lab 4");
       assert.equal(await loadChatSession(session.id), null);
     });
+  });
+
+  await t.test("recent session picker items include the full filtered session set", async () => {
+    const sessions = Array.from({ length: 25 }, (_, index) => ({
+      version: 1 as const,
+      id: `workspace-${index + 1}`,
+      title: `Workspace ${index + 1}`,
+      scope: {
+        type: "workspace" as const,
+        workspacePath: `/tmp/ws-${index + 1}`,
+        courseId: 17,
+        assignmentId: index + 1,
+      },
+      createdAt: "2026-03-29T10:00:00.000Z",
+      updatedAt: "2026-03-29T10:00:00.000Z",
+      lastOpenedAt: "2026-03-29T10:00:00.000Z",
+      metadata: {
+        courseName: "ECE243",
+      },
+    }));
+
+    const items = buildRecentSessionPickerItems(sessions);
+
+    assert.equal(items.length, 25);
+    assert.equal(items[24]?.value, "workspace-25");
+    assert.match(items[24]?.label ?? "", /Workspace 25/);
   });
 
   await t.test("workspace base and work flows share one writer and metadata contract", async () => {
