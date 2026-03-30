@@ -35,8 +35,13 @@ export interface ContentChunk {
 export interface LoadedWorkspace {
   path: string;
   sessionSlug: string;
+  assignmentId: number | null;
   assignmentName: string;
+  courseId: number | null;
   courseName: string;
+  courseCode: string | null;
+  preparedAt: string | null;
+  workspaceState: string | null;
   assignmentMd: string | null;
   planMd: string | null;
   notesMd: string | null;

@@ -76,6 +76,9 @@ export async function createWorkspace(
       courseCode: course.courseCode,
       workspacePath: wsPath,
       sessionSlug: slug,
+      preparedAt: existing.preparedAt ?? now,
+      workspaceState: existing.workspaceState ?? "ready",
+      lastError: existing.lastError ?? null,
     };
   } else {
     session = {
@@ -89,6 +92,9 @@ export async function createWorkspace(
       courseId: course.id,
       courseName: course.name,
       courseCode: course.courseCode,
+      preparedAt: now,
+      workspaceState: "ready",
+      lastError: null,
     };
   }
 

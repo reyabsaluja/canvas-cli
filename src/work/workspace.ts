@@ -48,6 +48,9 @@ export async function createWorkWorkspace(
       courseCode: course.courseCode,
       workspacePath: wsPath,
       sessionSlug: slug,
+      preparedAt: now,
+      workspaceState: "ready",
+      lastError: null,
     };
   } else {
     session = {
@@ -61,6 +64,9 @@ export async function createWorkWorkspace(
       courseId: course.id,
       courseName: course.name,
       courseCode: course.courseCode,
+      preparedAt: now,
+      workspaceState: "ready",
+      lastError: null,
     };
   }
   await writeAtomic(sessionJsonPath, JSON.stringify(session, null, 2) + "\n");

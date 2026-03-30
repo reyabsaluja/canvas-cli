@@ -63,8 +63,14 @@ export async function loadWorkspace(wsPath: string): Promise<LoadedWorkspace> {
   return {
     path: wsPath,
     sessionSlug: (session.sessionSlug as string) ?? path.basename(wsPath),
+    assignmentId:
+      typeof session.assignmentId === "number" ? session.assignmentId : null,
     assignmentName: (session.assignmentName as string) ?? "Unknown",
+    courseId: typeof session.courseId === "number" ? session.courseId : null,
     courseName: (session.courseName as string) ?? "Unknown",
+    courseCode: (session.courseCode as string) ?? null,
+    preparedAt: (session.preparedAt as string) ?? null,
+    workspaceState: (session.workspaceState as string) ?? null,
     assignmentMd,
     planMd,
     notesMd,

@@ -1,37 +1,84 @@
 import { existsSync } from "node:fs";
 import { cpus, totalmem } from "node:os";
-import chalk from "chalk";
-import { showPicker, type PickerItem } from "./picker.js";
-import { runWorkspaceUI } from "./workspace-ui.js";
+import fs from "node:fs/promises";
+import path from "node:path";
 import {
-  initServices,
-  fetchAssignments,
-  openWorkspace,
-  getRecentWorkspaces,
-  getDisplayCourses,
-  formatDueCompact,
-  type AppServices,
-} from "./services.js";
-import { loadCourseConfig, type CourseConfig } from "./course-config.js";
-import { loadCourseCache } from "../enrich/cache-loader.js";
-import { refreshWorkspace } from "./services.js";
-import { runCourseSetup, runCourseManagement } from "./course-setup.js";
-import { loadWorkspace } from "../ask/load-workspace.js";
-import {
-  clearScreen,
-  showCursor,
   hideCursor,
-  createBuffer,
+  showCursor,
+  clearScreen,
   CANVAS_ASCII,
   C,
   MenuBox,
   getTermSize,
   stripAnsi,
-  enableMouseTracking,
-  disableMouseTracking,
 } from "./screen.js";
-import type { Course } from "../domain/models.js";
+import { showPicker } from "./picker.js";
+import {
+  initServices,
+  fetchAssignments,
+  openWorkspace,
+  refreshWorkspace,
+  getRecentWorkspaces,
+  getDisplayCourses,
+  formatDueCompact,
+  createChatContext,
+  askWorkspaceQuestion,
+  hydrateConversationHistory,
+  getCourseById,
+  fetchUpcomingAssignments,
+  type AppServices,
+} from "./services.js";
+import { loadCourseConfig } from "./course-config.js";
+import { runCourseSetup } from "./course-setup.js";
+import { loadCourseCache } from "../enrich/cache-loader.js";
+import { loadWorkspace } from "../ask/load-workspace.js";
+import { updateWorkspaceSessionMeta } from "../workspace/session.js";
+import { runChatShell } from "./chat-shell.js";
+import {
+  loadOrCreateChatSession,
+  listChatSessions,
+  saveChatSession,
+} from "./chat-sessions.js";
+import type {
+  AppScope,
+  ChatMessage,
+  ChatSession,
+  CommandDefinition,
+  ScopeRuntime,
+} from "./chat-state.js";
+import { answerCourseQuestion, answerGlobalQuestion } from "./chat-assistant.js";
+import { extractFileText } from "../extract/extract-text.js";
+import type { Course, Assignment } from "../domain/models.js";
 import type { AssignmentWorkup } from "../work/types.js";
+
+type ShellResult =
+  | { type: "quit" }
+  | { type: "scope"; scope: AppScope }
+  | { type: "course-picker" }
+  | { type: "recent-picker" }
+  | { type: "assignment-picker"; courseId: number }
+  | { type: "open-assignment"; courseId: number; assignmentName: string }
+  | { type: "workspace-refresh"; courseId: number; assignmentName: string };
+
+const COMMANDS: CommandDefinition[] = [
+  { name: "/courses", description: "Open the course picker", scopes: ["global"] },
+  { name: "/recent", description: "Reopen a recent course or workspace", scopes: ["global"] },
+  { name: "/open", description: "Open a course, assignment, or recent item", scopes: ["global", "course"] },
+  { name: "/assignments", description: "Open the assignment picker", scopes: ["course"] },
+  { name: "/files", description: "List course files and cached downloads", scopes: ["course"] },
+  { name: "/modules", description: "List course modules", scopes: ["course"] },
+  { name: "/overview", description: "Show assignment overview", scopes: ["workspace"] },
+  { name: "/requirements", description: "Show deliverables and constraints", scopes: ["workspace"], aliases: ["/reqs"] },
+  { name: "/plan", description: "Show the action plan", scopes: ["workspace"] },
+  { name: "/resources", description: "Show key resources", scopes: ["workspace"] },
+  { name: "/evidence", description: "Show confirmed vs inferred sources", scopes: ["workspace"] },
+  { name: "/status", description: "Show workspace status", scopes: ["workspace"] },
+  { name: "/refresh", description: "Refresh the current workspace", scopes: ["workspace"] },
+  { name: "/back", description: "Go up one scope", scopes: ["course", "workspace"] },
+  { name: "/home", description: "Return to the global home session", scopes: ["global", "course", "workspace"] },
+  { name: "/help", description: "Show available commands", scopes: ["global", "course", "workspace"] },
+  { name: "/quit", description: "Exit canvas-cli", scopes: ["global", "course", "workspace"], aliases: ["/exit", "/q"] },
+];
 
 /**
  * Main interactive TUI application.
@@ -43,7 +90,6 @@ export async function launchApp(): Promise<void> {
     process.exit(0);
   });
 
-  // Show splash while loading
   clearScreen();
   hideCursor();
   renderSplashLoading();
@@ -51,12 +97,12 @@ export async function launchApp(): Promise<void> {
   let services: AppServices;
   try {
     services = await initServices();
-  } catch (err) {
+  } catch (error) {
     showCursor();
     clearScreen();
     console.error(
       C.error(
-        `\n  Failed to connect: ${err instanceof Error ? err.message : "unknown error"}`
+        `\n  Failed to connect: ${error instanceof Error ? error.message : "unknown error"}`
       )
     );
     console.error(
@@ -65,97 +111,1004 @@ export async function launchApp(): Promise<void> {
     process.exit(1);
   }
 
-  // Load course config — run setup if no config or empty config
   let courseConfig = await loadCourseConfig();
-
   if (!courseConfig || courseConfig.courses.length === 0) {
     clearScreen();
     courseConfig = await runCourseSetup(services.allCourses);
   }
   services.courseConfig = courseConfig;
 
-  // Pre-fetch recent workspaces
-  let recent = await getRecentWorkspaces();
-
-  let state: "home" | "assignments" | "workspace" = "home";
-  let selectedCourse: Course | null = null;
+  let scope: AppScope = { type: "global" };
 
   while (true) {
-    switch (state) {
-      case "home": {
-        const action = await showHomeScreen(services, recent);
-        if (action === null) {
-          showCursor();
-          clearScreen();
-          return;
-        }
-        if (action === "all_workspaces") {
-          const wsAction = await showAllWorkspaces(recent, services);
-          if (wsAction?.startsWith("workspace:")) {
-            const wsPath = wsAction.slice("workspace:".length);
-            const result = await enterExistingWorkspace(wsPath, services);
-            if (result === "courses") state = "home";
-            else if (result === "back") state = "home";
-            else { showCursor(); clearScreen(); return; }
-          }
-          recent = await getRecentWorkspaces(); // refresh in case of deletes
-        } else if (action === "manage_courses") {
-          clearScreen();
-          const updated = await runCourseManagement(
-            services.courseConfig ?? { courses: [] },
-            services.allCourses
-          );
-          services.courseConfig = updated;
-          recent = await getRecentWorkspaces();
-        } else if (action.startsWith("course:")) {
-          const courseId = action.slice("course:".length);
-          const displayCourses = getDisplayCourses(services);
-          selectedCourse =
-            displayCourses.find((c) => String(c.id) === courseId) ?? null;
-          if (selectedCourse) state = "assignments";
-        } else if (action.startsWith("workspace:")) {
-          const wsPath = action.slice("workspace:".length);
-          const result = await enterExistingWorkspace(wsPath, services);
-          if (result === "courses") state = "home";
-          else if (result === "back") state = "home";
-          else {
-            showCursor();
-            clearScreen();
-            return;
-          }
-        }
-        break;
-      }
+    const shellContext = await createShellContext(services, scope);
+    const result = await runChatShell<ShellResult>({
+      session: shellContext.session,
+      runtime: shellContext.runtime,
+      commands: COMMANDS,
+      modelLabel: services.aiConfig?.model ?? "no model",
+      bannerRenderer: shellContext.bannerRenderer,
+      extraHelpCommands: shellContext.extraHelpCommands,
+      pinOptions: shellContext.pinOptions,
+      resolvePinContent: shellContext.resolvePinContent,
+      onAsk: shellContext.onAsk,
+      onCommand: async (command, args, api) => {
+        return handleCommand(command, args, api, services);
+      },
+    });
 
-      case "assignments": {
-        if (!selectedCourse) {
-          state = "home";
-          break;
-        }
-        const result = await showAssignmentPicker(services, selectedCourse);
-        if (result === null) {
-          state = "home";
-          break;
-        }
-        const wsResult = await enterNewWorkspace(
-          services,
-          selectedCourse,
-          result
-        );
-        if (wsResult === "back") state = "assignments";
-        else if (wsResult === "courses") state = "home";
-        else {
-          showCursor();
-          clearScreen();
-          return;
-        }
-        break;
-      }
+    if (!result || result.type === "quit") {
+      showCursor();
+      clearScreen();
+      return;
+    }
+
+    if (result.type === "scope") {
+      scope = result.scope;
+      continue;
+    }
+
+    if (result.type === "course-picker") {
+      const nextCourse = await pickCourse(services);
+      scope = nextCourse ? { type: "course", courseId: nextCourse.id } : shellContext.runtime.scope;
+      continue;
+    }
+
+    if (result.type === "recent-picker") {
+      const nextScope = await pickRecentScope(services);
+      scope = nextScope ?? shellContext.runtime.scope;
+      continue;
+    }
+
+    if (result.type === "assignment-picker") {
+      const nextScope = await pickAssignmentScope(services, result.courseId);
+      scope = nextScope ?? shellContext.runtime.scope;
+      continue;
+    }
+
+    if (result.type === "open-assignment") {
+      const nextScope = await openAssignmentScope(
+        services,
+        result.courseId,
+        result.assignmentName
+      );
+      scope = nextScope ?? shellContext.runtime.scope;
+      continue;
+    }
+
+    if (result.type === "workspace-refresh") {
+      scope = await refreshWorkspaceScope(
+        services,
+        result.courseId,
+        result.assignmentName,
+        shellContext.runtime.scope
+      );
     }
   }
 }
 
-// --- Splash Loading (shown briefly while connecting) ---
+async function createShellContext(
+  services: AppServices,
+  scope: AppScope
+): Promise<{
+  session: ChatSession;
+  runtime: ScopeRuntime;
+  bannerRenderer?: (buf: { push(line?: string): void }) => void;
+  extraHelpCommands?: Array<{ cmd: string; desc: string }>;
+  pinOptions?: Array<{ name: string; label: string }>;
+  resolvePinContent?: (pin: { name: string; label: string }) => Promise<string | null>;
+  onAsk: Parameters<typeof runChatShell<ShellResult>>[0]["onAsk"];
+}> {
+  if (scope.type === "global") {
+    const recent = await getRecentWorkspaces();
+    const upcoming = await fetchUpcomingAssignments(services, 10);
+    const session = await loadOrCreateChatSession(scope, {
+      title: "Global",
+      metadata: {},
+      initialMessages: buildGlobalIntroMessages(recent, upcoming),
+    });
+
+    return {
+      session,
+      runtime: {
+        scope,
+        title: "Global",
+        scopeLabel: "Global",
+        placeholder: "Ask about your courses, or use /courses and /recent",
+      },
+      bannerRenderer: (buf) => renderGlobalBanner(buf, services, recent, upcoming),
+      onAsk: async (input, callbacks) => {
+        if (!services.aiConfig) {
+          return {
+            content:
+              "AI is unavailable because no provider key is configured. You can still use /courses, /recent, and /open.",
+          };
+        }
+        const answer = await answerGlobalQuestion({
+          aiConfig: services.aiConfig,
+          services,
+          question: input,
+          history: session.messages,
+          recent,
+          upcomingAssignments: upcoming,
+          onTextDelta: callbacks.onTextDelta,
+        });
+        return { content: answer };
+      },
+    };
+  }
+
+  if (scope.type === "course") {
+    const course = getCourseById(services, scope.courseId);
+    if (!course) {
+      const session = await loadOrCreateChatSession({ type: "global" }, {
+        title: "Global",
+      });
+      return {
+        session,
+        runtime: {
+          scope: { type: "global" },
+          title: "Global",
+          scopeLabel: "Global",
+        },
+        bannerRenderer: (buf) => renderGlobalBanner(buf, services, [], []),
+        onAsk: async () => ({
+          content: "That course is no longer available. Use /courses to pick another one.",
+        }),
+      };
+    }
+
+    const assignments = await fetchAssignments(services, course.id, course.name).catch(() => []);
+    const cache = await loadCourseCache(course.courseCode, course.id);
+    const session = await loadOrCreateChatSession(scope, {
+      title: course.name,
+      metadata: {
+        courseId: course.id,
+        courseName: course.name,
+        courseCode: course.courseCode,
+      },
+      initialMessages: buildCourseIntroMessages(course, assignments, cache !== null),
+    });
+
+    return {
+      session,
+      runtime: {
+        scope,
+        title: course.name,
+        subtitle: course.courseCode,
+        scopeLabel: `Course: ${course.name}`,
+        placeholder: "Ask about this course, or use /assignments",
+      },
+      onAsk: async (input, callbacks) => {
+        if (!services.aiConfig) {
+          return {
+            content:
+              "AI is unavailable because no provider key is configured. Course navigation commands still work.",
+          };
+        }
+        const answer = await answerCourseQuestion({
+          aiConfig: services.aiConfig,
+          courseName: course.name,
+          courseCode: course.courseCode,
+          cache,
+          assignments,
+          history: session.messages,
+          question: input,
+          onToolCall: callbacks.onToolCall,
+          onTextDelta: callbacks.onTextDelta,
+        });
+        return { content: answer };
+      },
+    };
+  }
+
+  const workspaceData = await loadOrCreateWorkspaceShell(services, scope);
+  return workspaceData;
+}
+
+async function loadOrCreateWorkspaceShell(
+  services: AppServices,
+  scope: Extract<AppScope, { type: "workspace" }>
+): Promise<{
+  session: ChatSession;
+  runtime: ScopeRuntime;
+  bannerRenderer?: (buf: { push(line?: string): void }) => void;
+  extraHelpCommands: Array<{ cmd: string; desc: string }>;
+  pinOptions: Array<{ name: string; label: string; localPath?: string }>;
+  resolvePinContent: (pin: {
+    name: string;
+    label: string;
+    localPath?: string;
+  }) => Promise<string | null>;
+  onAsk: Parameters<typeof runChatShell<ShellResult>>[0]["onAsk"];
+}> {
+  if (!(await workspaceExists(scope.workspacePath))) {
+    const session = await loadOrCreateChatSession({ type: "global" }, {
+      title: "Global",
+      initialMessages: buildGlobalIntroMessages([], []),
+    });
+    const message =
+      "That workspace no longer exists on disk. Use /recent or /courses to open something else.";
+    if (session.messages[session.messages.length - 1]?.content !== message) {
+      session.messages.push({ role: "system", content: message });
+      await saveChatSession(session);
+    }
+    return {
+      session,
+      runtime: {
+        scope: { type: "global" },
+        title: "Global",
+        scopeLabel: "Global",
+        placeholder: "Ask about your courses, or use /courses and /recent",
+      },
+      bannerRenderer: (buf: { push(line?: string): void }) =>
+        renderGlobalBanner(buf, services, [], []),
+      onAsk: async () => ({
+        content: "Open another course or workspace to continue.",
+      }),
+      extraHelpCommands: [],
+      pinOptions: [],
+      resolvePinContent: async () => null,
+    };
+  }
+
+  const loaded = await loadWorkspace(scope.workspacePath);
+  await updateWorkspaceSessionMeta(scope.workspacePath, (current) => ({
+    ...current,
+    updatedAt: new Date().toISOString(),
+    lastOpenedAt: new Date().toISOString(),
+    workspaceState: current.workspaceState ?? "ready",
+  }));
+  const workup = loaded.workupJson as AssignmentWorkup | null;
+  const courseId = loaded.courseId ?? scope.courseId;
+  const course = courseId ? getCourseById(services, courseId) : null;
+  const cache = course ? await loadCourseCache(course.courseCode, course.id) : null;
+  const openResult = {
+    workspacePath: scope.workspacePath,
+    workup,
+    loaded,
+    lifecycleState: cache?.ingestion?.ingestedAt &&
+      loaded.preparedAt &&
+      new Date(cache.ingestion.ingestedAt).getTime() > new Date(loaded.preparedAt).getTime()
+      ? "stale"
+      : (loaded.workspaceState ?? "ready"),
+  };
+
+  const session = await loadOrCreateChatSession(
+    {
+      type: "workspace",
+      workspacePath: openResult.workspacePath,
+      courseId: courseId ?? null,
+      assignmentId: loaded.assignmentId ?? scope.assignmentId,
+    },
+    {
+      title: loaded.assignmentName,
+      metadata: {
+        courseId: courseId ?? null,
+        courseName: loaded.courseName,
+        courseCode: loaded.courseCode ?? undefined,
+        assignmentId: loaded.assignmentId,
+        assignmentName: loaded.assignmentName,
+        workspacePath: openResult.workspacePath,
+        sessionSlug: loaded.sessionSlug,
+      },
+      initialMessages: buildWorkspaceIntroMessages(loaded, workup, openResult.lifecycleState),
+    }
+  );
+
+  const chatCtx = services.aiConfig
+    ? createChatContext(services.aiConfig, loaded, {
+        cache,
+        client: services.client,
+        config: services.config,
+        courseId: courseId ?? null,
+      })
+    : null;
+  if (chatCtx) {
+    hydrateConversationHistory(chatCtx, session.messages);
+  }
+
+  return {
+    session,
+    runtime: {
+      scope,
+      title: loaded.assignmentName,
+      subtitle:
+        openResult.lifecycleState === "stale"
+          ? `${loaded.courseName} · stale`
+          : loaded.courseName,
+      scopeLabel: `Workspace: ${loaded.courseName} / ${loaded.assignmentName}`,
+      placeholder: "Ask about this assignment, or use /help",
+    },
+    extraHelpCommands: [
+      { cmd: "/pin", desc: "Attach a workspace file to your prompt" },
+    ],
+    pinOptions: buildWorkspacePinOptions(loaded, cache),
+    resolvePinContent: async (pin) => resolveWorkspacePinContent(loaded, cache, pin),
+    onAsk: async (input, callbacks) => {
+      if (!services.aiConfig || !chatCtx) {
+        return {
+          content:
+            "AI is unavailable because no provider key is configured. Workspace slash commands still work.",
+        };
+      }
+      const answer = await askWorkspaceQuestion(
+        services.aiConfig,
+        loaded,
+        input,
+        callbacks.onToolCall,
+        {
+          cache,
+          client: services.client,
+          config: services.config,
+          courseId: courseId ?? null,
+        },
+        chatCtx,
+        callbacks.onTextDelta
+      );
+      return {
+        content: answer.answer,
+        bulletPoints: answer.bulletPoints,
+        sources: answer.sources,
+        confidence: answer.confidence,
+      };
+    },
+  };
+}
+
+async function handleCommand(
+  command: string,
+  args: string,
+  api: {
+    addMessage: (message: ChatMessage) => Promise<void>;
+    session: ChatSession;
+    runtime: ScopeRuntime;
+  },
+  services: AppServices
+): Promise<ShellResult | null | void> {
+  const scope = api.runtime.scope;
+
+  if (command === "/quit" || command === "/exit" || command === "/q") {
+    return { type: "quit" };
+  }
+
+  if (command === "/home") {
+    if (scope.type === "global") {
+      await api.addMessage({
+        role: "system",
+        content: "You are already in the global home session.",
+      });
+      return;
+    }
+    return { type: "scope", scope: { type: "global" } };
+  }
+
+  if (command === "/back") {
+    if (scope.type === "workspace" && scope.courseId) {
+      return { type: "scope", scope: { type: "course", courseId: scope.courseId } };
+    }
+    if (scope.type === "course") {
+      return { type: "scope", scope: { type: "global" } };
+    }
+    await api.addMessage({
+      role: "system",
+      content: "There is no higher scope above global.",
+    });
+    return;
+  }
+
+  if (scope.type === "global") {
+    if (command === "/courses") {
+      const courses = getDisplayCourses(services);
+      if (courses.length === 0) {
+        await api.addMessage({
+          role: "system",
+          content: "No courses are configured yet.",
+        });
+        return;
+      }
+      return { type: "course-picker" };
+    }
+    if (command === "/recent") {
+      return { type: "recent-picker" };
+    }
+    if (command === "/open") {
+      const next = await resolveGlobalOpen(args, services);
+      if (next) return { type: "scope", scope: next };
+      return { type: "recent-picker" };
+    }
+    return;
+  }
+
+  if (scope.type === "course") {
+    const course = getCourseById(services, scope.courseId);
+    if (!course) {
+      await api.addMessage({
+        role: "system",
+        content: "That course is no longer available. Use /courses to pick another one.",
+      });
+      return { type: "scope", scope: { type: "global" } };
+    }
+
+    if (command === "/assignments" || command === "/open") {
+      if (args.trim()) {
+        const assignments = await fetchAssignments(services, course.id, course.name);
+        const match = assignments.find((assignment) =>
+          assignment.name.toLowerCase().includes(args.trim().toLowerCase())
+        );
+        if (match) {
+          return {
+            type: "open-assignment",
+            courseId: course.id,
+            assignmentName: match.name,
+          };
+        }
+        await api.addMessage({
+          role: "system",
+          content: `No assignment in ${course.name} matched "${args.trim()}".`,
+        });
+        return;
+      }
+      return { type: "assignment-picker", courseId: course.id };
+    }
+
+    const cache = await loadCourseCache(course.courseCode, course.id);
+    if (command === "/modules") {
+      if (!cache || cache.modules.length === 0) {
+        await api.addMessage({
+          role: "system",
+          content:
+            "No course modules are cached yet. Open a workspace or refresh the course cache first.",
+        });
+        return;
+      }
+      await api.addMessage({
+        role: "assistant",
+        content: cache.modules
+          .map((module, index) => `${index + 1}. ${module.name} (${module.itemCount} items)`)
+          .join("\n"),
+      });
+      return;
+    }
+
+    if (command === "/files") {
+      if (!cache) {
+        await api.addMessage({
+          role: "system",
+          content:
+            "No cached course files are available yet. Open a workspace or refresh the course cache first.",
+        });
+        return;
+      }
+      const downloaded = cache.attachments
+        .filter((attachment) => attachment.status === "downloaded" || attachment.status === "skipped")
+        .slice(0, 20)
+        .map((attachment) => `• ${attachment.originalFilename}`);
+      const indexed = cache.files.slice(0, 12).map((file) => `• ${file.displayName}`);
+      await api.addMessage({
+        role: "assistant",
+        content: [
+          `Downloaded attachments (${downloaded.length || 0})`,
+          downloaded.length > 0 ? downloaded.join("\n") : "• none yet",
+          "",
+          `Course file index (${cache.files.length})`,
+          indexed.length > 0 ? indexed.join("\n") : "• none indexed",
+        ].join("\n"),
+      });
+      return;
+    }
+
+    return;
+  }
+
+  if (command === "/overview") {
+    const loaded = await loadWorkspace(scope.workspacePath);
+    const currentWorkup = loaded.workupJson as AssignmentWorkup | null;
+    await api.addMessage({
+      role: currentWorkup?.overview ? "assistant" : "system",
+      content: currentWorkup?.overview ?? "No workup data available.",
+    });
+    return;
+  }
+
+  if (command === "/requirements" || command === "/reqs") {
+    const loaded = await loadWorkspace(scope.workspacePath);
+    const currentWorkup = loaded.workupJson as AssignmentWorkup | null;
+    if (!currentWorkup) {
+      await api.addMessage({ role: "system", content: "No workup data available." });
+      return;
+    }
+    const parts: string[] = [];
+    if (currentWorkup.deliverables.length > 0) {
+      parts.push(
+        "**Deliverables**\n" +
+          currentWorkup.deliverables.map((item) => `• ${item}`).join("\n")
+      );
+    }
+    if (currentWorkup.constraints.length > 0) {
+      parts.push(
+        "**Constraints**\n" +
+          currentWorkup.constraints.map((item) => `• ${item}`).join("\n")
+      );
+    }
+    await api.addMessage({
+      role: "assistant",
+      content: parts.join("\n\n") || "No deliverables or constraints found.",
+    });
+    return;
+  }
+
+  if (command === "/plan") {
+    const loaded = await loadWorkspace(scope.workspacePath);
+    const currentWorkup = loaded.workupJson as AssignmentWorkup | null;
+    await api.addMessage({
+      role:
+        currentWorkup && currentWorkup.actionPlan.length > 0 ? "assistant" : "system",
+      content:
+        currentWorkup && currentWorkup.actionPlan.length > 0
+          ? currentWorkup.actionPlan
+              .map((step) => `${step.step}. ${step.action}${step.detail ? `\n   ${step.detail}` : ""}`)
+              .join("\n")
+          : "No action plan available.",
+    });
+    return;
+  }
+
+  if (command === "/resources") {
+    const loaded = await loadWorkspace(scope.workspacePath);
+    const currentWorkup = loaded.workupJson as AssignmentWorkup | null;
+    await api.addMessage({
+      role:
+        currentWorkup && currentWorkup.relevantResources.length > 0
+          ? "assistant"
+          : "system",
+      content:
+        currentWorkup && currentWorkup.relevantResources.length > 0
+          ? currentWorkup.relevantResources
+              .map((resource) => `• **${resource.title}** (${resource.type}) — ${resource.why}`)
+              .join("\n")
+          : "No resources listed.",
+    });
+    return;
+  }
+
+  if (command === "/evidence") {
+    const loaded = await loadWorkspace(scope.workspacePath);
+    const currentWorkup = loaded.workupJson as AssignmentWorkup | null;
+    if (!currentWorkup || currentWorkup.sourceTrace.length === 0) {
+      await api.addMessage({
+        role: "system",
+        content: "No source trace available.",
+      });
+      return;
+    }
+    let content = currentWorkup.sourceTrace
+      .map((item) => `• ${item.conclusion}\n  source: ${item.source}`)
+      .join("\n");
+    if (currentWorkup.uncertainties.length > 0) {
+      content +=
+        "\n\n**Open questions**\n" +
+        currentWorkup.uncertainties.map((item) => `? ${item}`).join("\n");
+    }
+    await api.addMessage({ role: "assistant", content });
+    return;
+  }
+
+  if (command === "/status") {
+    const loaded = await loadWorkspace(scope.workspacePath);
+    await api.addMessage({
+      role: "assistant",
+      content: [
+        `Assignment: ${loaded.assignmentName}`,
+        `Course: ${loaded.courseName}`,
+        `Path: ${scope.workspacePath}`,
+        `Extracted: ${loaded.extractedFiles.length} documents`,
+        `Plan: ${loaded.planMd ? "available" : "missing"}`,
+      ].join("\n"),
+    });
+    return;
+  }
+
+  if (command === "/refresh") {
+    if (!scope.courseId) {
+      await api.addMessage({
+        role: "system",
+        content: "Cannot refresh this workspace because the course is unknown.",
+      });
+      return;
+    }
+    return {
+      type: "workspace-refresh",
+      courseId: scope.courseId,
+      assignmentName:
+        api.session.metadata.assignmentName ?? api.session.title,
+    };
+  }
+}
+
+async function pickCourse(services: AppServices): Promise<Course | null> {
+  const courses = getDisplayCourses(services);
+  if (courses.length === 0) return null;
+  const selected = await showPicker({
+    title: "Courses",
+    subtitle: `${courses.length} courses`,
+    items: courses.map((course) => ({
+      label: course.name,
+      sublabel: course.courseCode,
+      value: String(course.id),
+    })),
+    filterable: true,
+    backLabel: "back",
+  });
+  if (!selected) return null;
+  return courses.find((course) => String(course.id) === selected) ?? null;
+}
+
+async function pickAssignmentScope(
+  services: AppServices,
+  courseId: number
+): Promise<AppScope | null> {
+  const course = getCourseById(services, courseId);
+  if (!course) return null;
+
+  clearScreen();
+  console.log("");
+  console.log(C.dim(`  loading assignments for ${course.courseCode}...`));
+
+  let assignments: Assignment[];
+  try {
+    assignments = await fetchAssignments(services, course.id, course.name);
+  } catch (error) {
+    console.error(
+      C.error(`  Error: ${error instanceof Error ? error.message : "unknown"}`)
+    );
+    await sleep(1200);
+    return null;
+  }
+
+  if (assignments.length === 0) {
+    console.log(C.dim("  No assignments found for this course."));
+    await sleep(1200);
+    return null;
+  }
+
+  const selected = await showPicker({
+    title: course.courseCode || course.name,
+    subtitle: `${assignments.length} assignments`,
+    items: assignments.map((assignment) => ({
+      label: assignment.name,
+      sublabel:
+        formatDueCompact(assignment.dueAt) +
+        (assignment.submitted ? " · submitted" : ""),
+      value: assignment.name,
+      dimmed: assignment.submitted,
+    })),
+    filterable: true,
+    backLabel: "back",
+  });
+
+  if (!selected) return null;
+
+  clearScreen();
+  console.log("");
+  console.log(C.primaryBold(`  ${selected}`));
+  console.log(C.dim(`  ${course.name}`));
+  console.log("");
+
+  try {
+    const result = await openWorkspace(services, course, selected, (stage) => {
+      console.log(`  ${C.dim("›")} ${C.dim(stage)}`);
+    });
+    return {
+      type: "workspace",
+      workspacePath: result.workspacePath,
+      courseId: course.id,
+      assignmentId: result.loaded.assignmentId,
+    };
+  } catch (error) {
+    console.error(
+      C.error(`\n  Failed: ${error instanceof Error ? error.message : "unknown"}`)
+    );
+    console.log(C.dim("\n  Press any key to continue..."));
+    await waitForKey();
+    return null;
+  }
+}
+
+async function pickRecentScope(services: AppServices): Promise<AppScope | null> {
+  const allSessions = (await listChatSessions()).filter(
+    (session) => session.scope.type !== "global"
+  );
+  const sessions: typeof allSessions = [];
+  for (const session of allSessions) {
+    if (
+      session.scope.type === "workspace" &&
+      !(await workspaceExists(session.scope.workspacePath))
+    ) {
+      continue;
+    }
+    sessions.push(session);
+  }
+
+  if (sessions.length > 0) {
+    const selected = await showPicker({
+      title: "Recent sessions",
+      subtitle: `${sessions.length} recent items`,
+      items: sessions.slice(0, 20).map((session) => ({
+        label: session.title,
+        sublabel:
+          session.scope.type === "course"
+            ? `Course · ${session.metadata.courseName ?? ""}`
+            : `Workspace · ${session.metadata.courseName ?? ""}`,
+        value: session.id,
+      })),
+      filterable: true,
+      backLabel: "back",
+    });
+    if (!selected) return null;
+    const session = sessions.find((entry) => entry.id === selected) ?? null;
+    return session?.scope ?? null;
+  }
+
+  const recent = await getRecentWorkspaces();
+  if (recent.length === 0) return null;
+  const selected = await showPicker({
+    title: "Recent workspaces",
+    subtitle: `${recent.length} workspaces`,
+    items: recent.map((workspace) => ({
+      label: workspace.name,
+      sublabel: workspace.course,
+      value: workspace.path,
+    })),
+    filterable: true,
+    backLabel: "back",
+  });
+  if (!selected) return null;
+  const loaded = await loadWorkspace(selected);
+  return {
+    type: "workspace",
+    workspacePath: selected,
+    courseId: loaded.courseId,
+    assignmentId: loaded.assignmentId,
+  };
+}
+
+async function resolveGlobalOpen(
+  query: string,
+  services: AppServices
+): Promise<AppScope | null> {
+  const trimmed = query.trim().toLowerCase();
+  if (!trimmed) return null;
+
+  const course = getDisplayCourses(services).find(
+    (entry) =>
+      entry.name.toLowerCase().includes(trimmed) ||
+      entry.courseCode.toLowerCase().includes(trimmed)
+  );
+  if (course) {
+    return { type: "course", courseId: course.id };
+  }
+
+  const recent = await getRecentWorkspaces();
+  const workspace = recent.find(
+    (entry) =>
+      entry.name.toLowerCase().includes(trimmed) ||
+      entry.course.toLowerCase().includes(trimmed)
+  );
+  if (!workspace) return null;
+  const loaded = await loadWorkspace(workspace.path);
+  return {
+    type: "workspace",
+    workspacePath: workspace.path,
+    courseId: loaded.courseId,
+    assignmentId: loaded.assignmentId,
+  };
+}
+
+async function openAssignmentScope(
+  services: AppServices,
+  courseId: number,
+  assignmentName: string
+): Promise<AppScope | null> {
+  const course = getCourseById(services, courseId);
+  if (!course) return null;
+
+  clearScreen();
+  console.log("");
+  console.log(C.primaryBold(`  ${assignmentName}`));
+  console.log(C.dim(`  ${course.name}`));
+  console.log("");
+
+  try {
+    const result = await openWorkspace(services, course, assignmentName, (stage) => {
+      console.log(`  ${C.dim("›")} ${C.dim(stage)}`);
+    });
+    return {
+      type: "workspace",
+      workspacePath: result.workspacePath,
+      courseId: course.id,
+      assignmentId: result.loaded.assignmentId,
+    };
+  } catch (error) {
+    console.error(
+      C.error(`\n  Failed: ${error instanceof Error ? error.message : "unknown"}`)
+    );
+    console.log(C.dim("\n  Press any key to continue..."));
+    await waitForKey();
+    return null;
+  }
+}
+
+async function refreshWorkspaceScope(
+  services: AppServices,
+  courseId: number,
+  assignmentName: string,
+  fallbackScope: AppScope
+): Promise<AppScope> {
+  const course = getCourseById(services, courseId);
+  if (!course) return fallbackScope;
+
+  clearScreen();
+  console.log("");
+  console.log(C.primaryBold(`  Refreshing ${assignmentName}`));
+  console.log(C.dim(`  ${course.name}`));
+  console.log("");
+
+  try {
+    const refreshed = await refreshWorkspace(services, course, assignmentName, (stage) => {
+      console.log(`  ${C.dim("›")} ${C.dim(stage)}`);
+    });
+    return {
+      type: "workspace",
+      workspacePath: refreshed.workspacePath,
+      courseId: course.id,
+      assignmentId: refreshed.loaded.assignmentId,
+    };
+  } catch (error) {
+    console.error(
+      C.error(`\n  Refresh failed: ${error instanceof Error ? error.message : "unknown"}`)
+    );
+    console.log(C.dim("\n  Press any key to continue..."));
+    await waitForKey();
+    return fallbackScope;
+  }
+}
+
+function buildGlobalIntroMessages(
+  recent: Array<{ name: string; course: string }>,
+  upcoming: Assignment[]
+): ChatMessage[] {
+  const lines = [
+    "Academic control center ready.",
+    "",
+    "Use `/courses` to open a course, `/recent` to reopen work, or ask a broad question across your courses.",
+  ];
+  if (recent.length > 0) {
+    lines.push("", "**Recent workspaces**");
+    for (const workspace of recent.slice(0, 4)) {
+      lines.push(`• ${workspace.name} — ${workspace.course}`);
+    }
+  }
+  if (upcoming.length > 0) {
+    lines.push("", "**Upcoming assignments**");
+    for (const assignment of upcoming.slice(0, 5)) {
+      lines.push(`• ${assignment.name} — ${assignment.courseName}`);
+    }
+  }
+  return [{ role: "assistant", content: lines.join("\n") }];
+}
+
+function buildCourseIntroMessages(
+  course: Course,
+  assignments: Assignment[],
+  hasCache: boolean
+): ChatMessage[] {
+  const lines = [
+    `You are in ${course.name}.`,
+    "",
+    "Ask about assignments in this course, or use `/assignments`, `/files`, and `/modules`.",
+    hasCache
+      ? "Course cache is available for deeper questions."
+      : "Course cache is not ready yet. Open an assignment workspace for richer detail.",
+  ];
+  if (assignments.length > 0) {
+    lines.push("", "**Upcoming work**");
+    for (const assignment of assignments.slice(0, 5)) {
+      lines.push(`• ${assignment.name} — ${formatDueCompact(assignment.dueAt)}`);
+    }
+  }
+  return [{ role: "assistant", content: lines.join("\n") }];
+}
+
+function buildWorkspaceIntroMessages(
+  loaded: Awaited<ReturnType<typeof loadWorkspace>>,
+  workup: AssignmentWorkup | null,
+  lifecycleState: string
+): ChatMessage[] {
+  const messages: ChatMessage[] = [];
+  if (lifecycleState === "stale") {
+    messages.push({
+      role: "system",
+      content:
+        "This workspace is available, but the course cache is newer than the current workup. Use /refresh when you want the latest assignment context.",
+    });
+  }
+  if (workup?.overview) {
+    messages.push({
+      role: "system",
+      content: workup.overview,
+    });
+  } else {
+    messages.push({
+      role: "assistant",
+      content: `Workspace ready for ${loaded.assignmentName}. Use /help for assignment commands.`,
+    });
+  }
+  return messages;
+}
+
+function buildWorkspacePinOptions(
+  loaded: Awaited<ReturnType<typeof loadWorkspace>>,
+  cache: Awaited<ReturnType<typeof loadCourseCache>>
+): Array<{ name: string; label: string; localPath?: string }> {
+  const options: Array<{ name: string; label: string; localPath?: string }> = [];
+  for (const extracted of loaded.extractedFiles) {
+    options.push({
+      name: extracted.name,
+      label: extracted.name
+        .replace(/\.txt$/, "")
+        .replace(/[._\s-]/g, "_")
+        .toLowerCase(),
+    });
+  }
+  if (cache) {
+    for (const attachment of cache.attachments) {
+      if (attachment.status !== "downloaded" && attachment.status !== "skipped") continue;
+      const label = attachment.originalFilename
+        .replace(/\.[^.]+$/, "")
+        .replace(/[.\s-]/g, "_")
+        .toLowerCase();
+      if (!options.some((option) => option.label === label)) {
+        options.push({
+          name: attachment.originalFilename,
+          label,
+          localPath: attachment.localPath,
+        });
+      }
+    }
+  }
+  if (loaded.assignmentMd) options.push({ name: "assignment.md", label: "assignment" });
+  if (loaded.planMd) options.push({ name: "plan.md", label: "plan" });
+  if (loaded.workupJson) options.push({ name: "workup.json", label: "workup" });
+  return options;
+}
+
+async function resolveWorkspacePinContent(
+  loaded: Awaited<ReturnType<typeof loadWorkspace>>,
+  cache: Awaited<ReturnType<typeof loadCourseCache>>,
+  pin: { name: string; label: string; localPath?: string }
+): Promise<string | null> {
+  for (const extracted of loaded.extractedFiles) {
+    if (extracted.name === pin.name || extracted.name.includes(pin.label)) {
+      return extracted.content.slice(0, 15000);
+    }
+  }
+  if (pin.localPath && cache) {
+    const fullPath = path.join(cache.coursePath, pin.localPath);
+    const extracted = await extractFileText(fullPath, pin.name);
+    return extracted.slice(0, 15000);
+  }
+  if (pin.name === "assignment.md" && loaded.assignmentMd) {
+    return loaded.assignmentMd.slice(0, 15000);
+  }
+  if (pin.name === "plan.md" && loaded.planMd) {
+    return loaded.planMd.slice(0, 15000);
+  }
+  if (pin.name === "workup.json" && loaded.workupJson) {
+    return JSON.stringify(loaded.workupJson, null, 2).slice(0, 15000);
+  }
+  return null;
+}
 
 function renderSplashLoading(): void {
   const { cols } = getTermSize();
@@ -165,427 +1118,32 @@ function renderSplashLoading(): void {
   console.log(centerText(C.dim("connecting to canvas..."), cols));
 }
 
-// --- Unified Home Screen ---
-
-async function showHomeScreen(
+function renderGlobalBanner(
+  buf: { push(line?: string): void },
   services: AppServices,
-  recent: Array<{ name: string; course: string; slug: string; path: string }>
-): Promise<string | null> {
-  return new Promise((resolve) => {
-    const HOME_TOP_MARGIN_ROWS = 3;
-    const { cols } = getTermSize();
-
-    // Build the item list: recent workspaces first, then courses
-    const items: Array<{
-      label: string;
-      sublabel: string;
-      value: string;
-      dimmed: boolean;
-      isSection: boolean;
-    }> = [];
-
-    // Recent workspaces (max 3)
-    if (recent.length > 0) {
-      items.push({
-        label: "Recent",
-        sublabel: "",
-        value: "",
-        dimmed: false,
-        isSection: true,
-      });
-      for (const ws of recent.slice(0, 3)) {
-        items.push({
-          label: ws.name,
-          sublabel: ws.course,
-          value: `workspace:${ws.path}`,
-          dimmed: false,
-          isSection: false,
-        });
-      }
-      if (recent.length > 3) {
-        items.push({
-          label: "See all workspaces",
-          sublabel: `${recent.length} total`,
-          value: "all_workspaces",
-          dimmed: true,
-          isSection: false,
-        });
-      }
-    }
-
-    // Courses — use configured display courses
-    const displayCourses = getDisplayCourses(services);
-    items.push({
-      label: "Courses",
-      sublabel: "",
-      value: "",
-      dimmed: false,
-      isSection: true,
-    });
-    for (const c of displayCourses) {
-      items.push({
-        label: c.name || c.courseCode,
-        sublabel: c.name !== c.courseCode ? c.courseCode : "",
-        value: `course:${c.id}`,
-        dimmed: false,
-        isSection: false,
-      });
-    }
-
-    // Manage courses option
-    items.push({
-      label: "Manage courses",
-      sublabel: "add, remove, or rename",
-      value: "manage_courses",
-      dimmed: true,
-      isSection: false,
-    });
-
-    // Selectable items only (skip section headers)
-    const selectableIndices = items
-      .map((item, i) => (item.isSection ? -1 : i))
-      .filter((i) => i >= 0);
-    let selectedIdx = 0; // index into selectableIndices
-    let filter = "";
-    let scrollTop = 0; // lines scrolled from the top of content
-
-    function getFiltered() {
-      if (!filter) return { items, selectableIndices };
-      const q = filter.toLowerCase();
-      const filteredItems = items.filter(
-        (item) =>
-          item.isSection ||
-          item.label.toLowerCase().includes(q) ||
-          item.sublabel.toLowerCase().includes(q)
-      );
-      // Remove section headers with no items after them
-      const cleaned: typeof items = [];
-      for (let i = 0; i < filteredItems.length; i++) {
-        if (filteredItems[i].isSection) {
-          // Check if next non-section item exists
-          if (
-            i + 1 < filteredItems.length &&
-            !filteredItems[i + 1].isSection
-          ) {
-            cleaned.push(filteredItems[i]);
-          }
-        } else {
-          cleaned.push(filteredItems[i]);
-        }
-      }
-      const selectable = cleaned
-        .map((item, i) => (item.isSection ? -1 : i))
-        .filter((i) => i >= 0);
-      return { items: cleaned, selectableIndices: selectable };
-    }
-
-    function buildHomeListLines(
-      renderedItems: typeof items,
-      currentSelectableIdx: number,
-      termCols: number,
-    ): string[] {
-      const lines: string[] = [];
-      const contentWidth = Math.max(24, termCols - 8);
-      const detailWidth = Math.max(20, contentWidth - 4);
-
-      if (filter) {
-        lines.push(C.dim("  filter ") + C.text(filter) + chalk.white("█"));
-        lines.push("");
-      }
-
-      let firstSection = true;
-      for (let i = 0; i < renderedItems.length; i++) {
-        const item = renderedItems[i];
-
-        if (item.isSection) {
-          if (!firstSection) lines.push("");
-          const divider = C.dimmer("─".repeat(Math.max(8, Math.min(18, contentWidth - item.label.length - 4))));
-          lines.push(`  ${C.primaryBold(item.label)} ${divider}`);
-          firstSection = false;
-          continue;
-        }
-
-        const isSelected = i === currentSelectableIdx;
-        const pointer = isSelected ? C.primary("❯") : C.dimmer("•");
-        const labelLines = wrapWords(item.label, contentWidth - 4);
-        const labelColor = item.dimmed
-          ? isSelected ? C.bold : C.dim
-          : isSelected ? C.bold : C.text;
-
-        lines.push(`  ${pointer} ${labelColor(labelLines[0])}`);
-        for (let j = 1; j < labelLines.length; j++) {
-          lines.push(`    ${labelColor(labelLines[j])}`);
-        }
-
-        if (item.sublabel) {
-          const subLines = wrapWords(item.sublabel, detailWidth);
-          for (const subLine of subLines) {
-            lines.push(`    ${isSelected ? C.muted(subLine) : C.dim(subLine)}`);
-          }
-        }
-      }
-
-      lines.push("");
-      lines.push(
-        "  " +
-          C.primary("↑↓") + C.dimmer(" move   ") +
-          C.primary("enter") + C.dimmer(" open   ") +
-          C.primary("esc") + C.dimmer(" quit   ") +
-          C.primary("type") + C.dimmer(" to filter")
-      );
-
-      return lines;
-    }
-
-    function render(): void {
-      const buf = createBuffer();
-      hideCursor();
-      const { cols: termCols, rows: termRows } = getTermSize();
-
-      // Estimate content height to vertically center
-      const artLines = CANVAS_ASCII.split("\n").filter((l) => l.trim()).length;
-      const preFiltered = getFiltered();
-      const preCurrentSelectableIdx =
-        preFiltered.selectableIndices[selectedIdx] ?? -1;
-      const itemLines = buildHomeListLines(
-        preFiltered.items,
-        preCurrentSelectableIdx,
-        termCols
-      ).length;
-      const boxLines = countInfoBoxLines(services, recent, termCols);
-      const totalContent =
-        artLines + boxLines + itemLines + 6 + HOME_TOP_MARGIN_ROWS;
-      const topPad = Math.max(0, Math.floor((termRows - totalContent) / 2));
-
-      for (let p = 0; p < HOME_TOP_MARGIN_ROWS; p++) buf.push("");
-      for (let p = 0; p < topPad; p++) buf.push("");
-
-      // ASCII art
-      renderCenteredAscii(termCols, buf);
-
-      // Info box (version is embedded in top border)
-      buf.push("");
-      renderInfoBox(services, recent, termCols, buf);
-      buf.push("");
-
-      // Items list
-      const filtered = getFiltered();
-      const currentSelectableIdx =
-        filtered.selectableIndices[selectedIdx] ?? -1;
-      const listLines = buildHomeListLines(
-        filtered.items,
-        currentSelectableIdx,
-        termCols
-      );
-      for (const line of listLines) {
-        buf.push(line);
-      }
-
-      const totalLines = buf.length;
-      const { rows: viewRows } = getTermSize();
-      const maxScroll = Math.max(0, totalLines - viewRows);
-      scrollTop = Math.min(scrollTop, maxScroll);
-      const scrollFromBottom = maxScroll - scrollTop;
-      buf.flush(0, scrollFromBottom);
-    }
-
-    render();
-    enableMouseTracking();
-
-    const stdin = process.stdin;
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.setEncoding("utf8");
-
-    function onData(key: string): void {
-      const filtered = getFiltered();
-
-      // SGR mouse events: \x1B[<btn;col;rowM or \x1B[<btn;col;rowm
-      const sgrMatch = key.match(/\x1B\[<(\d+);\d+;\d+[Mm]/);
-      if (sgrMatch) {
-        const btn = parseInt(sgrMatch[1], 10);
-        if (btn === 64) {
-          scrollTop = Math.max(0, scrollTop - 3);
-          render();
-        } else if (btn === 65) {
-          scrollTop += 3;
-          render();
-        }
-        return;
-      }
-
-      // Escape — quit
-      if (key === "\x1B" || key === "\x1B\x1B") {
-        cleanup();
-        resolve(null);
-        return;
-      }
-
-      // Enter — select
-      if (key === "\r" || key === "\n") {
-        if (filtered.selectableIndices.length > 0) {
-          const itemIdx = filtered.selectableIndices[selectedIdx];
-          const item = filtered.items[itemIdx];
-          if (item && item.value) {
-            cleanup();
-            resolve(item.value);
-            return;
-          }
-        }
-      }
-
-      // Arrow up
-      if (key === "\x1B[A") {
-        selectedIdx = Math.max(0, selectedIdx - 1);
-        render();
-        return;
-      }
-
-      // Arrow down
-      if (key === "\x1B[B") {
-        selectedIdx = Math.min(
-          filtered.selectableIndices.length - 1,
-          selectedIdx + 1
-        );
-        render();
-        return;
-      }
-
-      // Backspace
-      if (key === "\x7F" || key === "\b") {
-        if (filter.length > 0) {
-          filter = filter.slice(0, -1);
-          selectedIdx = 0;
-          render();
-        }
-        return;
-      }
-
-      // Ctrl+C
-      if (key === "\x03") {
-        cleanup();
-        process.exit(0);
-      }
-
-      // Regular character for filtering
-      if (key.length === 1 && key >= " ") {
-        filter += key;
-        selectedIdx = 0;
-        render();
-      }
-    }
-
-    function cleanup(): void {
-      disableMouseTracking();
-      stdin.removeListener("data", onData);
-      stdin.setRawMode(false);
-      stdin.pause();
-      showCursor();
-      clearScreen();
-    }
-
-    stdin.on("data", onData);
+  recent: Array<{ name: string; course: string }>,
+  _upcoming: Assignment[]
+): void {
+  const { cols } = getTermSize();
+  renderCenteredAscii(cols, {
+    push: (line: string) => buf.push(line),
   });
-}
-
-// --- All Workspaces Screen ---
-
-async function showAllWorkspaces(
-  workspaces: Array<{ name: string; course: string; slug: string; path: string }>,
-  services: AppServices
-): Promise<string | null> {
-  const items: PickerItem[] = [];
-
-  for (const ws of workspaces) {
-    items.push({
-      label: ws.name,
-      sublabel: ws.course,
-      value: `workspace:${ws.path}`,
-    });
-  }
-
-  items.push({
-    label: "Manage workspaces",
-    sublabel: "rename or delete",
-    value: "manage_workspaces",
-    dimmed: true,
-  });
-
-  const action = await showPicker({
-    title: "All workspaces",
-    subtitle: `${workspaces.length} workspaces`,
-    items,
-    filterable: true,
-    backLabel: "back",
-  });
-
-  if (!action) return null;
-
-  if (action === "manage_workspaces") {
-    await manageWorkspaces(workspaces);
-    return null; // return to home to refresh
-  }
-
-  return action;
-}
-
-async function manageWorkspaces(
-  workspaces: Array<{ name: string; course: string; slug: string; path: string }>
-): Promise<void> {
-  const action = await showPicker({
-    title: "Manage workspaces",
-    items: [
-      { label: "Delete a workspace", sublabel: "remove from disk", value: "delete" },
-      { label: "Back", value: "back" },
-    ],
-    backLabel: "back",
-  });
-
-  if (!action || action === "back") return;
-
-  if (action === "delete") {
-    const toDelete = await showPicker({
-      title: "Delete workspace",
-      subtitle: "This permanently removes the workspace folder",
-      items: workspaces.map((ws) => ({
-        label: ws.name,
-        sublabel: ws.course,
-        value: ws.path,
-      })),
-      filterable: true,
-      backLabel: "cancel",
-    });
-
-    if (toDelete) {
-      const fs = await import("node:fs/promises");
-      try {
-        await fs.rm(toDelete, { recursive: true, force: true });
-      } catch {
-        // ignore errors
-      }
+  buf.push("");
+  renderInfoBox(
+    services,
+    recent.map((item) => ({ ...item, slug: "", path: "" })),
+    cols,
+    {
+      push: (line: string) => buf.push(line),
     }
-  }
-}
-
-// --- Info Box Renderer ---
-// Strategy: build each row as PLAIN TEXT first, pad to exact width, then colorize.
-// This avoids ANSI escape code length miscalculations.
-
-function countInfoBoxLines(
-  services: AppServices,
-  recent: Array<{ name: string; course: string; slug: string; path: string }>,
-  termCols: number,
-): number {
-  let count = 0;
-  renderInfoBox(services, recent, termCols, { push: () => { count++; } });
-  return count;
+  );
 }
 
 function renderInfoBox(
   services: AppServices,
   recent: Array<{ name: string; course: string; slug: string; path: string }>,
   termCols: number,
-  buf: { push(line: string): void } = { push: (l) => console.log(l) }
+  buf: { push(line: string): void } = { push: (line) => console.log(line) }
 ): void {
   const schoolUrl = process.env.CANVAS_BASE_URL ?? "";
   let school = "unknown";
@@ -615,13 +1173,11 @@ function renderInfoBox(
     ["/help", "full command list and a quick reminder of what each command does"],
   ];
 
-  // Box width — keep the home box roomy without feeling overextended
   const boxInner = Math.min(termCols - 4, 98);
 
-  /** Center box row; margins use default terminal bg, grey stays inside the borders. */
   function pushMenuRow(core: string): void {
-    const w = stripAnsi(core).length;
-    const gap = Math.max(0, termCols - w);
+    const width = stripAnsi(core).length;
+    const gap = Math.max(0, termCols - width);
     const left = Math.floor(gap / 2);
     buf.push(" ".repeat(left) + core);
   }
@@ -638,15 +1194,16 @@ function renderInfoBox(
     return;
   }
 
-  const leftW = Math.floor(boxInner * 0.40);
+  const leftW = Math.floor(boxInner * 0.4);
   const rightW = boxInner - leftW - 1;
 
-  // --- Top border with centered version label ---
   const versionLabel = " v0.1.0 ";
-  const topLineTotal = leftW + 1 + rightW + 2; // inner chars of top border
+  const topLineTotal = leftW + 1 + rightW + 2;
   const versionStart = Math.floor((topLineTotal - versionLabel.length) / 2);
   const topLeft = "─".repeat(Math.max(0, versionStart));
-  const topRight = "─".repeat(Math.max(0, topLineTotal - versionStart - versionLabel.length));
+  const topRight = "─".repeat(
+    Math.max(0, topLineTotal - versionStart - versionLabel.length)
+  );
   pushMenuRow(
     MenuBox.edge("╭") +
       MenuBox.edge(topLeft) +
@@ -655,7 +1212,6 @@ function renderInfoBox(
       MenuBox.edge("╮")
   );
 
-  // Subtle inner top padding (~one row ≈ line-height; avoids large blank bands)
   pushMenuRow(
     MenuBox.edge("│") +
       MenuBox.fill(" ") +
@@ -666,8 +1222,14 @@ function renderInfoBox(
       MenuBox.edge("│")
   );
 
-  // --- Build rows ---
-  type LeftStyle = "kv" | "kvMuted" | "kvWarm" | "sectionHeader" | "desc" | "dim" | "empty";
+  type LeftStyle =
+    | "kv"
+    | "kvMuted"
+    | "kvWarm"
+    | "sectionHeader"
+    | "desc"
+    | "dim"
+    | "empty";
   type RightStyle = "header" | "cmd" | "empty";
   type LeftRow = { text: string; style: LeftStyle };
   type RightRow = { text: string; style: RightStyle };
@@ -675,10 +1237,11 @@ function renderInfoBox(
   const rightRows: RightRow[] = [];
   const commandStarts = new Map<string, number>();
   const pushLeft = (text: string, style: LeftStyle) => leftRows.push({ text, style });
-  const pushRight = (text: string, style: RightStyle) => rightRows.push({ text, style });
-  const pushCommand = (cmd: [string, string]) => {
-    commandStarts.set(cmd[0], rightRows.length);
-    for (const line of formatCmdRows(cmd, rightW)) {
+  const pushRight = (text: string, style: RightStyle) =>
+    rightRows.push({ text, style });
+  const pushCommand = (command: [string, string]) => {
+    commandStarts.set(command[0], rightRows.length);
+    for (const line of formatCmdRows(command, rightW)) {
       pushRight(line, "cmd");
     }
   };
@@ -686,15 +1249,13 @@ function renderInfoBox(
     while (leftRows.length < targetRow) pushLeft("", "empty");
   };
 
-  // Helper to make a left cell that fits
   const L = (text: string) => truncPlain(text, leftW);
   const formatInfoRow = (label: string, value: string) =>
     L(`${label.padEnd(12)}${value}`);
 
-  // Right column
   pushRight("Commands", "header");
-  for (const cmd of commands) {
-    pushCommand(cmd);
+  for (const command of commands) {
+    pushCommand(command);
   }
 
   const statusRow = commandStarts.get("/status") ?? rightRows.length;
@@ -708,7 +1269,6 @@ function renderInfoBox(
   );
   const refreshRow = commandStarts.get("/refresh") ?? rightRows.length;
 
-  // Left column
   pushLeft(formatInfoRow("school", school), "kvWarm");
   pushLeft(formatInfoRow("model", aiModelText), "kvWarm");
   pushLeft("", "empty");
@@ -723,31 +1283,32 @@ function renderInfoBox(
     padLeftToRow(statusRow);
     pushLeft("Courses", "sectionHeader");
     const courseLines = wrapCommaList(
-      displayCourses.slice(0, 5).map((c) => c.name || c.courseCode),
+      displayCourses.slice(0, 5).map((course) => course.name || course.courseCode),
       leftW - 2
     );
-    for (const cLine of courseLines) {
-      pushLeft(cLine, "desc");
+    for (const line of courseLines) {
+      pushLeft(line, "desc");
     }
   }
 
   if (recent.length > 0) {
     padLeftToRow(refreshRow);
     pushLeft("Recent Workspaces", "sectionHeader");
-    for (let i = 0; i < recent.length; i++) {
-      const wsName = truncPlain(recent[i].name, leftW - 2);
-      pushLeft(wsName, wsName ? "desc" : "empty");
+    for (const workspace of recent) {
+      const workspaceName = truncPlain(workspace.name, leftW - 2);
+      pushLeft(workspaceName, workspaceName ? "desc" : "empty");
     }
   }
 
   const totalRows = Math.max(16, leftRows.length, rightRows.length);
 
-  // --- Render rows ---
   for (let i = 0; i < totalRows; i++) {
     const leftRow = leftRows[i] ?? { text: "", style: "empty" as LeftStyle };
     const rightRow = rightRows[i] ?? { text: "", style: "empty" as RightStyle };
-    const leftPadded = leftRow.text + " ".repeat(Math.max(0, leftW - leftRow.text.length));
-    const rightPadded = rightRow.text + " ".repeat(Math.max(0, rightW - rightRow.text.length));
+    const leftPadded =
+      leftRow.text + " ".repeat(Math.max(0, leftW - leftRow.text.length));
+    const rightPadded =
+      rightRow.text + " ".repeat(Math.max(0, rightW - rightRow.text.length));
 
     const leftColored = colorizeCell(leftPadded, leftRow.style, true);
     const rightColored = colorizeCmdCell(rightPadded, rightRow.style, true);
@@ -763,7 +1324,6 @@ function renderInfoBox(
     );
   }
 
-  // --- Bottom border (rounded corners; ┴ matches column split) ---
   pushMenuRow(
     MenuBox.edge("╰") +
       MenuBox.edge("─".repeat(leftW + 1)) +
@@ -773,19 +1333,24 @@ function renderInfoBox(
   );
 }
 
-function formatCmdRows(cmd: [string, string], maxW: number): string[] {
+function formatCmdRows(command: [string, string], maxW: number): string[] {
   const cmdColW = Math.min(16, Math.max(8, maxW - 12));
   const descW = Math.max(8, maxW - cmdColW);
-  const descLines = wrapWords(cmd[1], descW);
+  const descLines = wrapWords(command[1], descW);
 
   return descLines.map((line, index) =>
-    index === 0 ? `${cmd[0].padEnd(cmdColW)}${line}` : `${" ".repeat(cmdColW)}${line}`
+    index === 0
+      ? `${command[0].padEnd(cmdColW)}${line}`
+      : `${" ".repeat(cmdColW)}${line}`
   );
 }
 
 function truncPlain(text: string, maxLen: number): string {
-  if (text.length <= maxLen) return text;
-  return text.slice(0, maxLen - 3) + "...";
+  return text.length <= maxLen
+    ? text
+    : maxLen > 3
+      ? text.slice(0, maxLen - 3) + "..."
+      : text.slice(0, maxLen);
 }
 
 function wrapCommaList(items: string[], maxLen: number): string[] {
@@ -839,7 +1404,7 @@ function wrapWords(text: string, maxLen: number): string[] {
 }
 
 function formatSystemSummary(): string {
-  const memoryGb = Math.round(totalmem() / (1024 ** 3));
+  const memoryGb = Math.round(totalmem() / 1024 ** 3);
   const runtime = detectRuntimeLabel();
   return `${cpus().length} cores · ${memoryGb}GB · ${runtime}`;
 }
@@ -859,112 +1424,141 @@ function detectRuntimeLabel(): string {
 }
 
 type InfoBoxPalette = {
-  secondary: (s: string) => string;
-  dim: (s: string) => string;
-  warm: (s: string) => string;
-  text: (s: string) => string;
-  bold: (s: string) => string;
-  primary: (s: string) => string;
-  primaryBold: (s: string) => string;
-  fill: (s: string) => string;
+  secondary: (value: string) => string;
+  dim: (value: string) => string;
+  warm: (value: string) => string;
+  text: (value: string) => string;
+  bold: (value: string) => string;
+  primary: (value: string) => string;
+  primaryBold: (value: string) => string;
+  fill: (value: string) => string;
 };
 
 const infoPalDefault: InfoBoxPalette = {
-  secondary: (s) => C.muted(s),
-  dim: (s) => C.dim(s),
-  warm: (s) => C.warm(s),
-  text: (s) => C.text(s),
-  bold: (s) => C.bold(s),
-  primary: (s) => C.primary(s),
-  primaryBold: (s) => C.primaryBold(s),
-  fill: (s) => s,
+  secondary: (value) => C.muted(value),
+  dim: (value) => C.dim(value),
+  warm: (value) => C.warm(value),
+  text: (value) => C.text(value),
+  bold: (value) => C.bold(value),
+  primary: (value) => C.primary(value),
+  primaryBold: (value) => C.primaryBold(value),
+  fill: (value) => value,
 };
 
 const infoPalMenu: InfoBoxPalette = {
-  secondary: (s) => MenuBox.secondary(s),
-  dim: (s) => MenuBox.dim(s),
-  warm: (s) => C.warm(s),
-  text: (s) => MenuBox.text(s),
-  bold: (s) => MenuBox.bold(s),
-  primary: (s) => MenuBox.primary(s),
-  primaryBold: (s) => MenuBox.primaryBold(s),
-  fill: (s) => MenuBox.fill(s),
+  secondary: (value) => MenuBox.secondary(value),
+  dim: (value) => MenuBox.dim(value),
+  warm: (value) => C.warm(value),
+  text: (value) => MenuBox.text(value),
+  bold: (value) => MenuBox.bold(value),
+  primary: (value) => MenuBox.primary(value),
+  primaryBold: (value) => MenuBox.primaryBold(value),
+  fill: (value) => MenuBox.fill(value),
 };
 
-function colorizeCell(paddedPlain: string, style: string, onMenuBox = false): string {
-  const P = onMenuBox ? infoPalMenu : infoPalDefault;
+function colorizeCell(
+  paddedPlain: string,
+  style: string,
+  onMenuBox = false
+): string {
+  const palette = onMenuBox ? infoPalMenu : infoPalDefault;
   switch (style) {
     case "kv": {
       const match = paddedPlain.match(/^(\S+)(\s{2,})(.*)/);
       if (match) {
-        return P.secondary(match[1]) + P.fill(match[2]) + P.dim(match[3]);
+        return (
+          palette.secondary(match[1]!) +
+          palette.fill(match[2]!) +
+          palette.dim(match[3]!)
+        );
       }
-      return P.text(paddedPlain);
+      return palette.text(paddedPlain);
     }
     case "kvMuted": {
       const match = paddedPlain.match(/^(\S+)(\s{2,})(.*)/);
       if (match) {
-        return P.dim(match[1]) + P.fill(match[2]) + P.dim(match[3]);
+        return (
+          palette.dim(match[1]!) +
+          palette.fill(match[2]!) +
+          palette.dim(match[3]!)
+        );
       }
-      return P.text(paddedPlain);
+      return palette.text(paddedPlain);
     }
     case "kvWarm": {
       const match = paddedPlain.match(/^(\S+)(\s{2,})(.*)/);
       if (match) {
-        return P.secondary(match[1]) + P.fill(match[2]) + P.warm(match[3]);
+        return (
+          palette.secondary(match[1]!) +
+          palette.fill(match[2]!) +
+          palette.warm(match[3]!)
+        );
       }
-      return P.text(paddedPlain);
+      return palette.text(paddedPlain);
     }
     case "sectionHeader":
-      return P.primaryBold(paddedPlain);
+      return palette.primaryBold(paddedPlain);
     case "desc":
-      return P.secondary(paddedPlain);
+      return palette.secondary(paddedPlain);
     case "dim":
-      return P.dim(paddedPlain);
+      return palette.dim(paddedPlain);
     case "empty":
       return onMenuBox ? MenuBox.fill(paddedPlain) : paddedPlain;
     default:
-      return P.text(paddedPlain);
+      return palette.text(paddedPlain);
   }
 }
 
-function colorizeCmdCell(paddedPlain: string, style: string, onMenuBox = false): string {
-  const P = onMenuBox ? infoPalMenu : infoPalDefault;
+function colorizeCmdCell(
+  paddedPlain: string,
+  style: string,
+  onMenuBox = false
+): string {
+  const palette = onMenuBox ? infoPalMenu : infoPalDefault;
   switch (style) {
     case "header":
-      return P.primaryBold(paddedPlain);
+      return palette.primaryBold(paddedPlain);
     case "cmd": {
       const slashMatch = paddedPlain.match(/^(\/\S+)(\s+)(.*)/);
       if (slashMatch) {
-        return P.primary(slashMatch[1]) + P.fill(slashMatch[2]) + P.secondary(slashMatch[3]);
+        return (
+          palette.primary(slashMatch[1]!) +
+          palette.fill(slashMatch[2]!) +
+          palette.secondary(slashMatch[3]!)
+        );
       }
       const continuationMatch = paddedPlain.match(/^(\s+)(\S.*)/);
       if (continuationMatch) {
-        return P.fill(continuationMatch[1]) + P.secondary(continuationMatch[2]);
+        return (
+          palette.fill(continuationMatch[1]!) +
+          palette.secondary(continuationMatch[2]!)
+        );
       }
       const kvMatch = paddedPlain.match(/^(\S+)(\s{2,})(.*)/);
       if (kvMatch) {
-        return P.primary(kvMatch[1]) + P.fill(kvMatch[2]) + P.secondary(kvMatch[3]);
+        return (
+          palette.primary(kvMatch[1]!) +
+          palette.fill(kvMatch[2]!) +
+          palette.secondary(kvMatch[3]!)
+        );
       }
-      return P.dim(paddedPlain);
+      return palette.dim(paddedPlain);
     }
     case "empty":
       return onMenuBox ? MenuBox.fill(paddedPlain) : paddedPlain;
     default:
-      return P.dim(paddedPlain);
+      return palette.dim(paddedPlain);
   }
 }
 
-// --- ASCII Art Renderer ---
-
-const MIN_ART_WIDTH = 60; // minimum terminal width to show ASCII art
+const MIN_ART_WIDTH = 60;
 
 function renderCenteredAscii(
   termCols: number,
-  buf: { push(line: string): void } = { push: (l) => console.log(l) }
+  buf: { push(line: string): void } = { push: (line) => console.log(line) }
 ): void {
-  const artLines = CANVAS_ASCII.split("\n").filter((l) => l.trim());
-  const artWidth = Math.max(...artLines.map((l) => l.length));
+  const artLines = CANVAS_ASCII.split("\n").filter((line) => line.trim());
+  const artWidth = Math.max(...artLines.map((line) => line.length));
 
   if (termCols < MIN_ART_WIDTH) {
     const simple = "  canvas";
@@ -980,244 +1574,19 @@ function renderCenteredAscii(
 }
 
 function centerText(text: string, termCols: number): string {
-  const visLen = stripAnsi(text).length;
-  const padding = Math.max(0, Math.floor((termCols - visLen) / 2));
+  const visibleLen = stripAnsi(text).length;
+  const padding = Math.max(0, Math.floor((termCols - visibleLen) / 2));
   return " ".repeat(padding) + text;
 }
 
-// stripAnsi imported from screen.ts
-
-// --- Assignment Picker ---
-
-async function showAssignmentPicker(
-  services: AppServices,
-  course: Course
-): Promise<string | null> {
-  clearScreen();
-  console.log("");
-  console.log(C.dim(`  loading assignments for ${course.courseCode}...`));
-
-  let assignments;
+async function workspaceExists(workspacePath: string): Promise<boolean> {
   try {
-    assignments = await fetchAssignments(services, course.id, course.name);
-  } catch (err) {
-    console.error(
-      C.error(
-        `  Error: ${err instanceof Error ? err.message : "unknown"}`
-      )
-    );
-    return null;
-  }
-
-  if (assignments.length === 0) {
-    console.log(C.dim("  No assignments found for this course."));
-    await sleep(1500);
-    return null;
-  }
-
-  const items: PickerItem[] = assignments.map((a) => ({
-    label: a.name,
-    sublabel:
-      formatDueCompact(a.dueAt) + (a.submitted ? " · submitted" : ""),
-    value: a.name,
-    dimmed: a.submitted,
-  }));
-
-  return showPicker({
-    title: course.courseCode || course.name,
-    subtitle: `${assignments.length} assignments`,
-    items,
-    filterable: true,
-    backLabel: "back",
-  });
-}
-
-// --- Workspace Entry ---
-
-async function enterNewWorkspace(
-  services: AppServices,
-  course: Course,
-  assignmentName: string
-): Promise<"back" | "courses" | "quit"> {
-  // Loop handles /refresh — re-runs pipeline and re-enters workspace
-  while (true) {
-    clearScreen();
-    console.log("");
-    console.log(C.primaryBold(`  ${assignmentName}`));
-    console.log(C.dim(`  ${course.name}`));
-    console.log("");
-
-    let wsData;
-    try {
-      wsData = await openWorkspace(
-        services,
-        course,
-        assignmentName,
-        (stage) => {
-          console.log(`  ${C.dim("›")} ${C.dim(stage)}`);
-        }
-      );
-    } catch (err) {
-      console.error(
-        C.error(
-          `\n  Failed: ${err instanceof Error ? err.message : "unknown"}`
-        )
-      );
-      showCursor();
-      console.log(C.dim("\n  Press any key to continue..."));
-      await waitForKey();
-      return "back";
-    }
-
-    clearScreen();
-    const courseDisplayName = findCourseDisplayName(services, wsData.loaded.courseName);
-    const cache = await loadCourseCache(course.courseCode, course.id);
-    const result = await runWorkspaceUI({
-      workspacePath: wsData.workspacePath,
-      workup: wsData.workup,
-      loaded: wsData.loaded,
-      aiConfig: services.aiConfig,
-      courseDisplayName,
-      agentContext: {
-        cache,
-        client: services.client,
-        config: services.config,
-        courseId: course.id,
-      },
-    });
-
-    if (result === "refresh") {
-      // Re-run ingest + work
-      clearScreen();
-      console.log("");
-      console.log(C.primaryBold(`  Refreshing ${assignmentName}`));
-      console.log(C.dim(`  ${course.name}`));
-      console.log("");
-      try {
-        await refreshWorkspace(services, course, assignmentName, (stage) => {
-          console.log(`  ${C.dim("›")} ${C.dim(stage)}`);
-        });
-      } catch (err) {
-        console.error(
-          C.error(`\n  Refresh failed: ${err instanceof Error ? err.message : "unknown"}`)
-        );
-        showCursor();
-        console.log(C.dim("\n  Press any key to continue..."));
-        await waitForKey();
-      }
-      // Loop back to re-enter workspace with fresh data
-      continue;
-    }
-
-    return result;
+    const stat = await fs.stat(path.join(workspacePath, "session.json"));
+    return stat.isFile();
+  } catch {
+    return false;
   }
 }
-
-async function enterExistingWorkspace(
-  wsPath: string,
-  services: AppServices
-): Promise<"back" | "courses" | "quit"> {
-  while (true) {
-    clearScreen();
-    console.log(C.dim("\n  loading workspace..."));
-
-    let loaded;
-    try {
-      loaded = await loadWorkspace(wsPath);
-    } catch (err) {
-      console.error(
-        C.error(`\n  Failed to load workspace: ${err instanceof Error ? err.message : "unknown"}`)
-      );
-      await waitForKey();
-      return "back";
-    }
-
-    let workup: AssignmentWorkup | null = null;
-    if (loaded.workupJson) {
-      workup = loaded.workupJson as unknown as AssignmentWorkup;
-    }
-
-    const courseDisplayName = findCourseDisplayName(services, loaded.courseName);
-    let agentCache = null;
-    let courseId: number | null = null;
-    let matchedCourse: Course | null = null;
-
-    // Find course from config or allCourses
-    if (services.courseConfig) {
-      const uc = services.courseConfig.courses.find(
-        (c) => c.originalName === loaded.courseName
-      );
-      if (uc) {
-        courseId = uc.id;
-        agentCache = await loadCourseCache(uc.originalCode, uc.id);
-        matchedCourse = services.allCourses.find((c) => c.id === uc.id) ?? null;
-      }
-    }
-
-    clearScreen();
-    const result = await runWorkspaceUI({
-      workspacePath: wsPath,
-      workup,
-      loaded,
-      aiConfig: services.aiConfig,
-      courseDisplayName,
-      agentContext: {
-        cache: agentCache,
-        client: services.client,
-        config: services.config,
-        courseId,
-      },
-    });
-
-    if (result === "refresh" && matchedCourse) {
-      clearScreen();
-      console.log("");
-      console.log(C.primaryBold(`  Refreshing ${loaded.assignmentName}`));
-      console.log(C.dim(`  ${loaded.courseName}`));
-      console.log("");
-      try {
-        const refreshed = await refreshWorkspace(
-          services,
-          matchedCourse,
-          loaded.assignmentName,
-          (stage) => console.log(`  ${C.dim("›")} ${C.dim(stage)}`)
-        );
-        wsPath = refreshed.workspacePath;
-      } catch (err) {
-        console.error(
-          C.error(`\n  Refresh failed: ${err instanceof Error ? err.message : "unknown"}`)
-        );
-        showCursor();
-        console.log(C.dim("\n  Press any key to continue..."));
-        await waitForKey();
-      }
-      continue;
-    }
-
-    if (result === "refresh") {
-      // Can't refresh without course info
-      clearScreen();
-      console.log(C.dim("\n  Cannot refresh — course not found in config."));
-      await sleep(2000);
-      continue;
-    }
-
-    return result;
-  }
-}
-
-/**
- * Find the user's display name for a course by matching the original Canvas name.
- */
-function findCourseDisplayName(services: AppServices, canvasCourseName: string): string | undefined {
-  if (!services.courseConfig) return undefined;
-  const match = services.courseConfig.courses.find(
-    (c) => c.originalName === canvasCourseName || c.originalCode === canvasCourseName
-  );
-  return match?.displayName;
-}
-
-// --- Utilities ---
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

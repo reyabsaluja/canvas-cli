@@ -17,12 +17,17 @@ import { loadWorkspace } from "../ask/load-workspace.js";
 import { getAIConfig, type AIProviderConfig } from "../ai/provider.js";
 import { makeSessionSlug, getWorkspacePath } from "../workspace/paths.js";
 import { listWorkspaces } from "../ask/resolve-workspace.js";
+import {
+  loadWorkspaceSessionMeta,
+  updateWorkspaceSessionMeta,
+} from "../workspace/session.js";
 import type { Course, Assignment, AssignmentDetail } from "../domain/models.js";
 import type { CanvasCourse } from "../canvas/types.js";
-import type { UserCourse, CourseConfig } from "./course-config.js";
+import type { CourseConfig } from "./course-config.js";
 import type { AssignmentWorkup } from "../work/types.js";
 import type { WorkspaceAnswer } from "../ask/types.js";
 import type { LoadedWorkspace } from "../ask/types.js";
+import type { WorkspaceLifecycleState } from "./chat-state.js";
 import fs from "node:fs/promises";
 
 /**
@@ -37,6 +42,13 @@ export interface AppServices {
   allCourses: Course[];
   /** User-configured courses (filtered + renamed). Null if no config yet. */
   courseConfig: CourseConfig | null;
+}
+
+export interface WorkspaceOpenResult {
+  workspacePath: string;
+  workup: AssignmentWorkup | null;
+  loaded: LoadedWorkspace;
+  lifecycleState: WorkspaceLifecycleState;
 }
 
 export async function initServices(): Promise<AppServices> {
@@ -101,11 +113,7 @@ export async function openWorkspace(
   course: Course,
   assignmentName: string,
   onProgress: (stage: string) => void
-): Promise<{
-  workspacePath: string;
-  workup: AssignmentWorkup | null;
-  loaded: LoadedWorkspace;
-}> {
+): Promise<WorkspaceOpenResult> {
   // Step 1: Resolve the assignment (TUI-safe, no process.exit)
   onProgress("resolving assignment");
 
@@ -140,10 +148,23 @@ export async function openWorkspace(
   if (workupExists) {
     onProgress("loading workspace");
     const loaded = await loadWorkspace(wsPath);
+    const cache = await loadCourseCache(course.courseCode, course.id);
+    const meta = await loadWorkspaceSessionMeta(wsPath);
+    const lifecycleState = isWorkspaceStale(meta?.preparedAt ?? null, cache)
+      ? "stale"
+      : "ready";
+    await updateWorkspaceSessionMeta(wsPath, (current) => ({
+      ...current,
+      updatedAt: new Date().toISOString(),
+      lastOpenedAt: new Date().toISOString(),
+      workspaceState: lifecycleState,
+      lastError: null,
+    }));
     return {
       workspacePath: wsPath,
       workup: loaded.workupJson as unknown as AssignmentWorkup | null,
       loaded,
+      lifecycleState,
     };
   }
 
@@ -202,6 +223,7 @@ export async function openWorkspace(
     workspacePath: result.workspacePath,
     workup: investigation.workup,
     loaded,
+    lifecycleState: "ready",
   };
 }
 
@@ -214,11 +236,7 @@ export async function refreshWorkspace(
   course: Course,
   assignmentName: string,
   onProgress: (stage: string) => void
-): Promise<{
-  workspacePath: string;
-  workup: AssignmentWorkup | null;
-  loaded: LoadedWorkspace;
-}> {
+): Promise<WorkspaceOpenResult> {
   // Step 1: Resolve assignment
   onProgress("resolving assignment");
   const rawAssignments = await services.client.getAssignments(course.id);
@@ -232,6 +250,15 @@ export async function refreshWorkspace(
   const match = matches[0];
   const rawDetail = await services.client.getAssignmentDetail(course.id, match.id);
   const detail = normalizeAssignmentDetail(rawDetail, course.name);
+  const slug = makeSessionSlug(course.courseCode, detail.name, detail.id);
+  const wsPath = getWorkspacePath(slug);
+
+  await updateWorkspaceSessionMeta(wsPath, (current) => ({
+    ...current,
+    updatedAt: new Date().toISOString(),
+    workspaceState: "refreshing",
+    lastError: null,
+  }));
 
   // Step 2: Force re-ingest
   onProgress("re-ingesting course data");
@@ -272,6 +299,7 @@ export async function refreshWorkspace(
     workspacePath: result.workspacePath,
     workup: investigation.workup,
     loaded,
+    lifecycleState: "ready",
   };
 }
 
@@ -301,6 +329,18 @@ export function createChatContext(
     courseId: extraContext?.courseId ?? null,
     conversationHistory: [],
   };
+}
+
+export function hydrateConversationHistory(
+  chatContext: { conversationHistory: Array<{ role: string; content: string }> },
+  messages: Array<{ role: string; content: string }>
+): void {
+  chatContext.conversationHistory = messages
+    .filter((message) => message.role === "user" || message.role === "assistant")
+    .map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
 }
 
 /**
@@ -345,6 +385,44 @@ export async function getRecentWorkspaces(): Promise<
   return listWorkspaces();
 }
 
+export function getCourseById(
+  services: AppServices,
+  courseId: number
+): Course | null {
+  return getDisplayCourses(services).find((course) => course.id === courseId) ?? null;
+}
+
+export function getCourseDisplayName(
+  services: AppServices,
+  courseId: number
+): string | null {
+  const configured = services.courseConfig?.courses.find((course) => course.id === courseId);
+  if (configured) return configured.displayName;
+  return services.allCourses.find((course) => course.id === courseId)?.name ?? null;
+}
+
+export async function fetchUpcomingAssignments(
+  services: AppServices,
+  limit: number = 12
+): Promise<Assignment[]> {
+  const courses = getDisplayCourses(services);
+  const allAssignments = await Promise.all(
+    courses.map(async (course) => {
+      try {
+        return await fetchAssignments(services, course.id, course.name);
+      } catch {
+        return [];
+      }
+    })
+  );
+
+  return sortByUrgency(
+    allAssignments
+      .flat()
+      .filter((assignment) => !assignment.submitted)
+  ).slice(0, limit);
+}
+
 /**
  * Format a due date for compact display.
  */
@@ -359,4 +437,12 @@ export function formatDueCompact(dueAt: Date | null): string {
   if (diffDays === 1) return "due tomorrow";
   if (diffDays <= 7) return `due in ${diffDays}d`;
   return `due ${dueAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+}
+
+function isWorkspaceStale(
+  preparedAt: string | null,
+  cache: CourseCache | null
+): boolean {
+  if (!preparedAt || !cache?.ingestion?.ingestedAt) return false;
+  return new Date(cache.ingestion.ingestedAt).getTime() > new Date(preparedAt).getTime();
 }

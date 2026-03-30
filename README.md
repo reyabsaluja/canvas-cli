@@ -38,46 +38,39 @@ canvas-cli
 
 This launches an interactive application where you can:
 
-1. **Browse courses** — arrow keys to navigate, type to filter, Enter to select
-2. **Pick assignments** — see due dates and status at a glance
-3. **Enter a workspace** — the system automatically ingests and prepares the assignment if needed
-4. **Ask questions** — type natural language questions about the assignment
-5. **Use slash commands** — `/overview`, `/plan`, `/resources`, `/evidence`, etc.
+1. **Start in global chat** — open directly into a persistent home session
+2. **Move between scopes** — global, course, and workspace all use the same shell
+3. **Open pickers from commands** — `/courses`, `/recent`, `/assignments`, `/open`
+4. **Ask questions naturally** — global handles broad questions, course scope handles course context, workspace scope keeps the rich assignment chat
+5. **Use scope-aware slash commands** — `/help` changes with the current scope
 
 ### Example flow
 
 ```
 $ canvas-cli
 
-  canvas-cli
-  Recent workspaces
+  [canvas ascii header]
+  [home box]
 
-  ❯ Lab4 — ECE212 2026 Home Page
-    Milestone 3 — ECE297 Software Design
-    Browse courses — 5 current courses
+  Academic control center ready.
 
-  ↑↓ navigate  Enter select  Esc quit
+  Use /courses to open a course, /recent to reopen work,
+  or ask a broad question across your courses.
+
+  > what's due soon across my courses?
 ```
 
-Select an assignment and enter the workspace:
+Move into a course, then open a workspace without leaving the chat shell:
 
 ```
-  Lab4
-  ECE212 2026 Home Page
-  Confidence: high | Due: March 6, 2026
-  ──────────────────────────────────────
+  > /courses
+  [course picker opens]
 
-  This is Lab 4: Second-order Circuits, covering RLC circuit analysis with
-  underdamped, critically damped, and overdamped responses...
+  > /assignments
+  [assignment picker opens]
 
-  Next steps
-  1. Complete pre-lab PSpice simulations
-  2. Review second-order circuit theory
-  3. Prepare for in-lab measurements
-
-  Type a question, or use /help for commands
-
-  >
+  Workspace: ECE212 2026 Home Page / Lab4
+  > what exactly do I need to submit?
 ```
 
 Type questions directly:
@@ -112,6 +105,31 @@ Type questions directly:
 
 ### Slash commands
 
+Global scope:
+
+| Command | Description |
+|---|---|
+| `/courses` | Open the course picker |
+| `/recent` | Reopen a recent course or workspace |
+| `/open` | Jump straight to a course or recent item |
+| `/home` | Stay in the global home session |
+| `/help` | Show available commands |
+| `/quit` | Exit canvas-cli |
+
+Course scope:
+
+| Command | Description |
+|---|---|
+| `/assignments` | Open the assignment picker for the current course |
+| `/files` | Show cached files and downloads for the course |
+| `/modules` | Show course modules |
+| `/open` | Open an assignment directly |
+| `/back` | Return to global scope |
+| `/home` | Return to global scope |
+| `/help` | Show course-scope commands |
+
+Workspace scope:
+
 | Command | Description |
 |---|---|
 | `/overview` | Show assignment overview |
@@ -120,10 +138,10 @@ Type questions directly:
 | `/resources` | Show key resources |
 | `/evidence` | Show confirmed vs inferred sources |
 | `/status` | Show workspace status |
-| `/help` | Show available commands |
-| `/back` | Return to assignment selection |
-| `/courses` | Return to course selection |
-| `/quit` | Exit canvas-cli |
+| `/refresh` | Refresh the workspace from the latest course cache |
+| `/back` | Return to the course session |
+| `/home` | Return to the global home session |
+| `/help` | Show workspace commands |
 
 ### Automatic workspace preparation
 
@@ -133,7 +151,7 @@ When you open an assignment for the first time, canvas-cli automatically:
 3. Runs the AI work agent (reads documents, synthesizes understanding)
 4. Creates the workspace with assignment.md, plan.md, workup.json, etc.
 
-You see the progress live inside the workspace UI:
+You see the progress live before the workspace session opens:
 ```
   › resolving assignment
   › checking course cache
