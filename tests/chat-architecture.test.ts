@@ -27,6 +27,7 @@ import {
   openWorkspace,
   refreshWorkspace,
 } from "../src/tui/services.js";
+import { createShellContext } from "../src/tui/app-runtime.js";
 import { makeCourseSlug } from "../src/ingest/slug.js";
 import type { Course } from "../src/domain/models.js";
 import { loadWorkspaceSessionMeta } from "../src/workspace/session.js";
@@ -308,6 +309,91 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     assert.equal(resolveCommand(COMMANDS, "/reqs")?.name, "/requirements");
     assert.match(formatScopeTargets(["workspace"]), /Open an assignment first/);
     assert.match(formatScopeTargets(["course", "workspace"]), /a course/);
+  });
+
+  await t.test("course shell context renders before background hydration completes", async () => {
+    await withTempCwd(async () => {
+      const course: Course = {
+        id: 17,
+        name: "ECE243",
+        courseCode: "ECE243H1",
+        termName: "Winter 2026",
+        isCurrent: true,
+      };
+
+      let resolveAssignments: ((value: any[]) => void) | null = null;
+      let assignmentCalls = 0;
+      const assignmentsPromise = new Promise<any[]>((resolve) => {
+        resolveAssignments = resolve;
+      });
+
+      const services = {
+        client: {
+          async getAssignments() {
+            assignmentCalls += 1;
+            return assignmentsPromise;
+          },
+        },
+        config: {} as never,
+        aiConfig: null,
+        rawCourses: [],
+        allCourses: [course],
+        courseConfig: null,
+        assignmentCache: new Map(),
+      } as any;
+
+      const shellContext = await Promise.race([
+        createShellContext(services, { type: "course", courseId: course.id }),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("course shell context blocked on hydration")),
+            100
+          )
+        ),
+      ]);
+
+      assert.equal(shellContext.runtime.statusLabel, "Status: loading course data");
+      assert.equal(
+        assignmentCalls,
+        0,
+        "course shell creation should not fetch assignments before first render"
+      );
+
+      const api = {
+        addMessage: async (message: (typeof shellContext.session.messages)[number]) => {
+          shellContext.session.messages.push(message);
+        },
+        addMessages: async (
+          messages: Array<(typeof shellContext.session.messages)[number]>
+        ) => {
+          shellContext.session.messages.push(...messages);
+        },
+        render: () => {},
+        session: shellContext.session,
+        runtime: shellContext.runtime,
+      };
+
+      const hydrationPromise = shellContext.onReady?.(api);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.equal(assignmentCalls, 1);
+
+      resolveAssignments?.([
+        {
+          id: 42,
+          name: "Lab 4",
+          course_id: course.id,
+          due_at: null,
+          has_submitted_submissions: false,
+          html_url: "https://canvas.example/lab-4",
+        },
+      ]);
+      await hydrationPromise;
+
+      assert.equal(shellContext.runtime.statusLabel, "Status: assignments ready");
+      assert.equal(shellContext.session.messages.length, 2);
+      assert.match(shellContext.session.messages[1]?.content ?? "", /Upcoming work/);
+      assert.match(shellContext.session.messages[1]?.content ?? "", /Lab 4/);
+    });
   });
 
   await t.test("reopens an existing workspace without Canvas calls", async () => {

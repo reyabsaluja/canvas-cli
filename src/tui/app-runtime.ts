@@ -31,7 +31,7 @@ import {
   resolveWorkspacePinContent,
 } from "./app-workspace-content.js";
 import { workspaceExists } from "./app-navigation.js";
-import type { ShellContext } from "./app-types.js";
+import type { ShellContext, ShellRuntimeApi } from "./app-types.js";
 
 export async function createShellContext(
   services: AppServices,
@@ -103,10 +103,9 @@ export async function createShellContext(
       };
     }
 
-    const assignments = await fetchAssignments(services, course.id, course.name).catch(
-      () => []
-    );
-    const cache = await loadCourseCache(course.courseCode, course.id);
+    let assignments: Assignment[] = [];
+    let cache = null as Awaited<ReturnType<typeof loadCourseCache>>;
+    let hydrationPromise: Promise<void> | null = null;
     const session = await loadOrCreateChatSession(scope, {
       title: course.name,
       metadata: {
@@ -114,8 +113,81 @@ export async function createShellContext(
         courseName: course.name,
         courseCode: course.courseCode,
       },
-      initialMessages: buildCourseIntroMessages(course, assignments, cache !== null),
+      initialMessages: buildCourseIntroMessages(course, [], false),
     });
+    const shouldPostHydrationMessage = session.messages.length <= 1;
+
+    const setCourseStatus = (
+      runtime: ShellContext["runtime"],
+      statusLabel?: string
+    ): void => {
+      runtime.statusLabel = statusLabel;
+    };
+
+    const hydrateCourseData = async (api?: ShellRuntimeApi): Promise<void> => {
+      if (hydrationPromise) {
+        return hydrationPromise;
+      }
+
+      hydrationPromise = (async () => {
+        const runtime = api?.runtime;
+        if (runtime) {
+          setCourseStatus(runtime, "Status: loading course data");
+          api.render();
+        }
+
+        try {
+          const [nextAssignments, nextCache] = await Promise.all([
+            fetchAssignments(services, course.id, course.name).catch(() => []),
+            loadCourseCache(course.courseCode, course.id),
+          ]);
+          assignments = nextAssignments;
+          cache = nextCache;
+
+          if (runtime) {
+            setCourseStatus(
+              runtime,
+              nextCache ? "Status: course data ready" : "Status: assignments ready"
+            );
+          }
+
+          if (api && shouldPostHydrationMessage) {
+            const nextMessage = buildCourseIntroMessages(
+              course,
+              nextAssignments,
+              nextCache !== null
+            )[0];
+            if (
+              nextMessage &&
+              api.session.messages[api.session.messages.length - 1]?.content !==
+              nextMessage.content
+            ) {
+              await api.addMessage(nextMessage);
+            }
+          }
+        } catch (error) {
+          if (runtime) {
+            setCourseStatus(runtime, "Status: course data unavailable");
+          }
+          if (api && shouldPostHydrationMessage) {
+            const message = `Course data could not finish loading: ${
+              error instanceof Error ? error.message : "unknown error"
+            }`;
+            if (
+              api.session.messages[api.session.messages.length - 1]?.content !==
+              message
+            ) {
+              await api.addMessage({
+                role: "system",
+                content: message,
+              });
+            }
+          }
+        }
+      })();
+
+      return hydrationPromise;
+    };
 
     return {
       session,
@@ -124,7 +196,11 @@ export async function createShellContext(
         title: course.name,
         subtitle: course.courseCode,
         scopeLabel: `Course: ${course.name}`,
+        statusLabel: "Status: loading course data",
         placeholder: "Ask about this course, or use /assignments",
+      },
+      onReady: async (api) => {
+        await hydrateCourseData(api);
       },
       onAsk: async (input, callbacks) => {
         if (!services.aiConfig) {
@@ -133,6 +209,7 @@ export async function createShellContext(
               "AI is unavailable because no provider key is configured. Course navigation commands still work.",
           };
         }
+        await hydrateCourseData();
         const answer = await answerCourseQuestion({
           aiConfig: services.aiConfig,
           courseName: course.name,

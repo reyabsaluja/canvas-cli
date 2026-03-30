@@ -41,6 +41,7 @@ export interface ShellContext {
   resolvePinContent?: (pin: ShellPinOption) => Promise<string | null>;
   getLoadedWorkspace?: () => LoadedWorkspace | null;
   getCourseCache?: () => CourseCache | null;
+  onReady?: (api: ShellRuntimeApi) => Promise<void> | void;
   onAsk: (
     input: string,
     callbacks: {
@@ -58,6 +59,14 @@ export interface ShellContext {
     sources?: Array<{ title: string; kind: string }>;
     confidence?: string;
   }>;
+}
+
+export interface ShellRuntimeApi {
+  addMessage: (message: ChatMessage) => Promise<void>;
+  addMessages: (messages: ChatMessage[]) => Promise<void>;
+  render: () => void;
+  session: ChatSession;
+  runtime: ScopeRuntime;
 }
 
 export interface CommandApi {

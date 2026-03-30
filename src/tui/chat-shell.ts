@@ -11,7 +11,7 @@ import {
   getAvailableCommands,
   resolveCommand,
 } from "./commands.js";
-import type { ShellPinOption } from "./app-types.js";
+import type { ShellPinOption, ShellRuntimeApi } from "./app-types.js";
 import {
   MAIN_VIEW_BOTTOM_RESERVE,
   buildBannerLines,
@@ -23,13 +23,10 @@ import { ChatShellPersistence } from "./chat-shell-persistence.js";
 import { enterChatShell, leaveChatShell } from "./chat-shell-terminal.js";
 import { createSerialTaskQueue } from "./serial-task-queue.js";
 
-interface ChatShellApi<TExit> {
+interface ChatShellApi<TExit> extends ShellRuntimeApi {
   addMessage: (message: ChatMessage) => Promise<void>;
   addMessages: (messages: ChatMessage[]) => Promise<void>;
   resolve: (result: TExit | null) => void;
-  render: () => void;
-  session: ChatSession;
-  runtime: ScopeRuntime;
 }
 
 interface AskCallbacks {
@@ -62,6 +59,7 @@ export interface ChatShellOptions<TExit> {
     args: string,
     api: ChatShellApi<TExit>
   ) => Promise<TExit | null | void>;
+  onReady?: (api: ShellRuntimeApi) => Promise<void> | void;
 }
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -727,5 +725,28 @@ export async function runChatShell<TExit>(
     }
 
     stdin.on("data", onData);
+
+    if (options.onReady) {
+      queueMicrotask(() => {
+        if (shellClosed) return;
+        void Promise.resolve(options.onReady!(api))
+          .then(() => {
+            if (!shellClosed) {
+              render();
+            }
+          })
+          .catch(async (error: unknown) => {
+            if (shellClosed) return;
+            markTranscriptDirty();
+            await persistence.addMessage({
+              role: "system",
+              content: `Error: ${error instanceof Error ? error.message : "unknown"}`,
+            });
+            if (!shellClosed) {
+              render();
+            }
+          });
+      });
+    }
   });
 }
