@@ -117,6 +117,8 @@ export async function runChatShell<TExit>(
   let chatScrollOffset = 0;
   let spinnerTimer: ReturnType<typeof setInterval> | null = null;
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
+  let persistChain: Promise<void> = Promise.resolve();
+  let persistFailureMessage: string | null = null;
 
   const placeholder =
     options.runtime.placeholder ?? "Type your message or /help for commands";
@@ -262,7 +264,7 @@ export async function runChatShell<TExit>(
     }
     persistTimer = setTimeout(() => {
       persistTimer = null;
-      void flushPersist();
+      void flushPersist().catch(() => {});
     }, delayMs);
   }
 
@@ -272,7 +274,17 @@ export async function runChatShell<TExit>(
       persistTimer = null;
     }
     session.updatedAt = new Date().toISOString();
-    await saveChatSession(session);
+    persistChain = persistChain.catch(() => {}).then(async () => {
+      try {
+        await saveChatSession(session);
+        persistFailureMessage = null;
+      } catch (error) {
+        persistFailureMessage =
+          error instanceof Error ? error.message : "unknown persistence error";
+        throw error;
+      }
+    });
+    return persistChain;
   }
 
   async function addMessage(message: ChatMessage): Promise<void> {
@@ -298,16 +310,38 @@ export async function runChatShell<TExit>(
   async function cleanup(
     stdin: NodeJS.ReadStream,
     onData: (data: string) => void
-  ): Promise<void> {
-    stopSpinner();
-    await flushPersist();
-    stdin.removeListener("data", onData);
-    stdin.setRawMode(false);
-    stdin.pause();
-    disableMouseTracking();
-    leaveAlternateScreen();
-    showCursor();
-    clearScreen();
+  ): Promise<string | null> {
+    let persistError: string | null = null;
+
+    try {
+      stopSpinner();
+      await flushPersist();
+    } catch (error) {
+      persistError =
+        error instanceof Error ? error.message : "unknown persistence error";
+    } finally {
+      stdin.removeListener("data", onData);
+      try {
+        if (stdin.isTTY) stdin.setRawMode(false);
+      } catch {}
+      try {
+        stdin.pause();
+      } catch {}
+      try {
+        disableMouseTracking();
+      } catch {}
+      try {
+        leaveAlternateScreen();
+      } catch {}
+      try {
+        showCursor();
+      } catch {}
+      try {
+        clearScreen();
+      } catch {}
+    }
+
+    return persistError ?? persistFailureMessage;
   }
 
   enterAlternateScreen();
@@ -480,7 +514,10 @@ export async function runChatShell<TExit>(
       if (isProcessing && !keyOkWhileProcessing(key)) return;
 
       if (key === "\x03") {
-        await cleanup(stdin, onData);
+        const persistError = await cleanup(stdin, onData);
+        if (persistError) {
+          console.error(`Failed to save chat session: ${persistError}`);
+        }
         process.exit(0);
       }
 
@@ -595,7 +632,10 @@ export async function runChatShell<TExit>(
           try {
             const exit = await options.onCommand(commandName, rest.join(" "), api);
             if (exit !== undefined) {
-              await cleanup(stdin, onData);
+              const persistError = await cleanup(stdin, onData);
+              if (persistError) {
+                console.error(`Failed to save chat session: ${persistError}`);
+              }
               resolve(exit ?? null);
               return;
             }

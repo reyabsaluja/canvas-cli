@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import crypto from "node:crypto";
 import type { AppScope, ChatSession, ChatSessionMetadata } from "./chat-state.js";
 
 const CHAT_SESSIONS_DIR = ".canvas-cli/chat-sessions";
@@ -47,7 +48,7 @@ export async function loadChatSession(sessionId: string): Promise<ChatSession | 
 export async function saveChatSession(session: ChatSession): Promise<void> {
   const filePath = getChatSessionPath(session.id);
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(session, null, 2) + "\n", "utf-8");
+  await writeAtomic(filePath, JSON.stringify(session, null, 2) + "\n");
 }
 
 export async function loadOrCreateChatSession(
@@ -135,5 +136,15 @@ export async function listChatSessions(): Promise<ChatSession[]> {
     return sessions;
   } catch {
     return [];
+  }
+}
+
+async function writeAtomic(filePath: string, content: string): Promise<void> {
+  const tmpPath = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(tmpPath, content, "utf-8");
+    await fs.rename(tmpPath, filePath);
+  } finally {
+    await fs.rm(tmpPath, { force: true }).catch(() => {});
   }
 }

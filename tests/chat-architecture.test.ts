@@ -84,6 +84,24 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     });
   });
 
+  await t.test("chat session saves do not leave temp files behind", async () => {
+    await withTempCwd(async (tempDir) => {
+      const scope: AppScope = { type: "global" };
+      const session = await loadOrCreateChatSession(scope, {
+        title: "Global",
+        initialMessages: [{ role: "assistant", content: "Ready." }],
+      });
+
+      session.messages.push({ role: "user", content: "hello" });
+      await saveChatSession(session);
+
+      const sessionsDir = path.join(tempDir, ".canvas-cli", "chat-sessions");
+      const entries = await fs.readdir(sessionsDir);
+      assert.ok(entries.includes("global-home.json"));
+      assert.equal(entries.some((entry) => entry.endsWith(".tmp")), false);
+    });
+  });
+
   await t.test("keeps command availability scoped and aliases resolvable", async () => {
     const globalCommands = getAvailableCommands(COMMANDS, "global").map((command) => command.name);
     const courseCommands = getAvailableCommands(COMMANDS, "course").map((command) => command.name);
