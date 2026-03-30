@@ -167,7 +167,19 @@ export interface ChatAgentContext {
   config: Config | null;
   courseId: number | null;
   /** Persistent conversation history for multi-turn context. */
-  conversationHistory: Array<{ role: string; content: string }>;
+  conversationHistory: ChatAgentConversationEntry[];
+}
+
+export interface ChatAgentConversationEntry {
+  role: string;
+  content: string;
+}
+
+export interface ChatAgentExtraContext {
+  cache: CourseCache | null;
+  client: CanvasClient | null;
+  config: Config | null;
+  courseId: number | null;
 }
 
 export interface ToolCallEvent {

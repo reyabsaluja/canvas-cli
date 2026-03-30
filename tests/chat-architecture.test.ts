@@ -19,9 +19,11 @@ import {
 import { handleCommand } from "../src/tui/app-commands.js";
 import type { AppScope } from "../src/tui/chat-state.js";
 import {
+  createChatContext,
   fetchAssignments,
   getCourseById,
   getDisplayCourseAvailability,
+  hydrateConversationHistory,
   invalidateAssignmentCache,
   getWorkspaceLifecycleState,
   openWorkspace,
@@ -377,6 +379,40 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     assert.equal(resolveCommand(COMMANDS, "/reqs")?.name, "/requirements");
     assert.match(formatScopeTargets(["workspace"]), /Open an assignment first/);
     assert.match(formatScopeTargets(["course", "workspace"]), /a course/);
+  });
+
+  await t.test("workspace chat context helpers preserve conversation history shape", async () => {
+    const loaded = {
+      assignmentName: "Lab 4",
+      courseName: "ECE243",
+      extractedFiles: [],
+      workupJson: null,
+    } as any;
+
+    const context = createChatContext(
+      { provider: "anthropic", model: "test-model", apiKey: "test" } as any,
+      loaded,
+      {
+        cache: null,
+        client: null,
+        config: null,
+        courseId: 17,
+      }
+    );
+
+    hydrateConversationHistory(context, [
+      { role: "system", content: "ignore me" },
+      { role: "user", content: "What is due?" },
+      { role: "assistant", content: "Lab 4 is due soon." },
+      { role: "tool", content: "also ignore me" },
+    ]);
+
+    assert.equal(context.loaded, loaded);
+    assert.equal(context.courseId, 17);
+    assert.deepEqual(context.conversationHistory, [
+      { role: "user", content: "What is due?" },
+      { role: "assistant", content: "Lab 4 is due soon." },
+    ]);
   });
 
   await t.test("course shell context renders before background hydration completes", async () => {

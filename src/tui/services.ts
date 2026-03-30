@@ -34,6 +34,10 @@ import type { AssignmentWorkup } from "../work/types.js";
 import type { WorkspaceAnswer } from "../ask/types.js";
 import type { LoadedWorkspace } from "../ask/types.js";
 import type { WorkspaceLifecycleState } from "./chat-state.js";
+import type {
+  ChatAgentContext,
+  ChatAgentExtraContext,
+} from "./chat-agent.js";
 import fs from "node:fs/promises";
 
 /**
@@ -527,13 +531,8 @@ export type { ToolCallEvent } from "./chat-agent.js";
 export function createChatContext(
   aiConfig: AIProviderConfig,
   loaded: LoadedWorkspace,
-  extraContext?: {
-    cache: CourseCache | null;
-    client: CanvasClient | null;
-    config: Config | null;
-    courseId: number | null;
-  }
-): any {
+  extraContext?: ChatAgentExtraContext
+): ChatAgentContext {
   return {
     aiConfig,
     loaded,
@@ -546,7 +545,7 @@ export function createChatContext(
 }
 
 export function hydrateConversationHistory(
-  chatContext: { conversationHistory: Array<{ role: string; content: string }> },
+  chatContext: ChatAgentContext,
   messages: Array<{ role: string; content: string }>
 ): void {
   chatContext.conversationHistory = messages
@@ -566,26 +565,13 @@ export async function askWorkspaceQuestion(
   loaded: LoadedWorkspace,
   question: string,
   onToolCall?: (event: { action: string; target: string; result: string; color: "green" | "red" }) => void,
-  extraContext?: {
-    cache: CourseCache | null;
-    client: CanvasClient | null;
-    config: Config | null;
-    courseId: number | null;
-  },
-  chatContext?: any,
+  extraContext?: ChatAgentExtraContext,
+  chatContext?: ChatAgentContext,
   onTextDelta?: (delta: string) => void
 ): Promise<WorkspaceAnswer> {
   const { runChatAgent } = await import("./chat-agent.js");
 
-  const ctx = chatContext ?? {
-    aiConfig,
-    loaded,
-    cache: extraContext?.cache ?? null,
-    client: extraContext?.client ?? null,
-    config: extraContext?.config ?? null,
-    courseId: extraContext?.courseId ?? null,
-    conversationHistory: [],
-  };
+  const ctx = chatContext ?? createChatContext(aiConfig, loaded, extraContext);
 
   return runChatAgent(ctx, question, onToolCall ?? (() => {}), onTextDelta);
 }
