@@ -1,9 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { LoadedWorkspace } from "./types.js";
+import type { ExtractedWorkspaceFile, LoadedWorkspace } from "./types.js";
 
 /**
- * Load all workspace artifacts needed for question answering.
+ * Load workspace metadata and small artifacts needed for shell entry.
+ * Extracted document text is indexed by filename only and loaded lazily on demand.
  */
 export async function loadWorkspace(wsPath: string): Promise<LoadedWorkspace> {
   const [sessionRaw, assignmentMd, planMd, notesMd, workupRaw] =
@@ -29,36 +30,7 @@ export async function loadWorkspace(wsPath: string): Promise<LoadedWorkspace> {
     // malformed
   }
 
-  // Load extracted text files (including subdirectories like pages/)
-  const extractedFiles: Array<{ name: string; content: string }> = [];
-  const extractedDir = path.join(wsPath, "extracted");
-  try {
-    const entries = await fs.readdir(extractedDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isFile() && entry.name.endsWith(".txt")) {
-        const content = await readSafe(path.join(extractedDir, entry.name));
-        if (content && content.trim().length > 0) {
-          extractedFiles.push({ name: entry.name, content });
-        }
-      } else if (entry.isDirectory()) {
-        // Read .txt files from subdirectories (e.g., pages/)
-        try {
-          const subEntries = await fs.readdir(path.join(extractedDir, entry.name));
-          for (const sub of subEntries) {
-            if (!sub.endsWith(".txt")) continue;
-            const content = await readSafe(path.join(extractedDir, entry.name, sub));
-            if (content && content.trim().length > 0) {
-              extractedFiles.push({ name: `${entry.name}/${sub}`, content });
-            }
-          }
-        } catch {
-          // skip unreadable subdirectory
-        }
-      }
-    }
-  } catch {
-    // no extracted dir
-  }
+  const extractedFiles = await listWorkspaceExtractedFiles(wsPath);
 
   return {
     path: wsPath,
@@ -76,7 +48,80 @@ export async function loadWorkspace(wsPath: string): Promise<LoadedWorkspace> {
     notesMd,
     workupJson,
     extractedFiles,
+    extractedFileCache: new Map<string, string>(),
   };
+}
+
+export async function readWorkspaceExtractedFile(
+  ws: LoadedWorkspace,
+  file: string | ExtractedWorkspaceFile
+): Promise<string | null> {
+  const entry =
+    typeof file === "string"
+      ? ws.extractedFiles.find((candidate) => candidate.name === file) ?? null
+      : file;
+  if (!entry) return null;
+
+  ws.extractedFileCache ??= new Map<string, string>();
+  const cached = ws.extractedFileCache.get(entry.name);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const content = await readSafe(path.join(ws.path, entry.relativePath));
+  if (!content || content.trim().length === 0) {
+    return null;
+  }
+  ws.extractedFileCache.set(entry.name, content);
+  return content;
+}
+
+export async function loadWorkspaceExtractedFiles(
+  ws: LoadedWorkspace
+): Promise<Array<{ name: string; content: string }>> {
+  const files: Array<{ name: string; content: string }> = [];
+  for (const entry of ws.extractedFiles) {
+    const content = await readWorkspaceExtractedFile(ws, entry);
+    if (content) {
+      files.push({ name: entry.name, content });
+    }
+  }
+  return files;
+}
+
+async function listWorkspaceExtractedFiles(
+  wsPath: string
+): Promise<ExtractedWorkspaceFile[]> {
+  const extractedDir = path.join(wsPath, "extracted");
+  try {
+    return await walkExtractedFiles(extractedDir, "extracted");
+  } catch {
+    return [];
+  }
+}
+
+async function walkExtractedFiles(
+  absoluteDir: string,
+  relativeDir: string
+): Promise<ExtractedWorkspaceFile[]> {
+  const files: ExtractedWorkspaceFile[] = [];
+  const entries = await fs.readdir(absoluteDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const nextAbsolute = path.join(absoluteDir, entry.name);
+    const nextRelative = path.join(relativeDir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await walkExtractedFiles(nextAbsolute, nextRelative)));
+      continue;
+    }
+    if (!entry.isFile() || !entry.name.endsWith(".txt")) {
+      continue;
+    }
+    files.push({
+      name: path.relative("extracted", nextRelative),
+      relativePath: nextRelative,
+    });
+  }
+  return files.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 async function readSafe(filePath: string): Promise<string | null> {

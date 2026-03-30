@@ -29,6 +29,10 @@ import { makeCourseSlug } from "../src/ingest/slug.js";
 import type { Course } from "../src/domain/models.js";
 import { loadWorkspaceSessionMeta } from "../src/workspace/session.js";
 import {
+  loadWorkspace,
+  readWorkspaceExtractedFile,
+} from "../src/ask/load-workspace.js";
+import {
   createWorkspace,
   createWorkWorkspace,
 } from "../src/workspace/create.js";
@@ -1129,7 +1133,15 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
               { conclusion: "Need waveform screenshot", source: "lab4-spec.pdf" },
             ],
           },
-          extractedFiles: [{ name: "lab4-spec.txt", content: "waveform screenshot" }],
+          extractedFiles: [
+            {
+              name: "lab4-spec.txt",
+              relativePath: "extracted/lab4-spec.txt",
+            },
+          ],
+          extractedFileCache: new Map([
+            ["lab4-spec.txt", "waveform screenshot"],
+          ]),
         }) as any,
       getCourseCache: () => null,
     } as any;
@@ -1146,5 +1158,55 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     assert.match(messages[2]?.content ?? "", /Lab Handout/);
     assert.match(messages[3]?.content ?? "", /waveform screenshot/);
     assert.match(messages[4]?.content ?? "", /Assignment: Lab 4/);
+  });
+
+  await t.test("workspace loading indexes extracted files lazily and reads content on demand", async () => {
+    await withTempCwd(async (tempDir) => {
+      const workspacePath = path.join(
+        tempDir,
+        ".canvas-cli",
+        "sessions",
+        "ece243h1-lab-4-42"
+      );
+      await fs.mkdir(path.join(workspacePath, "extracted", "pages"), {
+        recursive: true,
+      });
+      await writeJson(path.join(workspacePath, "session.json"), {
+        version: 1,
+        createdAt: "2026-03-29T10:00:00.000Z",
+        updatedAt: "2026-03-29T10:05:00.000Z",
+        sessionSlug: "ece243h1-lab-4-42",
+        workspacePath,
+        assignmentId: 42,
+        assignmentName: "Lab 4",
+        courseId: 17,
+        courseName: "ECE243",
+        courseCode: "ECE243H1",
+        preparedAt: "2026-03-29T10:05:00.000Z",
+        workspaceState: "ready",
+      });
+      await fs.writeFile(
+        path.join(workspacePath, "extracted", "lab4-spec.txt"),
+        "waveform screenshot requirement\n",
+        "utf-8"
+      );
+      await fs.writeFile(
+        path.join(workspacePath, "extracted", "pages", "brief.txt"),
+        "pipeline timing details\n",
+        "utf-8"
+      );
+
+      const loaded = await loadWorkspace(workspacePath);
+
+      assert.deepEqual(
+        loaded.extractedFiles.map((file) => file.name),
+        ["lab4-spec.txt", "pages/brief.txt"]
+      );
+      assert.equal((loaded.extractedFiles[0] as any).content, undefined);
+
+      const content = await readWorkspaceExtractedFile(loaded, "pages/brief.txt");
+      assert.match(content ?? "", /pipeline timing details/);
+      assert.equal(loaded.extractedFileCache?.get("pages/brief.txt"), content);
+    });
   });
 });

@@ -1,6 +1,10 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 import { loadCourseCache } from "../enrich/cache-loader.js";
-import { loadWorkspace } from "../ask/load-workspace.js";
+import {
+  loadWorkspace,
+  readWorkspaceExtractedFile,
+} from "../ask/load-workspace.js";
 import { extractFileText } from "../extract/extract-text.js";
 import type { Assignment, Course } from "../domain/models.js";
 import type { LoadedWorkspace } from "../ask/types.js";
@@ -8,6 +12,7 @@ import type { AssignmentWorkup } from "../work/types.js";
 import type { ChatMessage } from "./chat-state.js";
 import { formatDueCompact } from "./services.js";
 import type { ShellPinOption } from "./app-types.js";
+import { getExtractedAttachmentPath } from "../enrich/course-documents.js";
 
 export function formatWorkspaceStatusLabel(
   lifecycleState: string
@@ -156,13 +161,19 @@ export async function resolveWorkspacePinContent(
 ): Promise<string | null> {
   for (const extracted of loaded.extractedFiles) {
     if (extracted.name === pin.name || extracted.name.includes(pin.label)) {
-      return extracted.content.slice(0, 15000);
+      const content = await readWorkspaceExtractedFile(loaded, extracted);
+      return content ? content.slice(0, 15000) : null;
     }
   }
   if (pin.localPath && cache) {
+    const extractedPath = getExtractedAttachmentPath(cache.coursePath, pin.localPath);
+    const extracted = await readSafe(extractedPath);
+    if (extracted) {
+      return extracted.slice(0, 15000);
+    }
     const fullPath = path.join(cache.coursePath, pin.localPath);
-    const extracted = await extractFileText(fullPath, pin.name);
-    return extracted.slice(0, 15000);
+    const extractedFallback = await extractFileText(fullPath, pin.name);
+    return extractedFallback.slice(0, 15000);
   }
   if (pin.name === "assignment.md" && loaded.assignmentMd) {
     return loaded.assignmentMd.slice(0, 15000);
@@ -174,4 +185,12 @@ export async function resolveWorkspacePinContent(
     return JSON.stringify(loaded.workupJson, null, 2).slice(0, 15000);
   }
   return null;
+}
+
+async function readSafe(filePath: string): Promise<string | null> {
+  try {
+    return await fs.readFile(filePath, "utf-8");
+  } catch {
+    return null;
+  }
 }

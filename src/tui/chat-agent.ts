@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { LoadedWorkspace } from "../ask/types.js";
+import { readWorkspaceExtractedFile } from "../ask/load-workspace.js";
 import type { CourseCache } from "../enrich/cache-loader.js";
 import type { CanvasClient } from "../canvas/client.js";
 import type { Config } from "../config/env.js";
@@ -249,7 +250,7 @@ async function executeToolCall(
 ): Promise<string> {
   switch (name) {
     case "search_workspace":
-      return searchWorkspace(input.query as string, ctx);
+      return await searchWorkspace(input.query as string, ctx);
     case "read_file":
       return readFile(input.filename as string, ctx);
     case "list_files":
@@ -263,8 +264,8 @@ async function executeToolCall(
   }
 }
 
-function searchWorkspace(query: string, ctx: ChatAgentContext): string {
-  const chunks = buildChunks(ctx.loaded);
+async function searchWorkspace(query: string, ctx: ChatAgentContext): Promise<string> {
+  const chunks = await buildChunks(ctx.loaded);
   const relevant = retrieveRelevant(query, chunks, 5);
   if (relevant.length === 0) return "No relevant content found for that query.";
   const results: string[] = [];
@@ -358,7 +359,10 @@ async function readFile(filename: string, ctx: ChatAgentContext): Promise<string
   for (const ef of ctx.loaded.extractedFiles) {
     const en = ef.name.toLowerCase();
     if (en === q || en === qClean || en === qClean + ".txt" || en.includes(qClean)) {
-      return ef.content.slice(0, MAX_DOC_TEXT);
+      const content = await readWorkspaceExtractedFile(ctx.loaded, ef);
+      if (content) {
+        return content.slice(0, MAX_DOC_TEXT);
+      }
     }
   }
 

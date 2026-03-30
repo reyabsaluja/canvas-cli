@@ -1,3 +1,4 @@
+import { loadWorkspaceExtractedFiles } from "./load-workspace.js";
 import type { LoadedWorkspace, ContentChunk } from "./types.js";
 
 /**
@@ -5,7 +6,7 @@ import type { LoadedWorkspace, ContentChunk } from "./types.js";
  * Splits markdown into sections, flattens workup JSON fields,
  * and includes extracted document text.
  */
-export function buildChunks(ws: LoadedWorkspace): ContentChunk[] {
+export async function buildChunks(ws: LoadedWorkspace): Promise<ContentChunk[]> {
   const chunks: ContentChunk[] = [];
 
   // Workup JSON fields as individual chunks (highest signal)
@@ -194,7 +195,7 @@ export function buildChunks(ws: LoadedWorkspace): ContentChunk[] {
   }
 
   // Extracted documents
-  for (const ef of ws.extractedFiles) {
+  for (const ef of await loadWorkspaceExtractedFiles(ws)) {
     // Split large extracted files into ~2000 char chunks
     if (ef.content.length > 3000) {
       const parts = splitByParagraphs(ef.content, 2500);

@@ -29,6 +29,11 @@ export interface ContentChunk {
   kind: string;
 }
 
+export interface ExtractedWorkspaceFile {
+  name: string;
+  relativePath: string;
+}
+
 /**
  * Loaded workspace data.
  */
@@ -46,5 +51,6 @@ export interface LoadedWorkspace {
   planMd: string | null;
   notesMd: string | null;
   workupJson: Record<string, unknown> | null;
-  extractedFiles: Array<{ name: string; content: string }>;
+  extractedFiles: ExtractedWorkspaceFile[];
+  extractedFileCache?: Map<string, string>;
 }

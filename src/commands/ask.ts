@@ -58,7 +58,7 @@ export async function askCommand(
   }
 
   // Build chunks and retrieve
-  const chunks = buildChunks(ws);
+  const chunks = await buildChunks(ws);
 
   if (chunks.length === 0) {
     console.error("Workspace has no content to answer from.");
