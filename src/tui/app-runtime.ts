@@ -146,6 +146,7 @@ export async function createShellContext(
         });
         return { content: answer };
       },
+      getCourseCache: () => cache,
     };
   }
 
@@ -250,6 +251,8 @@ async function loadOrCreateWorkspaceShell(
       statusLabel: formatWorkspaceStatusLabel(lifecycleState),
       placeholder: "Ask about this assignment, or use /help",
     },
+    getLoadedWorkspace: () => loaded,
+    getCourseCache: () => cache,
     extraHelpCommands: [{ cmd: "/pin", desc: "Attach a workspace file to your prompt" }],
     pinOptions: buildWorkspacePinOptions(loaded, cache),
     resolvePinContent: async (pin) => resolveWorkspacePinContent(loaded, cache, pin),

@@ -1,3 +1,5 @@
+import type { LoadedWorkspace } from "../ask/types.js";
+import type { CourseCache } from "../enrich/cache-loader.js";
 import type { AssignmentTarget } from "./services.js";
 import type {
   AppScope,
@@ -37,6 +39,8 @@ export interface ShellContext {
   extraHelpCommands?: Array<{ cmd: string; desc: string }>;
   pinOptions?: ShellPinOption[];
   resolvePinContent?: (pin: ShellPinOption) => Promise<string | null>;
+  getLoadedWorkspace?: () => LoadedWorkspace | null;
+  getCourseCache?: () => CourseCache | null;
   onAsk: (
     input: string,
     callbacks: {
@@ -60,4 +64,6 @@ export interface CommandApi {
   addMessage: (message: ChatMessage) => Promise<void>;
   session: ChatSession;
   runtime: ScopeRuntime;
+  getLoadedWorkspace?: () => LoadedWorkspace | null;
+  getCourseCache?: () => CourseCache | null;
 }

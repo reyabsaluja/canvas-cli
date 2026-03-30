@@ -1,5 +1,5 @@
 import { loadCourseCache } from "../enrich/cache-loader.js";
-import { loadWorkspace } from "../ask/load-workspace.js";
+import type { LoadedWorkspace } from "../ask/types.js";
 import type { AssignmentWorkup } from "../work/types.js";
 import {
   fetchAssignments,
@@ -18,6 +18,14 @@ export async function handleCommand(
   services: AppServices
 ): Promise<ShellResult | null | void> {
   const scope = api.runtime.scope;
+
+  const getCurrentWorkspace = (): LoadedWorkspace | null => {
+    return api.getLoadedWorkspace?.() ?? null;
+  };
+
+  const getCurrentWorkup = (): AssignmentWorkup | null => {
+    return (getCurrentWorkspace()?.workupJson as AssignmentWorkup | null) ?? null;
+  };
 
   if (command === "/quit" || command === "/exit" || command === "/q") {
     return { type: "quit" };
@@ -174,8 +182,7 @@ export async function handleCommand(
   }
 
   if (command === "/overview") {
-    const loaded = await loadWorkspace(scope.workspacePath);
-    const currentWorkup = loaded.workupJson as AssignmentWorkup | null;
+    const currentWorkup = getCurrentWorkup();
     await api.addMessage({
       role: currentWorkup?.overview ? "assistant" : "system",
       content: currentWorkup?.overview ?? "No workup data available.",
@@ -184,8 +191,7 @@ export async function handleCommand(
   }
 
   if (command === "/requirements" || command === "/reqs") {
-    const loaded = await loadWorkspace(scope.workspacePath);
-    const currentWorkup = loaded.workupJson as AssignmentWorkup | null;
+    const currentWorkup = getCurrentWorkup();
     if (!currentWorkup) {
       await api.addMessage({ role: "system", content: "No workup data available." });
       return;
@@ -211,8 +217,7 @@ export async function handleCommand(
   }
 
   if (command === "/plan") {
-    const loaded = await loadWorkspace(scope.workspacePath);
-    const currentWorkup = loaded.workupJson as AssignmentWorkup | null;
+    const currentWorkup = getCurrentWorkup();
     await api.addMessage({
       role:
         currentWorkup && currentWorkup.actionPlan.length > 0 ? "assistant" : "system",
@@ -230,8 +235,7 @@ export async function handleCommand(
   }
 
   if (command === "/resources") {
-    const loaded = await loadWorkspace(scope.workspacePath);
-    const currentWorkup = loaded.workupJson as AssignmentWorkup | null;
+    const currentWorkup = getCurrentWorkup();
     await api.addMessage({
       role:
         currentWorkup && currentWorkup.relevantResources.length > 0
@@ -251,8 +255,7 @@ export async function handleCommand(
   }
 
   if (command === "/evidence") {
-    const loaded = await loadWorkspace(scope.workspacePath);
-    const currentWorkup = loaded.workupJson as AssignmentWorkup | null;
+    const currentWorkup = getCurrentWorkup();
     if (!currentWorkup || currentWorkup.sourceTrace.length === 0) {
       await api.addMessage({
         role: "system",
@@ -273,10 +276,19 @@ export async function handleCommand(
   }
 
   if (command === "/status") {
-    const loaded = await loadWorkspace(scope.workspacePath);
+    const loaded = getCurrentWorkspace();
+    if (!loaded) {
+      await api.addMessage({
+        role: "system",
+        content: "Workspace data is not loaded. Reopen the workspace and try again.",
+      });
+      return;
+    }
     const course =
       scope.courseId !== null ? getCourseById(services, scope.courseId) : null;
-    const cache = course ? await loadCourseCache(course.courseCode, course.id) : null;
+    const cache =
+      api.getCourseCache?.() ??
+      (course ? await loadCourseCache(course.courseCode, course.id) : null);
     const lifecycleState = getWorkspaceLifecycleState(
       loaded.preparedAt,
       loaded.workspaceState,

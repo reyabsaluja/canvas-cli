@@ -58,7 +58,16 @@ export async function launchApp(): Promise<void> {
         resolvePinContent: shellContext.resolvePinContent,
         onAsk: shellContext.onAsk,
         onCommand: (command, args, api) =>
-          handleCommand(command, args, api, services),
+          handleCommand(
+            command,
+            args,
+            {
+              ...api,
+              getLoadedWorkspace: shellContext.getLoadedWorkspace,
+              getCourseCache: shellContext.getCourseCache,
+            },
+            services
+          ),
       });
 
       if (!result || result.type === "quit") {

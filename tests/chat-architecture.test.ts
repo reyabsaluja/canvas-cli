@@ -16,6 +16,7 @@ import {
   getAvailableCommands,
   resolveCommand,
 } from "../src/tui/commands.js";
+import { handleCommand } from "../src/tui/app-commands.js";
 import type { AppScope } from "../src/tui/chat-state.js";
 import {
   getCourseById,
@@ -1074,5 +1075,76 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
         /Cached extracted attachment text/
       );
     });
+  });
+
+  await t.test("workspace slash commands use loaded shell state instead of reloading from disk", async () => {
+    const messages: Array<{ role: string; content: string }> = [];
+    const api = {
+      addMessage: async (message: { role: string; content: string }) => {
+        messages.push(message);
+      },
+      session: {
+        title: "Lab 4",
+        metadata: {
+          assignmentId: 42,
+          assignmentName: "Lab 4",
+        },
+      },
+      runtime: {
+        scope: {
+          type: "workspace",
+          workspacePath: "/path/that/does/not/exist",
+          courseId: null,
+          assignmentId: 42,
+        },
+      },
+      getLoadedWorkspace: () =>
+        ({
+          path: "/path/that/does/not/exist",
+          sessionSlug: "ece243h1-lab-4-42",
+          assignmentId: 42,
+          assignmentName: "Lab 4",
+          courseId: 17,
+          courseName: "ECE243",
+          courseCode: "ECE243H1",
+          preparedAt: "2026-03-29T10:05:00.000Z",
+          workspaceState: "ready",
+          assignmentMd: "# Assignment",
+          planMd: "# Plan",
+          notesMd: null,
+          workupJson: {
+            overview: "Cached overview",
+            deliverables: ["report"],
+            constraints: ["submit pdf"],
+            relevantResources: [
+              { title: "Lab Handout", type: "pdf", why: "primary spec" },
+            ],
+            actionPlan: [
+              { step: 1, action: "Read spec", detail: "Focus on timing" },
+            ],
+            uncertainties: ["Confirm waveform format"],
+            dueDate: null,
+            confidence: "medium",
+            sourceTrace: [
+              { conclusion: "Need waveform screenshot", source: "lab4-spec.pdf" },
+            ],
+          },
+          extractedFiles: [{ name: "lab4-spec.txt", content: "waveform screenshot" }],
+        }) as any,
+      getCourseCache: () => null,
+    } as any;
+
+    await handleCommand("/overview", "", api, {} as any);
+    await handleCommand("/plan", "", api, {} as any);
+    await handleCommand("/resources", "", api, {} as any);
+    await handleCommand("/evidence", "", api, {} as any);
+    await handleCommand("/status", "", api, {} as any);
+
+    assert.equal(messages.length, 5);
+    assert.match(messages[0]?.content ?? "", /Cached overview/);
+    assert.match(messages[1]?.content ?? "", /Read spec/);
+    assert.match(messages[2]?.content ?? "", /Lab Handout/);
+    assert.match(messages[3]?.content ?? "", /waveform screenshot/);
+    assert.match(messages[4]?.content ?? "", /Assignment: Lab 4/);
   });
 });
