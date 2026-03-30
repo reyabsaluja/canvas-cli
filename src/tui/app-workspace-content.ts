@@ -5,7 +5,6 @@ import {
   loadWorkspace,
   readWorkspaceExtractedFile,
 } from "../ask/load-workspace.js";
-import { extractFileText } from "../extract/extract-text.js";
 import type { Assignment, Course } from "../domain/models.js";
 import type { LoadedWorkspace } from "../ask/types.js";
 import type { AssignmentWorkup } from "../work/types.js";
@@ -171,9 +170,7 @@ export async function resolveWorkspacePinContent(
     if (extracted) {
       return extracted.slice(0, 15000);
     }
-    const fullPath = path.join(cache.coursePath, pin.localPath);
-    const extractedFallback = await extractFileText(fullPath, pin.name);
-    return extractedFallback.slice(0, 15000);
+    return null;
   }
   if (pin.name === "assignment.md" && loaded.assignmentMd) {
     return loaded.assignmentMd.slice(0, 15000);

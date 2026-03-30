@@ -3,6 +3,7 @@ import path from "node:path";
 import type { LoadedWorkspace } from "../ask/types.js";
 import { readWorkspaceExtractedFile } from "../ask/load-workspace.js";
 import type { CourseCache } from "../enrich/cache-loader.js";
+import { getExtractedAttachmentPath } from "../enrich/course-documents.js";
 import type { CanvasClient } from "../canvas/client.js";
 import type { Config } from "../config/env.js";
 import type { WorkspaceAnswer } from "../ask/types.js";
@@ -318,7 +319,11 @@ async function readFile(filename: string, ctx: ChatAgentContext): Promise<string
     if (!ctx.cache) return null;
     for (const att of ctx.cache.attachments) {
       if ((att.status === "downloaded" || att.status === "skipped") && test(att.originalFilename.toLowerCase())) {
-        return { path: path.join(ctx.cache.coursePath, att.localPath), name: att.originalFilename };
+        return {
+          path: path.join(ctx.cache.coursePath, att.localPath),
+          localPath: att.localPath,
+          name: att.originalFilename,
+        };
       }
     }
     return null;
@@ -326,16 +331,29 @@ async function readFile(filename: string, ctx: ChatAgentContext): Promise<string
 
   // 1. Direct match in course cache (e.g., "lab4_rubric.pdf" -> "lab4_rubric.pdf")
   const direct = findInCache((n) => n === qClean || n === q);
-  if (direct) return extractFileText(direct.path, direct.name);
+  if (direct) {
+    return (
+      (await readCachedCourseAttachment(ctx, direct.localPath)) ??
+      `Cached extracted text for "${direct.name}" is missing. Refresh the course cache to rebuild it.`
+    );
+  }
 
   // 2. Contains match in course cache (e.g., "rubric" -> "lab4_rubric-1.pdf")
   const contains = findInCache((n) => n.includes(qClean) || n.includes(q));
-  if (contains) return extractFileText(contains.path, contains.name);
+  if (contains) {
+    return (
+      (await readCachedCourseAttachment(ctx, contains.localPath)) ??
+      `Cached extracted text for "${contains.name}" is missing. Refresh the course cache to rebuild it.`
+    );
+  }
 
   // 3. Zip match: requested file might be INSIDE a zip (e.g., "lab4.pdf" is inside "lab4.zip")
   const zipMatch = findInCache((n) => n.endsWith(".zip") && n.includes(qBase));
   if (zipMatch) {
-    const fullContent = await extractFileText(zipMatch.path, zipMatch.name);
+    const fullContent = await readCachedCourseAttachment(ctx, zipMatch.localPath);
+    if (!fullContent) {
+      return `Cached extracted text for "${zipMatch.name}" is missing. Refresh the course cache to rebuild it.`;
+    }
     // Extract just the specific file section from the zip output
     const lines = fullContent.split("\n");
     const hdr = lines.findIndex((l) => {
@@ -412,5 +430,36 @@ async function downloadCourseFile(title: string, ctx: ChatAgentContext): Promise
   await fs.mkdir(downloadDir, { recursive: true });
   const localPath = path.join(downloadDir, fileMeta.display_name);
   await fs.writeFile(localPath, buffer);
-  return await extractFileText(localPath, fileMeta.display_name);
+  try {
+    const extracted = await extractFileText(localPath, fileMeta.display_name);
+    if (extracted && !extracted.startsWith("[") && extracted.trim().length > 0) {
+      const extractedPath = getExtractedAttachmentPath(
+        ctx.cache.coursePath,
+        path.relative(ctx.cache.coursePath, localPath)
+      );
+      await fs.mkdir(path.dirname(extractedPath), { recursive: true });
+      await fs.writeFile(
+        extractedPath,
+        extracted.endsWith("\n") ? extracted : extracted + "\n",
+        "utf-8"
+      );
+      return extracted;
+    }
+  } catch {
+    // Fall through to a guidance message below.
+  }
+  return `Downloaded "${fileMeta.display_name}", but extracted text is not available yet. Refresh the course cache to rebuild it.`;
+}
+
+async function readCachedCourseAttachment(
+  ctx: ChatAgentContext,
+  localPath: string
+): Promise<string | null> {
+  if (!ctx.cache) return null;
+  const extractedPath = getExtractedAttachmentPath(ctx.cache.coursePath, localPath);
+  try {
+    return await fs.readFile(extractedPath, "utf-8");
+  } catch {
+    return null;
+  }
 }

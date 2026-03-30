@@ -43,6 +43,7 @@ import {
   searchCourseIndex,
 } from "../src/tui/course-retrieval.js";
 import { buildContextBundle } from "../src/ai/context-bundle.js";
+import { resolveWorkspacePinContent } from "../src/tui/app-workspace-content.js";
 
 async function writeJson(filePath: string, data: unknown): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -1279,6 +1280,65 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
         bundle.extractedTexts.map((entry) => entry.content).join("\n"),
         /Cached extracted attachment text/
       );
+    });
+  });
+
+  await t.test("workspace pinning uses cached extracted course attachments", async () => {
+    await withTempCwd(async (tempDir) => {
+      const coursePath = path.join(tempDir, ".canvas-cli", "courses", "ece243h1-17");
+      await fs.mkdir(path.join(coursePath, "extracted", "attachments", "modules"), {
+        recursive: true,
+      });
+      await fs.writeFile(
+        path.join(coursePath, "extracted", "attachments", "modules", "lab4-spec.pdf.txt"),
+        "Pinned cached attachment text.\n",
+        "utf-8"
+      );
+
+      const content = await resolveWorkspacePinContent(
+        {
+          path: "/tmp/ws",
+          sessionSlug: "ws",
+          assignmentId: 42,
+          assignmentName: "Lab 4",
+          courseId: 17,
+          courseName: "ECE243",
+          courseCode: "ECE243H1",
+          preparedAt: null,
+          workspaceState: "ready",
+          assignmentMd: null,
+          planMd: null,
+          notesMd: null,
+          workupJson: null,
+          extractedFiles: [],
+          extractedFileCache: new Map(),
+        },
+        {
+          courseId: 17,
+          coursePath,
+          assignments: [],
+          modules: [],
+          files: [],
+          pages: [],
+          syllabusCandidates: [],
+          attachments: [
+            {
+              originalFilename: "lab4-spec.pdf",
+              localPath: "attachments/modules/lab4-spec.pdf",
+              status: "downloaded",
+              reason: "",
+            },
+          ],
+          ingestion: { ingestedAt: "2026-03-29T10:00:00.000Z" },
+        } as any,
+        {
+          name: "lab4-spec.pdf",
+          label: "lab4_spec",
+          localPath: "attachments/modules/lab4-spec.pdf",
+        }
+      );
+
+      assert.match(content ?? "", /Pinned cached attachment text/);
     });
   });
 
