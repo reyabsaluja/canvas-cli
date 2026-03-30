@@ -15,10 +15,15 @@ import { createWorkWorkspace } from "../work/workspace.js";
 import { loadWorkspace } from "../ask/load-workspace.js";
 // buildChunks, retrieveRelevant, answerQuestion now used by chat-agent.ts
 import { getAIConfig, type AIProviderConfig } from "../ai/provider.js";
-import { makeSessionSlug, getWorkspacePath } from "../workspace/paths.js";
+import {
+  makeSessionSlug,
+  getSessionsRoot,
+  getWorkspacePath,
+} from "../workspace/paths.js";
 import { listWorkspaces } from "../ask/resolve-workspace.js";
 import {
   loadWorkspaceSessionMeta,
+  type SessionMeta,
   updateWorkspaceSessionMeta,
 } from "../workspace/session.js";
 import type { Course, Assignment, AssignmentDetail } from "../domain/models.js";
@@ -49,6 +54,11 @@ export interface WorkspaceOpenResult {
   workup: AssignmentWorkup | null;
   loaded: LoadedWorkspace;
   lifecycleState: WorkspaceLifecycleState;
+}
+
+export interface AssignmentTarget {
+  id: number | null;
+  name: string;
 }
 
 export function getWorkspaceLifecycleState(
@@ -134,63 +144,35 @@ export async function fetchAssignments(
 export async function openWorkspace(
   services: AppServices,
   course: Course,
-  assignmentName: string,
+  assignmentTarget: AssignmentTarget,
   onProgress: (stage: string) => void
 ): Promise<WorkspaceOpenResult> {
-  // Step 1: Resolve the assignment (TUI-safe, no process.exit)
-  onProgress("resolving assignment");
-
-  const rawAssignments = await services.client.getAssignments(course.id);
-  const allAssignments = rawAssignments.map((a) =>
-    normalizeAssignment(a, course.name)
+  onProgress("checking existing workspaces");
+  const existingWorkspacePath = await findExistingWorkspacePath(
+    course,
+    assignmentTarget
   );
-  const matches = matchAssignments(assignmentName, allAssignments);
-
-  if (matches.length === 0) {
-    throw new Error(`No assignment matching "${assignmentName}" found.`);
+  if (existingWorkspacePath) {
+    return loadExistingWorkspaceResult(
+      existingWorkspacePath,
+      course,
+      onProgress
+    );
   }
 
-  const match = matches[0];
-  const rawDetail = await services.client.getAssignmentDetail(
-    course.id,
-    match.id
+  // Step 1: Resolve the assignment on Canvas only when no local workspace exists.
+  onProgress("resolving assignment");
+  const detail = await resolveAssignmentDetail(
+    services,
+    course,
+    assignmentTarget
   );
-  const detail = normalizeAssignmentDetail(rawDetail, course.name);
 
   const slug = makeSessionSlug(course.courseCode, detail.name, detail.id);
   const wsPath = getWorkspacePath(slug);
 
-  // Step 2: Check if workspace already exists
-  const workupPath = `${wsPath}/workup.json`;
-  let workupExists = false;
-  try {
-    await fs.stat(workupPath);
-    workupExists = true;
-  } catch {}
-
-  if (workupExists) {
-    onProgress("loading workspace");
-    const loaded = await loadWorkspace(wsPath);
-    const cache = await loadCourseCache(course.courseCode, course.id);
-    const meta = await loadWorkspaceSessionMeta(wsPath);
-    const lifecycleState = getWorkspaceLifecycleState(
-      meta?.preparedAt ?? null,
-      meta?.workspaceState ?? null,
-      cache
-    );
-    await updateWorkspaceSessionMeta(wsPath, (current) => ({
-      ...current,
-      updatedAt: new Date().toISOString(),
-      lastOpenedAt: new Date().toISOString(),
-      workspaceState: lifecycleState,
-      lastError: null,
-    }));
-    return {
-      workspacePath: wsPath,
-      workup: loaded.workupJson as unknown as AssignmentWorkup | null,
-      loaded,
-      lifecycleState,
-    };
+  if (await workspaceHasWorkup(wsPath)) {
+    return loadExistingWorkspaceResult(wsPath, course, onProgress);
   }
 
   // Step 3: Check ingestion cache
@@ -252,6 +234,124 @@ export async function openWorkspace(
   };
 }
 
+async function loadExistingWorkspaceResult(
+  workspacePath: string,
+  course: Course,
+  onProgress: (stage: string) => void
+): Promise<WorkspaceOpenResult> {
+  onProgress("loading workspace");
+  const loaded = await loadWorkspace(workspacePath);
+  const cache = await loadCourseCache(course.courseCode, course.id);
+  const meta = await loadWorkspaceSessionMeta(workspacePath);
+  const lifecycleState = getWorkspaceLifecycleState(
+    meta?.preparedAt ?? null,
+    meta?.workspaceState ?? null,
+    cache
+  );
+  await updateWorkspaceSessionMeta(workspacePath, (current) => ({
+    ...current,
+    updatedAt: new Date().toISOString(),
+    lastOpenedAt: new Date().toISOString(),
+    workspaceState: lifecycleState,
+    lastError: null,
+  }));
+  return {
+    workspacePath,
+    workup: loaded.workupJson as unknown as AssignmentWorkup | null,
+    loaded,
+    lifecycleState,
+  };
+}
+
+async function findExistingWorkspacePath(
+  course: Course,
+  assignmentTarget: AssignmentTarget
+): Promise<string | null> {
+  const sessionsRoot = getSessionsRoot();
+  let entries;
+  try {
+    entries = await fs.readdir(sessionsRoot, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+
+  const normalizedAssignmentName = normalizeWorkspaceLookupValue(
+    assignmentTarget.name
+  );
+  const candidates: SessionMeta[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const workspacePath = getWorkspacePath(entry.name);
+    const meta = await loadWorkspaceSessionMeta(workspacePath);
+    if (!meta) continue;
+    if (meta.courseId !== course.id) continue;
+    if (assignmentTarget.id !== null && meta.assignmentId !== assignmentTarget.id) {
+      continue;
+    }
+    if (
+      assignmentTarget.id === null &&
+      normalizeWorkspaceLookupValue(meta.assignmentName) !== normalizedAssignmentName
+    ) {
+      continue;
+    }
+    if (!(await workspaceHasWorkup(workspacePath))) continue;
+    candidates.push(meta);
+  }
+
+  if (candidates.length === 0) return null;
+
+  candidates.sort((a, b) => {
+    return (
+      new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
+  });
+  return candidates[0]!.workspacePath;
+}
+
+function normalizeWorkspaceLookupValue(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+async function resolveAssignmentDetail(
+  services: AppServices,
+  course: Course,
+  assignmentTarget: AssignmentTarget
+): Promise<AssignmentDetail> {
+  if (assignmentTarget.id !== null) {
+    const rawDetail = await services.client.getAssignmentDetail(
+      course.id,
+      assignmentTarget.id
+    );
+    return normalizeAssignmentDetail(rawDetail, course.name);
+  }
+
+  const rawAssignments = await services.client.getAssignments(course.id);
+  const allAssignments = rawAssignments.map((a) =>
+    normalizeAssignment(a, course.name)
+  );
+  const matches = matchAssignments(assignmentTarget.name, allAssignments);
+
+  if (matches.length === 0) {
+    throw new Error(`No assignment matching "${assignmentTarget.name}" found.`);
+  }
+
+  const rawDetail = await services.client.getAssignmentDetail(
+    course.id,
+    matches[0]!.id
+  );
+  return normalizeAssignmentDetail(rawDetail, course.name);
+}
+
+async function workspaceHasWorkup(workspacePath: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(`${workspacePath}/workup.json`);
+    return stat.isFile();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Refresh a workspace — re-runs ingest (with --refresh) + work pipeline.
  * Returns the updated workspace data.
@@ -259,22 +359,16 @@ export async function openWorkspace(
 export async function refreshWorkspace(
   services: AppServices,
   course: Course,
-  assignmentName: string,
+  assignmentTarget: AssignmentTarget,
   onProgress: (stage: string) => void
 ): Promise<WorkspaceOpenResult> {
   // Step 1: Resolve assignment
   onProgress("resolving assignment");
-  const rawAssignments = await services.client.getAssignments(course.id);
-  const allAssignments = rawAssignments.map((a) =>
-    normalizeAssignment(a, course.name)
+  const detail = await resolveAssignmentDetail(
+    services,
+    course,
+    assignmentTarget
   );
-  const matches = matchAssignments(assignmentName, allAssignments);
-  if (matches.length === 0) {
-    throw new Error(`No assignment matching "${assignmentName}" found.`);
-  }
-  const match = matches[0];
-  const rawDetail = await services.client.getAssignmentDetail(course.id, match.id);
-  const detail = normalizeAssignmentDetail(rawDetail, course.name);
   const slug = makeSessionSlug(course.courseCode, detail.name, detail.id);
   const wsPath = getWorkspacePath(slug);
 

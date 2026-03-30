@@ -14,6 +14,7 @@ import {
 } from "./screen.js";
 import { showPicker } from "./picker.js";
 import {
+  type AssignmentTarget,
   initServices,
   fetchAssignments,
   openWorkspace,
@@ -49,6 +50,7 @@ import type {
 import { answerCourseQuestion, answerGlobalQuestion } from "./chat-assistant.js";
 import { extractFileText } from "../extract/extract-text.js";
 import type { Course, Assignment } from "../domain/models.js";
+import { matchAssignments } from "../domain/matching.js";
 import type { AssignmentWorkup } from "../work/types.js";
 import { COMMANDS } from "./commands.js";
 
@@ -59,8 +61,8 @@ type ShellResult =
   | { type: "course-picker" }
   | { type: "recent-picker" }
   | { type: "assignment-picker"; courseId: number }
-  | { type: "open-assignment"; courseId: number; assignmentName: string }
-  | { type: "workspace-refresh"; courseId: number; assignmentName: string };
+  | { type: "open-assignment"; courseId: number; assignmentTarget: AssignmentTarget }
+  | { type: "workspace-refresh"; courseId: number; assignmentTarget: AssignmentTarget };
 
 /**
  * Main interactive TUI application.
@@ -173,7 +175,7 @@ export async function launchApp(): Promise<void> {
         const nextScope = await openAssignmentScope(
           services,
           result.courseId,
-          result.assignmentName
+          result.assignmentTarget
         );
         scope = nextScope ?? shellContext.runtime.scope;
         continue;
@@ -183,7 +185,7 @@ export async function launchApp(): Promise<void> {
         scope = await refreshWorkspaceScope(
           services,
           result.courseId,
-          result.assignmentName,
+          result.assignmentTarget,
           shellContext.runtime.scope
         );
       }
@@ -564,15 +566,27 @@ async function handleCommand(
     if (command === "/assignments" || command === "/open") {
       if (args.trim()) {
         const assignments = await fetchAssignments(services, course.id, course.name);
-        const match = assignments.find((assignment) =>
-          assignment.name.toLowerCase().includes(args.trim().toLowerCase())
-        );
-        if (match) {
+        const matches = matchAssignments(args.trim(), assignments);
+        if (matches.length === 1) {
           return {
             type: "open-assignment",
             courseId: course.id,
-            assignmentName: match.name,
+            assignmentTarget: {
+              id: matches[0]!.id,
+              name: matches[0]!.name,
+            },
           };
+        }
+        if (matches.length > 1) {
+          await api.addMessage({
+            role: "system",
+            content: [
+              `Multiple assignments in ${course.name} matched "${args.trim()}".`,
+              "Be more specific or use /assignments:",
+              ...matches.slice(0, 5).map((assignment) => `• ${assignment.name}`),
+            ].join("\n"),
+          });
+          return;
         }
         await api.addMessage({
           role: "system",
@@ -760,8 +774,10 @@ async function handleCommand(
     return {
       type: "workspace-refresh",
       courseId: scope.courseId,
-      assignmentName:
-        api.session.metadata.assignmentName ?? api.session.title,
+      assignmentTarget: {
+        id: api.session.metadata.assignmentId ?? scope.assignmentId ?? null,
+        name: api.session.metadata.assignmentName ?? api.session.title,
+      },
     };
   }
 }
@@ -820,7 +836,7 @@ async function pickAssignmentScope(
       sublabel:
         formatDueCompact(assignment.dueAt) +
         (assignment.submitted ? " · submitted" : ""),
-      value: assignment.name,
+      value: String(assignment.id),
       dimmed: assignment.submitted,
     })),
     filterable: true,
@@ -828,17 +844,28 @@ async function pickAssignmentScope(
   });
 
   if (!selected) return null;
+  const selectedAssignment =
+    assignments.find((assignment) => String(assignment.id) === selected) ?? null;
+  if (!selectedAssignment) return null;
 
   clearScreen();
   console.log("");
-  console.log(C.primaryBold(`  ${selected}`));
+  console.log(C.primaryBold(`  ${selectedAssignment.name}`));
   console.log(C.dim(`  ${course.name}`));
   console.log("");
 
   try {
-    const result = await openWorkspace(services, course, selected, (stage) => {
-      console.log(`  ${C.dim("›")} ${C.dim(stage)}`);
-    });
+    const result = await openWorkspace(
+      services,
+      course,
+      {
+        id: selectedAssignment.id,
+        name: selectedAssignment.name,
+      },
+      (stage) => {
+        console.log(`  ${C.dim("›")} ${C.dim(stage)}`);
+      }
+    );
     return {
       type: "workspace",
       workspacePath: result.workspacePath,
@@ -1008,21 +1035,26 @@ function formatWorkspaceStatusLabel(lifecycleState: string): string | undefined 
 async function openAssignmentScope(
   services: AppServices,
   courseId: number,
-  assignmentName: string
+  assignmentTarget: AssignmentTarget
 ): Promise<AppScope | null> {
   const course = getCourseById(services, courseId);
   if (!course) return null;
 
   clearScreen();
   console.log("");
-  console.log(C.primaryBold(`  ${assignmentName}`));
+  console.log(C.primaryBold(`  ${assignmentTarget.name}`));
   console.log(C.dim(`  ${course.name}`));
   console.log("");
 
   try {
-    const result = await openWorkspace(services, course, assignmentName, (stage) => {
-      console.log(`  ${C.dim("›")} ${C.dim(stage)}`);
-    });
+    const result = await openWorkspace(
+      services,
+      course,
+      assignmentTarget,
+      (stage) => {
+        console.log(`  ${C.dim("›")} ${C.dim(stage)}`);
+      }
+    );
     return {
       type: "workspace",
       workspacePath: result.workspacePath,
@@ -1042,7 +1074,7 @@ async function openAssignmentScope(
 async function refreshWorkspaceScope(
   services: AppServices,
   courseId: number,
-  assignmentName: string,
+  assignmentTarget: AssignmentTarget,
   fallbackScope: AppScope
 ): Promise<AppScope> {
   const course = getCourseById(services, courseId);
@@ -1050,14 +1082,19 @@ async function refreshWorkspaceScope(
 
   clearScreen();
   console.log("");
-  console.log(C.primaryBold(`  Refreshing ${assignmentName}`));
+  console.log(C.primaryBold(`  Refreshing ${assignmentTarget.name}`));
   console.log(C.dim(`  ${course.name}`));
   console.log("");
 
   try {
-    const refreshed = await refreshWorkspace(services, course, assignmentName, (stage) => {
-      console.log(`  ${C.dim("›")} ${C.dim(stage)}`);
-    });
+    const refreshed = await refreshWorkspace(
+      services,
+      course,
+      assignmentTarget,
+      (stage) => {
+        console.log(`  ${C.dim("›")} ${C.dim(stage)}`);
+      }
+    );
     return {
       type: "workspace",
       workspacePath: refreshed.workspacePath,
