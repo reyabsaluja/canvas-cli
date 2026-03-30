@@ -18,6 +18,8 @@ import {
 } from "../src/tui/commands.js";
 import type { AppScope } from "../src/tui/chat-state.js";
 import {
+  getCourseById,
+  getDisplayCourseAvailability,
   getWorkspaceLifecycleState,
   openWorkspace,
   refreshWorkspace,
@@ -46,6 +48,46 @@ async function withTempCwd(
 }
 
 test("chat architecture integration", { concurrency: false }, async (t) => {
+  await t.test("filters unavailable configured courses out of active scope", async () => {
+    const liveCourse: Course = {
+      id: 17,
+      name: "ECE243",
+      courseCode: "ECE243H1",
+      termName: "Winter 2026",
+      isCurrent: true,
+    };
+
+    const services = {
+      allCourses: [liveCourse],
+      courseConfig: {
+        courses: [
+          {
+            id: 17,
+            displayName: "Computer Organization",
+            originalCode: "ECE243H1",
+            originalName: "ECE243",
+          },
+          {
+            id: 99,
+            displayName: "Dead Course",
+            originalCode: "CSC999H1",
+            originalName: "Ghost Course",
+          },
+        ],
+      },
+    } as any;
+
+    const availability = getDisplayCourseAvailability(services);
+
+    assert.equal(availability.available.length, 1);
+    assert.equal(availability.available[0]?.id, 17);
+    assert.equal(availability.available[0]?.name, "Computer Organization");
+    assert.equal(availability.unavailable.length, 1);
+    assert.equal(availability.unavailable[0]?.id, 99);
+    assert.equal(getCourseById(services, 17)?.name, "Computer Organization");
+    assert.equal(getCourseById(services, 99), null);
+  });
+
   await t.test("persists and reopens scoped sessions", async () => {
     await withTempCwd(async () => {
       const scope: AppScope = { type: "workspace", workspacePath: "/tmp/ws-a", courseId: 17, assignmentId: 42 };

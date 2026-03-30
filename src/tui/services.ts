@@ -29,7 +29,7 @@ import {
 } from "../workspace/session.js";
 import type { Course, Assignment, AssignmentDetail } from "../domain/models.js";
 import type { CanvasCourse } from "../canvas/types.js";
-import type { CourseConfig } from "./course-config.js";
+import type { CourseConfig, UserCourse } from "./course-config.js";
 import type { AssignmentWorkup } from "../work/types.js";
 import type { WorkspaceAnswer } from "../ask/types.js";
 import type { LoadedWorkspace } from "../ask/types.js";
@@ -60,6 +60,11 @@ export interface WorkspaceOpenResult {
 export interface AssignmentTarget {
   id: number | null;
   name: string;
+}
+
+export interface DisplayCourseAvailability {
+  available: Course[];
+  unavailable: UserCourse[];
 }
 
 export function getWorkspaceLifecycleState(
@@ -98,23 +103,47 @@ export async function initServices(): Promise<AppServices> {
  * Only falls back to allCourses if courseConfig is null (pre-setup state).
  */
 export function getDisplayCourses(services: AppServices): Course[] {
+  return getDisplayCourseAvailability(services).available;
+}
+
+export function getDisplayCourseAvailability(
+  services: AppServices
+): DisplayCourseAvailability {
   if (!services.courseConfig) {
-    // Pre-setup state — show all courses as fallback
-    return services.allCourses;
+    return {
+      available: services.allCourses,
+      unavailable: [],
+    };
   }
 
-  // Map user config to Course objects with custom display names.
-  // courseCode keeps the ORIGINAL code (for slugs/cache), name shows the display name.
-  return services.courseConfig.courses.map((uc) => {
-    const original = services.allCourses.find((c) => c.id === uc.id);
-    return {
-      id: uc.id,
-      name: uc.displayName, // display name shown in UI
-      courseCode: uc.originalCode, // original code used for slugs/cache
-      termName: original?.termName ?? null,
-      isCurrent: true,
-    };
-  });
+  const allCoursesById = new Map(
+    services.allCourses.map((course) => [course.id, course] as const)
+  );
+  const available: Course[] = [];
+  const unavailable: UserCourse[] = [];
+
+  for (const configuredCourse of services.courseConfig.courses) {
+    const original = allCoursesById.get(configuredCourse.id);
+    if (!original) {
+      unavailable.push(configuredCourse);
+      continue;
+    }
+    available.push({
+      id: configuredCourse.id,
+      name: configuredCourse.displayName,
+      courseCode: configuredCourse.originalCode,
+      termName: original.termName,
+      isCurrent: original.isCurrent,
+    });
+  }
+
+  return { available, unavailable };
+}
+
+export function getUnavailableConfiguredCourses(
+  services: AppServices
+): UserCourse[] {
+  return getDisplayCourseAvailability(services).unavailable;
 }
 
 /**

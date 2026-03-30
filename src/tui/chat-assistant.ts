@@ -7,7 +7,10 @@ import {
 } from "../ai/provider.js";
 import type { Assignment } from "../domain/models.js";
 import type { CourseCache } from "../enrich/cache-loader.js";
-import type { AppServices } from "./services.js";
+import {
+  getDisplayCourseAvailability,
+  type AppServices,
+} from "./services.js";
 import type { ChatMessage } from "./chat-state.js";
 import { extractFileText } from "../extract/extract-text.js";
 
@@ -160,20 +163,31 @@ function buildGlobalSystemPrompt(
   recent: Array<{ name: string; course: string; path: string }>,
   upcomingAssignments: Assignment[]
 ): string {
-  const courses = services.courseConfig?.courses ?? [];
+  const availability = getDisplayCourseAvailability(services);
+  const courses = availability.available;
+  const unavailableCourses = availability.unavailable;
   const lines: string[] = [
     "You are the global home assistant for canvas-cli.",
     "This scope is navigation-oriented. Help the user with cross-course questions, upcoming work, and where to go next.",
     "Do not pretend you can read assignment documents from global scope.",
     "If the user needs assignment-level detail, tell them to open the course or workspace.",
     "",
-    "Configured courses:",
+    "Available configured courses:",
   ];
 
   if (courses.length === 0) {
-    lines.push("- No courses configured yet.");
+    lines.push("- No available courses configured.");
   } else {
     for (const course of courses) {
+      lines.push(`- ${course.name} (${course.courseCode})`);
+    }
+  }
+
+  lines.push("", "Unavailable configured courses:");
+  if (unavailableCourses.length === 0) {
+    lines.push("- None.");
+  } else {
+    for (const course of unavailableCourses) {
       lines.push(`- ${course.displayName} (${course.originalCode})`);
     }
   }

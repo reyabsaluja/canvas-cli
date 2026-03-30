@@ -21,6 +21,8 @@ import {
   refreshWorkspace,
   getRecentWorkspaces,
   getDisplayCourses,
+  getDisplayCourseAvailability,
+  getUnavailableConfiguredCourses,
   formatDueCompact,
   createChatContext,
   askWorkspaceQuestion,
@@ -147,7 +149,7 @@ export async function launchApp(): Promise<void> {
           services.allCourses
         );
         services.courseConfig = updated;
-        scope = normalizeScopeAfterCourseManagement(scope, updated);
+        scope = normalizeScopeAfterCourseManagement(scope, services);
         continue;
       }
 
@@ -209,6 +211,7 @@ async function createShellContext(
 }> {
   if (scope.type === "global") {
     const recent = await getRecentWorkspaces();
+    const unavailableCourses = getUnavailableConfiguredCourses(services);
     let upcomingPromise: Promise<Assignment[]> | null = null;
     const getUpcomingAssignments = (): Promise<Assignment[]> => {
       upcomingPromise ??= fetchUpcomingAssignments(services, 10).catch(() => []);
@@ -217,7 +220,7 @@ async function createShellContext(
     const session = await loadOrCreateChatSession(scope, {
       title: "Global",
       metadata: {},
-      initialMessages: buildGlobalIntroMessages(recent, []),
+      initialMessages: buildGlobalIntroMessages(recent, [], unavailableCourses),
     });
 
     return {
@@ -336,9 +339,10 @@ async function loadOrCreateWorkspaceShell(
   onAsk: Parameters<typeof runChatShell<ShellResult>>[0]["onAsk"];
 }> {
   if (!(await workspaceExists(scope.workspacePath))) {
+    const unavailableCourses = getUnavailableConfiguredCourses(services);
     const session = await loadOrCreateChatSession({ type: "global" }, {
       title: "Global",
-      initialMessages: buildGlobalIntroMessages([], []),
+      initialMessages: buildGlobalIntroMessages([], [], unavailableCourses),
     });
     const message =
       "That workspace no longer exists on disk. Use /recent or /courses to open something else.";
@@ -1005,10 +1009,10 @@ async function resolveGlobalOpen(
 
 function normalizeScopeAfterCourseManagement(
   scope: AppScope,
-  config: { courses: Array<{ id: number }> }
+  services: AppServices
 ): AppScope {
   if (scope.type === "course") {
-    return config.courses.some((course) => course.id === scope.courseId)
+    return getCourseById(services, scope.courseId)
       ? scope
       : { type: "global" };
   }
@@ -1113,13 +1117,21 @@ async function refreshWorkspaceScope(
 
 function buildGlobalIntroMessages(
   recent: Array<{ name: string; course: string }>,
-  upcoming: Assignment[]
+  upcoming: Assignment[],
+  unavailableCourses: Array<{ displayName: string; originalCode: string }>
 ): ChatMessage[] {
   const lines = [
     "Academic control center ready.",
     "",
     "Use `/courses` to open a course, `/manage-courses` to edit your list, `/recent` to reopen work, or ask a broad question across your courses.",
   ];
+  if (unavailableCourses.length > 0) {
+    lines.push("", "**Unavailable courses**");
+    for (const course of unavailableCourses.slice(0, 4)) {
+      lines.push(`• ${course.displayName} (${course.originalCode}) is no longer available in Canvas`);
+    }
+    lines.push("Use `/manage-courses` to remove or rename outdated entries.");
+  }
   if (recent.length > 0) {
     lines.push("", "**Recent workspaces**");
     for (const workspace of recent.slice(0, 4)) {
@@ -1300,8 +1312,11 @@ function renderInfoBox(
   }
 
   const aiModelText = services.aiConfig ? services.aiConfig.model : "not configured";
-  const displayCourses = getDisplayCourses(services);
-  const courseCount = `${displayCourses.length} active`;
+  const availability = getDisplayCourseAvailability(services);
+  const displayCourses = availability.available;
+  const courseCount = availability.unavailable.length > 0
+    ? `${displayCourses.length} active · ${availability.unavailable.length} unavailable`
+    : `${displayCourses.length} active`;
   const workspaceCount = `${recent.length} active`;
   const systemSummary = formatSystemSummary();
   const toolAgentSummary = "9 tools · 2 agents";
