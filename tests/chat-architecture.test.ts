@@ -31,6 +31,11 @@ import {
   createWorkspace,
   createWorkWorkspace,
 } from "../src/workspace/create.js";
+import {
+  readCourseDocumentFromIndex,
+  searchCourseIndex,
+} from "../src/tui/course-retrieval.js";
+import { buildContextBundle } from "../src/ai/context-bundle.js";
 
 async function writeJson(filePath: string, data: unknown): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -923,5 +928,151 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     );
 
     assert.equal(lifecycle, "error");
+  });
+
+  await t.test("course retrieval searches cached extracted content instead of metadata only", async () => {
+    await withTempCwd(async (tempDir) => {
+      const coursePath = path.join(tempDir, ".canvas-cli", "courses", "ece243h1-17");
+      await writeJson(path.join(coursePath, "assignments.json"), []);
+      await writeJson(path.join(coursePath, "modules.json"), []);
+      await writeJson(path.join(coursePath, "files.json"), []);
+      await writeJson(path.join(coursePath, "pages.json"), [
+        { pageId: "lab-brief", title: "Lab Brief", url: null },
+      ]);
+      await writeJson(path.join(coursePath, "syllabus-candidates.json"), []);
+      await writeJson(path.join(coursePath, "attachments.json"), [
+        {
+          originalFilename: "lab4-spec.pdf",
+          localPath: "attachments/lab4-spec.pdf",
+          status: "downloaded",
+          reason: "",
+        },
+      ]);
+      await writeJson(path.join(coursePath, "ingestion.json"), {
+        ingestedAt: "2026-03-29T10:00:00.000Z",
+      });
+      await fs.mkdir(path.join(coursePath, "extracted", "pages"), { recursive: true });
+      await fs.mkdir(path.join(coursePath, "extracted", "attachments"), {
+        recursive: true,
+      });
+      await fs.writeFile(
+        path.join(coursePath, "extracted", "pages", "lab-brief.txt"),
+        "# Lab Brief\n\nAssembly pipeline timing is explained here.\n",
+        "utf-8"
+      );
+      await fs.writeFile(
+        path.join(coursePath, "extracted", "attachments", "lab4-spec.pdf.txt"),
+        "Deliverables include a waveform screenshot and a short analysis.\n",
+        "utf-8"
+      );
+
+      const cache = {
+        courseId: 17,
+        coursePath,
+        assignments: [],
+        modules: [],
+        files: [],
+        pages: [{ pageId: "lab-brief", title: "Lab Brief", url: null }],
+        syllabusCandidates: [],
+        attachments: [
+          {
+            originalFilename: "lab4-spec.pdf",
+            localPath: "attachments/lab4-spec.pdf",
+            status: "downloaded",
+            reason: "",
+          },
+        ],
+        ingestion: { ingestedAt: "2026-03-29T10:00:00.000Z" },
+      } as any;
+
+      const searchResult = await searchCourseIndex(cache, "waveform screenshot");
+      assert.match(searchResult, /\[attachment\] lab4-spec\.pdf/);
+
+      const pageResult = await searchCourseIndex(cache, "pipeline timing");
+      assert.match(pageResult, /\[page\] Lab Brief/);
+
+      const readResult = await readCourseDocumentFromIndex(cache, "lab4 spec");
+      assert.match(readResult, /waveform screenshot/);
+    });
+  });
+
+  await t.test("context bundle reuses cached extracted attachments", async () => {
+    await withTempCwd(async (tempDir) => {
+      const coursePath = path.join(tempDir, ".canvas-cli", "courses", "ece243h1-17");
+      await fs.mkdir(path.join(coursePath, "extracted", "attachments"), {
+        recursive: true,
+      });
+      await fs.writeFile(
+        path.join(coursePath, "extracted", "attachments", "lab4-spec.pdf.txt"),
+        "Cached extracted attachment text.\n",
+        "utf-8"
+      );
+
+      const bundle = await buildContextBundle(
+        {
+          id: 42,
+          name: "Lab 4",
+          courseId: 17,
+          courseName: "ECE243",
+          dueAt: null,
+          unlockAt: null,
+          lockAt: null,
+          submitted: false,
+          submittedAt: null,
+          score: null,
+          grade: null,
+          late: false,
+          missing: false,
+          status: "upcoming",
+          pointsPossible: null,
+          gradingType: "points",
+          submissionTypes: [],
+          allowedExtensions: null,
+          htmlUrl: "https://canvas.example/lab-4",
+          description: null,
+          attachments: [],
+        } as any,
+        {
+          flags: {
+            hasWeakCanvasDescription: false,
+            missingDueDate: true,
+            likelySubmissionShell: false,
+          },
+          relatedAttachments: [
+            {
+              filename: "lab4-spec.pdf",
+              localPath: "attachments/lab4-spec.pdf",
+              reason: "linked from assignment",
+            },
+          ],
+          relatedPages: [],
+          relatedModules: [],
+          relevantAssignments: [],
+        } as any,
+        {
+          courseId: 17,
+          coursePath,
+          assignments: [],
+          modules: [],
+          files: [],
+          pages: [],
+          syllabusCandidates: [],
+          attachments: [
+            {
+              originalFilename: "lab4-spec.pdf",
+              localPath: "attachments/lab4-spec.pdf",
+              status: "downloaded",
+              reason: "",
+            },
+          ],
+          ingestion: { ingestedAt: "2026-03-29T10:00:00.000Z" },
+        }
+      );
+
+      assert.match(
+        bundle.extractedTexts.map((entry) => entry.content).join("\n"),
+        /Cached extracted attachment text/
+      );
+    });
   });
 });

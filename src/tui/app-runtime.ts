@@ -75,6 +75,7 @@ export async function createShellContext(
           history: session.messages,
           recent,
           upcomingAssignments: upcoming,
+          onToolCall: callbacks.onToolCall,
           onTextDelta: callbacks.onTextDelta,
         });
         return { content: answer };

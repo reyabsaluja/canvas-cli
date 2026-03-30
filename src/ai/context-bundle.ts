@@ -1,10 +1,12 @@
 import fs from "node:fs/promises";
-import path from "node:path";
 import type { AssignmentDetail } from "../domain/models.js";
 import type { EnrichmentSummary } from "../enrich/types.js";
 import type { CourseCache } from "../enrich/cache-loader.js";
 import { htmlToText } from "../format/html-to-text.js";
-import { extractFileText } from "../extract/extract-text.js";
+import {
+  getExtractedAttachmentPath,
+  getExtractedSyllabusPath,
+} from "../enrich/course-documents.js";
 
 /**
  * Assembled context bundle for the AI model.
@@ -85,7 +87,7 @@ export async function buildContextBundle(
   let totalTextLoaded = 0;
 
   // 1. Always include syllabus body if it exists
-  const syllabusTextPath = path.join(cache.coursePath, "extracted", "syllabus-body.txt");
+  const syllabusTextPath = getExtractedSyllabusPath(cache.coursePath);
   const syllabusText = await readTextSafe(syllabusTextPath);
   if (syllabusText && syllabusText.length > 50) {
     const content = truncate(syllabusText, MAX_TEXT_PER_SOURCE);
@@ -101,8 +103,11 @@ export async function buildContextBundle(
     if (att.status !== "downloaded" && att.status !== "skipped") continue;
     if (totalTextLoaded >= MAX_TOTAL_TEXT) break;
 
-    const fullPath = path.join(cache.coursePath, att.localPath);
-    const text = await extractFileText(fullPath, att.originalFilename);
+    const extractedPath = getExtractedAttachmentPath(
+      cache.coursePath,
+      att.localPath
+    );
+    const text = await readTextSafe(extractedPath);
     if (text && text.length > 20 && !text.startsWith("[")) {
       const content = truncate(text, MAX_TEXT_PER_SOURCE);
       bundle.extractedTexts.push({
@@ -120,8 +125,11 @@ export async function buildContextBundle(
       if (totalTextLoaded >= MAX_TOTAL_TEXT) break;
       if (loadedSources.has(att.filename)) continue;
 
-      const fullPath = path.join(cache.coursePath, att.localPath);
-      const text = await extractFileText(fullPath, att.filename);
+      const extractedPath = getExtractedAttachmentPath(
+        cache.coursePath,
+        att.localPath
+      );
+      const text = await readTextSafe(extractedPath);
       if (text && text.length > 20 && !text.startsWith("[")) {
         const content = truncate(text, MAX_TEXT_PER_SOURCE);
         bundle.extractedTexts.push({
@@ -169,8 +177,6 @@ function buildAssignmentList(cache: CourseCache): string | null {
   }
   return lines.join("\n");
 }
-
-// extractFileText imported from ../extract/extract-text.js
 
 async function readTextSafe(filePath: string): Promise<string | null> {
   try {
