@@ -113,7 +113,7 @@ async function ensureCourseConfig(services: AppServices): Promise<void> {
   services.courseConfig = courseConfig;
 }
 
-async function resolveShellResult(
+export async function resolveShellResult(
   services: AppServices,
   currentScope: AppScope,
   runtimeScope: AppScope,

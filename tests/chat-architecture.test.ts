@@ -31,6 +31,10 @@ import {
 } from "../src/tui/services.js";
 import { createShellContext } from "../src/tui/app-runtime.js";
 import { buildRecentSessionPickerItems } from "../src/tui/app-navigation.js";
+import {
+  normalizeScopeAfterCourseManagement,
+} from "../src/tui/app-navigation.js";
+import { resolveShellResult } from "../src/tui/app.js";
 import { makeCourseSlug } from "../src/ingest/slug.js";
 import type { Course } from "../src/domain/models.js";
 import { loadWorkspaceSessionMeta } from "../src/workspace/session.js";
@@ -270,6 +274,161 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
       assert.equal(workspaces[0]?.name, "Lab 4");
       assert.equal(workspaces[1]?.name, "Lab 3");
     });
+  });
+
+  await t.test("workspace shell context recovers missing workspace scopes back to global", async () => {
+    await withTempCwd(async () => {
+      const course: Course = {
+        id: 17,
+        name: "ECE243",
+        courseCode: "ECE243H1",
+        termName: "Winter 2026",
+        isCurrent: true,
+      };
+      const services = {
+        client: {},
+        config: {} as never,
+        aiConfig: null,
+        rawCourses: [],
+        allCourses: [course],
+        courseConfig: null,
+        assignmentCache: new Map(),
+      } as any;
+
+      const shellContext = await createShellContext(services, {
+        type: "workspace",
+        workspacePath: "/tmp/does-not-exist",
+        courseId: 17,
+        assignmentId: 42,
+      });
+
+      assert.equal(shellContext.runtime.scope.type, "global");
+      assert.equal(shellContext.session.scope.type, "global");
+      assert.match(
+        shellContext.session.messages[shellContext.session.messages.length - 1]?.content ?? "",
+        /no longer exists on disk/
+      );
+    });
+  });
+
+  await t.test("workspace shell context surfaces stale workspaces in runtime status", async () => {
+    await withTempCwd(async (tempDir) => {
+      const course: Course = {
+        id: 17,
+        name: "ECE243",
+        courseCode: "ECE243H1",
+        termName: "Winter 2026",
+        isCurrent: true,
+      };
+      const workspacePath = path.join(
+        tempDir,
+        ".canvas-cli",
+        "sessions",
+        "ece243h1-lab-4-42"
+      );
+      const courseSlug = makeCourseSlug(course.courseCode, course.id);
+      const coursePath = path.join(tempDir, ".canvas-cli", "courses", courseSlug);
+
+      await fs.mkdir(path.join(workspacePath, "extracted"), { recursive: true });
+      await writeJson(path.join(workspacePath, "session.json"), {
+        version: 1,
+        createdAt: "2026-03-29T09:00:00.000Z",
+        updatedAt: "2026-03-29T09:30:00.000Z",
+        sessionSlug: "ece243h1-lab-4-42",
+        workspacePath,
+        assignmentId: 42,
+        assignmentName: "Lab 4",
+        courseId: 17,
+        courseName: "ECE243",
+        courseCode: "ECE243H1",
+        preparedAt: "2026-03-29T09:30:00.000Z",
+        workspaceState: "ready",
+      });
+      await writeJson(path.join(workspacePath, "workup.json"), {
+        overview: "Existing overview",
+      });
+      await fs.writeFile(path.join(workspacePath, "assignment.md"), "# Lab 4\n", "utf-8");
+
+      await writeJson(path.join(coursePath, "ingestion.json"), {
+        ingestedAt: "2026-03-29T10:30:00.000Z",
+      });
+      await writeJson(path.join(coursePath, "assignments.json"), []);
+      await writeJson(path.join(coursePath, "modules.json"), []);
+      await writeJson(path.join(coursePath, "files.json"), []);
+      await writeJson(path.join(coursePath, "pages.json"), []);
+      await writeJson(path.join(coursePath, "syllabus-candidates.json"), []);
+      await writeJson(path.join(coursePath, "attachments.json"), []);
+
+      const services = {
+        client: {},
+        config: {} as never,
+        aiConfig: null,
+        rawCourses: [],
+        allCourses: [course],
+        courseConfig: null,
+        assignmentCache: new Map(),
+      } as any;
+
+      const shellContext = await createShellContext(services, {
+        type: "workspace",
+        workspacePath,
+        courseId: 17,
+        assignmentId: 42,
+      });
+
+      assert.equal(shellContext.runtime.scope.type, "workspace");
+      assert.equal(shellContext.runtime.statusLabel, "Status: stale · /refresh recommended");
+      assert.match(shellContext.runtime.subtitle ?? "", /stale workspace/);
+    });
+  });
+
+  await t.test("course management normalization drops missing course scopes to global", async () => {
+    const liveCourse: Course = {
+      id: 17,
+      name: "ECE243",
+      courseCode: "ECE243H1",
+      termName: "Winter 2026",
+      isCurrent: true,
+    };
+    const services = {
+      allCourses: [liveCourse],
+      courseConfig: {
+        courses: [
+          {
+            id: 17,
+            displayName: "Computer Organization",
+            originalCode: "ECE243H1",
+            originalName: "ECE243",
+          },
+        ],
+      },
+    } as any;
+
+    assert.deepEqual(
+      normalizeScopeAfterCourseManagement(
+        { type: "course", courseId: 99 },
+        services
+      ),
+      { type: "global" }
+    );
+    assert.deepEqual(
+      normalizeScopeAfterCourseManagement(
+        { type: "course", courseId: 17 },
+        services
+      ),
+      { type: "course", courseId: 17 }
+    );
+  });
+
+  await t.test("resolveShellResult preserves explicit scope transitions", async () => {
+    const nextScope = await resolveShellResult(
+      {} as any,
+      { type: "global" },
+      { type: "global" },
+      { type: "scope", scope: { type: "course", courseId: 17 } }
+    );
+
+    assert.deepEqual(nextScope, { type: "course", courseId: 17 });
   });
 
   await t.test("workspace base and work flows share one writer and metadata contract", async () => {
