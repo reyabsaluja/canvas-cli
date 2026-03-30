@@ -14,7 +14,7 @@ import type {
 import type { ShellPinOption } from "./app-types.js";
 
 const inputBg = chalk.bgHex("#2d3342");
-const userBubbleBg = chalk.bgHex("#32394a");
+const userBubbleBg = chalk.bgHex("#3a445d");
 const inputPlaceholderFg = chalk.hex("#8b95a8");
 const toolBgGreen = chalk.bgHex("#1a2e1a");
 const toolBgRed = chalk.bgHex("#2e1a1a");
@@ -91,7 +91,7 @@ export function buildTranscriptLines(options: {
 
 export function renderChatFrame(
   options: RenderChatFrameOptions
-): { chatScrollOffset: number } {
+): { chatScrollOffset: number; maxScroll: number } {
   const buf = createBuffer();
   const { cols, rows } = getTermSize();
   const contentWidth = Math.min(cols - 4, 100);
@@ -159,7 +159,7 @@ export function renderChatFrame(
       )
   );
 
-  return { chatScrollOffset };
+  return { chatScrollOffset, maxScroll };
 }
 
 export function renderInputFooter(options: {
@@ -246,10 +246,10 @@ function renderSlashPinOverlay(
     const command = slashMatches[start + index]!;
     const selected = start + index === slashSelected;
     const pointer = selected ? C.primary("❯ ") : "  ";
-    const name = selected ? C.primaryBold(command.name) : C.accent(command.name);
+    const name = selected ? C.primaryBold(command.name) : C.primary(command.name);
     writes.push(
       `\x1B[${firstRow + index};1H\x1B[0m\x1B[2K${fitToRow(
-        ` ${pointer}${name}  ${C.dim(command.description)}`
+        ` ${pointer}${name}  ${C.muted(command.description)}`
       )}`
     );
   }
@@ -265,9 +265,10 @@ function renderStickyBottom(
   modelLabel: string
 ): string {
   const { cols, rows } = getTermSize();
-  const boxWidth = Math.max(1, cols - 2);
+  const footerWidth = Math.max(1, cols - 1);
+  const displayWidth = Math.max(1, footerWidth - 1);
   const cursor = chalk.white("█");
-  const emptyLine = " ".repeat(boxWidth);
+  const emptyLine = " ".repeat(footerWidth);
   const fitToRow = (value: string) => {
     const visible = stripAnsi(value).length;
     if (visible > cols - 1) {
@@ -278,18 +279,21 @@ function renderStickyBottom(
 
   let displayText: string;
   if (!inputBuffer) {
-    const maxPlaceholder = Math.max(0, boxWidth - 1);
+    const maxPlaceholder = Math.max(0, displayWidth - 1);
     const trimmed =
       placeholder.length > maxPlaceholder && maxPlaceholder > 3
         ? placeholder.slice(0, maxPlaceholder - 3) + "..."
         : placeholder.slice(0, maxPlaceholder);
     const styled = inputPlaceholderFg(trimmed);
-    const remaining = Math.max(0, boxWidth - 1 - stripAnsi(styled).length);
+    const remaining = Math.max(
+      0,
+      displayWidth - stripAnsi(cursor + styled).length
+    );
     displayText = cursor + styled + " ".repeat(remaining);
   } else {
     const colored = inputBuffer.replace(/\/pin\s+\S+/g, (match) => C.accent(match));
-    const visible = stripAnsi(colored).length;
-    const remaining = Math.max(0, boxWidth - visible - 1);
+    const visible = stripAnsi(colored + cursor).length;
+    const remaining = Math.max(0, displayWidth - visible);
     displayText = colored + cursor + " ".repeat(remaining);
   }
 
@@ -340,18 +344,32 @@ function getRenderedMessageLines(
 
   switch (message.role) {
     case "user": {
+      const trimmed = message.content.trim();
+      if (trimmed.startsWith("/")) {
+        const rendered = wrapLines(trimmed, Math.max(12, maxWidth - 4)).map((line) =>
+          `  ${C.primary(line)}`
+        );
+        cache.set(cacheKey, ["", ...rendered]);
+        return ["", ...rendered];
+      }
+
       const indent = "  ";
-      const bubbleWidth = Math.max(16, Math.min(maxWidth, cols - 4));
+      const bubbleWidth = Math.max(
+        24,
+        Math.min(Math.max(maxWidth, cols - 8), cols - 4)
+      );
       const innerWidth = Math.max(1, bubbleWidth - 2);
       const wrappedLines = wrapLines(message.content, innerWidth);
+      const emptyLine = " ".repeat(bubbleWidth);
       const padInner = (line: string) => {
         const visible = stripAnsi(line).length;
         return line + " ".repeat(Math.max(0, innerWidth - visible));
       };
-      const rendered: string[] = [];
+      const rendered: string[] = [`${indent}${userBubbleBg(emptyLine)}`];
       for (const line of wrappedLines) {
         rendered.push(`${indent}${userBubbleBg(` ${padInner(line)} `)}`);
       }
+      rendered.push(`${indent}${userBubbleBg(emptyLine)}`);
       cache.set(cacheKey, ["", ...rendered]);
       return ["", ...rendered];
     }

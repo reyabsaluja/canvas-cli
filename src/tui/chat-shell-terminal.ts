@@ -14,7 +14,6 @@ export function enterChatShell(render: () => void): NodeJS.ReadStream {
   clearScreen();
   hideCursor();
   render();
-  showCursor();
 
   const stdin = process.stdin;
   stdin.setRawMode(true);

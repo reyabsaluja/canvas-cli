@@ -152,7 +152,30 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     assert.doesNotMatch(banner, /\/refresh/);
   });
 
-  await t.test("user transcript bubbles stay wide without spanning the full viewport", async () => {
+  await t.test("user transcript bubbles stay wide with padded top and bottom rows", async () => {
+    const cols = 100;
+    const lines = buildTranscriptLines({
+      messages: [{ role: "user", content: "how many upcoming assignments do i have" }],
+      contentWidth: 96,
+      cols,
+      expanded: false,
+    });
+
+    const renderedLines = lines.filter((line) => stripAnsi(line).length > 0);
+    assert.ok(renderedLines.length > 0);
+    const visibleWidths = renderedLines.map((line) => stripAnsi(line).length);
+    assert.ok(
+      visibleWidths.every((width) => width > cols * 0.6),
+      "expected wide user bubbles"
+    );
+    assert.ok(
+      visibleWidths.every((width) => width < cols),
+      "expected user bubbles to stay inside the viewport"
+    );
+    assert.ok(renderedLines.length >= 3, "expected top padding, content, and bottom padding");
+  });
+
+  await t.test("slash commands render as lightweight command lines instead of padded bubbles", async () => {
     const cols = 100;
     const lines = buildTranscriptLines({
       messages: [{ role: "user", content: "/courses" }],
@@ -162,16 +185,9 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     });
 
     const renderedLines = lines.filter((line) => stripAnsi(line).trim().length > 0);
-    assert.ok(renderedLines.length > 0);
-    const visibleWidths = renderedLines.map((line) => stripAnsi(line).length);
-    assert.ok(
-      visibleWidths.every((width) => width > cols * 0.75),
-      "expected wide user bubbles"
-    );
-    assert.ok(
-      visibleWidths.every((width) => width < cols),
-      "expected user bubbles to stay inside the viewport"
-    );
+    assert.equal(renderedLines.length, 1);
+    assert.ok(stripAnsi(renderedLines[0] ?? "").includes("/courses"));
+    assert.ok(stripAnsi(renderedLines[0] ?? "").length < cols * 0.25);
   });
 
   await t.test("persists and reopens scoped sessions", async () => {

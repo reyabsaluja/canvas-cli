@@ -94,6 +94,7 @@ export async function runChatShell<TExit>(
   let currentSpinnerLine = "";
   let spinnerFrame = 0;
   let chatScrollOffset = 0;
+  let maxChatScrollOffset = 0;
   let spinnerTimer: ReturnType<typeof setInterval> | null = null;
   let currentVerb = "";
   let transcriptLinesCache: string[] | null = null;
@@ -181,6 +182,7 @@ export async function runChatShell<TExit>(
       pinSelected,
     });
     chatScrollOffset = next.chatScrollOffset;
+    maxChatScrollOffset = next.maxScroll;
   }
 
   function renderInputOnly(): void {
@@ -267,7 +269,7 @@ export async function runChatShell<TExit>(
     }
 
     function setChatScrollOffset(nextOffset: number): boolean {
-      const normalized = Math.max(0, nextOffset);
+      const normalized = Math.max(0, Math.min(nextOffset, maxChatScrollOffset));
       if (normalized === chatScrollOffset) {
         return false;
       }
@@ -460,7 +462,7 @@ export async function runChatShell<TExit>(
         return;
       }
       if (key === "\x1b[1~" || key === "\x1B[1~") {
-        if (setChatScrollOffset(999999)) {
+        if (setChatScrollOffset(maxChatScrollOffset)) {
           render();
         }
         return;
@@ -588,7 +590,7 @@ export async function runChatShell<TExit>(
         getPinMatches().length > 0
       ) {
         pinSelected = Math.max(0, pinSelected - 1);
-        render();
+        renderInputOnly();
         return;
       }
       if (
@@ -597,17 +599,17 @@ export async function runChatShell<TExit>(
         getPinMatches().length > 0
       ) {
         pinSelected = Math.min(getPinMatches().length - 1, pinSelected + 1);
-        render();
+        renderInputOnly();
         return;
       }
       if (key === "\x1B[A" && showSlashMenu) {
         slashSelected = Math.max(0, slashSelected - 1);
-        render();
+        renderInputOnly();
         return;
       }
       if (key === "\x1B[B" && showSlashMenu) {
         slashSelected = Math.min(getSlashMatches().length - 1, slashSelected + 1);
-        render();
+        renderInputOnly();
         return;
       }
 
@@ -645,7 +647,7 @@ export async function runChatShell<TExit>(
         const matches = getSlashMatches();
         if (matches.length > 0) {
           inputBuffer = matches[slashSelected]!.name;
-          render();
+          renderInputOnly();
         }
         return;
       }
@@ -656,10 +658,10 @@ export async function runChatShell<TExit>(
         showSlashMenu = inputBuffer.startsWith("/");
         if (getActivePinPartial() !== null) {
           pinSelected = 0;
-          render();
+          renderInputOnly();
         } else if (showSlashMenu) {
           slashSelected = 0;
-          render();
+          renderInputOnly();
         } else if (wasSlash) {
           render();
         } else {
