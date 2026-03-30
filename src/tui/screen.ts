@@ -6,6 +6,8 @@ export const C = {
   primaryBold: chalk.hex("#7aa2f7").bold,
   accent: chalk.hex("#7dcfff"),
   text: chalk.hex("#c0caf5"),
+  warm: chalk.hex("#d8c58f"),
+  muted: chalk.hex("#bcd1da"),
   /** Home info: command descriptions, school/courses/model/workspaces labels */
   secondary: chalk.hex("#536878"),
   dim: chalk.hex("#565f89"),
@@ -24,7 +26,7 @@ export const MenuBox = {
   version: (s: string) => C.secondary(s),
   primary: (s: string) => C.primary(s),
   primaryBold: (s: string) => C.primaryBold(s),
-  secondary: (s: string) => C.secondary(s),
+  secondary: (s: string) => C.muted(s),
   dim: (s: string) => C.dim(s),
   text: (s: string) => C.text(s),
   bold: (s: string) => C.bold(s),
