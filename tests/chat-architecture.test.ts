@@ -19,8 +19,10 @@ import {
 import { handleCommand } from "../src/tui/app-commands.js";
 import type { AppScope } from "../src/tui/chat-state.js";
 import {
+  fetchAssignments,
   getCourseById,
   getDisplayCourseAvailability,
+  invalidateAssignmentCache,
   getWorkspaceLifecycleState,
   openWorkspace,
   refreshWorkspace,
@@ -330,6 +332,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
         rawCourses: [],
         allCourses: [course],
         courseConfig: null,
+        assignmentCache: new Map(),
       } as any;
 
       const progress: string[] = [];
@@ -446,6 +449,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
         rawCourses: [],
         allCourses: [course],
         courseConfig: null,
+        assignmentCache: new Map(),
       } as any;
 
       await assert.rejects(
@@ -543,6 +547,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
         rawCourses: [],
         allCourses: [course],
         courseConfig: null,
+        assignmentCache: new Map(),
       } as any;
 
       await assert.rejects(
@@ -552,6 +557,159 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
       assert.equal(assignmentCalls, 0);
       assert.equal(detailCalls, 1);
     });
+  });
+
+  await t.test("assignment lists are cached for the shell lifetime and reused by openWorkspace", async () => {
+    await withTempCwd(async (tempDir) => {
+      const course: Course = {
+        id: 17,
+        name: "ECE243",
+        courseCode: "ECE243H1",
+        termName: "Winter 2026",
+        isCurrent: true,
+      };
+      const courseSlug = makeCourseSlug(course.courseCode, course.id);
+      const coursePath = path.join(tempDir, ".canvas-cli", "courses", courseSlug);
+      await writeJson(path.join(coursePath, "ingestion.json"), {
+        ingestedAt: "2026-03-29T10:00:00.000Z",
+      });
+      await writeJson(path.join(coursePath, "assignments.json"), []);
+      await writeJson(path.join(coursePath, "modules.json"), []);
+      await writeJson(path.join(coursePath, "files.json"), []);
+      await writeJson(path.join(coursePath, "pages.json"), []);
+      await writeJson(path.join(coursePath, "syllabus-candidates.json"), []);
+      await writeJson(path.join(coursePath, "attachments.json"), []);
+
+      let assignmentCalls = 0;
+      let detailCalls = 0;
+      const services = {
+        client: {
+          async getAssignments() {
+            assignmentCalls += 1;
+            return [
+              {
+                id: 42,
+                name: "Lab 4",
+                course_id: course.id,
+                due_at: null,
+                has_submitted_submissions: false,
+                html_url: "https://canvas.example/lab-4",
+              },
+            ];
+          },
+          async getAssignmentDetail() {
+            detailCalls += 1;
+            return {
+              id: 42,
+              name: "Lab 4",
+              course_id: course.id,
+              due_at: null,
+              has_submitted_submissions: false,
+              html_url: "https://canvas.example/lab-4",
+              description: null,
+              unlock_at: null,
+              lock_at: null,
+              points_possible: null,
+              grading_type: "points",
+              submission_types: [],
+              allowed_extensions: null,
+              submitted_at: null,
+              score: null,
+              grade: null,
+              late: false,
+              missing: false,
+              attachments: [],
+            };
+          },
+          async getCourseDetail() {
+            return {
+              id: course.id,
+              name: course.name,
+              course_code: course.courseCode,
+              syllabus_body: null,
+              term: null,
+            };
+          },
+          async getModulesSafe() {
+            return [];
+          },
+          async getFilesSafe() {
+            return [];
+          },
+          async getPagesSafe() {
+            return [];
+          },
+          async getFrontPageSafe() {
+            return null;
+          },
+          async getPageBySlugSafe() {
+            return null;
+          },
+          async downloadFile() {
+            return null;
+          },
+        },
+        config: {} as never,
+        aiConfig: null,
+        rawCourses: [],
+        allCourses: [course],
+        courseConfig: null,
+        assignmentCache: new Map(),
+      } as any;
+
+      const first = await fetchAssignments(services, course.id, course.name);
+      const second = await fetchAssignments(services, course.id, course.name);
+      assert.equal(first.length, 1);
+      assert.equal(second.length, 1);
+      assert.equal(assignmentCalls, 1);
+
+      await assert.rejects(
+        openWorkspace(services, course, { id: null, name: "Lab 4" }, () => {}),
+        /ANTHROPIC_API_KEY not set/
+      );
+      assert.equal(
+        assignmentCalls,
+        1,
+        "openWorkspace should reuse cached assignments instead of refetching them"
+      );
+      assert.equal(detailCalls, 1);
+    });
+  });
+
+  await t.test("failed assignment fetches do not poison the cache", async () => {
+    const course: Course = {
+      id: 17,
+      name: "ECE243",
+      courseCode: "ECE243H1",
+      termName: "Winter 2026",
+      isCurrent: true,
+    };
+    let calls = 0;
+    const services = {
+      client: {
+        async getAssignments() {
+          calls += 1;
+          if (calls === 1) {
+            throw new Error("temporary Canvas failure");
+          }
+          return [];
+        },
+      },
+      assignmentCache: new Map(),
+    } as any;
+
+    await assert.rejects(
+      fetchAssignments(services, course.id, course.name),
+      /temporary Canvas failure/
+    );
+    assert.equal(services.assignmentCache.size, 0);
+
+    const assignments = await fetchAssignments(services, course.id, course.name);
+    assert.deepEqual(assignments, []);
+    assert.equal(calls, 2);
+
+    invalidateAssignmentCache(services, course.id);
+    assert.equal(services.assignmentCache.size, 0);
   });
 
   await t.test("create failure persists workspace error state", async () => {
@@ -624,6 +782,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
         rawCourses: [],
         allCourses: [course],
         courseConfig: null,
+        assignmentCache: new Map(),
       } as any;
 
       await assert.rejects(
@@ -757,6 +916,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
         rawCourses: [],
         allCourses: [course],
         courseConfig: null,
+        assignmentCache: new Map(),
       } as any;
 
       await assert.rejects(
@@ -873,6 +1033,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
         rawCourses: [],
         allCourses: [course],
         courseConfig: null,
+        assignmentCache: new Map(),
       } as any;
 
       let caught: Error | null = null;

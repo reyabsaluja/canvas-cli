@@ -48,6 +48,10 @@ export interface AppServices {
   allCourses: Course[];
   /** User-configured courses (filtered + renamed). Null if no config yet. */
   courseConfig: CourseConfig | null;
+  assignmentCache: Map<
+    number,
+    { courseName: string; assignmentsPromise: Promise<Assignment[]> }
+  >;
 }
 
 export interface WorkspaceOpenResult {
@@ -94,7 +98,15 @@ export async function initServices(): Promise<AppServices> {
     .map(normalizeCourse)
     .filter((c) => c.isCurrent);
 
-  return { config, client, aiConfig, rawCourses, allCourses, courseConfig: null };
+  return {
+    config,
+    client,
+    aiConfig,
+    rawCourses,
+    allCourses,
+    courseConfig: null,
+    assignmentCache: new Map(),
+  };
 }
 
 /**
@@ -154,12 +166,44 @@ export async function fetchAssignments(
   courseId: number,
   courseName: string
 ): Promise<Assignment[]> {
-  const raw = await services.client.getAssignments(courseId);
-  const normalized = raw.map((a) => normalizeAssignment(a, courseName));
-  const filtered = filterRelevantAssignments(normalized, {
-    all: true, // show all in TUI picker
+  const cached = services.assignmentCache.get(courseId);
+  if (cached && cached.courseName === courseName) {
+    return cached.assignmentsPromise;
+  }
+
+  const assignmentsPromise = services.client
+    .getAssignments(courseId)
+    .then((raw) => {
+      const normalized = raw.map((a) => normalizeAssignment(a, courseName));
+      const filtered = filterRelevantAssignments(normalized, {
+        all: true,
+      });
+      return sortByUrgency(filtered);
+    })
+    .catch((error) => {
+      const current = services.assignmentCache.get(courseId);
+      if (current?.assignmentsPromise === assignmentsPromise) {
+        services.assignmentCache.delete(courseId);
+      }
+      throw error;
+    });
+
+  services.assignmentCache.set(courseId, {
+    courseName,
+    assignmentsPromise,
   });
-  return sortByUrgency(filtered);
+  return assignmentsPromise;
+}
+
+export function invalidateAssignmentCache(
+  services: AppServices,
+  courseId?: number
+): void {
+  if (typeof courseId === "number") {
+    services.assignmentCache.delete(courseId);
+    return;
+  }
+  services.assignmentCache.clear();
 }
 
 /**
@@ -363,10 +407,7 @@ async function resolveAssignmentDetail(
     return normalizeAssignmentDetail(rawDetail, course.name);
   }
 
-  const rawAssignments = await services.client.getAssignments(course.id);
-  const allAssignments = rawAssignments.map((a) =>
-    normalizeAssignment(a, course.name)
-  );
+  const allAssignments = await fetchAssignments(services, course.id, course.name);
   const matches = matchAssignments(assignmentTarget.name, allAssignments);
 
   if (matches.length === 0) {

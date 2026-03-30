@@ -1,5 +1,6 @@
 import { clearScreen, hideCursor, showCursor, C } from "./screen.js";
 import {
+  invalidateAssignmentCache,
   initServices,
   type AppServices,
 } from "./services.js";
@@ -127,6 +128,7 @@ async function resolveShellResult(
       services.allCourses
     );
     services.courseConfig = updated;
+    invalidateAssignmentCache(services);
     return normalizeScopeAfterCourseManagement(currentScope, services);
   }
 
