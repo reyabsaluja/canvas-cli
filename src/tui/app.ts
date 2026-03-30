@@ -27,131 +27,143 @@ import {
   MenuBox,
   getTermSize,
   stripAnsi,
-  enableMouseTracking,
-  disableMouseTracking,
+  keepLineVisible,
+  truncatePlainToWidth,
 } from "./screen.js";
 import type { Course } from "../domain/models.js";
 import type { AssignmentWorkup } from "../work/types.js";
+import { isInteractiveTerminal, startTerminalSession } from "./terminal.js";
 
 /**
  * Main interactive TUI application.
  */
 export async function launchApp(): Promise<void> {
-  process.on("SIGINT", () => {
-    showCursor();
-    clearScreen();
-    process.exit(0);
-  });
-
-  // Show splash while loading
-  clearScreen();
-  hideCursor();
-  renderSplashLoading();
-
-  let services: AppServices;
-  try {
-    services = await initServices();
-  } catch (err) {
-    showCursor();
-    clearScreen();
-    console.error(
-      C.error(
-        `\n  Failed to connect: ${err instanceof Error ? err.message : "unknown error"}`
-      )
-    );
-    console.error(
-      C.dim("  Check your CANVAS_BASE_URL and CANVAS_ACCESS_TOKEN in .env")
-    );
+  if (!isInteractiveTerminal()) {
+    console.error("canvas-cli interactive mode requires a TTY.");
     process.exit(1);
   }
 
-  // Load course config — run setup if no config or empty config
-  let courseConfig = await loadCourseConfig();
-
-  if (!courseConfig || courseConfig.courses.length === 0) {
+  const handleSigint = (): void => {
+    showCursor();
     clearScreen();
-    courseConfig = await runCourseSetup(services.allCourses);
-  }
-  services.courseConfig = courseConfig;
+    process.exit(130);
+  };
 
-  // Pre-fetch recent workspaces
-  let recent = await getRecentWorkspaces();
+  process.once("SIGINT", handleSigint);
 
-  let state: "home" | "assignments" | "workspace" = "home";
-  let selectedCourse: Course | null = null;
+  try {
+    // Show splash while loading
+    clearScreen();
+    hideCursor();
+    renderSplashLoading();
 
-  while (true) {
-    switch (state) {
-      case "home": {
-        const action = await showHomeScreen(services, recent);
-        if (action === null) {
-          showCursor();
-          clearScreen();
-          return;
-        }
-        if (action === "all_workspaces") {
-          const wsAction = await showAllWorkspaces(recent, services);
-          if (wsAction?.startsWith("workspace:")) {
-            const wsPath = wsAction.slice("workspace:".length);
+    let services: AppServices;
+    try {
+      services = await initServices();
+    } catch (err) {
+      showCursor();
+      clearScreen();
+      console.error(
+        C.error(
+          `\n  Failed to connect: ${err instanceof Error ? err.message : "unknown error"}`
+        )
+      );
+      console.error(
+        C.dim("  Check your CANVAS_BASE_URL and CANVAS_ACCESS_TOKEN in .env")
+      );
+      process.exit(1);
+    }
+
+    // Load course config — run setup if no config or empty config
+    let courseConfig = await loadCourseConfig();
+
+    if (!courseConfig || courseConfig.courses.length === 0) {
+      clearScreen();
+      courseConfig = await runCourseSetup(services.allCourses);
+    }
+    services.courseConfig = courseConfig;
+
+    // Pre-fetch recent workspaces
+    let recent = await getRecentWorkspaces();
+
+    let state: "home" | "assignments" | "workspace" = "home";
+    let selectedCourse: Course | null = null;
+
+    while (true) {
+      switch (state) {
+        case "home": {
+          const action = await showHomeScreen(services, recent);
+          if (action === null) {
+            showCursor();
+            clearScreen();
+            return;
+          }
+          if (action === "all_workspaces") {
+            const wsAction = await showAllWorkspaces(recent, services);
+            if (wsAction?.startsWith("workspace:")) {
+              const wsPath = wsAction.slice("workspace:".length);
+              const result = await enterExistingWorkspace(wsPath, services);
+              if (result === "courses") state = "home";
+              else if (result === "back") state = "home";
+              else { showCursor(); clearScreen(); return; }
+            }
+            recent = await getRecentWorkspaces(); // refresh in case of deletes
+          } else if (action === "manage_courses") {
+            clearScreen();
+            const updated = await runCourseManagement(
+              services.courseConfig ?? { courses: [] },
+              services.allCourses
+            );
+            services.courseConfig = updated;
+            recent = await getRecentWorkspaces();
+          } else if (action.startsWith("course:")) {
+            const courseId = action.slice("course:".length);
+            const displayCourses = getDisplayCourses(services);
+            selectedCourse =
+              displayCourses.find((c) => String(c.id) === courseId) ?? null;
+            if (selectedCourse) state = "assignments";
+          } else if (action.startsWith("workspace:")) {
+            const wsPath = action.slice("workspace:".length);
             const result = await enterExistingWorkspace(wsPath, services);
             if (result === "courses") state = "home";
             else if (result === "back") state = "home";
-            else { showCursor(); clearScreen(); return; }
+            else {
+              showCursor();
+              clearScreen();
+              return;
+            }
           }
-          recent = await getRecentWorkspaces(); // refresh in case of deletes
-        } else if (action === "manage_courses") {
-          clearScreen();
-          const updated = await runCourseManagement(
-            services.courseConfig ?? { courses: [] },
-            services.allCourses
+          break;
+        }
+
+        case "assignments": {
+          if (!selectedCourse) {
+            state = "home";
+            break;
+          }
+          const result = await showAssignmentPicker(services, selectedCourse);
+          if (result === null) {
+            state = "home";
+            break;
+          }
+          const wsResult = await enterNewWorkspace(
+            services,
+            selectedCourse,
+            result
           );
-          services.courseConfig = updated;
-          recent = await getRecentWorkspaces();
-        } else if (action.startsWith("course:")) {
-          const courseId = action.slice("course:".length);
-          const displayCourses = getDisplayCourses(services);
-          selectedCourse =
-            displayCourses.find((c) => String(c.id) === courseId) ?? null;
-          if (selectedCourse) state = "assignments";
-        } else if (action.startsWith("workspace:")) {
-          const wsPath = action.slice("workspace:".length);
-          const result = await enterExistingWorkspace(wsPath, services);
-          if (result === "courses") state = "home";
-          else if (result === "back") state = "home";
+          if (wsResult === "back") state = "assignments";
+          else if (wsResult === "courses") state = "home";
           else {
             showCursor();
             clearScreen();
             return;
           }
-        }
-        break;
-      }
-
-      case "assignments": {
-        if (!selectedCourse) {
-          state = "home";
           break;
         }
-        const result = await showAssignmentPicker(services, selectedCourse);
-        if (result === null) {
-          state = "home";
-          break;
-        }
-        const wsResult = await enterNewWorkspace(
-          services,
-          selectedCourse,
-          result
-        );
-        if (wsResult === "back") state = "assignments";
-        else if (wsResult === "courses") state = "home";
-        else {
-          showCursor();
-          clearScreen();
-          return;
-        }
-        break;
       }
     }
+  } finally {
+    process.removeListener("SIGINT", handleSigint);
   }
 }
 
@@ -279,67 +291,8 @@ async function showHomeScreen(
       return { items: cleaned, selectableIndices: selectable };
     }
 
-    function buildHomeListLines(
-      renderedItems: typeof items,
-      currentSelectableIdx: number,
-      termCols: number,
-    ): string[] {
-      const lines: string[] = [];
-      const contentWidth = Math.max(24, termCols - 8);
-      const detailWidth = Math.max(20, contentWidth - 4);
-
-      if (filter) {
-        lines.push(C.dim("  filter ") + C.text(filter) + chalk.white("█"));
-        lines.push("");
-      }
-
-      let firstSection = true;
-      for (let i = 0; i < renderedItems.length; i++) {
-        const item = renderedItems[i];
-
-        if (item.isSection) {
-          if (!firstSection) lines.push("");
-          const divider = C.dimmer("─".repeat(Math.max(8, Math.min(18, contentWidth - item.label.length - 4))));
-          lines.push(`  ${C.primaryBold(item.label)} ${divider}`);
-          firstSection = false;
-          continue;
-        }
-
-        const isSelected = i === currentSelectableIdx;
-        const pointer = isSelected ? C.primary("❯") : C.dimmer("•");
-        const labelLines = wrapWords(item.label, contentWidth - 4);
-        const labelColor = item.dimmed
-          ? isSelected ? C.bold : C.dim
-          : isSelected ? C.bold : C.text;
-
-        lines.push(`  ${pointer} ${labelColor(labelLines[0])}`);
-        for (let j = 1; j < labelLines.length; j++) {
-          lines.push(`    ${labelColor(labelLines[j])}`);
-        }
-
-        if (item.sublabel) {
-          const subLines = wrapWords(item.sublabel, detailWidth);
-          for (const subLine of subLines) {
-            lines.push(`    ${isSelected ? C.muted(subLine) : C.dim(subLine)}`);
-          }
-        }
-      }
-
-      lines.push("");
-      lines.push(
-        "  " +
-          C.primary("↑↓") + C.dimmer(" move   ") +
-          C.primary("enter") + C.dimmer(" open   ") +
-          C.primary("esc") + C.dimmer(" quit   ") +
-          C.primary("type") + C.dimmer(" to filter")
-      );
-
-      return lines;
-    }
-
-    function render(): void {
+    function render(keepSelectionVisible: boolean = false): void {
       const buf = createBuffer();
-      hideCursor();
       const { cols: termCols, rows: termRows } = getTermSize();
 
       // Estimate content height to vertically center
@@ -372,10 +325,33 @@ async function showHomeScreen(
       const filtered = getFiltered();
       const currentSelectableIdx =
         filtered.selectableIndices[selectedIdx] ?? -1;
-      const listLines = buildHomeListLines(
-        filtered.items,
-        currentSelectableIdx,
-        termCols
+      let selectedLine = buf.length;
+
+      for (let i = 0; i < filtered.items.length; i++) {
+        const item = filtered.items[i];
+
+        if (item.isSection) {
+          buf.push("");
+          buf.push(C.primaryBold(`  ${item.label}`));
+          continue;
+        }
+
+        const isSelected = i === currentSelectableIdx;
+        if (isSelected) {
+          selectedLine = buf.length;
+        }
+        const pointer = isSelected ? C.primary("❯ ") : "  ";
+        const label = isSelected
+          ? C.bold(item.label)
+          : C.text(item.label);
+        const sub = item.sublabel ? C.dim(` — ${item.sublabel}`) : "";
+        buf.push(`  ${pointer}${label}${sub}`);
+      }
+
+      // Footer
+      buf.push("");
+      buf.push(
+        C.dimmer("  ↑↓ navigate  enter select  esc quit  type to filter")
       );
       for (const line of listLines) {
         buf.push(line);
@@ -384,18 +360,21 @@ async function showHomeScreen(
       const totalLines = buf.length;
       const { rows: viewRows } = getTermSize();
       const maxScroll = Math.max(0, totalLines - viewRows);
+      if (keepSelectionVisible) {
+        scrollTop = keepLineVisible(selectedLine, scrollTop, viewRows, totalLines, 2);
+      }
       scrollTop = Math.min(scrollTop, maxScroll);
       const scrollFromBottom = maxScroll - scrollTop;
       buf.flush(0, scrollFromBottom);
     }
 
-    render();
-    enableMouseTracking();
-
-    const stdin = process.stdin;
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.setEncoding("utf8");
+    const cleanupSession = startTerminalSession(onData, {
+      mouseTracking: true,
+      onResize: () => render(false),
+      clearOnEnter: false,
+      clearOnExit: false,
+    });
+    render(false);
 
     function onData(key: string): void {
       const filtered = getFiltered();
@@ -406,10 +385,10 @@ async function showHomeScreen(
         const btn = parseInt(sgrMatch[1], 10);
         if (btn === 64) {
           scrollTop = Math.max(0, scrollTop - 3);
-          render();
+          render(false);
         } else if (btn === 65) {
           scrollTop += 3;
-          render();
+          render(false);
         }
         return;
       }
@@ -437,7 +416,7 @@ async function showHomeScreen(
       // Arrow up
       if (key === "\x1B[A") {
         selectedIdx = Math.max(0, selectedIdx - 1);
-        render();
+        render(true);
         return;
       }
 
@@ -447,7 +426,7 @@ async function showHomeScreen(
           filtered.selectableIndices.length - 1,
           selectedIdx + 1
         );
-        render();
+        render(true);
         return;
       }
 
@@ -456,7 +435,8 @@ async function showHomeScreen(
         if (filter.length > 0) {
           filter = filter.slice(0, -1);
           selectedIdx = 0;
-          render();
+          scrollTop = 0;
+          render(false);
         }
         return;
       }
@@ -471,20 +451,14 @@ async function showHomeScreen(
       if (key.length === 1 && key >= " ") {
         filter += key;
         selectedIdx = 0;
-        render();
+        scrollTop = 0;
+        render(false);
       }
     }
 
     function cleanup(): void {
-      disableMouseTracking();
-      stdin.removeListener("data", onData);
-      stdin.setRawMode(false);
-      stdin.pause();
-      showCursor();
-      clearScreen();
+      cleanupSession();
     }
-
-    stdin.on("data", onData);
   });
 }
 
@@ -784,8 +758,7 @@ function formatCmdRows(cmd: [string, string], maxW: number): string[] {
 }
 
 function truncPlain(text: string, maxLen: number): string {
-  if (text.length <= maxLen) return text;
-  return text.slice(0, maxLen - 3) + "...";
+  return truncatePlainToWidth(text, maxLen);
 }
 
 function wrapCommaList(items: string[], maxLen: number): string[] {
@@ -1225,13 +1198,15 @@ function sleep(ms: number): Promise<void> {
 
 function waitForKey(): Promise<void> {
   return new Promise((resolve) => {
-    const stdin = process.stdin;
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.once("data", () => {
-      stdin.setRawMode(false);
-      stdin.pause();
-      resolve();
-    });
+    const cleanup = startTerminalSession(
+      () => {
+        cleanup();
+        resolve();
+      },
+      {
+        clearOnEnter: false,
+        clearOnExit: false,
+      }
+    );
   });
 }

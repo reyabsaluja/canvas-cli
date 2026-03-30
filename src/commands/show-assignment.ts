@@ -1,7 +1,7 @@
 import { CanvasClient } from "../canvas/client.js";
 import { loadConfig } from "../config/env.js";
 import { resolveAssignment } from "../domain/resolve-assignment.js";
-import { renderAssignmentDetail } from "../format/renderAssignmentDetail.js";
+import { renderAssignmentDetail } from "../format/render-assignment-detail.js";
 import { loadCourseCache } from "../enrich/cache-loader.js";
 import { enrichAssignmentDetail } from "../enrich/enrich-assignment.js";
 import type { EnrichedAssignmentDetail } from "../enrich/types.js";
