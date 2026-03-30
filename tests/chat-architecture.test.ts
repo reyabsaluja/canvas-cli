@@ -36,6 +36,7 @@ import {
   loadWorkspace,
   readWorkspaceExtractedFile,
 } from "../src/ask/load-workspace.js";
+import { listWorkspaces } from "../src/ask/resolve-workspace.js";
 import {
   createWorkspace,
   createWorkWorkspace,
@@ -227,6 +228,46 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     assert.equal(items.length, 25);
     assert.equal(items[24]?.value, "workspace-25");
     assert.match(items[24]?.label ?? "", /Workspace 25/);
+  });
+
+  await t.test("listWorkspaces returns workspaces sorted by most recent update", async () => {
+    await withTempCwd(async (tempDir) => {
+      const sessionsRoot = path.join(tempDir, ".canvas-cli", "sessions");
+      const olderPath = path.join(sessionsRoot, "ece243h1-lab-3-41");
+      const newerPath = path.join(sessionsRoot, "ece243h1-lab-4-42");
+      await fs.mkdir(olderPath, { recursive: true });
+      await fs.mkdir(newerPath, { recursive: true });
+
+      await writeJson(path.join(olderPath, "session.json"), {
+        version: 1,
+        createdAt: "2026-03-29T09:00:00.000Z",
+        updatedAt: "2026-03-29T09:30:00.000Z",
+        sessionSlug: "ece243h1-lab-3-41",
+        workspacePath: olderPath,
+        assignmentId: 41,
+        assignmentName: "Lab 3",
+        courseId: 17,
+        courseName: "ECE243",
+      });
+
+      await writeJson(path.join(newerPath, "session.json"), {
+        version: 1,
+        createdAt: "2026-03-29T09:00:00.000Z",
+        updatedAt: "2026-03-29T10:30:00.000Z",
+        sessionSlug: "ece243h1-lab-4-42",
+        workspacePath: newerPath,
+        assignmentId: 42,
+        assignmentName: "Lab 4",
+        courseId: 17,
+        courseName: "ECE243",
+      });
+
+      const workspaces = await listWorkspaces();
+
+      assert.equal(workspaces.length, 2);
+      assert.equal(workspaces[0]?.name, "Lab 4");
+      assert.equal(workspaces[1]?.name, "Lab 3");
+    });
   });
 
   await t.test("workspace base and work flows share one writer and metadata contract", async () => {
