@@ -141,20 +141,21 @@ export function renderChatFrame(
   );
 
   buf.flush(MAIN_VIEW_BOTTOM_RESERVE, chatScrollOffset);
-
-  renderStickyBottom(
-    options.placeholder,
-    options.inputBuffer,
-    options.runtime.scopeLabel,
-    options.runtime.statusLabel,
-    options.modelLabel
-  );
-  renderSlashPinOverlay(
-    options.slashMatches,
-    options.pinMatches,
-    options.slashSelected,
-    options.pinSelected,
-    options.inputBuffer
+  process.stdout.write(
+    renderStickyBottom(
+      options.placeholder,
+      options.inputBuffer,
+      options.runtime.scopeLabel,
+      options.runtime.statusLabel,
+      options.modelLabel
+    ) +
+      renderSlashPinOverlay(
+        options.slashMatches,
+        options.pinMatches,
+        options.slashSelected,
+        options.pinSelected,
+        options.inputBuffer
+      )
   );
 
   return { chatScrollOffset };
@@ -171,19 +172,21 @@ export function renderInputFooter(options: {
   slashSelected: number;
   pinSelected: number;
 }): void {
-  renderStickyBottom(
-    options.placeholder,
-    options.inputBuffer,
-    options.scopeLabel,
-    options.statusLabel,
-    options.modelLabel
-  );
-  renderSlashPinOverlay(
-    options.slashMatches,
-    options.pinMatches,
-    options.slashSelected,
-    options.pinSelected,
-    options.inputBuffer
+  process.stdout.write(
+    renderStickyBottom(
+      options.placeholder,
+      options.inputBuffer,
+      options.scopeLabel,
+      options.statusLabel,
+      options.modelLabel
+    ) +
+      renderSlashPinOverlay(
+        options.slashMatches,
+        options.pinMatches,
+        options.slashSelected,
+        options.pinSelected,
+        options.inputBuffer
+      )
   );
 }
 
@@ -193,11 +196,12 @@ function renderSlashPinOverlay(
   slashSelected: number,
   pinSelected: number,
   inputBuffer: string
-): void {
+): string {
   const { cols, rows } = getTermSize();
   const lastRowAboveInput = rows - STICKY_BOTTOM_ROWS;
-  if (lastRowAboveInput < 1) return;
+  if (lastRowAboveInput < 1) return "";
 
+  const writes: string[] = [];
   const padToCols = (value: string): string => {
     const visible = stripAnsi(value).length;
     if (visible > cols) return truncateAnsiToWidth(value, cols);
@@ -218,16 +222,16 @@ function renderSlashPinOverlay(
       const selected = start + index === pinSelected;
       const pointer = selected ? C.primary("❯ ") : "  ";
       const label = selected ? C.primaryBold(pin.label) : C.accent(pin.label);
-      process.stdout.write(
+      writes.push(
         `\x1B[${firstRow + index};1H${padToCols(
           `${indent}${pointer}${label}  ${C.dim(pin.name)}`
         )}`
       );
     }
-    return;
+    return writes.join("");
   }
 
-  if (slashMatches.length === 0) return;
+  if (slashMatches.length === 0) return "";
   const maxShow = Math.min(slashMatches.length, lastRowAboveInput);
   const start = Math.max(
     0,
@@ -239,12 +243,14 @@ function renderSlashPinOverlay(
     const selected = start + index === slashSelected;
     const pointer = selected ? C.primary("❯ ") : "  ";
     const name = selected ? C.primaryBold(command.name) : C.accent(command.name);
-    process.stdout.write(
+    writes.push(
       `\x1B[${firstRow + index};1H${padToCols(
         ` ${pointer}${name}  ${C.dim(command.description)}`
       )}`
     );
   }
+
+  return writes.join("");
 }
 
 function renderStickyBottom(
@@ -253,7 +259,7 @@ function renderStickyBottom(
   leftStatus: string,
   runtimeStatus: string | undefined,
   modelLabel: string
-): void {
+): string {
   const { cols, rows } = getTermSize();
   const boxWidth = Math.max(1, cols - 1);
   const cursor = chalk.white("█");
@@ -292,15 +298,15 @@ function renderStickyBottom(
   const statusLine = statusBarGrey(left) + " ".repeat(gap) + statusBarGrey(right);
   const startRow = rows - 3;
 
-  process.stdout.write(
+  return (
     `\x1B[${startRow};1H` +
-      pad(inputBg(emptyLine)) +
-      "\n" +
-      pad(inputBg(` ${displayText}`)) +
-      "\n" +
-      pad(inputBg(emptyLine)) +
-      "\n" +
-      pad(statusLine)
+    pad(inputBg(emptyLine)) +
+    "\n" +
+    pad(inputBg(` ${displayText}`)) +
+    "\n" +
+    pad(inputBg(emptyLine)) +
+    "\n" +
+    pad(statusLine)
   );
 }
 

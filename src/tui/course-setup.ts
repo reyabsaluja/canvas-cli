@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import readline from "node:readline";
 import { hideCursor, showCursor, createBuffer, clearScreen, C } from "./screen.js";
+import { USER_ABORT_EXIT_CODE } from "./chat-shell-exit.js";
 import type { Course } from "../domain/models.js";
 import type { UserCourse, CourseConfig } from "./course-config.js";
 import { saveCourseConfig } from "./course-config.js";
@@ -160,7 +161,7 @@ export function showMultiSelect(
       // Ctrl+C
       if (key === "\x03") {
         cleanup();
-        process.exit(0);
+        process.exit(USER_ABORT_EXIT_CODE);
       }
 
       // Regular character for filtering (skip 'd' since it's the done key)

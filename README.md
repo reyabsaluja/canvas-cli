@@ -44,6 +44,26 @@ This launches an interactive application where you can:
 4. **Ask questions naturally** — global handles broad questions, course scope handles course context, workspace scope keeps the rich assignment chat
 5. **Use scope-aware slash commands** — `/help` changes with the current scope
 
+### Scope model
+
+canvas-cli has three explicit scopes, and the header always shows which one you are in:
+
+- **Global** — cross-course questions, recent sessions, and navigation
+- **Course** — one course at a time, with course files/modules/assignments
+- **Workspace** — one assignment workspace with the full assignment-specific command set
+
+If you run a command in the wrong scope, canvas-cli returns a helpful scoped error instead of failing silently.
+
+### Persistent sessions
+
+The interactive TUI uses persistent chat sessions stored under `.canvas-cli/chat-sessions/`.
+
+- Global scope reuses one persistent home session
+- Each course gets its own persistent course session
+- Each workspace gets its own persistent workspace session
+
+Reopening a course or workspace restores the prior thread instead of starting from scratch.
+
 ### Example flow
 
 ```
@@ -72,6 +92,8 @@ Move into a course, then open a workspace without leaving the chat shell:
   Workspace: ECE212 2026 Home Page / Lab4
   > what exactly do I need to submit?
 ```
+
+Course scope appears immediately, then hydrates assignments and cached course material in the background. If course data is still loading, the status line reflects that and deeper answers become available as soon as hydration finishes.
 
 Type questions directly:
 
@@ -110,6 +132,7 @@ Global scope:
 | Command | Description |
 |---|---|
 | `/courses` | Open the course picker |
+| `/manage-courses` | Add, remove, or rename configured courses |
 | `/recent` | Reopen a recent course or workspace |
 | `/open` | Jump straight to a course or recent item |
 | `/home` | Stay in the global home session |
@@ -123,10 +146,12 @@ Course scope:
 | `/assignments` | Open the assignment picker for the current course |
 | `/files` | Show cached files and downloads for the course |
 | `/modules` | Show course modules |
+| `/manage-courses` | Add, remove, or rename configured courses |
 | `/open` | Open an assignment directly |
 | `/back` | Return to global scope |
 | `/home` | Return to global scope |
 | `/help` | Show course-scope commands |
+| `/quit` | Exit canvas-cli |
 
 Workspace scope:
 
@@ -138,10 +163,13 @@ Workspace scope:
 | `/resources` | Show key resources |
 | `/evidence` | Show confirmed vs inferred sources |
 | `/status` | Show workspace status |
+| `/pin` | Attach a workspace file or cached attachment to your next prompt |
 | `/refresh` | Refresh the workspace from the latest course cache |
+| `/manage-courses` | Add, remove, or rename configured courses |
 | `/back` | Return to the course session |
 | `/home` | Return to the global home session |
 | `/help` | Show workspace commands |
+| `/quit` | Exit canvas-cli |
 
 ### Automatic workspace preparation
 
@@ -166,6 +194,12 @@ You see the progress live before the workspace session opens:
 ```
 
 On subsequent opens, the workspace loads instantly.
+
+If the workspace is still valid but the underlying course cache is newer, it opens immediately in a **stale** state and recommends `/refresh` instead of forcing a rebuild up front.
+
+### Recent sessions and reopening work
+
+`/recent` searches the full saved session set, not just the newest few items. The picker windows large lists so you can still filter older course/workspace sessions without dumping every row to the terminal at once.
 
 ### Local workspace files
 

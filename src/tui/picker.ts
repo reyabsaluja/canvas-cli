@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import { hideCursor, showCursor, createBuffer, C, getTermSize } from "./screen.js";
+import { USER_ABORT_EXIT_CODE } from "./chat-shell-exit.js";
 
 export interface PickerItem {
   label: string;
@@ -152,7 +153,7 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
 
       if (key === "\x03") {
         cleanup();
-        process.exit(0);
+        process.exit(USER_ABORT_EXIT_CODE);
       }
 
       if (filterable && key.length === 1 && key >= " ") {

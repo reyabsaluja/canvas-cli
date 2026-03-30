@@ -35,6 +35,7 @@ import {
   normalizeScopeAfterCourseManagement,
 } from "../src/tui/app-navigation.js";
 import { resolveShellResult } from "../src/tui/app.js";
+import { renderGlobalBanner } from "../src/tui/app-banner.js";
 import { makeCourseSlug } from "../src/ingest/slug.js";
 import type { Course } from "../src/domain/models.js";
 import { loadWorkspaceSessionMeta } from "../src/workspace/session.js";
@@ -112,6 +113,40 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     assert.equal(availability.unavailable[0]?.id, 99);
     assert.equal(getCourseById(services, 17)?.name, "Computer Organization");
     assert.equal(getCourseById(services, 99), null);
+  });
+
+  await t.test("global banner only advertises commands valid in global scope", async () => {
+    const course: Course = {
+      id: 17,
+      name: "ECE243",
+      courseCode: "ECE243H1",
+      termName: "Winter 2026",
+      isCurrent: true,
+    };
+    const lines: string[] = [];
+
+    renderGlobalBanner(
+      {
+        push(line = "") {
+          lines.push(line);
+        },
+      },
+      {
+        aiConfig: { model: "test-model" },
+        allCourses: [course],
+        courseConfig: null,
+      } as any,
+      [{ name: "Lab 4", course: "ECE243" }]
+    );
+
+    const banner = lines.join("\n");
+    assert.match(banner, /\/courses/);
+    assert.match(banner, /\/manage-courses/);
+    assert.match(banner, /\/recent/);
+    assert.doesNotMatch(banner, /\/overview/);
+    assert.doesNotMatch(banner, /\/plan/);
+    assert.doesNotMatch(banner, /\/resources/);
+    assert.doesNotMatch(banner, /\/refresh/);
   });
 
   await t.test("persists and reopens scoped sessions", async () => {
