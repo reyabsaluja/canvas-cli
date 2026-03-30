@@ -13,6 +13,7 @@ import { COMMANDS } from "./commands.js";
 import { createShellContext } from "./app-runtime.js";
 import { handleCommand } from "./app-commands.js";
 import type { ShellResult } from "./app-types.js";
+import { deleteChatSession, getChatSessionId } from "./chat-sessions.js";
 import {
   normalizeScopeAfterCourseManagement,
   openAssignmentScope,
@@ -79,7 +80,19 @@ export async function launchApp(): Promise<void> {
         return;
       }
 
-      scope = await resolveShellResult(services, scope, shellContext.runtime.scope, result);
+      const nextScope = await resolveShellResult(
+        services,
+        scope,
+        shellContext.runtime.scope,
+        result
+      );
+      if (
+        shellContext.runtime.scope.type === "global" &&
+        nextScope.type !== "global"
+      ) {
+        await deleteChatSession(getChatSessionId(shellContext.runtime.scope));
+      }
+      scope = nextScope;
     }
   } finally {
     process.removeListener("SIGINT", handleSigint);

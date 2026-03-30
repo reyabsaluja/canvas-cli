@@ -139,6 +139,18 @@ export async function listChatSessions(): Promise<ChatSessionSummary[]> {
   return rebuildChatSessionIndex();
 }
 
+export async function deleteChatSession(sessionId: string): Promise<void> {
+  await fs.rm(getChatSessionPath(sessionId), { force: true }).catch(() => {});
+
+  const current = await loadChatSessionIndex();
+  if (!current) {
+    return;
+  }
+
+  const next = current.filter((entry) => entry.id !== sessionId);
+  await saveChatSessionIndex(next);
+}
+
 async function loadChatSessionIndex(): Promise<ChatSessionSummary[] | null> {
   try {
     const raw = await fs.readFile(getChatSessionIndexPath(), "utf-8");

@@ -3,7 +3,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { stripAnsi } from "../src/tui/screen.js";
 import {
+  deleteChatSession,
   getChatSessionId,
   listChatSessions,
   loadChatSession,
@@ -36,6 +38,7 @@ import {
 } from "../src/tui/app-navigation.js";
 import { resolveShellResult } from "../src/tui/app.js";
 import { renderGlobalBanner } from "../src/tui/app-banner.js";
+import { buildTranscriptLines } from "../src/tui/chat-shell-render.js";
 import { makeCourseSlug } from "../src/ingest/slug.js";
 import type { Course } from "../src/domain/models.js";
 import { loadWorkspaceSessionMeta } from "../src/workspace/session.js";
@@ -149,6 +152,28 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     assert.doesNotMatch(banner, /\/refresh/);
   });
 
+  await t.test("user transcript bubbles stay wide without spanning the full viewport", async () => {
+    const cols = 100;
+    const lines = buildTranscriptLines({
+      messages: [{ role: "user", content: "/courses" }],
+      contentWidth: 96,
+      cols,
+      expanded: false,
+    });
+
+    const renderedLines = lines.filter((line) => stripAnsi(line).trim().length > 0);
+    assert.ok(renderedLines.length > 0);
+    const visibleWidths = renderedLines.map((line) => stripAnsi(line).length);
+    assert.ok(
+      visibleWidths.every((width) => width > cols * 0.75),
+      "expected wide user bubbles"
+    );
+    assert.ok(
+      visibleWidths.every((width) => width < cols),
+      "expected user bubbles to stay inside the viewport"
+    );
+  });
+
   await t.test("persists and reopens scoped sessions", async () => {
     await withTempCwd(async () => {
       const scope: AppScope = { type: "workspace", workspacePath: "/tmp/ws-a", courseId: 17, assignmentId: 42 };
@@ -202,6 +227,26 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
       const entries = await fs.readdir(sessionsDir);
       assert.ok(entries.includes("global-home.json"));
       assert.equal(entries.some((entry) => entry.endsWith(".tmp")), false);
+    });
+  });
+
+  await t.test("global sessions are cleared after leaving global scope", async () => {
+    await withTempCwd(async () => {
+      const scope: AppScope = { type: "global" };
+      const session = await loadOrCreateChatSession(scope, {
+        title: "Global",
+        initialMessages: [{ role: "assistant", content: "Ready." }],
+      });
+
+      session.messages.push({ role: "user", content: "what's due soon?" });
+      await saveChatSession(session);
+      assert.ok(await loadChatSession(getChatSessionId(scope)));
+
+      await deleteChatSession(getChatSessionId(scope));
+
+      assert.equal(await loadChatSession(getChatSessionId(scope)), null);
+      const listed = await listChatSessions();
+      assert.equal(listed.some((entry) => entry.id === getChatSessionId(scope)), false);
     });
   });
 

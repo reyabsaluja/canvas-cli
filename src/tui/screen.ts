@@ -75,34 +75,37 @@ class ScreenBuffer {
     const { rows, cols } = getTermSize();
     const reserve = Math.max(0, bottomReserveRows);
     const maxContentLines = Math.max(1, rows - reserve);
+    const normalizeLine = (line: string): string => `\x1B[0m${line}\x1B[0m`;
+    const maxVisibleCols = Math.max(1, cols - 1);
 
     // Truncate lines to terminal width so they never wrap
-    let padded = this.lines.map((line) => {
+    let rendered = this.lines.map((line) => {
       const visible = stripAnsi(line).length;
-      if (visible > cols) {
-        return truncateAnsiToWidth(line, cols - 1) + " ";
+      if (visible > maxVisibleCols) {
+        return normalizeLine(truncateAnsiToWidth(line, maxVisibleCols));
       }
-      if (visible < cols) {
-        return line + " ".repeat(cols - visible);
-      }
-      return line;
+      return normalizeLine(line);
     });
 
-    if (padded.length > maxContentLines) {
-      const maxScroll = padded.length - maxContentLines;
+    if (rendered.length > maxContentLines) {
+      const maxScroll = rendered.length - maxContentLines;
       const off = Math.max(0, Math.min(scrollOffsetFromBottom, maxScroll));
-      const end = padded.length - off;
+      const end = rendered.length - off;
       const start = Math.max(0, end - maxContentLines);
-      padded = padded.slice(start, end);
+      rendered = rendered.slice(start, end);
     }
 
     // Fill remaining rows with blank lines to clear old content
-    while (padded.length < rows) {
-      padded.push(" ".repeat(cols));
+    while (rendered.length < rows) {
+      rendered.push("");
     }
 
-    // Move cursor home + write everything in one shot
-    process.stdout.write("\x1B[H" + padded.join("\n"));
+    const writes: string[] = ["\x1B[0m"];
+    for (let row = 0; row < rows; row++) {
+      writes.push(`\x1B[${row + 1};1H\x1B[0m\x1B[2K${rendered[row]!}`);
+    }
+    writes.push("\x1B[0m");
+    process.stdout.write(writes.join(""));
 
     this.lines = [];
   }
