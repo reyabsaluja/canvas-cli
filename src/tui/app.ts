@@ -26,10 +26,11 @@ import {
   hydrateConversationHistory,
   getCourseById,
   fetchUpcomingAssignments,
+  getWorkspaceLifecycleState,
   type AppServices,
 } from "./services.js";
 import { loadCourseConfig } from "./course-config.js";
-import { runCourseSetup } from "./course-setup.js";
+import { runCourseManagement, runCourseSetup } from "./course-setup.js";
 import { loadCourseCache } from "../enrich/cache-loader.js";
 import { loadWorkspace } from "../ask/load-workspace.js";
 import { updateWorkspaceSessionMeta } from "../workspace/session.js";
@@ -43,147 +44,152 @@ import type {
   AppScope,
   ChatMessage,
   ChatSession,
-  CommandDefinition,
   ScopeRuntime,
 } from "./chat-state.js";
 import { answerCourseQuestion, answerGlobalQuestion } from "./chat-assistant.js";
 import { extractFileText } from "../extract/extract-text.js";
 import type { Course, Assignment } from "../domain/models.js";
 import type { AssignmentWorkup } from "../work/types.js";
+import { COMMANDS } from "./commands.js";
 
 type ShellResult =
   | { type: "quit" }
   | { type: "scope"; scope: AppScope }
+  | { type: "course-management" }
   | { type: "course-picker" }
   | { type: "recent-picker" }
   | { type: "assignment-picker"; courseId: number }
   | { type: "open-assignment"; courseId: number; assignmentName: string }
   | { type: "workspace-refresh"; courseId: number; assignmentName: string };
 
-const COMMANDS: CommandDefinition[] = [
-  { name: "/courses", description: "Open the course picker", scopes: ["global"] },
-  { name: "/recent", description: "Reopen a recent course or workspace", scopes: ["global"] },
-  { name: "/open", description: "Open a course, assignment, or recent item", scopes: ["global", "course"] },
-  { name: "/assignments", description: "Open the assignment picker", scopes: ["course"] },
-  { name: "/files", description: "List course files and cached downloads", scopes: ["course"] },
-  { name: "/modules", description: "List course modules", scopes: ["course"] },
-  { name: "/overview", description: "Show assignment overview", scopes: ["workspace"] },
-  { name: "/requirements", description: "Show deliverables and constraints", scopes: ["workspace"], aliases: ["/reqs"] },
-  { name: "/plan", description: "Show the action plan", scopes: ["workspace"] },
-  { name: "/resources", description: "Show key resources", scopes: ["workspace"] },
-  { name: "/evidence", description: "Show confirmed vs inferred sources", scopes: ["workspace"] },
-  { name: "/status", description: "Show workspace status", scopes: ["workspace"] },
-  { name: "/refresh", description: "Refresh the current workspace", scopes: ["workspace"] },
-  { name: "/back", description: "Go up one scope", scopes: ["course", "workspace"] },
-  { name: "/home", description: "Return to the global home session", scopes: ["global", "course", "workspace"] },
-  { name: "/help", description: "Show available commands", scopes: ["global", "course", "workspace"] },
-  { name: "/quit", description: "Exit canvas-cli", scopes: ["global", "course", "workspace"], aliases: ["/exit", "/q"] },
-];
-
 /**
  * Main interactive TUI application.
  */
 export async function launchApp(): Promise<void> {
-  process.on("SIGINT", () => {
-    showCursor();
-    clearScreen();
-    process.exit(0);
-  });
-
-  clearScreen();
-  hideCursor();
-  renderSplashLoading();
-
-  let services: AppServices;
-  try {
-    services = await initServices();
-  } catch (error) {
-    showCursor();
-    clearScreen();
-    console.error(
-      C.error(
-        `\n  Failed to connect: ${error instanceof Error ? error.message : "unknown error"}`
-      )
-    );
-    console.error(
-      C.dim("  Check your CANVAS_BASE_URL and CANVAS_ACCESS_TOKEN in .env")
-    );
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    console.error("canvas-cli interactive mode requires a TTY.");
     process.exit(1);
   }
 
-  let courseConfig = await loadCourseConfig();
-  if (!courseConfig || courseConfig.courses.length === 0) {
+  const handleSigint = (): void => {
+    showCursor();
     clearScreen();
-    courseConfig = await runCourseSetup(services.allCourses);
-  }
-  services.courseConfig = courseConfig;
+    process.exit(130);
+  };
 
-  let scope: AppScope = { type: "global" };
+  process.once("SIGINT", handleSigint);
 
-  while (true) {
-    const shellContext = await createShellContext(services, scope);
-    const result = await runChatShell<ShellResult>({
-      session: shellContext.session,
-      runtime: shellContext.runtime,
-      commands: COMMANDS,
-      modelLabel: services.aiConfig?.model ?? "no model",
-      bannerRenderer: shellContext.bannerRenderer,
-      extraHelpCommands: shellContext.extraHelpCommands,
-      pinOptions: shellContext.pinOptions,
-      resolvePinContent: shellContext.resolvePinContent,
-      onAsk: shellContext.onAsk,
-      onCommand: async (command, args, api) => {
-        return handleCommand(command, args, api, services);
-      },
-    });
+  try {
+    clearScreen();
+    hideCursor();
+    renderSplashLoading();
 
-    if (!result || result.type === "quit") {
+    let services: AppServices;
+    try {
+      services = await initServices();
+    } catch (error) {
       showCursor();
       clearScreen();
-      return;
-    }
-
-    if (result.type === "scope") {
-      scope = result.scope;
-      continue;
-    }
-
-    if (result.type === "course-picker") {
-      const nextCourse = await pickCourse(services);
-      scope = nextCourse ? { type: "course", courseId: nextCourse.id } : shellContext.runtime.scope;
-      continue;
-    }
-
-    if (result.type === "recent-picker") {
-      const nextScope = await pickRecentScope(services);
-      scope = nextScope ?? shellContext.runtime.scope;
-      continue;
-    }
-
-    if (result.type === "assignment-picker") {
-      const nextScope = await pickAssignmentScope(services, result.courseId);
-      scope = nextScope ?? shellContext.runtime.scope;
-      continue;
-    }
-
-    if (result.type === "open-assignment") {
-      const nextScope = await openAssignmentScope(
-        services,
-        result.courseId,
-        result.assignmentName
+      console.error(
+        C.error(
+          `\n  Failed to connect: ${error instanceof Error ? error.message : "unknown error"}`
+        )
       );
-      scope = nextScope ?? shellContext.runtime.scope;
-      continue;
+      console.error(
+        C.dim("  Check your CANVAS_BASE_URL and CANVAS_ACCESS_TOKEN in .env")
+      );
+      process.exit(1);
     }
 
-    if (result.type === "workspace-refresh") {
-      scope = await refreshWorkspaceScope(
-        services,
-        result.courseId,
-        result.assignmentName,
-        shellContext.runtime.scope
-      );
+    let courseConfig = await loadCourseConfig();
+    if (!courseConfig || courseConfig.courses.length === 0) {
+      clearScreen();
+      courseConfig = await runCourseSetup(services.allCourses);
     }
+    services.courseConfig = courseConfig;
+
+    let scope: AppScope = { type: "global" };
+
+    while (true) {
+      const shellContext = await createShellContext(services, scope);
+      const result = await runChatShell<ShellResult>({
+        session: shellContext.session,
+        runtime: shellContext.runtime,
+        commands: COMMANDS,
+        modelLabel: services.aiConfig?.model ?? "no model",
+        bannerRenderer: shellContext.bannerRenderer,
+        extraHelpCommands: shellContext.extraHelpCommands,
+        pinOptions: shellContext.pinOptions,
+        resolvePinContent: shellContext.resolvePinContent,
+        onAsk: shellContext.onAsk,
+        onCommand: async (command, args, api) => {
+          return handleCommand(command, args, api, services);
+        },
+      });
+
+      if (!result || result.type === "quit") {
+        showCursor();
+        clearScreen();
+        return;
+      }
+
+      if (result.type === "scope") {
+        scope = result.scope;
+        continue;
+      }
+
+      if (result.type === "course-management") {
+        clearScreen();
+        const updated = await runCourseManagement(
+          services.courseConfig ?? { courses: [] },
+          services.allCourses
+        );
+        services.courseConfig = updated;
+        scope = normalizeScopeAfterCourseManagement(scope, updated);
+        continue;
+      }
+
+      if (result.type === "course-picker") {
+        const nextCourse = await pickCourse(services);
+        scope = nextCourse
+          ? { type: "course", courseId: nextCourse.id }
+          : shellContext.runtime.scope;
+        continue;
+      }
+
+      if (result.type === "recent-picker") {
+        const nextScope = await pickRecentScope(services);
+        scope = nextScope ?? shellContext.runtime.scope;
+        continue;
+      }
+
+      if (result.type === "assignment-picker") {
+        const nextScope = await pickAssignmentScope(services, result.courseId);
+        scope = nextScope ?? shellContext.runtime.scope;
+        continue;
+      }
+
+      if (result.type === "open-assignment") {
+        const nextScope = await openAssignmentScope(
+          services,
+          result.courseId,
+          result.assignmentName
+        );
+        scope = nextScope ?? shellContext.runtime.scope;
+        continue;
+      }
+
+      if (result.type === "workspace-refresh") {
+        scope = await refreshWorkspaceScope(
+          services,
+          result.courseId,
+          result.assignmentName,
+          shellContext.runtime.scope
+        );
+      }
+    }
+  } finally {
+    process.removeListener("SIGINT", handleSigint);
   }
 }
 
@@ -201,11 +207,15 @@ async function createShellContext(
 }> {
   if (scope.type === "global") {
     const recent = await getRecentWorkspaces();
-    const upcoming = await fetchUpcomingAssignments(services, 10);
+    let upcomingPromise: Promise<Assignment[]> | null = null;
+    const getUpcomingAssignments = (): Promise<Assignment[]> => {
+      upcomingPromise ??= fetchUpcomingAssignments(services, 10).catch(() => []);
+      return upcomingPromise;
+    };
     const session = await loadOrCreateChatSession(scope, {
       title: "Global",
       metadata: {},
-      initialMessages: buildGlobalIntroMessages(recent, upcoming),
+      initialMessages: buildGlobalIntroMessages(recent, []),
     });
 
     return {
@@ -216,7 +226,7 @@ async function createShellContext(
         scopeLabel: "Global",
         placeholder: "Ask about your courses, or use /courses and /recent",
       },
-      bannerRenderer: (buf) => renderGlobalBanner(buf, services, recent, upcoming),
+      bannerRenderer: (buf) => renderGlobalBanner(buf, services, recent, []),
       onAsk: async (input, callbacks) => {
         if (!services.aiConfig) {
           return {
@@ -224,6 +234,7 @@ async function createShellContext(
               "AI is unavailable because no provider key is configured. You can still use /courses, /recent, and /open.",
           };
         }
+        const upcoming = await getUpcomingAssignments();
         const answer = await answerGlobalQuestion({
           aiConfig: services.aiConfig,
           services,
@@ -353,25 +364,26 @@ async function loadOrCreateWorkspaceShell(
   }
 
   const loaded = await loadWorkspace(scope.workspacePath);
-  await updateWorkspaceSessionMeta(scope.workspacePath, (current) => ({
-    ...current,
-    updatedAt: new Date().toISOString(),
-    lastOpenedAt: new Date().toISOString(),
-    workspaceState: current.workspaceState ?? "ready",
-  }));
   const workup = loaded.workupJson as AssignmentWorkup | null;
   const courseId = loaded.courseId ?? scope.courseId;
   const course = courseId ? getCourseById(services, courseId) : null;
   const cache = course ? await loadCourseCache(course.courseCode, course.id) : null;
+  const lifecycleState = getWorkspaceLifecycleState(
+    loaded.preparedAt,
+    loaded.workspaceState,
+    cache
+  );
+  await updateWorkspaceSessionMeta(scope.workspacePath, (current) => ({
+    ...current,
+    updatedAt: new Date().toISOString(),
+    lastOpenedAt: new Date().toISOString(),
+    workspaceState: lifecycleState,
+  }));
   const openResult = {
     workspacePath: scope.workspacePath,
     workup,
     loaded,
-    lifecycleState: cache?.ingestion?.ingestedAt &&
-      loaded.preparedAt &&
-      new Date(cache.ingestion.ingestedAt).getTime() > new Date(loaded.preparedAt).getTime()
-      ? "stale"
-      : (loaded.workspaceState ?? "ready"),
+    lifecycleState,
   };
 
   const session = await loadOrCreateChatSession(
@@ -415,9 +427,10 @@ async function loadOrCreateWorkspaceShell(
       title: loaded.assignmentName,
       subtitle:
         openResult.lifecycleState === "stale"
-          ? `${loaded.courseName} · stale`
+          ? `${loaded.courseName} · stale workspace`
           : loaded.courseName,
       scopeLabel: `Workspace: ${loaded.courseName} / ${loaded.assignmentName}`,
+      statusLabel: formatWorkspaceStatusLabel(openResult.lifecycleState),
       placeholder: "Ask about this assignment, or use /help",
     },
     extraHelpCommands: [
@@ -497,6 +510,10 @@ async function handleCommand(
     return;
   }
 
+  if (command === "/manage-courses") {
+    return { type: "course-management" };
+  }
+
   if (scope.type === "global") {
     if (command === "/courses") {
       const courses = getDisplayCourses(services);
@@ -514,7 +531,21 @@ async function handleCommand(
     }
     if (command === "/open") {
       const next = await resolveGlobalOpen(args, services);
-      if (next) return { type: "scope", scope: next };
+      if (next.scope) return { type: "scope", scope: next.scope };
+      if (next.error) {
+        await api.addMessage({
+          role: "system",
+          content: next.error,
+        });
+        return;
+      }
+      if (args.trim()) {
+        await api.addMessage({
+          role: "system",
+          content: `No course or available workspace matched "${args.trim()}".`,
+        });
+        return;
+      }
       return { type: "recent-picker" };
     }
     return;
@@ -696,11 +727,20 @@ async function handleCommand(
 
   if (command === "/status") {
     const loaded = await loadWorkspace(scope.workspacePath);
+    const course =
+      scope.courseId !== null ? getCourseById(services, scope.courseId) : null;
+    const cache = course ? await loadCourseCache(course.courseCode, course.id) : null;
+    const lifecycleState = getWorkspaceLifecycleState(
+      loaded.preparedAt,
+      loaded.workspaceState,
+      cache
+    );
     await api.addMessage({
       role: "assistant",
       content: [
         `Assignment: ${loaded.assignmentName}`,
         `Course: ${loaded.courseName}`,
+        `Status: ${lifecycleState}${lifecycleState === "stale" ? " (refresh recommended)" : ""}`,
         `Path: ${scope.workspacePath}`,
         `Extracted: ${loaded.extractedFiles.length} documents`,
         `Plan: ${loaded.planMd ? "available" : "missing"}`,
@@ -850,7 +890,13 @@ async function pickRecentScope(services: AppServices): Promise<AppScope | null> 
     return session?.scope ?? null;
   }
 
-  const recent = await getRecentWorkspaces();
+  const allRecent = await getRecentWorkspaces();
+  const recent: typeof allRecent = [];
+  for (const workspace of allRecent) {
+    if (await workspaceExists(workspace.path)) {
+      recent.push(workspace);
+    }
+  }
   if (recent.length === 0) return null;
   const selected = await showPicker({
     title: "Recent workspaces",
@@ -864,7 +910,15 @@ async function pickRecentScope(services: AppServices): Promise<AppScope | null> 
     backLabel: "back",
   });
   if (!selected) return null;
-  const loaded = await loadWorkspace(selected);
+  if (!(await workspaceExists(selected))) {
+    return null;
+  }
+  let loaded;
+  try {
+    loaded = await loadWorkspace(selected);
+  } catch {
+    return null;
+  }
   return {
     type: "workspace",
     workspacePath: selected,
@@ -876,9 +930,9 @@ async function pickRecentScope(services: AppServices): Promise<AppScope | null> 
 async function resolveGlobalOpen(
   query: string,
   services: AppServices
-): Promise<AppScope | null> {
+): Promise<{ scope: AppScope | null; error?: string }> {
   const trimmed = query.trim().toLowerCase();
-  if (!trimmed) return null;
+  if (!trimmed) return { scope: null };
 
   const course = getDisplayCourses(services).find(
     (entry) =>
@@ -886,7 +940,7 @@ async function resolveGlobalOpen(
       entry.courseCode.toLowerCase().includes(trimmed)
   );
   if (course) {
-    return { type: "course", courseId: course.id };
+    return { scope: { type: "course", courseId: course.id } };
   }
 
   const recent = await getRecentWorkspaces();
@@ -895,14 +949,60 @@ async function resolveGlobalOpen(
       entry.name.toLowerCase().includes(trimmed) ||
       entry.course.toLowerCase().includes(trimmed)
   );
-  if (!workspace) return null;
-  const loaded = await loadWorkspace(workspace.path);
-  return {
-    type: "workspace",
-    workspacePath: workspace.path,
-    courseId: loaded.courseId,
-    assignmentId: loaded.assignmentId,
-  };
+  if (!workspace) return { scope: null };
+  if (!(await workspaceExists(workspace.path))) {
+    return {
+      scope: null,
+      error:
+        "That workspace is no longer available on disk. Use /recent or /courses to open something else.",
+    };
+  }
+  try {
+    const loaded = await loadWorkspace(workspace.path);
+    return {
+      scope: {
+        type: "workspace",
+        workspacePath: workspace.path,
+        courseId: loaded.courseId,
+        assignmentId: loaded.assignmentId,
+      },
+    };
+  } catch {
+    return {
+      scope: null,
+      error:
+        "That workspace could not be reopened. Use /recent or /courses to pick another one.",
+    };
+  }
+}
+
+function normalizeScopeAfterCourseManagement(
+  scope: AppScope,
+  config: { courses: Array<{ id: number }> }
+): AppScope {
+  if (scope.type === "course") {
+    return config.courses.some((course) => course.id === scope.courseId)
+      ? scope
+      : { type: "global" };
+  }
+  return scope;
+}
+
+function formatWorkspaceStatusLabel(lifecycleState: string): string | undefined {
+  switch (lifecycleState) {
+    case "stale":
+      return "Status: stale · /refresh recommended";
+    case "refreshing":
+      return "Status: refreshing";
+    case "ingesting":
+      return "Status: ingesting";
+    case "creating":
+      return "Status: creating";
+    case "error":
+      return "Status: error";
+    default:
+      return undefined;
+  }
 }
 
 async function openAssignmentScope(
@@ -981,7 +1081,7 @@ function buildGlobalIntroMessages(
   const lines = [
     "Academic control center ready.",
     "",
-    "Use `/courses` to open a course, `/recent` to reopen work, or ask a broad question across your courses.",
+    "Use `/courses` to open a course, `/manage-courses` to edit your list, `/recent` to reopen work, or ask a broad question across your courses.",
   ];
   if (recent.length > 0) {
     lines.push("", "**Recent workspaces**");
@@ -1132,6 +1232,13 @@ function renderGlobalBanner(
   renderInfoBox(
     services,
     recent.map((item) => ({ ...item, slug: "", path: "" })),
+    [
+      ["/courses", "browse your configured courses and move into a course session"],
+      ["/manage-courses", "add, remove, or rename the courses shown in canvas-cli"],
+      ["/recent", "reopen a recent course or workspace session"],
+      ["/open", "jump directly to a course or recent workspace by name"],
+      ["/help", "full command list for the current scope"],
+    ],
     cols,
     {
       push: (line: string) => buf.push(line),
@@ -1142,6 +1249,7 @@ function renderGlobalBanner(
 function renderInfoBox(
   services: AppServices,
   recent: Array<{ name: string; course: string; slug: string; path: string }>,
+  commands: [string, string][],
   termCols: number,
   buf: { push(line: string): void } = { push: (line) => console.log(line) }
 ): void {
@@ -1160,18 +1268,6 @@ function renderInfoBox(
   const workspaceCount = `${recent.length} active`;
   const systemSummary = formatSystemSummary();
   const toolAgentSummary = "9 tools · 2 agents";
-
-  const commands: [string, string][] = [
-    ["/overview", "quick assignment overview with the main goals, dates, and context"],
-    ["/plan", "step-by-step action plan for how to approach and finish the work"],
-    ["/resources", "important course files, links, and reference material for the assignment"],
-    ["/evidence", "what is confirmed by the source material versus what is inferred"],
-    ["/requirements", "deliverables, constraints, and the specific things you need to submit"],
-    ["/status", "workspace summary, available files, and current assignment state"],
-    ["/pin", "attach a workspace file to your prompt so the reply uses it directly"],
-    ["/refresh", "re-fetch the latest course content from Canvas and rebuild the workspace"],
-    ["/help", "full command list and a quick reminder of what each command does"],
-  ];
 
   const boxInner = Math.min(termCols - 4, 98);
 
@@ -1258,16 +1354,24 @@ function renderInfoBox(
     pushCommand(command);
   }
 
-  const statusRow = commandStarts.get("/status") ?? rightRows.length;
+  const findCommandRow = (names: string[], fallback: number): number => {
+    for (const name of names) {
+      const row = commandStarts.get(name);
+      if (row !== undefined) return row;
+    }
+    return fallback;
+  };
+
+  const statusRow = findCommandRow(["/status", "/open", "/courses"], rightRows.length);
   const systemRow = Math.max(
     leftRows.length,
-    (commandStarts.get("/evidence") ?? rightRows.length) - 1
+    findCommandRow(["/evidence", "/recent", "/open"], rightRows.length) - 1
   );
   const toolsRow = Math.max(
     leftRows.length,
-    (commandStarts.get("/requirements") ?? rightRows.length) - 1
+    findCommandRow(["/requirements", "/home", "/help"], rightRows.length) - 1
   );
-  const refreshRow = commandStarts.get("/refresh") ?? rightRows.length;
+  const refreshRow = findCommandRow(["/refresh", "/help"], rightRows.length);
 
   pushLeft(formatInfoRow("school", school), "kvWarm");
   pushLeft(formatInfoRow("model", aiModelText), "kvWarm");

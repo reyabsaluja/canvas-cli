@@ -20,6 +20,11 @@ import type {
   ScopeRuntime,
 } from "./chat-state.js";
 import { saveChatSession } from "./chat-sessions.js";
+import {
+  formatScopeTargets,
+  getAvailableCommands,
+  resolveCommand,
+} from "./commands.js";
 
 interface PinOption {
   name: string;
@@ -95,8 +100,9 @@ export async function runChatShell<TExit>(
 ): Promise<TExit | null> {
   const session = options.session;
   const messages = session.messages;
-  const availableCommands = options.commands.filter((command) =>
-    command.scopes.includes(options.runtime.scope.type)
+  const availableCommands = getAvailableCommands(
+    options.commands,
+    options.runtime.scope.type
   );
 
   let inputBuffer = "";
@@ -152,7 +158,13 @@ export async function runChatShell<TExit>(
       options.bannerRenderer(buf);
       buf.push("");
     } else {
-      buf.push(`  ${C.primaryBold(options.runtime.title)}  ${statusBarGrey(options.runtime.subtitle ?? "")}`);
+      const subtitle = options.runtime.subtitle
+        ? `  ${statusBarGrey(options.runtime.subtitle)}`
+        : "";
+      const status = options.runtime.statusLabel
+        ? `  ${C.warn(options.runtime.statusLabel)}`
+        : "";
+      buf.push(`  ${C.primaryBold(options.runtime.title)}${subtitle}${status}`);
       buf.push("");
     }
 
@@ -200,7 +212,13 @@ export async function runChatShell<TExit>(
       }
     }
 
-    renderStickyBottom(placeholder, inputBuffer, options.runtime.scopeLabel, options.modelLabel);
+    renderStickyBottom(
+      placeholder,
+      inputBuffer,
+      options.runtime.scopeLabel,
+      options.runtime.statusLabel,
+      options.modelLabel
+    );
     renderSlashPinOverlay(
       showSlashMenu ? getSlashMatches() : [],
       getPinMatches(),
@@ -268,7 +286,13 @@ export async function runChatShell<TExit>(
   }
 
   function renderInputOnly(): void {
-    renderStickyBottom(placeholder, inputBuffer, options.runtime.scopeLabel, options.modelLabel);
+    renderStickyBottom(
+      placeholder,
+      inputBuffer,
+      options.runtime.scopeLabel,
+      options.runtime.statusLabel,
+      options.modelLabel
+    );
   }
 
   async function cleanup(
@@ -568,14 +592,23 @@ export async function runChatShell<TExit>(
             return;
           }
 
-          const exit = await options.onCommand(commandName, rest.join(" "), api);
-          if (exit !== undefined) {
-            await cleanup(stdin, onData);
-            resolve(exit ?? null);
+          try {
+            const exit = await options.onCommand(commandName, rest.join(" "), api);
+            if (exit !== undefined) {
+              await cleanup(stdin, onData);
+              resolve(exit ?? null);
+              return;
+            }
+            render();
+            return;
+          } catch (error) {
+            await addMessage({
+              role: "system",
+              content: `Error: ${error instanceof Error ? error.message : "unknown"}`,
+            });
+            render();
             return;
           }
-          render();
-          return;
         }
 
         await handlePrompt(input);
@@ -722,41 +755,6 @@ export async function runChatShell<TExit>(
   });
 }
 
-function resolveCommand(
-  commands: CommandDefinition[],
-  rawName: string
-): CommandDefinition | null {
-  return (
-    commands.find(
-      (command) =>
-        command.name === rawName || (command.aliases ?? []).includes(rawName)
-    ) ?? null
-  );
-}
-
-function formatScopeTargets(scopes: string[]): string {
-  if (scopes.length === 1) {
-    return scopeDisplay(scopes[0]!);
-  }
-  if (scopes.length === 2) {
-    return `${scopeDisplay(scopes[0]!)} or ${scopeDisplay(scopes[1]!)}`;
-  }
-  return scopes.map(scopeDisplay).join(", ");
-}
-
-function scopeDisplay(scope: string): string {
-  switch (scope) {
-    case "global":
-      return "global scope. Try /courses or /recent";
-    case "course":
-      return "a course. Open a course first";
-    case "workspace":
-      return "a workspace. Open an assignment first";
-    default:
-      return scope;
-  }
-}
-
 function renderSlashPinOverlay(
   slashMatches: CommandDefinition[],
   pinMatches: PinOption[],
@@ -818,6 +816,7 @@ function renderStickyBottom(
   placeholder: string,
   inputBuffer: string,
   leftStatus: string,
+  runtimeStatus: string | undefined,
   modelLabel: string
 ): void {
   const { cols, rows } = getTermSize();
@@ -846,13 +845,15 @@ function renderStickyBottom(
     displayText = colored + cursor + " ".repeat(remaining);
   }
 
-  let left = leftStatus;
+  let left = runtimeStatus ? `${leftStatus} · ${runtimeStatus}` : leftStatus;
   let right = modelLabel;
-  if (left.length + right.length + 1 > cols) {
-    const maxLeft = Math.max(0, cols - right.length - 1);
+  const leftVisible = stripAnsi(left).length;
+  const rightVisible = stripAnsi(right).length;
+  if (leftVisible + rightVisible + 1 > cols) {
+    const maxLeft = Math.max(0, cols - rightVisible - 1);
     left = maxLeft > 3 ? left.slice(0, maxLeft - 3) + "..." : left.slice(0, maxLeft);
   }
-  const gap = Math.max(0, cols - left.length - right.length);
+  const gap = Math.max(0, cols - stripAnsi(left).length - rightVisible);
   const statusLine = statusBarGrey(left) + " ".repeat(gap) + statusBarGrey(right);
   const startRow = rows - 3;
 

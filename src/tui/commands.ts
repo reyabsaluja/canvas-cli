@@ -1,0 +1,88 @@
+import type { CommandDefinition, ScopeType } from "./chat-state.js";
+
+export const COMMANDS: CommandDefinition[] = [
+  { name: "/courses", description: "Open the course picker", scopes: ["global"] },
+  {
+    name: "/manage-courses",
+    description: "Add, remove, or rename courses",
+    scopes: ["global", "course", "workspace"],
+  },
+  { name: "/recent", description: "Reopen a recent course or workspace", scopes: ["global"] },
+  {
+    name: "/open",
+    description: "Open a course, assignment, or recent item",
+    scopes: ["global", "course"],
+  },
+  { name: "/assignments", description: "Open the assignment picker", scopes: ["course"] },
+  { name: "/files", description: "List course files and cached downloads", scopes: ["course"] },
+  { name: "/modules", description: "List course modules", scopes: ["course"] },
+  { name: "/overview", description: "Show assignment overview", scopes: ["workspace"] },
+  {
+    name: "/requirements",
+    description: "Show deliverables and constraints",
+    scopes: ["workspace"],
+    aliases: ["/reqs"],
+  },
+  { name: "/plan", description: "Show the action plan", scopes: ["workspace"] },
+  { name: "/resources", description: "Show key resources", scopes: ["workspace"] },
+  { name: "/evidence", description: "Show confirmed vs inferred sources", scopes: ["workspace"] },
+  { name: "/status", description: "Show workspace status", scopes: ["workspace"] },
+  { name: "/refresh", description: "Refresh the current workspace", scopes: ["workspace"] },
+  { name: "/back", description: "Go up one scope", scopes: ["course", "workspace"] },
+  {
+    name: "/home",
+    description: "Return to the global home session",
+    scopes: ["global", "course", "workspace"],
+  },
+  {
+    name: "/help",
+    description: "Show available commands",
+    scopes: ["global", "course", "workspace"],
+  },
+  {
+    name: "/quit",
+    description: "Exit canvas-cli",
+    scopes: ["global", "course", "workspace"],
+    aliases: ["/exit", "/q"],
+  },
+];
+
+export function getAvailableCommands(
+  commands: CommandDefinition[],
+  scope: ScopeType
+): CommandDefinition[] {
+  return commands.filter((command) => command.scopes.includes(scope));
+}
+
+export function resolveCommand(
+  commands: CommandDefinition[],
+  rawName: string
+): CommandDefinition | null {
+  return (
+    commands.find(
+      (command) =>
+        command.name === rawName || (command.aliases ?? []).includes(rawName)
+    ) ?? null
+  );
+}
+
+export function formatScopeTargets(scopes: ScopeType[]): string {
+  if (scopes.length === 1) {
+    return scopeDisplay(scopes[0]);
+  }
+  if (scopes.length === 2) {
+    return `${scopeDisplay(scopes[0])} or ${scopeDisplay(scopes[1])}`;
+  }
+  return scopes.map(scopeDisplay).join(", ");
+}
+
+function scopeDisplay(scope: ScopeType): string {
+  switch (scope) {
+    case "global":
+      return "global scope. Try /courses or /recent";
+    case "course":
+      return "a course. Open a course first";
+    case "workspace":
+      return "a workspace. Open an assignment first";
+  }
+}

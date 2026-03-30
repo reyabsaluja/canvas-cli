@@ -51,6 +51,29 @@ export interface WorkspaceOpenResult {
   lifecycleState: WorkspaceLifecycleState;
 }
 
+export function getWorkspaceLifecycleState(
+  preparedAt: string | null,
+  storedState: string | null,
+  cache: CourseCache | null
+): WorkspaceLifecycleState {
+  if (isWorkspaceStale(preparedAt, cache)) {
+    return "stale";
+  }
+
+  switch (storedState) {
+    case "missing":
+    case "creating":
+    case "ingesting":
+    case "ready":
+    case "stale":
+    case "refreshing":
+    case "error":
+      return storedState;
+    default:
+      return "ready";
+  }
+}
+
 export async function initServices(): Promise<AppServices> {
   const config = loadConfig();
   const client = new CanvasClient(config);
@@ -150,9 +173,11 @@ export async function openWorkspace(
     const loaded = await loadWorkspace(wsPath);
     const cache = await loadCourseCache(course.courseCode, course.id);
     const meta = await loadWorkspaceSessionMeta(wsPath);
-    const lifecycleState = isWorkspaceStale(meta?.preparedAt ?? null, cache)
-      ? "stale"
-      : "ready";
+    const lifecycleState = getWorkspaceLifecycleState(
+      meta?.preparedAt ?? null,
+      meta?.workspaceState ?? null,
+      cache
+    );
     await updateWorkspaceSessionMeta(wsPath, (current) => ({
       ...current,
       updatedAt: new Date().toISOString(),

@@ -73,5 +73,6 @@ export interface ScopeRuntime {
   title: string;
   subtitle?: string;
   scopeLabel: string;
+  statusLabel?: string;
   placeholder?: string;
 }
