@@ -13,8 +13,8 @@ import type {
 } from "./chat-state.js";
 import type { ShellPinOption } from "./app-types.js";
 
-const inputBg = chalk.bgHex("#2d3342");
 const userBubbleBg = chalk.bgHex("#3a445d");
+const inputBg = userBubbleBg;
 const inputPlaceholderFg = chalk.hex("#8b95a8");
 const toolBgGreen = chalk.bgHex("#1a2e1a");
 const toolBgRed = chalk.bgHex("#2e1a1a");
@@ -265,8 +265,13 @@ function renderStickyBottom(
   modelLabel: string
 ): string {
   const { cols, rows } = getTermSize();
-  const footerWidth = Math.max(1, cols - 1);
-  const displayWidth = Math.max(1, footerWidth - 1);
+  const footerIndent = "  ";
+  const contentWidth = Math.min(cols - 4, 100);
+  const footerWidth = Math.max(
+    24,
+    Math.min(Math.max(contentWidth, cols - 8), cols - 4)
+  );
+  const innerWidth = Math.max(1, footerWidth - 2);
   const cursor = chalk.white("█");
   const emptyLine = " ".repeat(footerWidth);
   const fitToRow = (value: string) => {
@@ -279,7 +284,7 @@ function renderStickyBottom(
 
   let displayText: string;
   if (!inputBuffer) {
-    const maxPlaceholder = Math.max(0, displayWidth - 1);
+    const maxPlaceholder = Math.max(0, innerWidth - 1);
     const trimmed =
       placeholder.length > maxPlaceholder && maxPlaceholder > 3
         ? placeholder.slice(0, maxPlaceholder - 3) + "..."
@@ -287,36 +292,43 @@ function renderStickyBottom(
     const styled = inputPlaceholderFg(trimmed);
     const remaining = Math.max(
       0,
-      displayWidth - stripAnsi(cursor + styled).length
+      innerWidth - stripAnsi(cursor + styled).length
     );
     displayText = cursor + styled + " ".repeat(remaining);
   } else {
     const colored = inputBuffer.replace(/\/pin\s+\S+/g, (match) => C.accent(match));
     const visible = stripAnsi(colored + cursor).length;
-    const remaining = Math.max(0, displayWidth - visible);
+    const remaining = Math.max(0, innerWidth - visible);
     displayText = colored + cursor + " ".repeat(remaining);
   }
 
   let left = runtimeStatus ? `${leftStatus} · ${runtimeStatus}` : leftStatus;
   let right = modelLabel;
-  const leftVisible = stripAnsi(left).length;
   const rightVisible = stripAnsi(right).length;
-  if (leftVisible + rightVisible + 1 > cols) {
-    const maxLeft = Math.max(0, cols - rightVisible - 1);
-    left = maxLeft > 3 ? left.slice(0, maxLeft - 3) + "..." : left.slice(0, maxLeft);
+  if (stripAnsi(left).length + rightVisible + 1 > footerWidth) {
+    const maxLeft = Math.max(0, footerWidth - rightVisible - 1);
+    left =
+      maxLeft > 3 ? left.slice(0, maxLeft - 3) + "..." : left.slice(0, maxLeft);
   }
-  const gap = Math.max(0, cols - stripAnsi(left).length - rightVisible);
-  const statusLine = statusBarGrey(left) + " ".repeat(gap) + statusBarGrey(right);
+  const gap = Math.max(
+    0,
+    footerWidth - stripAnsi(left).length - rightVisible
+  );
+  const statusLine =
+    footerIndent +
+    statusBarGrey(left) +
+    " ".repeat(gap) +
+    statusBarGrey(right);
   const startRow = rows - 3;
 
   return (
     "\x1B[0m" +
     `\x1B[${startRow};1H\x1B[0m\x1B[2K` +
-    fitToRow(inputBg(emptyLine)) +
+    fitToRow(`${footerIndent}${inputBg(emptyLine)}`) +
     `\x1B[${startRow + 1};1H\x1B[0m\x1B[2K` +
-    fitToRow(inputBg(` ${displayText}`)) +
+    fitToRow(`${footerIndent}${inputBg(` ${displayText} `)}`) +
     `\x1B[${startRow + 2};1H\x1B[0m\x1B[2K` +
-    fitToRow(inputBg(emptyLine)) +
+    fitToRow(`${footerIndent}${inputBg(emptyLine)}`) +
     `\x1B[${startRow + 3};1H\x1B[0m\x1B[2K` +
     fitToRow(statusLine) +
     "\x1B[0m"

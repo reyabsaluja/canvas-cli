@@ -33,6 +33,15 @@ import {
 import { workspaceExists } from "./app-navigation.js";
 import type { ShellContext, ShellRuntimeApi } from "./app-types.js";
 
+function getGlobalScopeLabel(): string {
+  const schoolUrl = process.env.CANVAS_BASE_URL ?? "";
+  try {
+    return new URL(schoolUrl.replace("/api/v1", "")).hostname || "global";
+  } catch {
+    return schoolUrl.replace(/https?:\/\//, "").replace(/\/api\/v1.*/, "") || "global";
+  }
+}
+
 export async function createShellContext(
   services: AppServices,
   scope: AppScope
@@ -56,7 +65,7 @@ export async function createShellContext(
       runtime: {
         scope,
         title: "Global",
-        scopeLabel: "Global",
+        scopeLabel: getGlobalScopeLabel(),
         placeholder: "Ask about your courses, or use /courses and /recent",
       },
       bannerRenderer: (buf) => renderGlobalBanner(buf, services, recent),
@@ -94,7 +103,7 @@ export async function createShellContext(
         runtime: {
           scope: { type: "global" },
           title: "Global",
-          scopeLabel: "Global",
+          scopeLabel: getGlobalScopeLabel(),
           placeholder: "Ask about your courses, or use /courses and /recent",
         },
         onAsk: async () => ({
@@ -251,7 +260,7 @@ async function loadOrCreateWorkspaceShell(
       runtime: {
         scope: { type: "global" },
         title: "Global",
-        scopeLabel: "Global",
+        scopeLabel: getGlobalScopeLabel(),
         placeholder: "Ask about your courses, or use /courses and /recent",
       },
       bannerRenderer: (buf) => renderGlobalBanner(buf, services, []),
