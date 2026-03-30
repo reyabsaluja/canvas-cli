@@ -7,6 +7,7 @@ import {
 import { loadCourseConfig } from "./course-config.js";
 import { runCourseManagement, runCourseSetup } from "./course-setup.js";
 import { runChatShell } from "./chat-shell.js";
+import { USER_ABORT_EXIT_CODE } from "./chat-shell-exit.js";
 import type { AppScope } from "./chat-state.js";
 import { COMMANDS } from "./commands.js";
 import { createShellContext } from "./app-runtime.js";
@@ -31,7 +32,7 @@ export async function launchApp(): Promise<void> {
   const handleSigint = (): void => {
     showCursor();
     clearScreen();
-    process.exit(130);
+    process.exit(USER_ABORT_EXIT_CODE);
   };
 
   process.once("SIGINT", handleSigint);

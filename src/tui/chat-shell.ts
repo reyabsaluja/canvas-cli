@@ -22,6 +22,7 @@ import {
 import { ChatShellPersistence } from "./chat-shell-persistence.js";
 import { enterChatShell, leaveChatShell } from "./chat-shell-terminal.js";
 import { createSerialTaskQueue } from "./serial-task-queue.js";
+import { exitShellAborted } from "./chat-shell-exit.js";
 
 interface ChatShellApi<TExit> extends ShellRuntimeApi {
   addMessage: (message: ChatMessage) => Promise<void>;
@@ -421,11 +422,7 @@ export async function runChatShell<TExit>(
       if (isProcessing && !keyOkWhileProcessing(key)) return;
 
       if (key === "\x03") {
-        const persistError = await closeShellOnce();
-        if (persistError) {
-          console.error(`Failed to save chat session: ${persistError}`);
-        }
-        process.exit(130);
+        await exitShellAborted(closeShellOnce, (code) => process.exit(code));
       }
 
       if (key === "\x0F") {
