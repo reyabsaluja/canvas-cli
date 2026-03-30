@@ -17,9 +17,14 @@ import {
   resolveCommand,
 } from "../src/tui/commands.js";
 import type { AppScope } from "../src/tui/chat-state.js";
-import { openWorkspace, refreshWorkspace } from "../src/tui/services.js";
+import {
+  getWorkspaceLifecycleState,
+  openWorkspace,
+  refreshWorkspace,
+} from "../src/tui/services.js";
 import { makeCourseSlug } from "../src/ingest/slug.js";
 import type { Course } from "../src/domain/models.js";
+import { loadWorkspaceSessionMeta } from "../src/workspace/session.js";
 
 async function writeJson(filePath: string, data: unknown): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -384,6 +389,91 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     });
   });
 
+  await t.test("create failure persists workspace error state", async () => {
+    await withTempCwd(async (tempDir) => {
+      const course: Course = {
+        id: 17,
+        name: "ECE243",
+        courseCode: "ECE243H1",
+        termName: "Winter 2026",
+        isCurrent: true,
+      };
+      const courseSlug = makeCourseSlug(course.courseCode, course.id);
+      const coursePath = path.join(tempDir, ".canvas-cli", "courses", courseSlug);
+      await writeJson(path.join(coursePath, "ingestion.json"), {
+        ingestedAt: "2026-03-29T10:00:00.000Z",
+      });
+      await writeJson(path.join(coursePath, "assignments.json"), []);
+      await writeJson(path.join(coursePath, "modules.json"), []);
+      await writeJson(path.join(coursePath, "files.json"), []);
+      await writeJson(path.join(coursePath, "pages.json"), []);
+      await writeJson(path.join(coursePath, "syllabus-candidates.json"), []);
+      await writeJson(path.join(coursePath, "attachments.json"), []);
+
+      const workspacePath = path.join(
+        tempDir,
+        ".canvas-cli",
+        "sessions",
+        "ece243h1-lab-4-42"
+      );
+      const services = {
+        client: {
+          async getAssignments() {
+            return [
+              {
+                id: 42,
+                name: "Lab 4",
+                course_id: course.id,
+                due_at: null,
+                has_submitted_submissions: false,
+                html_url: "https://canvas.example/lab-4",
+              },
+            ];
+          },
+          async getAssignmentDetail() {
+            return {
+              id: 42,
+              name: "Lab 4",
+              course_id: course.id,
+              due_at: null,
+              has_submitted_submissions: false,
+              html_url: "https://canvas.example/lab-4",
+              description: null,
+              unlock_at: null,
+              lock_at: null,
+              points_possible: null,
+              grading_type: "points",
+              submission_types: [],
+              allowed_extensions: null,
+              submitted_at: null,
+              score: null,
+              grade: null,
+              late: false,
+              missing: false,
+              attachments: [],
+            };
+          },
+        },
+        config: {} as never,
+        aiConfig: null,
+        rawCourses: [],
+        allCourses: [course],
+        courseConfig: null,
+      } as any;
+
+      await assert.rejects(
+        openWorkspace(services, course, { id: 42, name: "Lab 4" }, () => {}),
+        /ANTHROPIC_API_KEY not set/
+      );
+
+      const meta = await loadWorkspaceSessionMeta(workspacePath);
+      assert.ok(meta);
+      assert.equal(meta?.workspaceState, "error");
+      assert.match(meta?.lastError ?? "", /ANTHROPIC_API_KEY not set/);
+      assert.equal(meta?.preparedAt, undefined);
+    });
+  });
+
   await t.test("refresh still uses Canvas-backed resolution", async () => {
     await withTempCwd(async (tempDir) => {
       const course: Course = {
@@ -514,5 +604,169 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
       );
       assert.equal(detailCalls, 1);
     });
+  });
+
+  await t.test("refresh failure persists workspace error state", async () => {
+    await withTempCwd(async (tempDir) => {
+      const course: Course = {
+        id: 17,
+        name: "ECE243",
+        courseCode: "ECE243H1",
+        termName: "Winter 2026",
+        isCurrent: true,
+      };
+      const workspacePath = path.join(
+        tempDir,
+        ".canvas-cli",
+        "sessions",
+        "ece243h1-lab-4-42"
+      );
+      await fs.mkdir(workspacePath, { recursive: true });
+      await writeJson(path.join(workspacePath, "session.json"), {
+        version: 1,
+        createdAt: "2026-03-29T10:00:00.000Z",
+        updatedAt: "2026-03-29T10:05:00.000Z",
+        sessionSlug: "ece243h1-lab-4-42",
+        workspacePath,
+        assignmentId: 42,
+        assignmentName: "Lab 4",
+        courseId: 17,
+        courseName: "ECE243",
+        courseCode: "ECE243H1",
+        preparedAt: "2026-03-29T10:05:00.000Z",
+        workspaceState: "ready",
+        lastError: null,
+      });
+
+      const services = {
+        client: {
+          async getAssignments() {
+            return [
+              {
+                id: 42,
+                name: "Lab 4",
+                course_id: course.id,
+                due_at: null,
+                has_submitted_submissions: false,
+                html_url: "https://canvas.example/lab-4",
+              },
+            ];
+          },
+          async getAssignmentDetail() {
+            return {
+              id: 42,
+              name: "Lab 4",
+              course_id: course.id,
+              due_at: null,
+              has_submitted_submissions: false,
+              html_url: "https://canvas.example/lab-4",
+              description: null,
+              unlock_at: null,
+              lock_at: null,
+              points_possible: null,
+              grading_type: "points",
+              submission_types: [],
+              allowed_extensions: null,
+              submitted_at: null,
+              score: null,
+              grade: null,
+              late: false,
+              missing: false,
+              attachments: [],
+            };
+          },
+          async getCourseDetail() {
+            return {
+              id: course.id,
+              name: course.name,
+              course_code: course.courseCode,
+              syllabus_body: null,
+              term: null,
+            };
+          },
+          async getModulesSafe() {
+            return [];
+          },
+          async getFilesSafe() {
+            return [];
+          },
+          async getPagesSafe() {
+            return [];
+          },
+          async getFrontPageSafe() {
+            return null;
+          },
+          async getPageBySlugSafe() {
+            return null;
+          },
+          async downloadFile() {
+            return null;
+          },
+        },
+        config: {} as never,
+        aiConfig: null,
+        rawCourses: [],
+        allCourses: [course],
+        courseConfig: null,
+      } as any;
+
+      let caught: Error | null = null;
+      try {
+        await refreshWorkspace(
+          services,
+          course,
+          { id: 42, name: "Lab 4" },
+          () => {}
+        );
+      } catch (error) {
+        caught = error instanceof Error ? error : new Error(String(error));
+      }
+      assert.ok(caught);
+      assert.match(caught.message, /ANTHROPIC_API_KEY not set/);
+
+      const meta = await loadWorkspaceSessionMeta(workspacePath);
+      assert.ok(meta);
+      assert.equal(meta?.workspaceState, "error");
+      assert.match(meta?.lastError ?? "", /ANTHROPIC_API_KEY not set/);
+      assert.equal(meta?.preparedAt, "2026-03-29T10:05:00.000Z");
+    });
+  });
+
+  await t.test("explicit error state is not masked as stale", async () => {
+    const lifecycle = getWorkspaceLifecycleState(
+      "2026-03-29T10:00:00.000Z",
+      "error",
+      {
+        courseId: 17,
+        coursePath: "/tmp/course",
+        assignments: [],
+        modules: [],
+        files: [],
+        pages: [],
+        syllabusCandidates: [],
+        attachments: [],
+        ingestion: {
+          version: 1,
+          ingestedAt: "2026-03-29T11:00:00.000Z",
+          courseId: 17,
+          courseName: "ECE243",
+          courseCode: "ECE243H1",
+          refresh: true,
+          counts: {
+            assignments: 0,
+            modules: 0,
+            moduleItems: 0,
+            files: 0,
+            pages: 0,
+            syllabusCandidates: 0,
+            attachmentsDownloaded: 0,
+            attachmentsSkipped: 0,
+            attachmentsFailed: 0,
+          },
+        },
+      }
+    );
+
+    assert.equal(lifecycle, "error");
   });
 });

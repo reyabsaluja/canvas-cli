@@ -34,6 +34,7 @@ export async function saveWorkspaceSessionMeta(
   workspacePath: string,
   session: SessionMeta
 ): Promise<void> {
+  await fs.mkdir(workspacePath, { recursive: true });
   await fs.writeFile(
     getWorkspaceSessionPath(workspacePath),
     JSON.stringify(session, null, 2) + "\n",

@@ -23,6 +23,7 @@ import {
 import { listWorkspaces } from "../ask/resolve-workspace.js";
 import {
   loadWorkspaceSessionMeta,
+  saveWorkspaceSessionMeta,
   type SessionMeta,
   updateWorkspaceSessionMeta,
 } from "../workspace/session.js";
@@ -66,21 +67,16 @@ export function getWorkspaceLifecycleState(
   storedState: string | null,
   cache: CourseCache | null
 ): WorkspaceLifecycleState {
-  if (isWorkspaceStale(preparedAt, cache)) {
-    return "stale";
-  }
-
   switch (storedState) {
-    case "missing":
     case "creating":
     case "ingesting":
-    case "ready":
-    case "stale":
     case "refreshing":
     case "error":
       return storedState;
+    case "missing":
+      return "missing";
     default:
-      return "ready";
+      return isWorkspaceStale(preparedAt, cache) ? "stale" : "ready";
   }
 }
 
@@ -175,63 +171,83 @@ export async function openWorkspace(
     return loadExistingWorkspaceResult(wsPath, course, onProgress);
   }
 
-  // Step 3: Check ingestion cache
-  onProgress("checking course cache");
-  let cache = await loadCourseCache(course.courseCode, course.id);
+  await persistWorkspaceLifecycleState(wsPath, detail, course, "creating");
 
-  if (!cache) {
-    // Need to ingest first
-    onProgress("ingesting course data");
-    await ingestCourse(course, services.client, services.config, {
-      refresh: false,
-    });
-    onProgress("course ingested");
-    cache = await loadCourseCache(course.courseCode, course.id);
-  }
+  try {
+    // Step 3: Check ingestion cache
+    onProgress("checking course cache");
+    let cache = await loadCourseCache(course.courseCode, course.id);
 
-  if (!cache) {
-    throw new Error("Failed to load course cache after ingestion");
-  }
+    if (!cache) {
+      // Need to ingest first
+      await persistWorkspaceLifecycleState(wsPath, detail, course, "ingesting");
+      onProgress("ingesting course data");
+      await ingestCourse(course, services.client, services.config, {
+        refresh: false,
+      });
+      onProgress("course ingested");
+      cache = await loadCourseCache(course.courseCode, course.id);
+      await persistWorkspaceLifecycleState(wsPath, detail, course, "creating");
+    }
 
-  // Step 4: Run work pipeline
-  if (!services.aiConfig) {
-    throw new Error(
-      "ANTHROPIC_API_KEY not set — cannot run assignment workup"
+    if (!cache) {
+      throw new Error("Failed to load course cache after ingestion");
+    }
+
+    // Step 4: Run work pipeline
+    if (!services.aiConfig) {
+      throw new Error(
+        "ANTHROPIC_API_KEY not set — cannot run assignment workup"
+      );
+    }
+
+    onProgress("enriching assignment");
+    const enriched = enrichAssignmentDetail(detail, cache);
+
+    onProgress("investigating assignment");
+    const investigation = await runInvestigation(
+      services.aiConfig,
+      detail,
+      course,
+      enriched.enrichment,
+      cache,
+      services.client,
+      services.config,
+      (phase) => onProgress(phase)
     );
+
+    onProgress("creating workspace");
+    const result = await createWorkWorkspace(
+      detail,
+      course,
+      investigation.workup,
+      investigation.state
+    );
+
+    onProgress("workspace ready");
+    const loaded = await loadWorkspace(result.workspacePath);
+    const lifecycleState = await syncLoadedWorkspaceLifecycle(
+      result.workspacePath,
+      loaded,
+      course
+    );
+
+    return {
+      workspacePath: result.workspacePath,
+      workup: investigation.workup,
+      loaded,
+      lifecycleState,
+    };
+  } catch (error) {
+    await persistWorkspaceLifecycleState(
+      wsPath,
+      detail,
+      course,
+      "error",
+      error instanceof Error ? error.message : "unknown error"
+    );
+    throw error;
   }
-
-  onProgress("enriching assignment");
-  const enriched = enrichAssignmentDetail(detail, cache);
-
-  onProgress("investigating assignment");
-  const investigation = await runInvestigation(
-    services.aiConfig,
-    detail,
-    course,
-    enriched.enrichment,
-    cache,
-    services.client,
-    services.config,
-    (phase) => onProgress(phase)
-  );
-
-  onProgress("creating workspace");
-  const result = await createWorkWorkspace(
-    detail,
-    course,
-    investigation.workup,
-    investigation.state
-  );
-
-  onProgress("workspace ready");
-  const loaded = await loadWorkspace(result.workspacePath);
-
-  return {
-    workspacePath: result.workspacePath,
-    workup: investigation.workup,
-    loaded,
-    lifecycleState: "ready",
-  };
 }
 
 async function loadExistingWorkspaceResult(
@@ -241,20 +257,11 @@ async function loadExistingWorkspaceResult(
 ): Promise<WorkspaceOpenResult> {
   onProgress("loading workspace");
   const loaded = await loadWorkspace(workspacePath);
-  const cache = await loadCourseCache(course.courseCode, course.id);
-  const meta = await loadWorkspaceSessionMeta(workspacePath);
-  const lifecycleState = getWorkspaceLifecycleState(
-    meta?.preparedAt ?? null,
-    meta?.workspaceState ?? null,
-    cache
+  const lifecycleState = await syncLoadedWorkspaceLifecycle(
+    workspacePath,
+    loaded,
+    course
   );
-  await updateWorkspaceSessionMeta(workspacePath, (current) => ({
-    ...current,
-    updatedAt: new Date().toISOString(),
-    lastOpenedAt: new Date().toISOString(),
-    workspaceState: lifecycleState,
-    lastError: null,
-  }));
   return {
     workspacePath,
     workup: loaded.workupJson as unknown as AssignmentWorkup | null,
@@ -372,54 +379,65 @@ export async function refreshWorkspace(
   const slug = makeSessionSlug(course.courseCode, detail.name, detail.id);
   const wsPath = getWorkspacePath(slug);
 
-  await updateWorkspaceSessionMeta(wsPath, (current) => ({
-    ...current,
-    updatedAt: new Date().toISOString(),
-    workspaceState: "refreshing",
-    lastError: null,
-  }));
+  await persistWorkspaceLifecycleState(wsPath, detail, course, "refreshing");
 
-  // Step 2: Force re-ingest
-  onProgress("re-ingesting course data");
-  await ingestCourse(course, services.client, services.config, { refresh: true });
+  try {
+    // Step 2: Force re-ingest
+    onProgress("re-ingesting course data");
+    await ingestCourse(course, services.client, services.config, { refresh: true });
 
-  // Step 3: Load fresh cache
-  onProgress("loading fresh course cache");
-  const cache = await loadCourseCache(course.courseCode, course.id);
-  if (!cache) throw new Error("Failed to load course cache after re-ingestion");
+    // Step 3: Load fresh cache
+    onProgress("loading fresh course cache");
+    const cache = await loadCourseCache(course.courseCode, course.id);
+    if (!cache) throw new Error("Failed to load course cache after re-ingestion");
 
-  // Step 4: Re-run work pipeline
-  if (!services.aiConfig) {
-    throw new Error("ANTHROPIC_API_KEY not set — cannot run assignment workup");
+    // Step 4: Re-run work pipeline
+    if (!services.aiConfig) {
+      throw new Error("ANTHROPIC_API_KEY not set — cannot run assignment workup");
+    }
+
+    onProgress("enriching assignment");
+    const enriched = enrichAssignmentDetail(detail, cache);
+
+    onProgress("investigating assignment");
+    const investigation = await runInvestigation(
+      services.aiConfig,
+      detail,
+      course,
+      enriched.enrichment,
+      cache,
+      services.client,
+      services.config,
+      (phase) => onProgress(phase)
+    );
+
+    onProgress("creating workspace");
+    const result = await createWorkWorkspace(detail, course, investigation.workup, investigation.state);
+
+    onProgress("workspace refreshed");
+    const loaded = await loadWorkspace(result.workspacePath);
+    const lifecycleState = await syncLoadedWorkspaceLifecycle(
+      result.workspacePath,
+      loaded,
+      course
+    );
+
+    return {
+      workspacePath: result.workspacePath,
+      workup: investigation.workup,
+      loaded,
+      lifecycleState,
+    };
+  } catch (error) {
+    await persistWorkspaceLifecycleState(
+      wsPath,
+      detail,
+      course,
+      "error",
+      error instanceof Error ? error.message : "unknown error"
+    );
+    throw error;
   }
-
-  onProgress("enriching assignment");
-  const enriched = enrichAssignmentDetail(detail, cache);
-
-  onProgress("investigating assignment");
-  const investigation = await runInvestigation(
-    services.aiConfig,
-    detail,
-    course,
-    enriched.enrichment,
-    cache,
-    services.client,
-    services.config,
-    (phase) => onProgress(phase)
-  );
-
-  onProgress("creating workspace");
-  const result = await createWorkWorkspace(detail, course, investigation.workup, investigation.state);
-
-  onProgress("workspace refreshed");
-  const loaded = await loadWorkspace(result.workspacePath);
-
-  return {
-    workspacePath: result.workspacePath,
-    workup: investigation.workup,
-    loaded,
-    lifecycleState: "ready",
-  };
 }
 
 // ToolCallEvent is defined in chat-agent.ts
@@ -564,4 +582,57 @@ function isWorkspaceStale(
 ): boolean {
   if (!preparedAt || !cache?.ingestion?.ingestedAt) return false;
   return new Date(cache.ingestion.ingestedAt).getTime() > new Date(preparedAt).getTime();
+}
+
+async function syncLoadedWorkspaceLifecycle(
+  workspacePath: string,
+  loaded: LoadedWorkspace,
+  course: Course
+): Promise<WorkspaceLifecycleState> {
+  const cache = await loadCourseCache(course.courseCode, course.id);
+  const lifecycleState = getWorkspaceLifecycleState(
+    loaded.preparedAt,
+    loaded.workspaceState,
+    cache
+  );
+  await updateWorkspaceSessionMeta(workspacePath, (current) => ({
+    ...current,
+    updatedAt: new Date().toISOString(),
+    lastOpenedAt: new Date().toISOString(),
+    workspaceState: lifecycleState,
+    lastError: lifecycleState === "error" ? current.lastError ?? null : null,
+  }));
+  return lifecycleState;
+}
+
+async function persistWorkspaceLifecycleState(
+  workspacePath: string,
+  detail: AssignmentDetail,
+  course: Course,
+  workspaceState: WorkspaceLifecycleState,
+  lastError: string | null = null
+): Promise<SessionMeta> {
+  const existing = await loadWorkspaceSessionMeta(workspacePath);
+  const now = new Date().toISOString();
+  const session: SessionMeta = {
+    version: 1,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+    sessionSlug: existing?.sessionSlug ?? makeSessionSlug(course.courseCode, detail.name, detail.id),
+    workspacePath,
+    assignmentId: detail.id,
+    assignmentName: detail.name,
+    courseId: course.id,
+    courseName: course.name,
+    courseCode: course.courseCode,
+    preparedAt:
+      workspaceState === "ready"
+        ? now
+        : existing?.preparedAt,
+    lastOpenedAt: existing?.lastOpenedAt,
+    workspaceState,
+    lastError: workspaceState === "error" ? lastError : null,
+  };
+  await saveWorkspaceSessionMeta(workspacePath, session);
+  return session;
 }
