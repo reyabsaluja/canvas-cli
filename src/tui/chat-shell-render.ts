@@ -90,7 +90,7 @@ export function buildTranscriptLines(options: {
 
 export function renderChatFrame(
   options: RenderChatFrameOptions
-): { chatScrollOffset: number; spinnerRow: number } {
+): { chatScrollOffset: number } {
   const buf = createBuffer();
   const { cols, rows } = getTermSize();
   const contentWidth = Math.min(cols - 4, 100);
@@ -142,14 +142,6 @@ export function renderChatFrame(
 
   buf.flush(MAIN_VIEW_BOTTOM_RESERVE, chatScrollOffset);
 
-  let spinnerRow = 0;
-  if (options.isProcessing && options.currentSpinnerLine) {
-    const spinnerVirtualIndex = spinnerStart + 1;
-    if (spinnerVirtualIndex >= start && spinnerVirtualIndex < end) {
-      spinnerRow = spinnerVirtualIndex - start + 1;
-    }
-  }
-
   renderStickyBottom(
     options.placeholder,
     options.inputBuffer,
@@ -165,7 +157,7 @@ export function renderChatFrame(
     options.inputBuffer
   );
 
-  return { chatScrollOffset, spinnerRow };
+  return { chatScrollOffset };
 }
 
 export function renderInputFooter(options: {

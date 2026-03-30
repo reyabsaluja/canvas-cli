@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { C, getTermSize, stripAnsi } from "./screen.js";
+import { C, getTermSize } from "./screen.js";
 import type {
   ChatMessage,
   CommandDefinition,
@@ -94,7 +94,6 @@ export async function runChatShell<TExit>(
   let toolOutputExpanded = false;
   let currentSpinnerLine = "";
   let spinnerFrame = 0;
-  let spinnerRow = 0;
   let chatScrollOffset = 0;
   let spinnerTimer: ReturnType<typeof setInterval> | null = null;
   let currentVerb = "";
@@ -183,7 +182,6 @@ export async function runChatShell<TExit>(
       pinSelected,
     });
     chatScrollOffset = next.chatScrollOffset;
-    spinnerRow = next.spinnerRow;
   }
 
   function renderInputOnly(): void {
@@ -203,20 +201,12 @@ export async function runChatShell<TExit>(
   function startSpinner(): void {
     stopSpinner();
     spinnerTimer = setInterval(() => {
-      if (!isProcessing || !currentSpinnerLine || spinnerRow <= 0) return;
+      if (!isProcessing || !currentSpinnerLine) return;
       spinnerFrame = (spinnerFrame + 1) % SPINNER.length;
       currentSpinnerLine = `  ${C.primary(SPINNER[spinnerFrame])} ${C.accent(
         currentVerb
       )}${chalk.white("...")}`;
-      const { cols, rows } = getTermSize();
-      if (spinnerRow <= rows) {
-        const visible = stripAnsi(currentSpinnerLine).length;
-        const padded =
-          visible < cols
-            ? currentSpinnerLine + " ".repeat(cols - visible)
-            : currentSpinnerLine;
-        process.stdout.write(`\x1B[${spinnerRow};1H${padded}`);
-      }
+      render();
     }, 80);
   }
 
@@ -225,7 +215,6 @@ export async function runChatShell<TExit>(
       clearInterval(spinnerTimer);
       spinnerTimer = null;
     }
-    spinnerRow = 0;
   }
 
   async function cleanup(
