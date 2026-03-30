@@ -27,6 +27,10 @@ import {
 import { makeCourseSlug } from "../src/ingest/slug.js";
 import type { Course } from "../src/domain/models.js";
 import { loadWorkspaceSessionMeta } from "../src/workspace/session.js";
+import {
+  createWorkspace,
+  createWorkWorkspace,
+} from "../src/workspace/create.js";
 
 async function writeJson(filePath: string, data: unknown): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -141,6 +145,97 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
       const entries = await fs.readdir(sessionsDir);
       assert.ok(entries.includes("global-home.json"));
       assert.equal(entries.some((entry) => entry.endsWith(".tmp")), false);
+    });
+  });
+
+  await t.test("workspace base and work flows share one writer and metadata contract", async () => {
+    await withTempCwd(async (tempDir) => {
+      const course: Course = {
+        id: 17,
+        name: "ECE243",
+        courseCode: "ECE243H1",
+        termName: "Winter 2026",
+        isCurrent: true,
+      };
+      const detail = {
+        id: 42,
+        name: "Lab 4",
+        courseId: course.id,
+        courseName: course.name,
+        dueAt: null,
+        unlockAt: null,
+        lockAt: null,
+        submitted: false,
+        submittedAt: null,
+        score: null,
+        grade: null,
+        late: false,
+        missing: false,
+        status: "upcoming",
+        pointsPossible: null,
+        gradingType: "points",
+        submissionTypes: [],
+        allowedExtensions: null,
+        htmlUrl: "https://canvas.example/lab-4",
+        description: null,
+        attachments: [],
+      };
+
+      const baseResult = await createWorkspace(detail as any, course, {
+        accessToken: "token",
+      } as any);
+
+      const workup = {
+        overview: "Complete lab 4.",
+        deliverables: ["report"],
+        constraints: ["submit pdf"],
+        relevantResources: [],
+        recommendedReadOrder: [],
+        actionPlan: [{ step: 1, action: "Read the brief", detail: null }],
+        uncertainties: [],
+        dueDate: null,
+        confidence: "medium",
+        sourceTrace: [],
+      } as const;
+      const state = {
+        assignmentName: "Lab 4",
+        courseName: course.name,
+        visitedSources: [],
+        extractedTexts: new Map([["lab-spec", "Important extracted text"]]),
+        evidenceNotes: [],
+        toolCallCount: 0,
+      };
+
+      const workResult = await createWorkWorkspace(
+        detail as any,
+        course,
+        workup as any,
+        state,
+        {
+          accessToken: "token",
+        } as any
+      );
+
+      assert.equal(workResult.workspacePath, baseResult.workspacePath);
+      const workspacePath = path.join(
+        tempDir,
+        ".canvas-cli",
+        "sessions",
+        "ece243h1-lab-4-42"
+      );
+      const meta = await loadWorkspaceSessionMeta(workspacePath);
+      assert.ok(meta);
+      assert.equal(meta?.assignmentId, 42);
+      assert.equal(meta?.courseId, 17);
+      assert.equal(meta?.workspaceState, "ready");
+
+      const planMd = await fs.readFile(path.join(workspacePath, "plan.md"), "utf-8");
+      assert.match(planMd, /Read the brief/);
+      const extracted = await fs.readFile(
+        path.join(workspacePath, "extracted", "lab-spec.txt"),
+        "utf-8"
+      );
+      assert.equal(extracted, "Important extracted text");
     });
   });
 

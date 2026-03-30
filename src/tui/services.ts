@@ -11,7 +11,7 @@ import {
 import { matchAssignments } from "../domain/matching.js";
 import { ingestCourse } from "../ingest/ingest-course.js";
 import { runInvestigation } from "../work/orchestrator.js";
-import { createWorkWorkspace } from "../work/workspace.js";
+import { createWorkWorkspace } from "../workspace/create.js";
 import { loadWorkspace } from "../ask/load-workspace.js";
 // buildChunks, retrieveRelevant, answerQuestion now used by chat-agent.ts
 import { getAIConfig, type AIProviderConfig } from "../ai/provider.js";
@@ -250,7 +250,8 @@ export async function openWorkspace(
       detail,
       course,
       investigation.workup,
-      investigation.state
+      investigation.state,
+      services.config
     );
 
     onProgress("workspace ready");
@@ -441,7 +442,13 @@ export async function refreshWorkspace(
     );
 
     onProgress("creating workspace");
-    const result = await createWorkWorkspace(detail, course, investigation.workup, investigation.state);
+    const result = await createWorkWorkspace(
+      detail,
+      course,
+      investigation.workup,
+      investigation.state,
+      services.config
+    );
 
     onProgress("workspace refreshed");
     const loaded = await loadWorkspace(result.workspacePath);
