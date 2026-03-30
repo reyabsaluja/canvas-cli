@@ -7,6 +7,7 @@ import type {
   CanvasFile,
   CanvasPage,
 } from "../canvas/types.js";
+import { mapWithConcurrency } from "./concurrency.js";
 
 export interface RawCourseContent {
   courseDetail: CanvasCourseDetail;
@@ -20,6 +21,9 @@ export interface RawCourseContent {
   fetchedPages: Array<{ slug: string; title: string; body: string }>;
   warnings: string[];
 }
+
+const MODULE_ITEMS_CONCURRENCY = 4;
+const PAGE_BODY_CONCURRENCY = 4;
 
 /**
  * Fetch all available course content from Canvas.
@@ -44,50 +48,64 @@ export async function fetchCourseContent(
     );
   }
 
-  // Fetch modules (may be disabled for some courses)
-  const rawModules = await client.getModulesSafe(courseId);
+  const [rawModules, files, pages, frontPage] = await Promise.all([
+    client.getModulesSafe(courseId),
+    client.getFilesSafe(courseId),
+    client.getPagesSafe(courseId),
+    client.getFrontPageSafe(courseId),
+  ]);
 
-  // Fetch module items for each module (sequentially to avoid rate limiting)
-  const modules: Array<CanvasModule & { items: CanvasModuleItem[] }> = [];
-  for (const mod of rawModules) {
-    const items = await client.getModuleItemsSafe(courseId, mod.id);
-    modules.push({ ...mod, items });
-  }
+  const modules = await mapWithConcurrency(
+    rawModules,
+    MODULE_ITEMS_CONCURRENCY,
+    async (mod) => {
+      const items = await client.getModuleItemsSafe(courseId, mod.id);
+      return { ...mod, items };
+    }
+  );
 
-  // Fetch files (may be blocked)
-  const files = await client.getFilesSafe(courseId);
   if (files.length === 0 && rawModules.length > 0) {
     warnings.push("Files API not accessible — file index will be empty");
   }
 
-  // Fetch pages (may be blocked)
-  const pages = await client.getPagesSafe(courseId);
   if (pages.length === 0 && rawModules.length > 0) {
     warnings.push("Pages API not accessible — page index will be empty");
   }
 
   // Fetch front page (course home page content)
   let frontPageBody: string | null = null;
-  const frontPage = await client.getFrontPageSafe(courseId);
   if (frontPage?.body) {
     frontPageBody = frontPage.body;
   }
 
   // Fetch individual page bodies from module item page slugs
   // Even when the Pages list API is blocked, individual pages may be accessible by slug
-  const fetchedPages: Array<{ slug: string; title: string; body: string }> = [];
   const seenSlugs = new Set<string>();
+  const pageSlugs: string[] = [];
   for (const mod of modules) {
     for (const item of mod.items) {
       if (item.type === "Page" && item.page_url && !seenSlugs.has(item.page_url)) {
         seenSlugs.add(item.page_url);
-        const page = await client.getPageBySlugSafe(courseId, item.page_url);
-        if (page?.body) {
-          fetchedPages.push({ slug: item.page_url, title: page.title, body: page.body });
-        }
+        pageSlugs.push(item.page_url);
       }
     }
   }
+
+  const fetchedPages = (
+    await mapWithConcurrency(
+      pageSlugs,
+      PAGE_BODY_CONCURRENCY,
+      async (slug) => {
+        const page = await client.getPageBySlugSafe(courseId, slug);
+        if (!page?.body) {
+          return null;
+        }
+        return { slug, title: page.title, body: page.body };
+      }
+    )
+  ).filter(
+    (page): page is { slug: string; title: string; body: string } => page !== null
+  );
 
   return { courseDetail, assignments, modules, files, pages, frontPageBody, fetchedPages, warnings };
 }
