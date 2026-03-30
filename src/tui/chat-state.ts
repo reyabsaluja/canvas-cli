@@ -61,6 +61,17 @@ export interface ChatSession {
   metadata: ChatSessionMetadata;
 }
 
+export interface ChatSessionSummary {
+  version: 1;
+  id: string;
+  title: string;
+  scope: AppScope;
+  createdAt: string;
+  updatedAt: string;
+  lastOpenedAt: string;
+  metadata: ChatSessionMetadata;
+}
+
 export interface CommandDefinition {
   name: string;
   description: string;

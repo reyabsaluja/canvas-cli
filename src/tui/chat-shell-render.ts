@@ -27,7 +27,6 @@ const CHAT_GAP_ROWS = 2;
 export const MAIN_VIEW_BOTTOM_RESERVE = STICKY_BOTTOM_ROWS + CHAT_GAP_ROWS;
 
 export interface RenderChatFrameOptions {
-  messages: ChatMessage[];
   runtime: ScopeRuntime;
   placeholder: string;
   inputBuffer: string;
@@ -36,77 +35,118 @@ export interface RenderChatFrameOptions {
   currentSpinnerLine: string;
   toolOutputExpanded: boolean;
   modelLabel: string;
-  bannerRenderer?: (buf: { push(line?: string): void }) => void;
+  bannerLines: string[];
+  transcriptLines: string[];
   slashMatches: CommandDefinition[];
   pinMatches: ShellPinOption[];
   slashSelected: number;
   pinSelected: number;
 }
 
+const messageRenderCache = new WeakMap<ChatMessage, Map<string, string[]>>();
+
+export function buildBannerLines(options: {
+  runtime: ScopeRuntime;
+  bannerRenderer?: (buf: { push(line?: string): void }) => void;
+}): string[] {
+  if (options.bannerRenderer) {
+    const lines: string[] = [];
+    options.bannerRenderer({
+      push(line = "") {
+        lines.push(line);
+      },
+    });
+    return lines;
+  }
+
+  const subtitle = options.runtime.subtitle
+    ? `  ${statusBarGrey(options.runtime.subtitle)}`
+    : "";
+  const status = options.runtime.statusLabel
+    ? `  ${C.warn(options.runtime.statusLabel)}`
+    : "";
+  return [`  ${C.primaryBold(options.runtime.title)}${subtitle}${status}`];
+}
+
+export function buildTranscriptLines(options: {
+  messages: ChatMessage[];
+  contentWidth: number;
+  cols: number;
+  expanded: boolean;
+}): string[] {
+  const lines: string[] = [];
+  for (const message of options.messages) {
+    lines.push(
+      ...getRenderedMessageLines(
+        message,
+        options.contentWidth,
+        options.cols,
+        options.expanded
+      )
+    );
+  }
+  return lines;
+}
+
 export function renderChatFrame(
   options: RenderChatFrameOptions
 ): { chatScrollOffset: number; spinnerRow: number } {
   const buf = createBuffer();
-  const { cols } = getTermSize();
+  const { cols, rows } = getTermSize();
   const contentWidth = Math.min(cols - 4, 100);
+  const headerLines = ["", "", ...options.bannerLines, ""];
+  const olderHintLines =
+    options.chatScrollOffset > 0
+      ? [
+          C.dim(
+            "  ↑ Older · PgUp / PgDn · Ctrl+P up / Ctrl+N down · End latest · Home oldest"
+          ),
+        ]
+      : [];
+  const spinnerPaddingCount =
+    options.isProcessing && options.currentSpinnerLine ? 3 : 0;
+  const totalVirtualLines =
+    headerLines.length +
+    olderHintLines.length +
+    options.transcriptLines.length +
+    spinnerPaddingCount +
+    CHAT_GAP_ROWS;
+  const maxContent = Math.max(1, rows - MAIN_VIEW_BOTTOM_RESERVE);
+  const maxScroll = Math.max(0, totalVirtualLines - maxContent);
+  const chatScrollOffset = Math.min(
+    Math.max(0, options.chatScrollOffset),
+    maxScroll
+  );
+  const end = totalVirtualLines - chatScrollOffset;
+  const start = Math.max(0, end - maxContent);
 
-  buf.push("");
-  buf.push("");
+  appendVisibleLines(buf, headerLines, start, end, 0);
+  appendVisibleLines(buf, olderHintLines, start, end, headerLines.length);
+  appendVisibleLines(
+    buf,
+    options.transcriptLines,
+    start,
+    end,
+    headerLines.length + olderHintLines.length
+  );
+  const spinnerStart =
+    headerLines.length + olderHintLines.length + options.transcriptLines.length;
+  appendVisibleBlankSection(buf, spinnerPaddingCount, start, end, spinnerStart);
+  appendVisibleBlankSection(
+    buf,
+    CHAT_GAP_ROWS,
+    start,
+    end,
+    spinnerStart + spinnerPaddingCount
+  );
 
-  if (options.bannerRenderer) {
-    options.bannerRenderer(buf);
-    buf.push("");
-  } else {
-    const subtitle = options.runtime.subtitle
-      ? `  ${statusBarGrey(options.runtime.subtitle)}`
-      : "";
-    const status = options.runtime.statusLabel
-      ? `  ${C.warn(options.runtime.statusLabel)}`
-      : "";
-    buf.push(`  ${C.primaryBold(options.runtime.title)}${subtitle}${status}`);
-    buf.push("");
-  }
-
-  if (options.chatScrollOffset > 0) {
-    buf.push(
-      C.dim(
-        "  ↑ Older · PgUp / PgDn · Ctrl+P up / Ctrl+N down · End latest · Home oldest"
-      )
-    );
-  }
-
-  for (const message of options.messages) {
-    renderMessage(message, buf, contentWidth, options.toolOutputExpanded);
-  }
+  buf.flush(MAIN_VIEW_BOTTOM_RESERVE, chatScrollOffset);
 
   let spinnerRow = 0;
   if (options.isProcessing && options.currentSpinnerLine) {
-    buf.push("");
-    spinnerRow = buf.length + 1;
-    buf.push("");
-    buf.push("");
-  }
-
-  for (let gap = 0; gap < CHAT_GAP_ROWS; gap++) {
-    buf.push("");
-  }
-
-  const bufferLength = buf.length;
-  const { rows } = getTermSize();
-  const maxContent = Math.max(1, rows - MAIN_VIEW_BOTTOM_RESERVE);
-  const maxScroll = Math.max(0, bufferLength - maxContent);
-  const chatScrollOffset = Math.min(Math.max(0, options.chatScrollOffset), maxScroll);
-
-  const end = bufferLength - chatScrollOffset;
-  const start = Math.max(0, end - maxContent);
-  buf.flush(MAIN_VIEW_BOTTOM_RESERVE, chatScrollOffset);
-
-  if (spinnerRow > 0) {
-    const spinnerIndex = spinnerRow - 1;
-    if (spinnerIndex < start || spinnerIndex >= end) {
-      spinnerRow = 0;
-    } else {
-      spinnerRow = spinnerRow - start;
+    const spinnerVirtualIndex = spinnerStart + 1;
+    if (spinnerVirtualIndex >= start && spinnerVirtualIndex < end) {
+      spinnerRow = spinnerVirtualIndex - start + 1;
     }
   }
 
@@ -272,19 +312,27 @@ function renderStickyBottom(
   );
 }
 
-type Buf = { push(line: string): void };
-
-function renderMessage(
+function getRenderedMessageLines(
   message: ChatMessage,
-  buf: Buf,
   maxWidth: number,
+  cols: number,
   expanded: boolean
-): void {
-  buf.push("");
+): string[] {
+  const cacheKey = `${maxWidth}:${cols}:${expanded ? 1 : 0}`;
+  let cache = messageRenderCache.get(message);
+  if (!cache) {
+    cache = new Map<string, string[]>();
+    messageRenderCache.set(message, cache);
+  }
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const lines: string[] = [""];
 
   switch (message.role) {
     case "user": {
-      const { cols } = getTermSize();
       const boxWidth = Math.max(1, cols - 1);
       const emptyLine = " ".repeat(boxWidth + 1);
       const padRow = (line: string) => {
@@ -295,33 +343,34 @@ function renderMessage(
         const visible = stripAnsi(line).length;
         return line + " ".repeat(Math.max(0, boxWidth - visible));
       };
-      const lines = wrapLines(message.content, boxWidth);
-      buf.push(padRow(inputBg(emptyLine)));
-      for (const line of lines) {
-        buf.push(padRow(inputBg(` ${padInner(line)}`)));
+      const wrappedLines = wrapLines(message.content, boxWidth);
+      const rendered = [padRow(inputBg(emptyLine))];
+      for (const line of wrappedLines) {
+        rendered.push(padRow(inputBg(` ${padInner(line)}`)));
       }
-      buf.push(padRow(inputBg(emptyLine)));
-      break;
+      rendered.push(padRow(inputBg(emptyLine)));
+      cache.set(cacheKey, ["", ...rendered]);
+      return ["", ...rendered];
     }
     case "assistant": {
-      renderWrappedContent(message.content, buf, maxWidth);
+      renderWrappedContent(message.content, lines, maxWidth);
       if (message.bulletPoints?.length) {
-        buf.push("");
+        lines.push("");
         for (const point of message.bulletPoints) {
-          buf.push(`  ${C.dim("•")} ${chalk.white(point)}`);
+          lines.push(`  ${C.dim("•")} ${chalk.white(point)}`);
         }
       }
       if (message.sources?.length) {
-        buf.push("");
+        lines.push("");
         for (const source of message.sources) {
-          buf.push(`  ${C.dimmer(`[${source.kind}]`)} ${C.dim(source.title)}`);
+          lines.push(`  ${C.dimmer(`[${source.kind}]`)} ${C.dim(source.title)}`);
         }
       }
       break;
     }
     case "system":
       wrapLines(message.content, maxWidth).forEach((line) => {
-        buf.push(`  ${chalk.white(line)}`);
+        lines.push(`  ${chalk.white(line)}`);
       });
       break;
     case "tool": {
@@ -330,10 +379,10 @@ function renderMessage(
         message.toolColor === "red" ? toolTargetRed : toolTargetGreen;
       const boxWidth = Math.max(maxWidth, 40);
       const empty = " ".repeat(boxWidth);
-      buf.push("  " + bg(empty));
+      lines.push("  " + bg(empty));
       const headerText = `${message.toolAction ?? "tool"} ${message.toolTarget ?? ""}`;
       const headerPad = " ".repeat(Math.max(0, boxWidth - headerText.length - 1));
-      buf.push(
+      lines.push(
         "  " +
           bg(
             ` ${toolActionColor(message.toolAction ?? "tool")} ${targetColor(
@@ -344,18 +393,18 @@ function renderMessage(
       const contentLines = message.content.split("\n");
       const showLines = expanded ? contentLines : contentLines.slice(0, 8);
       const remaining = expanded ? 0 : Math.max(0, contentLines.length - 8);
-      buf.push("  " + bg(empty));
+      lines.push("  " + bg(empty));
       for (const line of showLines) {
         const trimmed = line.slice(0, boxWidth - 4);
         const padLen = Math.max(0, boxWidth - trimmed.length - 3);
-        buf.push("  " + bg(`  ${chalk.white(trimmed)}${" ".repeat(padLen)} `));
+        lines.push("  " + bg(`  ${chalk.white(trimmed)}${" ".repeat(padLen)} `));
       }
       if (remaining > 0) {
         const moreText = `... (${remaining} more lines, `;
         const totalLength =
           moreText.length + "ctrl+o".length + " to expand)".length;
         const padLen = Math.max(0, boxWidth - totalLength - 3);
-        buf.push(
+        lines.push(
           "  " +
             bg(
               `  ${C.dim(moreText)}${C.dimmer("ctrl+o")}${C.dim(
@@ -364,34 +413,37 @@ function renderMessage(
             )
         );
       }
-      buf.push("  " + bg(empty));
+      lines.push("  " + bg(empty));
       break;
     }
   }
+
+  cache.set(cacheKey, lines);
+  return lines;
 }
 
-function renderWrappedContent(content: string, buf: Buf, maxWidth: number): void {
+function renderWrappedContent(content: string, lines: string[], maxWidth: number): void {
   for (const line of content.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) {
-      buf.push("");
+      lines.push("");
       continue;
     }
     if (/^[-*_]{3,}$/.test(trimmed) || trimmed === "***") {
-      buf.push(`  ${C.dimmer("─".repeat(Math.min(maxWidth - 4, 40)))}`);
+      lines.push(`  ${C.dimmer("─".repeat(Math.min(maxWidth - 4, 40)))}`);
       continue;
     }
     const headingMatch = trimmed.match(/^(#{1,4})\s+(.+)/);
     if (headingMatch) {
-      buf.push("");
-      buf.push(`  ${C.primaryBold(applyInlineFormatting(headingMatch[2]!))}`);
+      lines.push("");
+      lines.push(`  ${C.primaryBold(applyInlineFormatting(headingMatch[2]!))}`);
       continue;
     }
     const bulletMatch = trimmed.match(/^[*\-•]\s+(.+)/);
     if (bulletMatch) {
       const text = applyInlineFormatting(bulletMatch[1]!);
       wrapLines(stripAnsi(text), maxWidth - 6).forEach((wrapped, index) => {
-        buf.push(
+        lines.push(
           index === 0
             ? `  ${C.dim("•")} ${applyInlineFormatting(wrapped)}`
             : `    ${applyInlineFormatting(wrapped)}`
@@ -402,7 +454,7 @@ function renderWrappedContent(content: string, buf: Buf, maxWidth: number): void
     const numbered = trimmed.match(/^(\d+)\.\s+(.+)/);
     if (numbered) {
       wrapLines(stripAnsi(numbered[2]!), maxWidth - 6).forEach((wrapped, index) => {
-        buf.push(
+        lines.push(
           index === 0
             ? `  ${C.primaryBold(numbered[1]! + ".")} ${applyInlineFormatting(
                 wrapped
@@ -413,8 +465,38 @@ function renderWrappedContent(content: string, buf: Buf, maxWidth: number): void
       continue;
     }
     wrapLines(stripAnsi(trimmed), maxWidth - 2).forEach((wrapped) => {
-      buf.push(`  ${applyInlineFormatting(wrapped)}`);
+      lines.push(`  ${applyInlineFormatting(wrapped)}`);
     });
+  }
+}
+
+function appendVisibleLines(
+  buf: { push(line?: string): void },
+  lines: string[],
+  start: number,
+  end: number,
+  sectionStart: number
+): void {
+  if (lines.length === 0) return;
+  const visibleStart = Math.max(start - sectionStart, 0);
+  const visibleEnd = Math.min(end - sectionStart, lines.length);
+  if (visibleStart >= visibleEnd) return;
+  for (let index = visibleStart; index < visibleEnd; index++) {
+    buf.push(lines[index]!);
+  }
+}
+
+function appendVisibleBlankSection(
+  buf: { push(line?: string): void },
+  count: number,
+  start: number,
+  end: number,
+  sectionStart: number
+): void {
+  const visibleStart = Math.max(start - sectionStart, 0);
+  const visibleEnd = Math.min(end - sectionStart, count);
+  for (let index = visibleStart; index < visibleEnd; index++) {
+    buf.push("");
   }
 }
 

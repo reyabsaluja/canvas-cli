@@ -14,6 +14,8 @@ import {
 import type { ShellPinOption } from "./app-types.js";
 import {
   MAIN_VIEW_BOTTOM_RESERVE,
+  buildBannerLines,
+  buildTranscriptLines,
   renderChatFrame,
   renderInputFooter,
 } from "./chat-shell-render.js";
@@ -95,9 +97,47 @@ export async function runChatShell<TExit>(
   let chatScrollOffset = 0;
   let spinnerTimer: ReturnType<typeof setInterval> | null = null;
   let currentVerb = "";
+  let transcriptLinesCache: string[] | null = null;
+  let transcriptCacheKey = "";
+  let bannerLinesCache: string[] | null = null;
+  let bannerCacheCols = -1;
 
   const placeholder =
     options.runtime.placeholder ?? "Type your message or /help for commands";
+
+  function markTranscriptDirty(): void {
+    transcriptLinesCache = null;
+  }
+
+  function getCachedBannerLines(): string[] {
+    const { cols } = getTermSize();
+    if (bannerLinesCache && bannerCacheCols === cols) {
+      return bannerLinesCache;
+    }
+    bannerLinesCache = buildBannerLines({
+      runtime: options.runtime,
+      bannerRenderer: options.bannerRenderer,
+    });
+    bannerCacheCols = cols;
+    return bannerLinesCache;
+  }
+
+  function getCachedTranscriptLines(): string[] {
+    const { cols } = getTermSize();
+    const contentWidth = Math.min(cols - 4, 100);
+    const cacheKey = `${cols}:${contentWidth}:${toolOutputExpanded ? 1 : 0}`;
+    if (transcriptLinesCache && transcriptCacheKey === cacheKey) {
+      return transcriptLinesCache;
+    }
+    transcriptLinesCache = buildTranscriptLines({
+      messages,
+      contentWidth,
+      cols,
+      expanded: toolOutputExpanded,
+    });
+    transcriptCacheKey = cacheKey;
+    return transcriptLinesCache;
+  }
 
   function getSlashMatches(): CommandDefinition[] {
     if (!inputBuffer.startsWith("/")) return [];
@@ -126,7 +166,6 @@ export async function runChatShell<TExit>(
 
   function render(): void {
     const next = renderChatFrame({
-      messages,
       runtime: options.runtime,
       placeholder,
       inputBuffer,
@@ -135,7 +174,8 @@ export async function runChatShell<TExit>(
       currentSpinnerLine,
       toolOutputExpanded,
       modelLabel: options.modelLabel,
-      bannerRenderer: options.bannerRenderer,
+      bannerLines: getCachedBannerLines(),
+      transcriptLines: getCachedTranscriptLines(),
       slashMatches: showSlashMenu ? getSlashMatches() : [],
       pinMatches: getPinMatches(),
       slashSelected,
@@ -204,8 +244,14 @@ export async function runChatShell<TExit>(
 
   return new Promise((resolve) => {
     const api: ChatShellApi<TExit> = {
-      addMessage: (message) => persistence.addMessage(message),
-      addMessages: (nextMessages) => persistence.addMessages(nextMessages),
+      addMessage: async (message) => {
+        markTranscriptDirty();
+        await persistence.addMessage(message);
+      },
+      addMessages: async (nextMessages) => {
+        markTranscriptDirty();
+        await persistence.addMessages(nextMessages);
+      },
       resolve: (result) => resolve(result),
       render,
       session,
@@ -266,6 +312,7 @@ export async function runChatShell<TExit>(
         }
       }
 
+      markTranscriptDirty();
       await persistence.addMessage({ role: "user", content: input });
       isProcessing = true;
       currentVerb = VERBS[Math.floor(Math.random() * VERBS.length)]!;
@@ -289,6 +336,7 @@ export async function runChatShell<TExit>(
                 role: "assistant",
                 content: streamedText.trim(),
               };
+              markTranscriptDirty();
               persistence.schedule();
               streamingStarted = false;
               streamedText = "";
@@ -301,6 +349,7 @@ export async function runChatShell<TExit>(
               toolTarget: event.target,
               toolColor: event.color,
             });
+            markTranscriptDirty();
             persistence.schedule();
             currentSpinnerLine = `  ${C.primary(
               SPINNER[spinnerFrame]
@@ -314,6 +363,7 @@ export async function runChatShell<TExit>(
               stopSpinner();
               currentSpinnerLine = "";
               messages.push({ role: "assistant", content: "" });
+              markTranscriptDirty();
             }
             streamedText += delta;
             const now = Date.now();
@@ -323,6 +373,7 @@ export async function runChatShell<TExit>(
                 role: "assistant",
                 content: streamedText,
               };
+              markTranscriptDirty();
               render();
             }
           },
@@ -337,6 +388,7 @@ export async function runChatShell<TExit>(
             sources: final.sources,
             confidence: final.confidence,
           };
+          markTranscriptDirty();
         } else {
           messages.push({
             role: "assistant",
@@ -345,10 +397,12 @@ export async function runChatShell<TExit>(
             sources: final.sources,
             confidence: final.confidence,
           });
+          markTranscriptDirty();
         }
         await persistence.flush();
       } catch (error) {
         stopSpinner();
+        markTranscriptDirty();
         await persistence.addMessage({
           role: "system",
           content: `Error: ${error instanceof Error ? error.message : "unknown"}`,
@@ -373,6 +427,7 @@ export async function runChatShell<TExit>(
 
       if (key === "\x0F") {
         toolOutputExpanded = !toolOutputExpanded;
+        markTranscriptDirty();
         render();
         return;
       }
@@ -443,6 +498,7 @@ export async function runChatShell<TExit>(
         }
 
         if (input.startsWith("/")) {
+          markTranscriptDirty();
           await persistence.addMessage({ role: "user", content: input });
           const [commandName, ...rest] = input.split(/\s+/);
           if (commandName === "/help") {
@@ -453,6 +509,7 @@ export async function runChatShell<TExit>(
             for (const extra of options.extraHelpCommands ?? []) {
               helpLines.push(`${C.accent(extra.cmd.padEnd(16))}${extra.desc}`);
             }
+            markTranscriptDirty();
             await persistence.addMessage({
               role: "assistant",
               content: helpLines.join("\n"),
@@ -463,6 +520,7 @@ export async function runChatShell<TExit>(
 
           const resolvedCommand = resolveCommand(options.commands, commandName);
           if (!resolvedCommand) {
+            markTranscriptDirty();
             await persistence.addMessage({
               role: "system",
               content: `Unknown command: ${commandName}. Type /help for options.`,
@@ -472,6 +530,7 @@ export async function runChatShell<TExit>(
           }
 
           if (!resolvedCommand.scopes.includes(options.runtime.scope.type)) {
+            markTranscriptDirty();
             await persistence.addMessage({
               role: "system",
               content: `${commandName} is only available in ${formatScopeTargets(
@@ -495,6 +554,7 @@ export async function runChatShell<TExit>(
             render();
             return;
           } catch (error) {
+            markTranscriptDirty();
             await persistence.addMessage({
               role: "system",
               content: `Error: ${error instanceof Error ? error.message : "unknown"}`,

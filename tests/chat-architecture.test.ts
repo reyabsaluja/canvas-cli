@@ -160,6 +160,46 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     });
   });
 
+  await t.test("session listing uses metadata index instead of reparsing full transcripts", async () => {
+    await withTempCwd(async (tempDir) => {
+      const scope: AppScope = {
+        type: "workspace",
+        workspacePath: "/tmp/ws-a",
+        courseId: 17,
+        assignmentId: 42,
+      };
+      const session = await loadOrCreateChatSession(scope, {
+        title: "Lab 4",
+        metadata: {
+          courseId: 17,
+          courseName: "ECE243",
+          assignmentId: 42,
+          assignmentName: "Lab 4",
+        },
+        initialMessages: [{ role: "assistant", content: "Workspace ready." }],
+      });
+      session.messages.push({
+        role: "assistant",
+        content: "A".repeat(20000),
+      });
+      await saveChatSession(session);
+
+      const sessionPath = path.join(
+        tempDir,
+        ".canvas-cli",
+        "chat-sessions",
+        `${session.id}.json`
+      );
+      await fs.writeFile(sessionPath, "{ broken json", "utf-8");
+
+      const listed = await listChatSessions();
+      assert.equal(listed.length, 1);
+      assert.equal(listed[0]?.id, session.id);
+      assert.equal(listed[0]?.title, "Lab 4");
+      assert.equal(await loadChatSession(session.id), null);
+    });
+  });
+
   await t.test("workspace base and work flows share one writer and metadata contract", async () => {
     await withTempCwd(async (tempDir) => {
       const course: Course = {

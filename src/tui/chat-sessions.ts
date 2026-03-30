@@ -1,9 +1,15 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
-import type { AppScope, ChatSession, ChatSessionMetadata } from "./chat-state.js";
+import type {
+  AppScope,
+  ChatSession,
+  ChatSessionMetadata,
+  ChatSessionSummary,
+} from "./chat-state.js";
 
 const CHAT_SESSIONS_DIR = ".canvas-cli/chat-sessions";
+const CHAT_SESSIONS_INDEX = "index.json";
 
 function getChatSessionsRoot(): string {
   return path.resolve(process.cwd(), CHAT_SESSIONS_DIR);
@@ -11,6 +17,10 @@ function getChatSessionsRoot(): string {
 
 function getChatSessionPath(sessionId: string): string {
   return path.join(getChatSessionsRoot(), `${sessionId}.json`);
+}
+
+function getChatSessionIndexPath(): string {
+  return path.join(getChatSessionsRoot(), CHAT_SESSIONS_INDEX);
 }
 
 function slugify(value: string): string {
@@ -49,6 +59,7 @@ export async function saveChatSession(session: ChatSession): Promise<void> {
   const filePath = getChatSessionPath(session.id);
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await writeAtomic(filePath, JSON.stringify(session, null, 2) + "\n");
+  await upsertChatSessionSummary(toChatSessionSummary(session));
 }
 
 export async function loadOrCreateChatSession(
@@ -120,23 +131,91 @@ export async function touchChatSession(
   return next;
 }
 
-export async function listChatSessions(): Promise<ChatSession[]> {
+export async function listChatSessions(): Promise<ChatSessionSummary[]> {
+  const indexed = await loadChatSessionIndex();
+  if (indexed) {
+    return indexed;
+  }
+  return rebuildChatSessionIndex();
+}
+
+async function loadChatSessionIndex(): Promise<ChatSessionSummary[] | null> {
+  try {
+    const raw = await fs.readFile(getChatSessionIndexPath(), "utf-8");
+    const parsed = JSON.parse(raw) as { sessions?: ChatSessionSummary[] };
+    if (!parsed || !Array.isArray(parsed.sessions)) {
+      return null;
+    }
+    return parsed.sessions
+      .slice()
+      .sort(
+        (a, b) =>
+          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      );
+  } catch {
+    return null;
+  }
+}
+
+async function rebuildChatSessionIndex(): Promise<ChatSessionSummary[]> {
   const root = getChatSessionsRoot();
   try {
     const entries = await fs.readdir(root, { withFileTypes: true });
-    const sessions: ChatSession[] = [];
+    const sessions: ChatSessionSummary[] = [];
     for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+      if (
+        !entry.isFile() ||
+        !entry.name.endsWith(".json") ||
+        entry.name === CHAT_SESSIONS_INDEX
+      ) {
+        continue;
+      }
       const loaded = await loadChatSession(entry.name.replace(/\.json$/, ""));
-      if (loaded) sessions.push(loaded);
+      if (loaded) {
+        sessions.push(toChatSessionSummary(loaded));
+      }
     }
-    sessions.sort((a, b) => {
-      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-    });
+    await saveChatSessionIndex(sessions);
     return sessions;
   } catch {
     return [];
   }
+}
+
+async function upsertChatSessionSummary(
+  summary: ChatSessionSummary
+): Promise<void> {
+  const current = (await loadChatSessionIndex()) ?? [];
+  const next = current.filter((entry) => entry.id !== summary.id);
+  next.push(summary);
+  next.sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  );
+  await saveChatSessionIndex(next);
+}
+
+async function saveChatSessionIndex(
+  sessions: ChatSessionSummary[]
+): Promise<void> {
+  const filePath = getChatSessionIndexPath();
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await writeAtomic(
+    filePath,
+    JSON.stringify({ version: 1, sessions }, null, 2) + "\n"
+  );
+}
+
+function toChatSessionSummary(session: ChatSession): ChatSessionSummary {
+  return {
+    version: session.version,
+    id: session.id,
+    title: session.title,
+    scope: session.scope,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    lastOpenedAt: session.lastOpenedAt,
+    metadata: session.metadata,
+  };
 }
 
 async function writeAtomic(filePath: string, content: string): Promise<void> {
