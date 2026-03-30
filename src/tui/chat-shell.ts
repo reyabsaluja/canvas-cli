@@ -266,6 +266,15 @@ export async function runChatShell<TExit>(
       return Math.max(2, Math.floor((rows - MAIN_VIEW_BOTTOM_RESERVE) * 0.65));
     }
 
+    function setChatScrollOffset(nextOffset: number): boolean {
+      const normalized = Math.max(0, nextOffset);
+      if (normalized === chatScrollOffset) {
+        return false;
+      }
+      chatScrollOffset = normalized;
+      return true;
+    }
+
     function keyOkWhileProcessing(key: string): boolean {
       return [
         "\x03",
@@ -433,23 +442,27 @@ export async function runChatShell<TExit>(
       }
 
       if (key === "\x1b[5~" || key === "\x1B[5~" || key === "\x10") {
-        chatScrollOffset += scrollPageStep();
-        render();
+        if (setChatScrollOffset(chatScrollOffset + scrollPageStep())) {
+          render();
+        }
         return;
       }
       if (key === "\x1b[6~" || key === "\x1B[6~" || key === "\x0e") {
-        chatScrollOffset = Math.max(0, chatScrollOffset - scrollPageStep());
-        render();
+        if (setChatScrollOffset(chatScrollOffset - scrollPageStep())) {
+          render();
+        }
         return;
       }
       if (key === "\x1b[4~" || key === "\x1B[4~") {
-        chatScrollOffset = 0;
-        render();
+        if (setChatScrollOffset(0)) {
+          render();
+        }
         return;
       }
       if (key === "\x1b[1~" || key === "\x1B[1~") {
-        chatScrollOffset = 999999;
-        render();
+        if (setChatScrollOffset(999999)) {
+          render();
+        }
         return;
       }
 
@@ -462,7 +475,7 @@ export async function runChatShell<TExit>(
       }
 
       if (key === "\r" || key === "\n") {
-        chatScrollOffset = 0;
+        setChatScrollOffset(0);
 
         const pinPartial = getActivePinPartial();
         if (pinPartial !== null) {
@@ -599,13 +612,15 @@ export async function runChatShell<TExit>(
       }
 
       if (key === "\x1B[A") {
-        chatScrollOffset += 3;
-        render();
+        if (setChatScrollOffset(chatScrollOffset + 3)) {
+          render();
+        }
         return;
       }
       if (key === "\x1B[B") {
-        chatScrollOffset = Math.max(0, chatScrollOffset - 3);
-        render();
+        if (setChatScrollOffset(chatScrollOffset - 3)) {
+          render();
+        }
         return;
       }
 
@@ -686,12 +701,15 @@ export async function runChatShell<TExit>(
             const button = parseInt(mouseMatch[1]!, 10);
             keyQueue.enqueue(async () => {
               if (shellClosed) return;
+              let didScroll = false;
               if (button === 64) {
-                chatScrollOffset += 3;
+                didScroll = setChatScrollOffset(chatScrollOffset + 3);
               } else if (button === 65) {
-                chatScrollOffset = Math.max(0, chatScrollOffset - 3);
+                didScroll = setChatScrollOffset(chatScrollOffset - 3);
               }
-              render();
+              if (didScroll) {
+                render();
+              }
             });
             input = input.slice(mouseMatch[0].length);
             continue;

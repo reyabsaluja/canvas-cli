@@ -164,7 +164,7 @@ function renderInfoBox(
   const systemRow = Math.max(
     leftRows.length,
     (commandStarts.get("/recent") ?? rightRows.length) - 1
-  );
+  ) + 1;
   const toolsRow = Math.max(
     leftRows.length,
     (commandStarts.get("/help") ?? rightRows.length) - 1
@@ -181,6 +181,7 @@ function renderInfoBox(
   pushLeft(toolAgentSummary, "dim");
 
   if (displayCourses.length > 0) {
+    pushLeft("", "empty");
     padLeftToRow(statusRow);
     pushLeft("Courses", "sectionHeader");
     const courseLines = wrapCommaList(
@@ -193,6 +194,9 @@ function renderInfoBox(
   }
 
   if (recent.length > 0) {
+    if (displayCourses.length > 0) {
+      pushLeft("", "empty");
+    }
     const recentRow = Math.max(leftRows.length, rightRows.length - 3);
     padLeftToRow(recentRow);
     pushLeft("Recent Workspaces", "sectionHeader");
