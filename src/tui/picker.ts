@@ -68,7 +68,7 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
       const visibleItems = filtered.slice(windowStart, windowEnd);
 
       buf.push("");
-      buf.push(C.primaryBold(`  ${title}`));
+      buf.push(C.bold(`  ${title}`));
       if (subtitle) buf.push(C.dim(`  ${subtitle}`));
       buf.push("");
 
@@ -88,7 +88,7 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
           const item = visibleItems[i];
           const absoluteIndex = windowStart + i;
           const isSelected = absoluteIndex === selected;
-          const pointer = isSelected ? C.primary("❯ ") : "  ";
+          const pointer = isSelected ? C.bold("❯ ") : "  ";
           const label = item.dimmed
             ? C.dim(item.label)
             : isSelected

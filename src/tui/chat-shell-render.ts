@@ -66,7 +66,7 @@ export function buildBannerLines(options: {
   const status = options.runtime.statusLabel
     ? `  ${C.warn(options.runtime.statusLabel)}`
     : "";
-  return [`  ${C.primaryBold(options.runtime.title)}${subtitle}${status}`];
+  return [`  ${C.bold(options.runtime.title)}${subtitle}${status}`];
 }
 
 export function buildTranscriptLines(options: {
@@ -224,8 +224,8 @@ function renderSlashPinOverlay(
     for (let index = 0; index < maxShow; index++) {
       const pin = pinMatches[start + index]!;
       const selected = start + index === pinSelected;
-      const pointer = selected ? C.primary("❯ ") : "  ";
-      const label = selected ? C.primaryBold(pin.label) : C.accent(pin.label);
+      const pointer = selected ? C.bold("❯ ") : "  ";
+      const label = selected ? C.bold(pin.label) : C.text(pin.label);
       writes.push(
         `\x1B[${firstRow + index};1H\x1B[0m\x1B[2K${fitToRow(
           `${indent}${pointer}${label}  ${C.dim(pin.name)}`
@@ -245,8 +245,8 @@ function renderSlashPinOverlay(
   for (let index = 0; index < maxShow; index++) {
     const command = slashMatches[start + index]!;
     const selected = start + index === slashSelected;
-    const pointer = selected ? C.primary("❯ ") : "  ";
-    const name = selected ? C.primaryBold(command.name) : C.primary(command.name);
+    const pointer = selected ? C.bold("❯ ") : "  ";
+    const name = selected ? C.bold(command.name) : C.text(command.name);
     writes.push(
       `\x1B[${firstRow + index};1H\x1B[0m\x1B[2K${fitToRow(
         ` ${pointer}${name}  ${C.muted(command.description)}`
@@ -296,7 +296,7 @@ function renderStickyBottom(
     );
     displayText = cursor + styled + " ".repeat(remaining);
   } else {
-    const colored = inputBuffer.replace(/\/pin\s+\S+/g, (match) => C.accent(match));
+    const colored = inputBuffer.replace(/\/pin\s+\S+/g, (match) => C.warm(match));
     const visible = stripAnsi(colored + cursor).length;
     const remaining = Math.max(0, innerWidth - visible);
     displayText = colored + cursor + " ".repeat(remaining);
@@ -359,7 +359,7 @@ function getRenderedMessageLines(
       const trimmed = message.content.trim();
       if (trimmed.startsWith("/")) {
         const rendered = wrapLines(trimmed, Math.max(12, maxWidth - 4)).map((line) =>
-          `  ${C.primary(line)}`
+          `  ${C.bold(line)}`
         );
         cache.set(cacheKey, ["", ...rendered]);
         return ["", ...rendered];
@@ -469,7 +469,7 @@ function renderWrappedContent(content: string, lines: string[], maxWidth: number
     const headingMatch = trimmed.match(/^(#{1,4})\s+(.+)/);
     if (headingMatch) {
       lines.push("");
-      lines.push(`  ${C.primaryBold(applyInlineFormatting(headingMatch[2]!))}`);
+      lines.push(`  ${C.bold(applyInlineFormatting(headingMatch[2]!))}`);
       continue;
     }
     const bulletMatch = trimmed.match(/^[*\-•]\s+(.+)/);
@@ -489,7 +489,7 @@ function renderWrappedContent(content: string, lines: string[], maxWidth: number
       wrapLines(stripAnsi(numbered[2]!), maxWidth - 6).forEach((wrapped, index) => {
         lines.push(
           index === 0
-            ? `  ${C.primaryBold(numbered[1]! + ".")} ${applyInlineFormatting(
+            ? `  ${C.bold(numbered[1]! + ".")} ${applyInlineFormatting(
                 wrapped
               )}`
             : `      ${applyInlineFormatting(wrapped)}`
@@ -537,7 +537,7 @@ function applyInlineFormatting(text: string): string {
   let result = text;
   result = result.replace(/\*\*(.+?)\*\*/g, (_match, inner) => chalk.white.bold(inner));
   result = result.replace(/__(.+?)__/g, (_match, inner) => chalk.white.bold(inner));
-  result = result.replace(/`([^`]+)`/g, (_match, inner) => C.accent(inner));
+  result = result.replace(/`([^`]+)`/g, (_match, inner) => C.warm(inner));
   result = result.replace(
     /(?<!\*)\*([^*]+)\*(?!\*)/g,
     (_match, inner) => chalk.white.italic(inner)

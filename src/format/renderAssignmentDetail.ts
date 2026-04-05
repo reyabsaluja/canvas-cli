@@ -214,7 +214,7 @@ function renderAIOverview(o: AssignmentRealOverview): string[] {
   const lines: string[] = [];
 
   lines.push("");
-  lines.push(chalk.bold.cyan("Real overview"));
+  lines.push(chalk.bold("Real overview"));
   lines.push("");
 
   // Overview paragraph — indent each line

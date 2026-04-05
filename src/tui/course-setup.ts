@@ -38,7 +38,7 @@ export function showMultiSelect(
         selected = Math.max(0, filtered.length - 1);
 
       buf.push("");
-      buf.push(C.primaryBold(`  ${title}`));
+      buf.push(C.bold(`  ${title}`));
       buf.push(C.dim(`  ${subtitle}`));
       buf.push("");
 
@@ -55,7 +55,7 @@ export function showMultiSelect(
           const isSel = i === selected;
           const isChecked = checked.has(c.id);
           const box = isChecked ? C.success("◉ ") : C.dim("○ ");
-          const pointer = isSel ? C.primary("❯ ") : "  ";
+          const pointer = isSel ? C.bold("❯ ") : "  ";
           const label = isSel
             ? C.bold(c.courseCode || c.name)
             : C.text(c.courseCode || c.name);
@@ -196,7 +196,7 @@ export async function promptRenames(
   clearScreen();
   showCursor();
   console.log("");
-  console.log(C.primaryBold("  Rename your courses"));
+  console.log(C.bold("  Rename your courses"));
   console.log(C.dim("  Give them short names, or press enter to keep the original"));
   console.log("");
 

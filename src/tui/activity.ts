@@ -78,7 +78,7 @@ export class ActivityIndicator {
     for (let i = 0; i < this.steps.length; i++) {
       const step = this.steps[i];
       const isDone = i < this.steps.length - 1;
-      const icon = isDone ? C.dim("›") : C.accent("›");
+      const icon = isDone ? C.dim("›") : C.text("›");
       const label = isDone ? C.dim(step) : C.text(step);
       const blockWidth = Math.min(cols - 6, 80);
       const textPart = `  ${stripAnsi(icon)} ${step}`;
@@ -119,8 +119,8 @@ export class ActivityIndicator {
   }
 
   private buildSpinnerLine(): string {
-    const s = C.primary(SPINNER[this.frame]);
-    return `  ${s} ${C.accent(this.verb)}${C.text("...")}`;
+    const s = C.dim(SPINNER[this.frame]);
+    return `  ${s} ${C.text(this.verb)}${C.dim("...")}`;
   }
 
   private getRow(termRows: number): number {

@@ -240,7 +240,7 @@ export async function openAssignmentScope(
 
   clearScreen();
   console.log("");
-  console.log(C.primaryBold(`  ${assignmentTarget.name}`));
+  console.log(C.bold(`  ${assignmentTarget.name}`));
   console.log(C.dim(`  ${course.name}`));
   console.log("");
 
@@ -280,7 +280,7 @@ export async function refreshWorkspaceScope(
 
   clearScreen();
   console.log("");
-  console.log(C.primaryBold(`  Refreshing ${assignmentTarget.name}`));
+  console.log(C.bold(`  Refreshing ${assignmentTarget.name}`));
   console.log(C.dim(`  ${course.name}`));
   console.log("");
 

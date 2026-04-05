@@ -204,9 +204,9 @@ export async function runChatShell<TExit>(
     spinnerTimer = setInterval(() => {
       if (!isProcessing || !currentSpinnerLine) return;
       spinnerFrame = (spinnerFrame + 1) % SPINNER.length;
-      currentSpinnerLine = `  ${C.primary(SPINNER[spinnerFrame])} ${C.accent(
+      currentSpinnerLine = `  ${C.dim(SPINNER[spinnerFrame])} ${C.text(
         currentVerb
-      )}${chalk.white("...")}`;
+      )}${C.dim("...")}`;
       render();
     }, 80);
   }
@@ -331,9 +331,9 @@ export async function runChatShell<TExit>(
       isProcessing = true;
       currentVerb = VERBS[Math.floor(Math.random() * VERBS.length)]!;
       spinnerFrame = 0;
-      currentSpinnerLine = `  ${C.primary(SPINNER[0])} ${C.accent(
+      currentSpinnerLine = `  ${C.dim(SPINNER[0])} ${C.text(
         currentVerb
-      )}${chalk.white("...")}`;
+      )}${C.dim("...")}`;
       render();
       startSpinner();
 
@@ -365,9 +365,9 @@ export async function runChatShell<TExit>(
             });
             markTranscriptDirty();
             persistence.schedule();
-            currentSpinnerLine = `  ${C.primary(
+            currentSpinnerLine = `  ${C.dim(
               SPINNER[spinnerFrame]
-            )} ${C.accent(currentVerb)}${chalk.white("...")}`;
+            )} ${C.text(currentVerb)}${C.dim("...")}`;
             render();
             startSpinner();
           },
@@ -519,10 +519,10 @@ export async function runChatShell<TExit>(
           if (commandName === "/help") {
             const helpLines = availableCommands.map(
               (command) =>
-                `${C.accent(command.name.padEnd(16))}${command.description}`
+                `${C.text(command.name.padEnd(16))}${command.description}`
             );
             for (const extra of options.extraHelpCommands ?? []) {
-              helpLines.push(`${C.accent(extra.cmd.padEnd(16))}${extra.desc}`);
+              helpLines.push(`${C.text(extra.cmd.padEnd(16))}${extra.desc}`);
             }
             markTranscriptDirty();
             await persistence.addMessage({
