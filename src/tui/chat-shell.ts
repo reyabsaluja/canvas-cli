@@ -59,6 +59,7 @@ export interface ChatShellOptions<TExit> {
   extraHelpCommands?: Array<{ cmd: string; desc: string }>;
   pinOptions?: ShellPinOption[];
   getOpenOptions?: () => ShellOpenOption[];
+  onClear?: () => Promise<ChatMessage[]>;
   resolvePinContent?: (pin: ShellPinOption) => Promise<string | null>;
   onAsk: (input: string, callbacks: AskCallbacks) => Promise<{
     content: string;
@@ -257,6 +258,22 @@ export async function runChatShell<TExit>(
       openSelected,
       pinSelected,
     });
+  }
+
+  function hasVisibleOverlay(): boolean {
+    return (
+      getOpenMatches().length > 0 ||
+      getPinMatches().length > 0 ||
+      (showSlashMenu && getSlashMatches().length > 0)
+    );
+  }
+
+  function renderAfterInputMutation(hadOverlay: boolean): void {
+    if (hadOverlay && !hasVisibleOverlay()) {
+      render();
+      return;
+    }
+    renderInputOnly();
   }
 
   function startSpinner(): void {
@@ -530,6 +547,24 @@ export async function runChatShell<TExit>(
         return;
       }
 
+      if (commandName === "/clear") {
+        const resetMessages = (await options.onClear?.()) ?? [];
+        pendingPins = [];
+        slashSelected = 0;
+        openSelected = 0;
+        pinSelected = 0;
+        showSlashMenu = false;
+        isProcessing = false;
+        currentSpinnerLine = "";
+        stopSpinner();
+        messages.splice(0, messages.length, ...resetMessages);
+        markTranscriptDirty();
+        chatScrollOffset = 0;
+        await persistence.flush();
+        render();
+        return;
+      }
+
       if (commandName === "/pin") {
         const pinCommand = resolveCommand(options.commands, commandName);
         if (
@@ -735,8 +770,9 @@ export async function runChatShell<TExit>(
 
       if (key === "\x1B") {
         if (showSlashMenu) {
+          const hadOverlay = hasVisibleOverlay();
           showSlashMenu = false;
-          renderInputOnly();
+          renderAfterInputMutation(hadOverlay);
         }
         return;
       }
@@ -771,7 +807,7 @@ export async function runChatShell<TExit>(
               `/pin ${selected.label}`
             );
             pinSelected = 0;
-            renderInputOnly();
+            renderAfterInputMutation(true);
             return;
           }
         }
@@ -864,6 +900,7 @@ export async function runChatShell<TExit>(
 
       if (key === "\x7F" || key === "\b") {
         if (inputBuffer.length > 0) {
+          const hadOverlay = hasVisibleOverlay();
           inputBuffer = inputBuffer.slice(0, -1);
           showSlashMenu = inputBuffer.startsWith("/");
           if (getActiveOpenPartial() !== null) {
@@ -873,7 +910,7 @@ export async function runChatShell<TExit>(
           } else {
             slashSelected = 0;
           }
-          renderInputOnly();
+          renderAfterInputMutation(hadOverlay);
         }
         return;
       }
@@ -884,7 +921,7 @@ export async function runChatShell<TExit>(
           const selected = openMatches[openSelected]!;
           inputBuffer = `/open ${selected.query}`;
           openSelected = 0;
-          renderInputOnly();
+          renderAfterInputMutation(true);
         }
         return;
       }
@@ -898,7 +935,7 @@ export async function runChatShell<TExit>(
             `/pin ${selected.label}`
           );
           pinSelected = 0;
-          renderInputOnly();
+          renderAfterInputMutation(true);
         }
         return;
       }
@@ -908,13 +945,15 @@ export async function runChatShell<TExit>(
         if (matches.length > 0) {
           inputBuffer = matches[slashSelected]!.name + " ";
           slashSelected = 0;
+          const hadOverlay = hasVisibleOverlay();
           showSlashMenu = false;
-          renderInputOnly();
+          renderAfterInputMutation(hadOverlay);
         }
         return;
       }
 
       if (key.length === 1 && key >= " ") {
+        const hadOverlay = hasVisibleOverlay();
         inputBuffer += key;
         showSlashMenu = inputBuffer.startsWith("/");
         if (getActiveOpenPartial() !== null) {
@@ -924,7 +963,7 @@ export async function runChatShell<TExit>(
         } else if (showSlashMenu) {
           slashSelected = 0;
         }
-        renderInputOnly();
+        renderAfterInputMutation(hadOverlay);
       }
     }
 

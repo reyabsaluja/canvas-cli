@@ -16,8 +16,6 @@ import type { ShellOpenOption, ShellPinOption } from "./app-types.js";
 const userBubbleBg = chalk.bgHex("#3a445d");
 const inputBg = userBubbleBg;
 const inputPlaceholderFg = chalk.hex("#8b95a8");
-const toolBgGreen = chalk.bgHex("#1a2e1a");
-const toolBgRed = chalk.bgHex("#2e1a1a");
 const toolActionColor = chalk.hex("#e0af68").bold;
 const toolTargetGreen = chalk.hex("#9ece6a");
 const toolTargetRed = chalk.hex("#f7768e");
@@ -109,7 +107,7 @@ export function renderChatFrame(
       : [];
   const spinnerLines =
     options.isProcessing && options.currentSpinnerLine
-      ? [`  ${options.currentSpinnerLine}`]
+      ? ["", `  ${options.currentSpinnerLine}`]
       : [];
   const totalVirtualLines =
     headerLines.length +
@@ -222,6 +220,9 @@ function renderAutocompleteOverlay(
   const maxVisibleCols = Math.max(1, cols - 1);
   const lastRowAboveInput = rows - STICKY_BOTTOM_ROWS;
   if (lastRowAboveInput < 1) return "";
+  const hasOverlay =
+    openMatches.length > 0 || pinMatches.length > 0 || slashMatches.length > 0;
+  if (!hasOverlay) return "";
 
   const writes: string[] = [];
   const clearStartRow = Math.max(1, lastRowAboveInput - MAX_OVERLAY_ROWS + 1);
@@ -286,10 +287,6 @@ function renderAutocompleteOverlay(
     return writes.join("");
   }
 
-  if (slashMatches.length === 0) {
-    writes.push("\x1B[0m");
-    return writes.join("");
-  }
   const maxShow = Math.min(slashMatches.length, lastRowAboveInput, MAX_OVERLAY_ROWS);
   const start = Math.max(
     0,
@@ -460,53 +457,36 @@ function getRenderedMessageLines(
       });
       break;
     case "tool": {
-      const bg = message.toolColor === "red" ? toolBgRed : toolBgGreen;
+      const marker = message.toolColor === "red" ? C.error("│") : C.success("│");
       const targetColor =
         message.toolColor === "red" ? toolTargetRed : toolTargetGreen;
       const boxWidth = getTranscriptBlockWidth(maxWidth, cols);
-      const innerWidth = Math.max(1, boxWidth - 2);
-      const empty = " ".repeat(boxWidth);
-      const padToolInner = (value: string) => {
-        const visible = stripAnsi(value).length;
-        return value + " ".repeat(Math.max(0, innerWidth - visible));
-      };
-      lines.push("  " + bg(empty));
+      const innerWidth = Math.max(1, boxWidth - 6);
       lines.push(
-        "  " +
-          bg(
-            ` ${padToolInner(
-              `${toolActionColor(message.toolAction ?? "tool")} ${targetColor(
-                message.toolTarget ?? ""
-              )}`
-            )} `
-          )
+        `  ${marker} ${toolActionColor(message.toolAction ?? "tool")} ${targetColor(
+          message.toolTarget ?? ""
+        )}`
       );
-      lines.push("  " + bg(empty));
       const wrappedContentLines = message.content
         .split("\n")
-        .flatMap((line) => wrapLines(line, Math.max(1, innerWidth - 1)));
+        .flatMap((line) => wrapLines(line, innerWidth));
       const showLines = expanded
         ? wrappedContentLines
         : wrappedContentLines.slice(0, 8);
       const remaining = expanded
         ? 0
         : Math.max(0, wrappedContentLines.length - 8);
+      lines.push("");
       for (const line of showLines) {
-        lines.push("  " + bg(` ${padToolInner(chalk.white(line))} `));
+        lines.push(`  ${marker} ${chalk.white(line)}`);
       }
       if (remaining > 0) {
         lines.push(
-          "  " +
-            bg(
-              ` ${padToolInner(
-                `${C.dim(`... (${remaining} more lines, `)}${C.dimmer(
-                  "ctrl+o"
-                )}${C.dim(" to expand)")}`
-              )} `
-            )
+          `  ${marker} ${C.dim(`... (${remaining} more lines, `)}${C.dimmer(
+            "ctrl+o"
+          )}${C.dim(" to expand)")}`
         );
       }
-      lines.push("  " + bg(empty));
       break;
     }
   }

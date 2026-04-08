@@ -660,13 +660,16 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     const workspaceCommands = getAvailableCommands(COMMANDS, "workspace").map((command) => command.name);
 
     assert.ok(globalCommands.includes("/manage-courses"));
+    assert.ok(globalCommands.includes("/clear"));
     assert.ok(!globalCommands.includes("/pin"));
     assert.ok(!globalCommands.includes("/overview"));
     assert.ok(courseCommands.includes("/manage-courses"));
+    assert.ok(courseCommands.includes("/clear"));
     assert.ok(courseCommands.includes("/assignments"));
     assert.ok(!courseCommands.includes("/pin"));
     assert.ok(!courseCommands.includes("/overview"));
     assert.ok(workspaceCommands.includes("/manage-courses"));
+    assert.ok(workspaceCommands.includes("/clear"));
     assert.ok(workspaceCommands.includes("/pin"));
     assert.ok(workspaceCommands.includes("/overview"));
 
@@ -755,6 +758,15 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     assert.deepEqual(context.conversationHistory, [
       { role: "user", content: "What is due?" },
       { role: "assistant", content: "Lab 4 is due soon." },
+    ]);
+
+    hydrateConversationHistory(context, [
+      { role: "system", content: "reset" },
+      { role: "assistant", content: "Workspace ready for Lab 4." },
+    ]);
+
+    assert.deepEqual(context.conversationHistory, [
+      { role: "assistant", content: "Workspace ready for Lab 4." },
     ]);
   });
 

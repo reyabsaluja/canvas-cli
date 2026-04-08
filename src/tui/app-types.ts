@@ -47,6 +47,7 @@ export interface ShellContext {
   extraHelpCommands?: Array<{ cmd: string; desc: string }>;
   pinOptions?: ShellPinOption[];
   getOpenOptions?: () => ShellOpenOption[];
+  onClear?: () => Promise<ChatMessage[]>;
   resolvePinContent?: (pin: ShellPinOption) => Promise<string | null>;
   getLoadedWorkspace?: () => LoadedWorkspace | null;
   getCourseCache?: () => CourseCache | null;

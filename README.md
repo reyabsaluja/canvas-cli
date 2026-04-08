@@ -135,6 +135,7 @@ Global scope:
 | `/manage-courses` | Add, remove, or rename configured courses |
 | `/recent` | Reopen a recent course or workspace |
 | `/open` | Jump straight to a course or recent item |
+| `/clear` | Clear the current chat and reset context |
 | `/home` | Stay in the global home session |
 | `/help` | Show available commands |
 | `/quit` | Exit canvas-cli |
@@ -148,6 +149,7 @@ Course scope:
 | `/modules` | Show course modules |
 | `/manage-courses` | Add, remove, or rename configured courses |
 | `/open` | Open an assignment or cached course resource |
+| `/clear` | Clear the current chat and reset context |
 | `/back` | Return to global scope |
 | `/home` | Return to global scope |
 | `/help` | Show course-scope commands |
@@ -165,6 +167,7 @@ Workspace scope:
 | `/status` | Show workspace status |
 | `/open` | Open a workspace or course resource by name |
 | `/pin` | Attach a workspace file or cached attachment to your next prompt |
+| `/clear` | Clear the current chat and reset context |
 | `/refresh` | Refresh the workspace from the latest course cache |
 | `/manage-courses` | Add, remove, or rename configured courses |
 | `/back` | Return to the course session |

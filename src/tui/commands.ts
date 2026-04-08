@@ -28,6 +28,11 @@ export const COMMANDS: CommandDefinition[] = [
   { name: "/evidence", description: "Show confirmed vs inferred sources", scopes: ["workspace"] },
   { name: "/status", description: "Show workspace status", scopes: ["workspace"] },
   { name: "/pin", description: "Attach a file to your next prompt", scopes: ["workspace"] },
+  {
+    name: "/clear",
+    description: "Clear this chat and reset the current context",
+    scopes: ["global", "course", "workspace"],
+  },
   { name: "/refresh", description: "Refresh the current workspace", scopes: ["workspace"] },
   { name: "/back", description: "Go up one scope", scopes: ["course", "workspace"] },
   {

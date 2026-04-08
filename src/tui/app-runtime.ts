@@ -73,6 +73,7 @@ export async function createShellContext(
         placeholder: "Ask about your courses, or use /courses and /recent",
       },
       bannerRenderer: (buf) => renderGlobalBanner(buf, services, recent),
+      onClear: async () => buildGlobalIntroMessages(recent, [], unavailableCourses),
       onAsk: async (input, callbacks) => {
         if (!services.aiConfig) {
           return {
@@ -110,6 +111,8 @@ export async function createShellContext(
           scopeLabel: getGlobalScopeLabel(),
           placeholder: "Ask about your courses, or use /courses and /recent",
         },
+        onClear: async () =>
+          buildGlobalIntroMessages([], [], getUnavailableConfiguredCourses(services)),
         onAsk: async () => ({
           content: "That course is no longer available. Use /courses to pick another one.",
         }),
@@ -219,6 +222,10 @@ export async function createShellContext(
         placeholder: "Ask about this course, or use /assignments",
       },
       getOpenOptions: () => openOptions,
+      onClear: async () => {
+        await hydrateCourseData();
+        return buildCourseIntroMessages(course, assignments, cache !== null);
+      },
       onReady: async (api) => {
         await hydrateCourseData(api);
       },
@@ -275,6 +282,7 @@ async function loadOrCreateWorkspaceShell(
         placeholder: "Ask about your courses, or use /courses and /recent",
       },
       bannerRenderer: (buf) => renderGlobalBanner(buf, services, []),
+      onClear: async () => buildGlobalIntroMessages([], [], unavailableCourses),
       onAsk: async () => ({
         content: "Open another course or workspace to continue.",
       }),
@@ -354,6 +362,13 @@ async function loadOrCreateWorkspaceShell(
     getLoadedWorkspace: () => loaded,
     getCourseCache: () => cache,
     getOpenOptions: () => openOptions,
+    onClear: async () => {
+      const nextMessages = buildWorkspaceIntroMessages(loaded, workup, lifecycleState);
+      if (chatContext) {
+        hydrateConversationHistory(chatContext, nextMessages);
+      }
+      return nextMessages;
+    },
     pinOptions: buildWorkspacePinOptions(loaded, cache),
     resolvePinContent: async (pin) => resolveWorkspacePinContent(loaded, cache, pin),
     onAsk: async (input, callbacks) => {
