@@ -1,4 +1,5 @@
 import chalk from "chalk";
+<<<<<<< HEAD
 import {
   clearScreen,
   createBuffer,
@@ -10,6 +11,10 @@ import {
   showCursor,
 } from "./screen.js";
 import { USER_ABORT_EXIT_CODE } from "./chat-shell-exit.js";
+=======
+import { createBuffer, C } from "./screen.js";
+import { startTerminalSession } from "./terminal.js";
+>>>>>>> main
 
 export interface PickerItem {
   label: string;
@@ -35,7 +40,11 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
     let selected = 0;
     let filter = "";
     let filtered = items;
+<<<<<<< HEAD
     let windowStart = 0;
+=======
+    let windowTop = 0;
+>>>>>>> main
 
     function getFiltered(): PickerItem[] {
       if (!filter) return items;
@@ -49,6 +58,7 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
 
     function render(): void {
       const buf = createBuffer();
+      const viewRows = process.stdout.rows || 24;
       filtered = getFiltered();
       if (selected >= filtered.length) selected = Math.max(0, filtered.length - 1);
       if (selected < windowStart) {
@@ -77,9 +87,13 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
         buf.push("");
       }
 
+      const itemStartLine = buf.length;
+      const footerRows = 2;
+      const availableItemRows = Math.max(1, viewRows - itemStartLine - footerRows);
       if (filtered.length === 0) {
         buf.push(C.dim("  No items match your search."));
       } else {
+<<<<<<< HEAD
         if (windowStart > 0) {
           buf.push(C.dim(`  ↑ ${windowStart} earlier item${windowStart === 1 ? "" : "s"}`));
         }
@@ -89,6 +103,35 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
           const absoluteIndex = windowStart + i;
           const isSelected = absoluteIndex === selected;
           const pointer = isSelected ? C.bold("❯ ") : "  ";
+=======
+        const selectedLine = selected;
+        const totalVirtualRows = filtered.length;
+        const margin = 2;
+        const minTop = Math.max(0, selectedLine - Math.max(0, availableItemRows - 1 - margin));
+        const maxTop = Math.max(0, selectedLine - margin);
+        windowTop = Math.max(minTop, Math.min(windowTop, maxTop));
+        windowTop = Math.max(0, Math.min(windowTop, Math.max(0, totalVirtualRows - availableItemRows)));
+
+        const hiddenAbove = windowTop;
+        const hiddenBelow = Math.max(0, totalVirtualRows - (windowTop + availableItemRows));
+        let visibleSlots = availableItemRows;
+
+        if (hiddenAbove > 0 && visibleSlots > 0) {
+          buf.push(C.dim(`  ... ${hiddenAbove} more above`));
+          visibleSlots -= 1;
+        }
+
+        const visibleCount = Math.max(
+          0,
+          Math.min(filtered.length - windowTop, visibleSlots - (hiddenBelow > 0 ? 1 : 0))
+        );
+
+        for (let i = 0; i < visibleCount; i++) {
+          const item = filtered[windowTop + i];
+          const itemIndex = windowTop + i;
+          const isSelected = itemIndex === selected;
+          const pointer = isSelected ? C.primary("❯ ") : "  ";
+>>>>>>> main
           const label = item.dimmed
             ? C.dim(item.label)
             : isSelected
@@ -100,9 +143,14 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
           buf.push(`  ${pointer}${label}${sub}`);
         }
 
+<<<<<<< HEAD
         const remaining = filtered.length - windowEnd;
         if (remaining > 0) {
           buf.push(C.dim(`  ↓ ${remaining} more item${remaining === 1 ? "" : "s"}`));
+=======
+        if (hiddenBelow > 0 && visibleSlots > 0) {
+          buf.push(C.dim(`  ... ${hiddenBelow} more below`));
+>>>>>>> main
         }
       }
 
@@ -116,15 +164,18 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
       buf.flush();
     }
 
+<<<<<<< HEAD
     enterAlternateScreen();
     clearScreen();
     hideCursor();
+=======
+    const cleanupSession = startTerminalSession(onData, {
+      onResize: render,
+      clearOnEnter: false,
+      clearOnExit: false,
+    });
+>>>>>>> main
     render();
-
-    const stdin = process.stdin;
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.setEncoding("utf8");
 
     function onData(key: string): void {
       if (key === "\x1B" || key === "\x1B\x1B") {
@@ -175,6 +226,7 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
     }
 
     function cleanup(): void {
+<<<<<<< HEAD
       stdin.removeListener("data", onData);
       try {
         stdin.setRawMode(false);
@@ -191,8 +243,9 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
       try {
         showCursor();
       } catch {}
+=======
+      cleanupSession();
+>>>>>>> main
     }
-
-    stdin.on("data", onData);
   });
 }
