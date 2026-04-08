@@ -13,7 +13,10 @@ import {
 } from "../ai/provider.js";
 import { extractFileText } from "../extract/extract-text.js";
 import { handleOpenResourceQuery } from "./open-resources.js";
-import { searchCourseIndex } from "./course-retrieval.js";
+import {
+  renderCourseArtifactSearchResult,
+  searchCourseKnowledge,
+} from "./course-retrieval.js";
 import {
   listWorkspaceKnowledgeArtifacts,
   readWorkspaceKnowledgeArtifact,
@@ -322,7 +325,8 @@ async function searchCourse(
   query: string,
   ctx: ChatAgentContext
 ): Promise<string> {
-  return await searchCourseIndex(ctx.cache, query);
+  const result = await searchCourseKnowledge(ctx.cache, query);
+  return renderCourseArtifactSearchResult(result, query);
 }
 
 async function readFile(filename: string, ctx: ChatAgentContext): Promise<string> {

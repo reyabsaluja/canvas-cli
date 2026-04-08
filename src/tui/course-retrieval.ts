@@ -14,6 +14,15 @@ export interface CourseArtifactMatch {
   score: number;
 }
 
+export type CourseArtifactSearchResult =
+  | {
+      status: "ok";
+      matches: CourseArtifactMatch[];
+    }
+  | {
+      status: "missing_cache" | "empty_query" | "not_found";
+    };
+
 export interface CourseDocumentMatch {
   artifact: ArtifactRecord;
   content: string;
@@ -55,6 +64,34 @@ export async function searchCourseArtifacts(
   });
 
   return results.map(mapCourseArtifactMatch);
+}
+
+export async function searchCourseKnowledge(
+  cache: CourseCache | null,
+  query: string,
+  options?: {
+    kinds?: ArtifactKind[];
+    limit?: number;
+  }
+): Promise<CourseArtifactSearchResult> {
+  if (!cache) {
+    return { status: "missing_cache" };
+  }
+
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return { status: "empty_query" };
+  }
+
+  const matches = await searchCourseArtifacts(cache, trimmed, options);
+  if (matches.length === 0) {
+    return { status: "not_found" };
+  }
+
+  return {
+    status: "ok",
+    matches,
+  };
 }
 
 export async function readCourseDocument(
@@ -101,46 +138,33 @@ export async function readCourseDocument(
   };
 }
 
-export async function searchCourseIndex(
-  cache: CourseCache | null,
+export function renderCourseArtifactSearchResult(
+  result: CourseArtifactSearchResult,
   query: string
-): Promise<string> {
-  if (!cache) {
-    return "Course cache is not available yet. Open a workspace or refresh the course first.";
+): string {
+  switch (result.status) {
+    case "missing_cache":
+      return "Course cache is not available yet. Open a workspace or refresh the course first.";
+    case "empty_query":
+      return "Enter a keyword to search the course cache.";
+    case "not_found":
+      return `No course material matched "${query}".`;
+    case "ok":
+      return result.matches
+        .map(({ artifact }) => {
+          const summary = artifact.excerpt ? ` — ${artifact.excerpt}` : "";
+          return `${formatArtifactLabel(artifact)}${summary}`;
+        })
+        .join("\n");
+    default:
+      return `No course material matched "${query}".`;
   }
-
-  const trimmed = query.trim();
-  if (!trimmed) {
-    return "Enter a keyword to search the course cache.";
-  }
-
-  const results = await searchCourseArtifacts(cache, trimmed);
-  if (results.length === 0) {
-    return `No course material matched "${query}".`;
-  }
-
-  return results
-    .map(({ artifact }) => {
-      const summary = artifact.excerpt ? ` — ${artifact.excerpt}` : "";
-      return `${formatArtifactLabel(artifact)}${summary}`;
-    })
-    .join("\n");
 }
 
-export async function readCourseDocumentFromIndex(
-  cache: CourseCache | null,
+export function renderCourseDocumentLookupResult(
+  result: CourseDocumentLookupResult,
   name: string
-): Promise<string> {
-  if (!cache) {
-    return "Could not read course documents because the course cache is missing.";
-  }
-
-  const trimmed = name.trim();
-  if (!trimmed) {
-    return "Provide a document name or title to read from the course cache.";
-  }
-
-  const result = await readCourseDocument(cache, trimmed);
+): string {
   switch (result.status) {
     case "ok":
       return result.document.content;

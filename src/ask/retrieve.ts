@@ -39,17 +39,6 @@ export async function buildWorkspaceRetrievalContext(
 }
 
 /**
- * Backwards-compatible adapter that exposes workspace chunks from the shared
- * knowledge store. Prefer buildWorkspaceRetrievalContext in new code.
- */
-export async function buildChunks(
-  workspace: LoadedWorkspace
-): Promise<ContentChunk[]> {
-  const context = await buildWorkspaceRetrievalContext(workspace);
-  return context.chunks;
-}
-
-/**
  * Retrieve the most relevant workspace sections using the shared artifact index.
  * Returns top-K sections mapped back to the ContentChunk shape for downstream consumers.
  */

@@ -12,8 +12,10 @@ import {
 } from "./services.js";
 import type { ChatMessage } from "./chat-state.js";
 import {
-  readCourseDocumentFromIndex,
-  searchCourseIndex,
+  readCourseDocument,
+  renderCourseArtifactSearchResult,
+  renderCourseDocumentLookupResult,
+  searchCourseKnowledge,
 } from "./course-retrieval.js";
 import { handleOpenResourceQuery } from "./open-resources.js";
 
@@ -235,7 +237,8 @@ export async function answerCourseQuestion(
         }
         case "search_course": {
           const query = String(input.query ?? "");
-          const result = await searchCourseIndex(options.cache, query);
+          const search = await searchCourseKnowledge(options.cache, query);
+          const result = renderCourseArtifactSearchResult(search, query);
           options.onToolCall?.({
             action: "search",
             target: query || "course",
@@ -246,12 +249,16 @@ export async function answerCourseQuestion(
         }
         case "read_course_document": {
           const name = String(input.name ?? "");
-          const result = await readCourseDocumentFromIndex(options.cache, name);
+          const lookup = await readCourseDocument(options.cache, name);
+          const result = renderCourseDocumentLookupResult(lookup, name);
           options.onToolCall?.({
             action: "read",
             target: name || "document",
             result,
-            color: result.startsWith("Could not") ? "red" : "green",
+            color:
+              lookup.status === "ok" || lookup.status === "missing_text"
+                ? "green"
+                : "red",
           });
           return result;
         }

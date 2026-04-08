@@ -17,8 +17,9 @@ import {
   loadArtifactIndex,
 } from "../src/knowledge/artifact-index.js";
 import {
+  renderCourseArtifactSearchResult,
   searchCourseArtifacts,
-  searchCourseIndex,
+  searchCourseKnowledge,
 } from "../src/tui/course-retrieval.js";
 import {
   listWorkspaceKnowledgeArtifacts,
@@ -339,8 +340,8 @@ test("artifact index keeps ask, course search, workspace chat, and overview alig
       cache,
       "waveform screenshot"
     );
-    const renderedCourseSearch = await searchCourseIndex(
-      cache,
+    const renderedCourseSearch = renderCourseArtifactSearchResult(
+      await searchCourseKnowledge(cache, "waveform screenshot"),
       "waveform screenshot"
     );
     const bundle = await buildContextBundle(detail, enrichment, cache);
@@ -430,7 +431,10 @@ test("artifact index invalidation propagates updated workspace and course conten
     const courseMatches = await searchCourseArtifacts(cache, "timing diagram");
     assert.equal(courseMatches[0]?.artifact.title, "lab4-spec.pdf");
 
-    const renderedCourseSearch = await searchCourseIndex(cache, "timing diagram");
+    const renderedCourseSearch = renderCourseArtifactSearchResult(
+      await searchCourseKnowledge(cache, "timing diagram"),
+      "timing diagram"
+    );
     assert.match(renderedCourseSearch, /\[attachment\] lab4-spec\.pdf/);
 
     const chatRead = await readWorkspaceKnowledgeArtifact(

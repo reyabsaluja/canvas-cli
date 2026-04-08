@@ -52,8 +52,10 @@ import {
   createWorkWorkspace,
 } from "../src/workspace/create.js";
 import {
-  readCourseDocumentFromIndex,
-  searchCourseIndex,
+  readCourseDocument,
+  renderCourseArtifactSearchResult,
+  renderCourseDocumentLookupResult,
+  searchCourseKnowledge,
 } from "../src/tui/course-retrieval.js";
 import { buildContextBundle } from "../src/ai/context-bundle.js";
 import {
@@ -1737,13 +1739,22 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
         ingestion: { ingestedAt: "2026-03-29T10:00:00.000Z" },
       } as any;
 
-      const searchResult = await searchCourseIndex(cache, "waveform screenshot");
+      const searchResult = renderCourseArtifactSearchResult(
+        await searchCourseKnowledge(cache, "waveform screenshot"),
+        "waveform screenshot"
+      );
       assert.match(searchResult, /\[attachment\] lab4-spec\.pdf/);
 
-      const pageResult = await searchCourseIndex(cache, "pipeline timing");
+      const pageResult = renderCourseArtifactSearchResult(
+        await searchCourseKnowledge(cache, "pipeline timing"),
+        "pipeline timing"
+      );
       assert.match(pageResult, /\[page\] Lab Brief/);
 
-      const readResult = await readCourseDocumentFromIndex(cache, "lab4 spec");
+      const readResult = renderCourseDocumentLookupResult(
+        await readCourseDocument(cache, "lab4 spec"),
+        "lab4 spec"
+      );
       assert.match(readResult, /waveform screenshot/);
     });
   });

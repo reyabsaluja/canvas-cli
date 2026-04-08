@@ -7,8 +7,10 @@ import type { CourseCache } from "../src/enrich/cache-loader.js";
 import { clearArtifactIndexCache } from "../src/knowledge/artifact-index.js";
 import {
   readCourseDocument,
-  readCourseDocumentFromIndex,
+  renderCourseArtifactSearchResult,
+  renderCourseDocumentLookupResult,
   searchCourseArtifacts,
+  searchCourseKnowledge,
 } from "../src/tui/course-retrieval.js";
 
 async function withTempDir(
@@ -199,7 +201,32 @@ test("course retrieval preserves missing extracted text guidance", async () => {
       assert.equal(result.artifact?.title, "lab4-spec.pdf");
     }
 
-    const rendered = await readCourseDocumentFromIndex(cache, "lab4 spec");
+    const rendered = renderCourseDocumentLookupResult(result, "lab4 spec");
     assert.match(rendered, /cached extracted text is missing/);
+  });
+});
+
+test("course search rendering uses structured search results from the shared artifact index", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "attachments"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "attachments", "lab4-spec.pdf.txt"),
+      "Deliverables include a waveform screenshot and a short analysis.\n",
+      "utf-8"
+    );
+
+    const cache = makeCourseCache(coursePath);
+    const search = await searchCourseKnowledge(cache, "waveform screenshot");
+    assert.equal(search.status, "ok");
+
+    const rendered = renderCourseArtifactSearchResult(
+      search,
+      "waveform screenshot"
+    );
+    assert.match(rendered, /\[attachment\] lab4-spec\.pdf/);
   });
 });

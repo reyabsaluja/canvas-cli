@@ -123,7 +123,7 @@ export async function buildContextBundle(
   return bundle;
 }
 
-export async function buildOverviewContextSources(
+async function buildOverviewContextSources(
   detail: AssignmentDetail,
   enrichment: EnrichmentSummary | null,
   cache: CourseCache | null
