@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import path from "node:path";
 import { loadCourseCache } from "../enrich/cache-loader.js";
 import {
@@ -12,6 +13,7 @@ import type { ChatMessage } from "./chat-state.js";
 import { formatDueCompact } from "./services.js";
 import type { ShellPinOption } from "./app-types.js";
 import { getExtractedAttachmentPath } from "../enrich/course-documents.js";
+import { extractFileText } from "../extract/extract-text.js";
 
 export function formatWorkspaceStatusLabel(
   lifecycleState: string
@@ -120,13 +122,30 @@ export function buildWorkspacePinOptions(
   cache: Awaited<ReturnType<typeof loadCourseCache>>
 ): ShellPinOption[] {
   const options: ShellPinOption[] = [];
+  const addOption = (option: ShellPinOption): void => {
+    if (!options.some((existing) => existing.label === option.label)) {
+      options.push(option);
+    }
+  };
+
   for (const extracted of loaded.extractedFiles) {
-    options.push({
+    addOption({
       name: extracted.name,
-      label: extracted.name
-        .replace(/\.txt$/, "")
-        .replace(/[._\s-]/g, "_")
-        .toLowerCase(),
+      label: toPinLabel(extracted.name),
+    });
+  }
+  for (const file of listWorkspacePinFilesSync(loaded.path, "attachments")) {
+    addOption({
+      name: file,
+      label: toPinLabel(file),
+      workspaceRelativePath: file,
+    });
+  }
+  for (const file of listWorkspacePinFilesSync(loaded.path, "resources")) {
+    addOption({
+      name: file,
+      label: toPinLabel(file),
+      workspaceRelativePath: file,
     });
   }
   if (cache) {
@@ -134,22 +153,17 @@ export function buildWorkspacePinOptions(
       if (attachment.status !== "downloaded" && attachment.status !== "skipped") {
         continue;
       }
-      const label = attachment.originalFilename
-        .replace(/\.[^.]+$/, "")
-        .replace(/[.\s-]/g, "_")
-        .toLowerCase();
-      if (!options.some((option) => option.label === label)) {
-        options.push({
-          name: attachment.originalFilename,
-          label,
-          localPath: attachment.localPath,
-        });
-      }
+      addOption({
+        name: attachment.originalFilename,
+        label: toPinLabel(attachment.localPath || attachment.originalFilename),
+        localPath: attachment.localPath,
+      });
     }
   }
-  if (loaded.assignmentMd) options.push({ name: "assignment.md", label: "assignment" });
-  if (loaded.planMd) options.push({ name: "plan.md", label: "plan" });
-  if (loaded.workupJson) options.push({ name: "workup.json", label: "workup" });
+  if (loaded.assignmentMd) addOption({ name: "assignment.md", label: "assignment" });
+  if (loaded.planMd) addOption({ name: "plan.md", label: "plan" });
+  if (loaded.notesMd) addOption({ name: "notes.md", label: "notes" });
+  if (loaded.workupJson) addOption({ name: "workup.json", label: "workup" });
   return options;
 }
 
@@ -164,13 +178,20 @@ export async function resolveWorkspacePinContent(
       return content ? content.slice(0, 15000) : null;
     }
   }
+  if (pin.workspaceRelativePath) {
+    const workspaceFilePath = path.join(loaded.path, pin.workspaceRelativePath);
+    const content = await readWorkspacePinFile(workspaceFilePath);
+    return content ? content.slice(0, 15000) : null;
+  }
   if (pin.localPath && cache) {
     const extractedPath = getExtractedAttachmentPath(cache.coursePath, pin.localPath);
     const extracted = await readSafe(extractedPath);
     if (extracted) {
       return extracted.slice(0, 15000);
     }
-    return null;
+    const fallbackPath = path.join(cache.coursePath, pin.localPath);
+    const content = await readWorkspacePinFile(fallbackPath);
+    return content ? content.slice(0, 15000) : null;
   }
   if (pin.name === "assignment.md" && loaded.assignmentMd) {
     return loaded.assignmentMd.slice(0, 15000);
@@ -178,10 +199,81 @@ export async function resolveWorkspacePinContent(
   if (pin.name === "plan.md" && loaded.planMd) {
     return loaded.planMd.slice(0, 15000);
   }
+  if (pin.name === "notes.md" && loaded.notesMd) {
+    return loaded.notesMd.slice(0, 15000);
+  }
   if (pin.name === "workup.json" && loaded.workupJson) {
     return JSON.stringify(loaded.workupJson, null, 2).slice(0, 15000);
   }
   return null;
+}
+
+function listWorkspacePinFilesSync(
+  workspacePath: string,
+  relativeDir: string
+): string[] {
+  const root = path.join(workspacePath, relativeDir);
+  try {
+    const entries: string[] = [];
+    walkWorkspacePinFilesSync(root, relativeDir, entries);
+    return entries.sort((a, b) => a.localeCompare(b));
+  } catch {
+    return [];
+  }
+}
+
+function walkWorkspacePinFilesSync(
+  absoluteDir: string,
+  relativeDir: string,
+  entries: string[]
+): void {
+  const children = fsSync.readdirSync(absoluteDir, { withFileTypes: true });
+  for (const child of children) {
+    const childAbsolute = path.join(absoluteDir, child.name);
+    const childRelative = path.join(relativeDir, child.name);
+    if (child.isDirectory()) {
+      walkWorkspacePinFilesSync(childAbsolute, childRelative, entries);
+      continue;
+    }
+    if (child.isFile()) {
+      entries.push(childRelative);
+    }
+  }
+}
+
+async function readWorkspacePinFile(filePath: string): Promise<string | null> {
+  const ext = path.extname(filePath).toLowerCase();
+  const isPlainText = new Set([
+    ".txt",
+    ".md",
+    ".json",
+    ".csv",
+    ".html",
+    ".htm",
+    ".py",
+    ".c",
+    ".h",
+    ".java",
+    ".js",
+    ".ts",
+    ".s",
+    ".asm",
+  ]);
+  if (isPlainText.has(ext)) {
+    return await readSafe(filePath);
+  }
+
+  const extracted = await extractFileText(filePath, path.basename(filePath));
+  return extracted?.trim() ? extracted : null;
+}
+
+function toPinLabel(value: string): string {
+  return value
+    .replace(/\.txt$/i, "")
+    .replace(/[./\\\s-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase();
 }
 
 async function readSafe(filePath: string): Promise<string | null> {

@@ -250,6 +250,7 @@ export async function runChatShell<TExit>(
       scopeLabel: options.runtime.scopeLabel,
       statusLabel: options.runtime.statusLabel,
       modelLabel: options.modelLabel,
+      currentSpinnerLine,
       slashMatches: showSlashMenu ? getSlashMatches() : [],
       openMatches: getOpenMatches(),
       pinMatches: getPinMatches(),
@@ -264,10 +265,10 @@ export async function runChatShell<TExit>(
     spinnerTimer = setInterval(() => {
       if (!isProcessing || !currentSpinnerLine) return;
       spinnerFrame = (spinnerFrame + 1) % SPINNER.length;
-      currentSpinnerLine = `  ${C.dim(SPINNER[spinnerFrame])} ${C.text(
+      currentSpinnerLine = `${C.dim(SPINNER[spinnerFrame])} ${C.text(
         currentVerb
       )}${C.dim("...")}`;
-      render();
+      renderInputOnly();
     }, 80);
   }
 
@@ -407,7 +408,7 @@ export async function runChatShell<TExit>(
       isProcessing = true;
       currentVerb = VERBS[Math.floor(Math.random() * VERBS.length)]!;
       spinnerFrame = 0;
-      currentSpinnerLine = `  ${C.dim(SPINNER[0])} ${C.text(
+      currentSpinnerLine = `${C.dim(SPINNER[0])} ${C.text(
         currentVerb
       )}${C.dim("...")}`;
       render();
@@ -441,7 +442,7 @@ export async function runChatShell<TExit>(
             });
             markTranscriptDirty();
             persistence.schedule();
-            currentSpinnerLine = `  ${C.dim(
+            currentSpinnerLine = `${C.dim(
               SPINNER[spinnerFrame]
             )} ${C.text(currentVerb)}${C.dim("...")}`;
             render();
@@ -736,7 +737,7 @@ export async function runChatShell<TExit>(
       if (key === "\x1B") {
         if (showSlashMenu) {
           showSlashMenu = false;
-          render();
+          renderInputOnly();
         }
         return;
       }
@@ -771,7 +772,7 @@ export async function runChatShell<TExit>(
               `/pin ${selected.label}`
             );
             pinSelected = 0;
-            render();
+            renderInputOnly();
             return;
           }
         }
@@ -865,24 +866,15 @@ export async function runChatShell<TExit>(
       if (key === "\x7F" || key === "\b") {
         if (inputBuffer.length > 0) {
           inputBuffer = inputBuffer.slice(0, -1);
-          const wasSlash = showSlashMenu;
           showSlashMenu = inputBuffer.startsWith("/");
           if (getActiveOpenPartial() !== null) {
             openSelected = 0;
+          } else if (getActivePinPartial() !== null) {
+            pinSelected = 0;
           } else {
             slashSelected = 0;
           }
-          if (wasSlash && !showSlashMenu) {
-            render();
-          } else if (
-            showSlashMenu ||
-            getActiveOpenPartial() !== null ||
-            getActivePinPartial() !== null
-          ) {
-            render();
-          } else {
-            renderInputOnly();
-          }
+          renderInputOnly();
         }
         return;
       }
@@ -893,7 +885,7 @@ export async function runChatShell<TExit>(
           const selected = openMatches[openSelected]!;
           inputBuffer = `/open ${selected.query}`;
           openSelected = 0;
-          render();
+          renderInputOnly();
         }
         return;
       }
@@ -907,7 +899,7 @@ export async function runChatShell<TExit>(
             `/pin ${selected.label}`
           );
           pinSelected = 0;
-          render();
+          renderInputOnly();
         }
         return;
       }
@@ -918,29 +910,22 @@ export async function runChatShell<TExit>(
           inputBuffer = matches[slashSelected]!.name + " ";
           slashSelected = 0;
           showSlashMenu = false;
-          render();
+          renderInputOnly();
         }
         return;
       }
 
       if (key.length === 1 && key >= " ") {
         inputBuffer += key;
-        const wasSlash = showSlashMenu;
         showSlashMenu = inputBuffer.startsWith("/");
         if (getActiveOpenPartial() !== null) {
           openSelected = 0;
-          render();
         } else if (getActivePinPartial() !== null) {
           pinSelected = 0;
-          render();
         } else if (showSlashMenu) {
           slashSelected = 0;
-          render();
-        } else if (wasSlash) {
-          render();
-        } else {
-          renderInputOnly();
         }
+        renderInputOnly();
       }
     }
 

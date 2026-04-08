@@ -56,7 +56,10 @@ import {
   searchCourseIndex,
 } from "../src/tui/course-retrieval.js";
 import { buildContextBundle } from "../src/ai/context-bundle.js";
-import { resolveWorkspacePinContent } from "../src/tui/app-workspace-content.js";
+import {
+  buildWorkspacePinOptions,
+  resolveWorkspacePinContent,
+} from "../src/tui/app-workspace-content.js";
 import {
   extractInlinePins,
   mergePinOptions,
@@ -193,6 +196,34 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     assert.equal(renderedLines.length, 1);
     assert.ok(stripAnsi(renderedLines[0] ?? "").includes("/courses"));
     assert.ok(stripAnsi(renderedLines[0] ?? "").length < cols * 0.25);
+  });
+
+  await t.test("tool transcript cards stay wide and wrap long content", async () => {
+    const cols = 160;
+    const longLine = Array.from({ length: 28 }, (_, index) => `token${index}`).join(" ");
+    const lines = buildTranscriptLines({
+      messages: [
+        {
+          role: "tool",
+          content: longLine,
+          toolAction: "search",
+          toolTarget: "lab 4",
+          toolColor: "green",
+        } as any,
+      ],
+      contentWidth: 96,
+      cols,
+      expanded: false,
+    });
+
+    const renderedLines = lines.filter((line) => stripAnsi(line).trim().length > 0);
+    assert.ok(
+      renderedLines.some((line) => stripAnsi(line).length > cols * 0.6),
+      "expected wide tool cards"
+    );
+    const rendered = stripAnsi(renderedLines.join("\n"));
+    assert.match(rendered, /token0/);
+    assert.match(rendered, /token27/);
   });
 
   await t.test("persists and reopens scoped sessions", async () => {
@@ -1841,6 +1872,76 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
       );
 
       assert.match(content ?? "", /Pinned cached attachment text/);
+    });
+  });
+
+  await t.test("workspace pinning includes workspace attachments and resources", async () => {
+    await withTempCwd(async (tempDir) => {
+      const workspacePath = path.join(tempDir, "workspace");
+      await fs.mkdir(path.join(workspacePath, "attachments", "modules"), {
+        recursive: true,
+      });
+      await fs.mkdir(path.join(workspacePath, "resources"), {
+        recursive: true,
+      });
+      await fs.writeFile(
+        path.join(workspacePath, "attachments", "modules", "lab4-spec.pdf"),
+        "fake-pdf",
+        "utf-8"
+      );
+      await fs.writeFile(
+        path.join(workspacePath, "resources", "starter.txt"),
+        "starter resource text",
+        "utf-8"
+      );
+
+      const loaded = {
+        path: workspacePath,
+        sessionSlug: "ws",
+        assignmentId: 42,
+        assignmentName: "Lab 4",
+        courseId: 17,
+        courseName: "ECE243",
+        courseCode: "ECE243H1",
+        preparedAt: null,
+        workspaceState: "ready",
+        assignmentMd: "# Assignment",
+        planMd: null,
+        notesMd: "# Notes",
+        workupJson: null,
+        extractedFiles: [],
+        extractedFileCache: new Map(),
+      };
+
+      const options = buildWorkspacePinOptions(loaded as any, null as any);
+
+      assert.ok(
+        options.some(
+          (option) =>
+            option.name === "attachments/modules/lab4-spec.pdf" &&
+            option.workspaceRelativePath === "attachments/modules/lab4-spec.pdf"
+        )
+      );
+      assert.ok(
+        options.some(
+          (option) =>
+            option.name === "resources/starter.txt" &&
+            option.workspaceRelativePath === "resources/starter.txt"
+        )
+      );
+      assert.ok(options.some((option) => option.label === "notes"));
+
+      const resourceContent = await resolveWorkspacePinContent(
+        loaded as any,
+        null as any,
+        {
+          name: "resources/starter.txt",
+          label: "resources_starter",
+          workspaceRelativePath: "resources/starter.txt",
+        }
+      );
+
+      assert.match(resourceContent ?? "", /starter resource text/);
     });
   });
 

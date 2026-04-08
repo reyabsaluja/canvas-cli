@@ -30,6 +30,7 @@ export interface ShellPinOption {
   name: string;
   label: string;
   localPath?: string;
+  workspaceRelativePath?: string;
 }
 
 export interface ShellOpenOption {

@@ -25,6 +25,7 @@ const statusBarGrey = chalk.hex("#9ca3af");
 
 export const STICKY_BOTTOM_ROWS = 4;
 const CHAT_GAP_ROWS = 2;
+const MAX_OVERLAY_ROWS = 8;
 export const MAIN_VIEW_BOTTOM_RESERVE = STICKY_BOTTOM_ROWS + CHAT_GAP_ROWS;
 
 export interface RenderChatFrameOptions {
@@ -106,13 +107,10 @@ export function renderChatFrame(
           ),
         ]
       : [];
-  const spinnerPaddingCount =
-    options.isProcessing && options.currentSpinnerLine ? 3 : 0;
   const totalVirtualLines =
     headerLines.length +
     olderHintLines.length +
     options.transcriptLines.length +
-    spinnerPaddingCount +
     CHAT_GAP_ROWS;
   const maxContent = Math.max(1, rows - MAIN_VIEW_BOTTOM_RESERVE);
   const maxScroll = Math.max(0, totalVirtualLines - maxContent);
@@ -132,15 +130,12 @@ export function renderChatFrame(
     end,
     headerLines.length + olderHintLines.length
   );
-  const spinnerStart =
-    headerLines.length + olderHintLines.length + options.transcriptLines.length;
-  appendVisibleBlankSection(buf, spinnerPaddingCount, start, end, spinnerStart);
   appendVisibleBlankSection(
     buf,
     CHAT_GAP_ROWS,
     start,
     end,
-    spinnerStart + spinnerPaddingCount
+    headerLines.length + olderHintLines.length + options.transcriptLines.length
   );
 
   buf.flush(MAIN_VIEW_BOTTOM_RESERVE, chatScrollOffset);
@@ -150,9 +145,10 @@ export function renderChatFrame(
       options.inputBuffer,
       options.runtime.scopeLabel,
       options.runtime.statusLabel,
-      options.modelLabel
+      options.modelLabel,
+      options.currentSpinnerLine
     ) +
-      renderSlashPinOverlay(
+      renderAutocompleteOverlay(
         options.slashMatches,
         options.openMatches,
         options.pinMatches,
@@ -172,6 +168,7 @@ export function renderInputFooter(options: {
   scopeLabel: string;
   statusLabel?: string;
   modelLabel: string;
+  currentSpinnerLine: string;
   slashMatches: CommandDefinition[];
   openMatches: ShellOpenOption[];
   pinMatches: ShellPinOption[];
@@ -185,9 +182,10 @@ export function renderInputFooter(options: {
       options.inputBuffer,
       options.scopeLabel,
       options.statusLabel,
-      options.modelLabel
+      options.modelLabel,
+      options.currentSpinnerLine
     ) +
-      renderSlashPinOverlay(
+      renderAutocompleteOverlay(
         options.slashMatches,
         options.openMatches,
         options.pinMatches,
@@ -199,7 +197,7 @@ export function renderInputFooter(options: {
   );
 }
 
-function renderSlashPinOverlay(
+function renderAutocompleteOverlay(
   slashMatches: CommandDefinition[],
   openMatches: ShellOpenOption[],
   pinMatches: ShellPinOption[],
@@ -214,6 +212,7 @@ function renderSlashPinOverlay(
   if (lastRowAboveInput < 1) return "";
 
   const writes: string[] = [];
+  const clearStartRow = Math.max(1, lastRowAboveInput - MAX_OVERLAY_ROWS + 1);
   const fitToRow = (value: string): string => {
     const visible = stripAnsi(value).length;
     if (visible > maxVisibleCols) {
@@ -221,9 +220,12 @@ function renderSlashPinOverlay(
     }
     return value;
   };
+  for (let row = clearStartRow; row <= lastRowAboveInput; row++) {
+    writes.push(`\x1B[${row};1H\x1B[0m\x1B[2K`);
+  }
 
   if (openMatches.length > 0) {
-    const maxShow = Math.min(openMatches.length, lastRowAboveInput, 8);
+    const maxShow = Math.min(openMatches.length, lastRowAboveInput, MAX_OVERLAY_ROWS);
     const start = Math.max(
       0,
       Math.min(openSelected - Math.floor(maxShow / 2), openMatches.length - maxShow)
@@ -244,11 +246,12 @@ function renderSlashPinOverlay(
         )}`
       );
     }
+    writes.push("\x1B[0m");
     return writes.join("");
   }
 
   if (pinMatches.length > 0) {
-    const maxShow = Math.min(pinMatches.length, lastRowAboveInput, 8);
+    const maxShow = Math.min(pinMatches.length, lastRowAboveInput, MAX_OVERLAY_ROWS);
     const start = Math.max(
       0,
       Math.min(pinSelected - Math.floor(maxShow / 2), pinMatches.length - maxShow)
@@ -267,11 +270,15 @@ function renderSlashPinOverlay(
         )}`
       );
     }
+    writes.push("\x1B[0m");
     return writes.join("");
   }
 
-  if (slashMatches.length === 0) return "";
-  const maxShow = Math.min(slashMatches.length, lastRowAboveInput);
+  if (slashMatches.length === 0) {
+    writes.push("\x1B[0m");
+    return writes.join("");
+  }
+  const maxShow = Math.min(slashMatches.length, lastRowAboveInput, MAX_OVERLAY_ROWS);
   const start = Math.max(
     0,
     Math.min(slashSelected - Math.floor(maxShow / 2), slashMatches.length - maxShow)
@@ -289,6 +296,7 @@ function renderSlashPinOverlay(
     );
   }
 
+  writes.push("\x1B[0m");
   return writes.join("");
 }
 
@@ -297,7 +305,8 @@ function renderStickyBottom(
   inputBuffer: string,
   leftStatus: string,
   runtimeStatus: string | undefined,
-  modelLabel: string
+  modelLabel: string,
+  currentSpinnerLine: string
 ): string {
   const { cols, rows } = getTermSize();
   const footerIndent = "  ";
@@ -340,18 +349,24 @@ function renderStickyBottom(
   let left = runtimeStatus ? `${leftStatus} · ${runtimeStatus}` : leftStatus;
   let right = modelLabel;
   const rightVisible = stripAnsi(right).length;
-  if (stripAnsi(left).length + rightVisible + 1 > footerWidth) {
-    const maxLeft = Math.max(0, footerWidth - rightVisible - 1);
+  const spinnerVisible = currentSpinnerLine
+    ? stripAnsi(currentSpinnerLine).length + stripAnsi(C.dim(" · ")).length
+    : 0;
+  if (stripAnsi(left).length + spinnerVisible + rightVisible + 1 > footerWidth) {
+    const maxLeft = Math.max(0, footerWidth - rightVisible - spinnerVisible - 1);
     left =
       maxLeft > 3 ? left.slice(0, maxLeft - 3) + "..." : left.slice(0, maxLeft);
   }
+  const leftStyled = currentSpinnerLine
+    ? `${statusBarGrey(left)}${C.dim(" · ")}${currentSpinnerLine}`
+    : statusBarGrey(left);
   const gap = Math.max(
     0,
-    footerWidth - stripAnsi(left).length - rightVisible
+    footerWidth - stripAnsi(leftStyled).length - rightVisible
   );
   const statusLine =
     footerIndent +
-    statusBarGrey(left) +
+    leftStyled +
     " ".repeat(gap) +
     statusBarGrey(right);
   const startRow = rows - 3;
@@ -401,10 +416,7 @@ function getRenderedMessageLines(
       }
 
       const indent = "  ";
-      const bubbleWidth = Math.max(
-        24,
-        Math.min(Math.max(maxWidth, cols - 8), cols - 4)
-      );
+      const bubbleWidth = getTranscriptBlockWidth(maxWidth, cols);
       const innerWidth = Math.max(1, bubbleWidth - 2);
       const wrappedLines = wrapLines(message.content, innerWidth);
       const emptyLine = " ".repeat(bubbleWidth);
@@ -445,39 +457,46 @@ function getRenderedMessageLines(
       const bg = message.toolColor === "red" ? toolBgRed : toolBgGreen;
       const targetColor =
         message.toolColor === "red" ? toolTargetRed : toolTargetGreen;
-      const boxWidth = Math.max(maxWidth, 40);
+      const boxWidth = getTranscriptBlockWidth(maxWidth, cols);
+      const innerWidth = Math.max(1, boxWidth - 2);
       const empty = " ".repeat(boxWidth);
+      const padToolInner = (value: string) => {
+        const visible = stripAnsi(value).length;
+        return value + " ".repeat(Math.max(0, innerWidth - visible));
+      };
       lines.push("  " + bg(empty));
-      const headerText = `${message.toolAction ?? "tool"} ${message.toolTarget ?? ""}`;
-      const headerPad = " ".repeat(Math.max(0, boxWidth - headerText.length - 1));
       lines.push(
         "  " +
           bg(
-            ` ${toolActionColor(message.toolAction ?? "tool")} ${targetColor(
-              message.toolTarget ?? ""
-            )}${headerPad}`
+            ` ${padToolInner(
+              `${toolActionColor(message.toolAction ?? "tool")} ${targetColor(
+                message.toolTarget ?? ""
+              )}`
+            )} `
           )
       );
-      const contentLines = message.content.split("\n");
-      const showLines = expanded ? contentLines : contentLines.slice(0, 8);
-      const remaining = expanded ? 0 : Math.max(0, contentLines.length - 8);
       lines.push("  " + bg(empty));
+      const wrappedContentLines = message.content
+        .split("\n")
+        .flatMap((line) => wrapLines(line, Math.max(1, innerWidth - 1)));
+      const showLines = expanded
+        ? wrappedContentLines
+        : wrappedContentLines.slice(0, 8);
+      const remaining = expanded
+        ? 0
+        : Math.max(0, wrappedContentLines.length - 8);
       for (const line of showLines) {
-        const trimmed = line.slice(0, boxWidth - 4);
-        const padLen = Math.max(0, boxWidth - trimmed.length - 3);
-        lines.push("  " + bg(`  ${chalk.white(trimmed)}${" ".repeat(padLen)} `));
+        lines.push("  " + bg(` ${padToolInner(chalk.white(line))} `));
       }
       if (remaining > 0) {
-        const moreText = `... (${remaining} more lines, `;
-        const totalLength =
-          moreText.length + "ctrl+o".length + " to expand)".length;
-        const padLen = Math.max(0, boxWidth - totalLength - 3);
         lines.push(
           "  " +
             bg(
-              `  ${C.dim(moreText)}${C.dimmer("ctrl+o")}${C.dim(
-                " to expand)"
-              )}${" ".repeat(padLen)} `
+              ` ${padToolInner(
+                `${C.dim(`... (${remaining} more lines, `)}${C.dimmer(
+                  "ctrl+o"
+                )}${C.dim(" to expand)")}`
+              )} `
             )
         );
       }
@@ -587,6 +606,16 @@ function wrapLines(text: string, maxWidth: number): string[] {
   let current = "";
   for (const word of words) {
     if (!word) continue;
+    if (word.length > maxWidth) {
+      if (current) {
+        lines.push(current);
+        current = "";
+      }
+      for (let index = 0; index < word.length; index += maxWidth) {
+        lines.push(word.slice(index, index + maxWidth));
+      }
+      continue;
+    }
     if (current.length + word.length + 1 > maxWidth && current.length > 0) {
       lines.push(current);
       current = word;
@@ -596,4 +625,8 @@ function wrapLines(text: string, maxWidth: number): string[] {
   }
   if (current) lines.push(current);
   return lines.length > 0 ? lines : [""];
+}
+
+function getTranscriptBlockWidth(maxWidth: number, cols: number): number {
+  return Math.max(24, Math.min(Math.max(maxWidth, cols - 8), cols - 4));
 }
