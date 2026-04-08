@@ -57,6 +57,11 @@ import {
 } from "../src/tui/course-retrieval.js";
 import { buildContextBundle } from "../src/ai/context-bundle.js";
 import { resolveWorkspacePinContent } from "../src/tui/app-workspace-content.js";
+import {
+  extractInlinePins,
+  mergePinOptions,
+  resolvePinReferences,
+} from "../src/tui/pins.js";
 
 async function writeJson(filePath: string, data: unknown): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -624,16 +629,68 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     const workspaceCommands = getAvailableCommands(COMMANDS, "workspace").map((command) => command.name);
 
     assert.ok(globalCommands.includes("/manage-courses"));
+    assert.ok(!globalCommands.includes("/pin"));
     assert.ok(!globalCommands.includes("/overview"));
     assert.ok(courseCommands.includes("/manage-courses"));
     assert.ok(courseCommands.includes("/assignments"));
+    assert.ok(!courseCommands.includes("/pin"));
     assert.ok(!courseCommands.includes("/overview"));
     assert.ok(workspaceCommands.includes("/manage-courses"));
+    assert.ok(workspaceCommands.includes("/pin"));
     assert.ok(workspaceCommands.includes("/overview"));
 
     assert.equal(resolveCommand(COMMANDS, "/reqs")?.name, "/requirements");
     assert.match(formatScopeTargets(["workspace"]), /Open an assignment first/);
     assert.match(formatScopeTargets(["course", "workspace"]), /a course/);
+  });
+
+  await t.test("pin helpers resolve unique matches and surface ambiguous ones", async () => {
+    const options = [
+      { name: "assignment.md", label: "assignment" },
+      { name: "lab4-spec.pdf", label: "lab4_spec" },
+      { name: "lab4-summary.pdf", label: "lab4_summary" },
+    ];
+
+    const resolution = resolvePinReferences(
+      ["assign", "lab4", "missing"],
+      options
+    );
+
+    assert.deepEqual(
+      resolution.resolved.map((pin) => pin.label),
+      ["assignment"]
+    );
+    assert.deepEqual(resolution.missing, ["missing"]);
+    assert.deepEqual(
+      resolution.ambiguous.map((entry) => entry.query),
+      ["lab4"]
+    );
+  });
+
+  await t.test("inline pin extraction strips pin tokens and dedupes queued files", async () => {
+    const options = [
+      { name: "assignment.md", label: "assignment" },
+      { name: "lab4-spec.pdf", label: "lab4_spec" },
+    ];
+
+    const extracted = extractInlinePins(
+      "compare /pin assignment against /pin lab4_spec before I submit",
+      options
+    );
+    const merged = mergePinOptions(
+      [{ name: "assignment.md", label: "assignment" }],
+      extracted.resolved
+    );
+
+    assert.equal(extracted.cleanInput, "compare against before I submit");
+    assert.deepEqual(
+      extracted.resolved.map((pin) => pin.label),
+      ["assignment", "lab4_spec"]
+    );
+    assert.deepEqual(
+      merged.map((pin) => pin.label),
+      ["assignment", "lab4_spec"]
+    );
   });
 
   await t.test("workspace chat context helpers preserve conversation history shape", async () => {

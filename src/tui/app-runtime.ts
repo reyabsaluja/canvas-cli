@@ -339,7 +339,6 @@ async function loadOrCreateWorkspaceShell(
     },
     getLoadedWorkspace: () => loaded,
     getCourseCache: () => cache,
-    extraHelpCommands: [{ cmd: "/pin", desc: "Attach a workspace file to your prompt" }],
     pinOptions: buildWorkspacePinOptions(loaded, cache),
     resolvePinContent: async (pin) => resolveWorkspacePinContent(loaded, cache, pin),
     onAsk: async (input, callbacks) => {

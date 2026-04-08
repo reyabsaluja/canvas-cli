@@ -13,6 +13,11 @@ import {
 } from "./commands.js";
 import type { ShellPinOption, ShellRuntimeApi } from "./app-types.js";
 import {
+  extractInlinePins,
+  mergePinOptions,
+  resolvePinReferences,
+} from "./pins.js";
+import {
   MAIN_VIEW_BOTTOM_RESERVE,
   buildBannerLines,
   buildTranscriptLines,
@@ -90,6 +95,7 @@ export async function runChatShell<TExit>(
   let pinSelected = 0;
   let showSlashMenu = false;
   let isProcessing = false;
+  let pendingPins: ShellPinOption[] = [];
   let toolOutputExpanded = false;
   let currentSpinnerLine = "";
   let spinnerFrame = 0;
@@ -297,18 +303,35 @@ export async function runChatShell<TExit>(
     }
 
     async function handlePrompt(input: string): Promise<void> {
-      const pinRegex = /\/pin\s+(\S+)/g;
-      const pins: ShellPinOption[] = [];
-      let pinMatch: RegExpExecArray | null;
-      while ((pinMatch = pinRegex.exec(input)) !== null) {
-        const label = pinMatch[1].toLowerCase();
-        const match = (options.pinOptions ?? []).find(
-          (pin) => pin.label === label || pin.label.includes(label)
-        );
-        if (match) pins.push(match);
+      const extractedPins = extractInlinePins(input, options.pinOptions ?? []);
+      if (extractedPins.missing.length > 0 || extractedPins.ambiguous.length > 0) {
+        const lines: string[] = [];
+        if (extractedPins.missing.length > 0) {
+          lines.push(
+            `No pinnable file matched: ${extractedPins.missing
+              .map((label) => `\`${label}\``)
+              .join(", ")}.`
+          );
+        }
+        for (const item of extractedPins.ambiguous) {
+          lines.push(
+            `Pin \`${item.query}\` is ambiguous. Matches: ${item.matches
+              .slice(0, 5)
+              .map((match) => `\`${match.label}\``)
+              .join(", ")}.`
+          );
+        }
+        lines.push("Use `/pin` to list available files, then try again.");
+        markTranscriptDirty();
+        await persistence.addMessage({
+          role: "system",
+          content: lines.join("\n"),
+        });
+        return;
       }
 
-      const cleanInput = input.replace(/\/pin\s+\S+/g, "").replace(/\s+/g, " ").trim();
+      const pins = mergePinOptions(pendingPins, extractedPins.resolved);
+      const cleanInput = extractedPins.cleanInput;
       let fullInput = cleanInput;
 
       if (pins.length > 0 && options.resolvePinContent) {
@@ -325,7 +348,6 @@ export async function runChatShell<TExit>(
           fullInput = `${attached.join("\n\n")}\n\nUser question: ${cleanInput}`;
         }
       }
-
       markTranscriptDirty();
       await persistence.addMessage({ role: "user", content: input });
       isProcessing = true;
@@ -414,6 +436,7 @@ export async function runChatShell<TExit>(
           markTranscriptDirty();
         }
         await persistence.flush();
+        pendingPins = [];
       } catch (error) {
         stopSpinner();
         markTranscriptDirty();
@@ -528,6 +551,125 @@ export async function runChatShell<TExit>(
             await persistence.addMessage({
               role: "assistant",
               content: helpLines.join("\n"),
+            });
+            render();
+            return;
+          }
+
+          if (commandName === "/pin") {
+            const pinCommand = resolveCommand(options.commands, commandName);
+            if (
+              !pinCommand ||
+              !pinCommand.scopes.includes(options.runtime.scope.type)
+            ) {
+              markTranscriptDirty();
+              await persistence.addMessage({
+                role: "system",
+                content: `${commandName} is only available in ${formatScopeTargets(
+                  pinCommand?.scopes ?? ["workspace"]
+                )}.`,
+              });
+              render();
+              return;
+            }
+
+            const availablePins = options.pinOptions ?? [];
+            const args = rest.filter(Boolean);
+            const requested = args[0]?.toLowerCase() ?? "";
+
+            if (availablePins.length === 0) {
+              markTranscriptDirty();
+              await persistence.addMessage({
+                role: "system",
+                content: "No pinnable files are available in this workspace yet.",
+              });
+              render();
+              return;
+            }
+
+            if (args.length === 0 || requested === "list") {
+              const lines = [
+                "Available pins",
+                "",
+                ...availablePins.map(
+                  (pin) => `• \`${pin.label}\` — ${pin.name}`
+                ),
+              ];
+              if (pendingPins.length > 0) {
+                lines.push(
+                  "",
+                  `Queued for your next prompt: ${pendingPins
+                    .map((pin) => `\`${pin.label}\``)
+                    .join(", ")}`
+                );
+              }
+              lines.push(
+                "",
+                "Use `/pin <label>` to queue a file for your next prompt.",
+                "Use `/pin clear` to remove queued pins."
+              );
+              markTranscriptDirty();
+              await persistence.addMessage({
+                role: "assistant",
+                content: lines.join("\n"),
+              });
+              render();
+              return;
+            }
+
+            if (requested === "clear" || requested === "reset") {
+              pendingPins = [];
+              markTranscriptDirty();
+              await persistence.addMessage({
+                role: "assistant",
+                content: "Cleared queued pins for the next prompt.",
+              });
+              render();
+              return;
+            }
+
+            const resolution = resolvePinReferences(args, availablePins);
+            pendingPins = mergePinOptions(pendingPins, resolution.resolved);
+
+            const lines: string[] = [];
+            if (resolution.resolved.length > 0) {
+              lines.push(
+                `Queued for your next prompt: ${resolution.resolved
+                  .map((pin) => `\`${pin.label}\``)
+                  .join(", ")}.`
+              );
+            }
+            if (resolution.missing.length > 0) {
+              lines.push(
+                `No pinnable file matched: ${resolution.missing
+                  .map((label) => `\`${label}\``)
+                  .join(", ")}.`
+              );
+            }
+            for (const item of resolution.ambiguous) {
+              lines.push(
+                `Pin \`${item.query}\` is ambiguous. Matches: ${item.matches
+                  .slice(0, 5)
+                  .map((match) => `\`${match.label}\``)
+                  .join(", ")}.`
+              );
+            }
+
+            if (pendingPins.length > 0) {
+              lines.push(
+                `Queued pins now: ${pendingPins
+                  .map((pin) => `\`${pin.label}\``)
+                  .join(", ")}.`
+              );
+              lines.push("Send your question when you're ready.");
+            } else if (lines.length === 0) {
+              lines.push("Nothing was queued. Use `/pin` to see available files.");
+            }
+
+            markTranscriptDirty();
+            await persistence.addMessage({
+              role: resolution.resolved.length > 0 ? "assistant" : "system",
+              content: lines.join("\n"),
             });
             render();
             return;
