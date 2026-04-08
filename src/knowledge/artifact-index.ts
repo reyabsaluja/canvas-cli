@@ -86,6 +86,12 @@ export interface RankedArtifactSection {
 
 const artifactIndexCache = new Map<string, Promise<ArtifactIndexInternal>>();
 
+export function formatArtifactLabel(
+  artifact: Pick<ArtifactRecord, "kind" | "title">
+): string {
+  return `[${artifact.kind}] ${artifact.title}`;
+}
+
 export async function getCourseArtifactSetKey(
   cache: CourseCache | null
 ): Promise<string | null> {

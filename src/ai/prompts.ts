@@ -23,6 +23,7 @@ Rules:
 - Do not repeat the full text of documents — summarize the key requirements.
 - If you have the actual PDF/instruction content, base your answer on it directly.
 - Keep the overview to 2-4 sentences. Keep tasks specific and actionable.
+- Use the exact source labels from the provided context when populating primary_sources.
 
 Respond with valid JSON matching this exact schema:
 {
@@ -80,6 +81,7 @@ export function buildUserMessage(bundle: ContextBundle): string {
     for (const ext of bundle.extractedTexts) {
       sections.push("");
       sections.push(`### ${ext.source}`);
+      sections.push(`Selected because: ${ext.selectionReason}`);
       sections.push(ext.content);
     }
   }

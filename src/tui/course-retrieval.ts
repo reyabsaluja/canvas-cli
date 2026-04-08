@@ -1,5 +1,6 @@
 import type { CourseCache } from "../enrich/cache-loader.js";
 import {
+  formatArtifactLabel,
   loadArtifactIndex,
   readArtifactContent,
   searchArtifacts,
@@ -121,7 +122,7 @@ export async function searchCourseIndex(
   return results
     .map(({ artifact }) => {
       const summary = artifact.excerpt ? ` — ${artifact.excerpt}` : "";
-      return `[${artifact.kind}] ${artifact.title}${summary}`;
+      return `${formatArtifactLabel(artifact)}${summary}`;
     })
     .join("\n");
 }
