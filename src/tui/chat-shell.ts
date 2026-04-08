@@ -643,11 +643,27 @@ export async function runChatShell<TExit>(
         return;
       }
 
+      if (key === "\t" && getActivePinPartial() !== null) {
+        const pinMatches = getPinMatches();
+        if (pinMatches.length > 0) {
+          const selected = pinMatches[pinSelected]!;
+          inputBuffer = inputBuffer.replace(
+            /\/pin(\s+\S*)?$/,
+            `/pin ${selected.label}`
+          );
+          pinSelected = 0;
+          render();
+        }
+        return;
+      }
+
       if (key === "\t" && showSlashMenu) {
         const matches = getSlashMatches();
         if (matches.length > 0) {
-          inputBuffer = matches[slashSelected]!.name;
-          renderInputOnly();
+          inputBuffer = matches[slashSelected]!.name + " ";
+          slashSelected = 0;
+          showSlashMenu = false;
+          render();
         }
         return;
       }
@@ -658,10 +674,10 @@ export async function runChatShell<TExit>(
         showSlashMenu = inputBuffer.startsWith("/");
         if (getActivePinPartial() !== null) {
           pinSelected = 0;
-          renderInputOnly();
+          render();
         } else if (showSlashMenu) {
           slashSelected = 0;
-          renderInputOnly();
+          render();
         } else if (wasSlash) {
           render();
         } else {
