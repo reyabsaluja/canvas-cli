@@ -5,7 +5,7 @@ import { loadCourseCache } from "../enrich/cache-loader.js";
 import { enrichAssignmentDetail } from "../enrich/enrich-assignment.js";
 import { getAIConfig } from "../ai/provider.js";
 import { runInvestigation } from "../work/orchestrator.js";
-import { createWorkWorkspace } from "../work/workspace.js";
+import { createWorkWorkspace } from "../workspace/create.js";
 import { handleError } from "../errors.js";
 import chalk from "chalk";
 import path from "node:path";
@@ -101,7 +101,7 @@ export async function workCommand(
 
   let result;
   try {
-    result = await createWorkWorkspace(detail, course, workup, state);
+    result = await createWorkWorkspace(detail, course, workup, state, config);
   } catch (err) {
     if (err instanceof Error) {
       console.error(`\nFailed to create workspace: ${err.message}`);

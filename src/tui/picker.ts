@@ -1,6 +1,20 @@
 import chalk from "chalk";
+<<<<<<< HEAD
+import {
+  clearScreen,
+  createBuffer,
+  C,
+  enterAlternateScreen,
+  getTermSize,
+  hideCursor,
+  leaveAlternateScreen,
+  showCursor,
+} from "./screen.js";
+import { USER_ABORT_EXIT_CODE } from "./chat-shell-exit.js";
+=======
 import { createBuffer, C } from "./screen.js";
 import { startTerminalSession } from "./terminal.js";
+>>>>>>> main
 
 export interface PickerItem {
   label: string;
@@ -26,7 +40,11 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
     let selected = 0;
     let filter = "";
     let filtered = items;
+<<<<<<< HEAD
+    let windowStart = 0;
+=======
     let windowTop = 0;
+>>>>>>> main
 
     function getFiltered(): PickerItem[] {
       if (!filter) return items;
@@ -43,9 +61,24 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
       const viewRows = process.stdout.rows || 24;
       filtered = getFiltered();
       if (selected >= filtered.length) selected = Math.max(0, filtered.length - 1);
+      if (selected < windowStart) {
+        windowStart = selected;
+      }
+
+      const { rows } = getTermSize();
+      const reservedRows =
+        5 + (subtitle ? 1 : 0) + (filterable && filter ? 2 : 0) + 2;
+      const visibleCount = Math.max(4, rows - reservedRows);
+      if (selected >= windowStart + visibleCount) {
+        windowStart = selected - visibleCount + 1;
+      }
+      const maxWindowStart = Math.max(0, filtered.length - visibleCount);
+      windowStart = Math.max(0, Math.min(windowStart, maxWindowStart));
+      const windowEnd = Math.min(filtered.length, windowStart + visibleCount);
+      const visibleItems = filtered.slice(windowStart, windowEnd);
 
       buf.push("");
-      buf.push(C.primaryBold(`  ${title}`));
+      buf.push(C.bold(`  ${title}`));
       if (subtitle) buf.push(C.dim(`  ${subtitle}`));
       buf.push("");
 
@@ -60,6 +93,17 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
       if (filtered.length === 0) {
         buf.push(C.dim("  No items match your search."));
       } else {
+<<<<<<< HEAD
+        if (windowStart > 0) {
+          buf.push(C.dim(`  ↑ ${windowStart} earlier item${windowStart === 1 ? "" : "s"}`));
+        }
+
+        for (let i = 0; i < visibleItems.length; i++) {
+          const item = visibleItems[i];
+          const absoluteIndex = windowStart + i;
+          const isSelected = absoluteIndex === selected;
+          const pointer = isSelected ? C.bold("❯ ") : "  ";
+=======
         const selectedLine = selected;
         const totalVirtualRows = filtered.length;
         const margin = 2;
@@ -87,6 +131,7 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
           const itemIndex = windowTop + i;
           const isSelected = itemIndex === selected;
           const pointer = isSelected ? C.primary("❯ ") : "  ";
+>>>>>>> main
           const label = item.dimmed
             ? C.dim(item.label)
             : isSelected
@@ -98,8 +143,14 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
           buf.push(`  ${pointer}${label}${sub}`);
         }
 
+<<<<<<< HEAD
+        const remaining = filtered.length - windowEnd;
+        if (remaining > 0) {
+          buf.push(C.dim(`  ↓ ${remaining} more item${remaining === 1 ? "" : "s"}`));
+=======
         if (hiddenBelow > 0 && visibleSlots > 0) {
           buf.push(C.dim(`  ... ${hiddenBelow} more below`));
+>>>>>>> main
         }
       }
 
@@ -113,11 +164,17 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
       buf.flush();
     }
 
+<<<<<<< HEAD
+    enterAlternateScreen();
+    clearScreen();
+    hideCursor();
+=======
     const cleanupSession = startTerminalSession(onData, {
       onResize: render,
       clearOnEnter: false,
       clearOnExit: false,
     });
+>>>>>>> main
     render();
 
     function onData(key: string): void {
@@ -158,7 +215,7 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
 
       if (key === "\x03") {
         cleanup();
-        process.exit(0);
+        process.exit(USER_ABORT_EXIT_CODE);
       }
 
       if (filterable && key.length === 1 && key >= " ") {
@@ -169,7 +226,26 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
     }
 
     function cleanup(): void {
+<<<<<<< HEAD
+      stdin.removeListener("data", onData);
+      try {
+        stdin.setRawMode(false);
+      } catch {}
+      try {
+        stdin.pause();
+      } catch {}
+      try {
+        leaveAlternateScreen();
+      } catch {}
+      try {
+        clearScreen();
+      } catch {}
+      try {
+        showCursor();
+      } catch {}
+=======
       cleanupSession();
+>>>>>>> main
     }
   });
 }

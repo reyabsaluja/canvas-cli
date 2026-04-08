@@ -1,5 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { extractFileText } from "../extract/extract-text.js";
+import { getExtractedAttachmentPath, getExtractedPagePath } from "../enrich/course-documents.js";
 import type {
   CourseMetadata,
   AssignmentIndexEntry,
@@ -78,11 +80,26 @@ export async function writeIngestionArtifacts(
     const pagesDir = path.join(coursePath, "extracted", "pages");
     await fs.mkdir(pagesDir, { recursive: true });
     for (const page of fetchedPages) {
-      const safeName = page.slug.replace(/[^a-zA-Z0-9._-]/g, "_");
-      await writeAtomic(
-        path.join(pagesDir, `${safeName}.txt`),
-        `# ${page.title}\n\n${htmlToText(page.body)}\n`
-      );
+      const pageTextPath = getExtractedPagePath(coursePath, page.slug);
+      await writeAtomic(pageTextPath, `# ${page.title}\n\n${htmlToText(page.body)}\n`);
+    }
+  }
+
+  for (const attachment of attachments) {
+    if (attachment.status !== "downloaded" && attachment.status !== "skipped") {
+      continue;
+    }
+    const fullPath = path.join(coursePath, attachment.localPath);
+    const extractedPath = getExtractedAttachmentPath(coursePath, attachment.localPath);
+    try {
+      const text = await extractFileText(fullPath, attachment.originalFilename);
+      if (!text || text.startsWith("[") || text.trim().length === 0) {
+        continue;
+      }
+      await fs.mkdir(path.dirname(extractedPath), { recursive: true });
+      await writeAtomic(extractedPath, text.endsWith("\n") ? text : text + "\n");
+    } catch {
+      // Extraction is best-effort; keep ingestion resilient if a file is unreadable.
     }
   }
 }

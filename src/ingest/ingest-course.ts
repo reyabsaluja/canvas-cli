@@ -12,12 +12,15 @@ import type { CanvasAssignment } from "../canvas/types.js";
 import { extractLinkedFiles } from "../workspace/attachments.js";
 import { makeCourseSlug, getCoursePath } from "./slug.js";
 import { fetchCourseContent } from "./fetch-course-content.js";
+import { mapWithConcurrency } from "./concurrency.js";
 import { normalizeCourseContent } from "./normalize-content.js";
 import { identifySyllabusCandidates } from "./syllabus-heuristics.js";
 import { selectAttachments } from "./attachment-selection.js";
 import { downloadSelectedAttachments } from "./attachment-download.js";
 import { writeIngestionArtifacts } from "./storage.js";
 import path from "node:path";
+
+const MODULE_FILE_METADATA_CONCURRENCY = 4;
 
 /**
  * Main ingestion pipeline. Deterministic, non-AI.
@@ -166,46 +169,75 @@ async function selectModuleFiles(
     fileById.set(f.id, f);
   }
 
+  const candidates: Array<{
+    modName: string;
+    itemTitle: string;
+    contentId: number;
+    file: FileIndexEntry | null;
+  }> = [];
+
   for (const mod of modules) {
     for (const item of mod.items) {
       if (item.type !== "File") continue;
       if (item.contentId === null) continue;
       if (alreadySelectedIds.has(item.contentId)) continue;
-
-      // Try to find in the files index first (if Files API was accessible)
-      let file = fileById.get(item.contentId);
-
-      // If not in files index, try fetching individual file metadata via API
-      if (!file) {
-        const fetched = await client.getFileSafe(item.contentId);
-        if (fetched) {
-          file = {
-            id: fetched.id,
-            displayName: fetched.display_name,
-            filename: fetched.filename,
-            contentType: fetched.content_type,
-            size: fetched.size,
-            url: fetched.url,
-            updatedAt: fetched.updated_at,
-            folderId: fetched.folder_id,
-          };
-        }
-      }
-
-      if (!file) continue;
-
-      alreadySelectedIds.add(file.id);
-      selected.push({
-        sourceType: "module_linked",
-        fileId: file.id,
-        filename: file.displayName || item.title,
-        downloadUrl: file.url,
-        reason: `module file in "${mod.name}"`,
-        contentType: file.contentType,
-        size: file.size,
-        subfolder: "modules",
+      candidates.push({
+        modName: mod.name,
+        itemTitle: item.title,
+        contentId: item.contentId,
+        file: fileById.get(item.contentId) ?? null,
       });
     }
+  }
+
+  const resolved = await mapWithConcurrency(
+    candidates,
+    MODULE_FILE_METADATA_CONCURRENCY,
+    async (candidate) => {
+      if (candidate.file) {
+        return {
+          file: candidate.file,
+          modName: candidate.modName,
+          itemTitle: candidate.itemTitle,
+        };
+      }
+
+      const fetched = await client.getFileSafe(candidate.contentId);
+      if (!fetched) {
+        return null;
+      }
+
+      return {
+        file: {
+          id: fetched.id,
+          displayName: fetched.display_name,
+          filename: fetched.filename,
+          contentType: fetched.content_type,
+          size: fetched.size,
+          url: fetched.url,
+          updatedAt: fetched.updated_at,
+          folderId: fetched.folder_id,
+        },
+        modName: candidate.modName,
+        itemTitle: candidate.itemTitle,
+      };
+    }
+  );
+
+  for (const entry of resolved) {
+    if (!entry) continue;
+    if (alreadySelectedIds.has(entry.file.id)) continue;
+    alreadySelectedIds.add(entry.file.id);
+    selected.push({
+      sourceType: "module_linked",
+      fileId: entry.file.id,
+      filename: entry.file.displayName || entry.itemTitle,
+      downloadUrl: entry.file.url,
+      reason: `module file in "${entry.modName}"`,
+      contentType: entry.file.contentType,
+      size: entry.file.size,
+      subfolder: "modules",
+    });
   }
 
   return selected;

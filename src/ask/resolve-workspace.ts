@@ -2,6 +2,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { getSessionsRoot } from "../workspace/paths.js";
 
+interface WorkspaceSummary {
+  path: string;
+  name: string;
+  course: string;
+  slug: string;
+  updatedAt: number;
+}
+
 /**
  * Resolve the active workspace path.
  *
@@ -32,31 +40,10 @@ export async function resolveWorkspace(
   if (!(await dirExists(sessionsRoot))) return null;
 
   // 4/5. Find workspaces and pick the most recent
-  const entries = await fs.readdir(sessionsRoot, { withFileTypes: true });
-  const workspaces: Array<{ path: string; updatedAt: number }> = [];
-
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const wsPath = path.join(sessionsRoot, entry.name);
-    const sessionPath = path.join(wsPath, "session.json");
-
-    try {
-      const content = await fs.readFile(sessionPath, "utf-8");
-      const session = JSON.parse(content);
-      const updatedAt = session.updatedAt
-        ? new Date(session.updatedAt).getTime()
-        : 0;
-      workspaces.push({ path: wsPath, updatedAt });
-    } catch {
-      // Not a valid workspace, skip
-    }
-  }
+  const workspaces = await listWorkspaceSummaries();
 
   if (workspaces.length === 0) return null;
-
-  // Sort by most recently updated
-  workspaces.sort((a, b) => b.updatedAt - a.updatedAt);
-  return workspaces[0].path;
+  return workspaces[0]!.path;
 }
 
 /**
@@ -66,16 +53,21 @@ export async function resolveWorkspace(
 export async function listWorkspaces(): Promise<
   Array<{ path: string; name: string; course: string; slug: string }>
 > {
+  const workspaces = await listWorkspaceSummaries();
+  return workspaces.map(({ path, name, course, slug }) => ({
+    path,
+    name,
+    course,
+    slug,
+  }));
+}
+
+async function listWorkspaceSummaries(): Promise<WorkspaceSummary[]> {
   const sessionsRoot = getSessionsRoot();
   if (!(await dirExists(sessionsRoot))) return [];
 
   const entries = await fs.readdir(sessionsRoot, { withFileTypes: true });
-  const results: Array<{
-    path: string;
-    name: string;
-    course: string;
-    slug: string;
-  }> = [];
+  const results: WorkspaceSummary[] = [];
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
@@ -91,12 +83,16 @@ export async function listWorkspaces(): Promise<
         name: session.assignmentName ?? entry.name,
         course: session.courseName ?? "",
         slug: entry.name,
+        updatedAt: session.updatedAt
+          ? new Date(session.updatedAt).getTime()
+          : 0,
       });
     } catch {
       // skip
     }
   }
 
+  results.sort((a, b) => b.updatedAt - a.updatedAt);
   return results;
 }
 

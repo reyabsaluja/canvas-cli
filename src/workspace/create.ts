@@ -1,10 +1,25 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AssignmentDetail, Course } from "../domain/models.js";
 import type { Config } from "../config/env.js";
-import type { SessionMeta } from "./session.js";
+import {
+  loadWorkspaceSessionMeta,
+  saveWorkspaceSessionMeta,
+  type SessionMeta,
+} from "./session.js";
 import { makeSessionSlug, getWorkspacePath } from "./paths.js";
 import { generateAssignmentMarkdown } from "./assignment-markdown.js";
+import {
+  generateNotesMarkdown,
+  generatePlanMarkdown,
+  generateWorkAssignmentMarkdown,
+} from "../work/generate-markdown.js";
+import type {
+  AssignmentWorkup,
+  InvestigationState,
+  WorkResult,
+} from "../work/types.js";
 import {
   extractLinkedFiles,
   downloadAttachments,
@@ -20,6 +35,23 @@ export interface WorkspaceResult {
   attachments: DownloadResult;
 }
 
+interface WorkspaceWriteOptions {
+  config?: Config;
+  workup?: AssignmentWorkup;
+  state?: InvestigationState;
+}
+
+interface UnifiedWorkspaceResult {
+  slug: string;
+  workspacePath: string;
+  created: boolean;
+  filesWritten: string[];
+  filesSkipped: string[];
+  attachments: DownloadResult;
+  resourcesCopied: string[];
+  documentsExtracted: string[];
+}
+
 /**
  * Create or update a local workspace for an assignment.
  *
@@ -32,109 +64,167 @@ export async function createWorkspace(
   course: Course,
   config: Config
 ): Promise<WorkspaceResult> {
+  const result = await writeWorkspaceArtifacts(detail, course, {
+    config,
+  });
+
+  return {
+    slug: result.slug,
+    workspacePath: result.workspacePath,
+    created: result.created,
+    filesWritten: result.filesWritten,
+    filesSkipped: result.filesSkipped,
+    attachments: result.attachments,
+  };
+}
+
+export async function createWorkWorkspace(
+  detail: AssignmentDetail,
+  course: Course,
+  workup: AssignmentWorkup,
+  state: InvestigationState,
+  config?: Config
+): Promise<WorkResult> {
+  const result = await writeWorkspaceArtifacts(detail, course, {
+    config,
+    workup,
+    state,
+  });
+
+  return {
+    workup,
+    workspacePath: result.workspacePath,
+    filesWritten: result.filesWritten,
+    filesSkipped: result.filesSkipped,
+    resourcesCopied: result.resourcesCopied,
+    documentsExtracted: result.documentsExtracted,
+  };
+}
+
+async function writeWorkspaceArtifacts(
+  detail: AssignmentDetail,
+  course: Course,
+  options: WorkspaceWriteOptions
+): Promise<UnifiedWorkspaceResult> {
   const slug = makeSessionSlug(course.courseCode, detail.name, detail.id);
   const wsPath = getWorkspacePath(slug);
-
   const existed = await dirExists(wsPath);
 
-  // Ensure directory structure
+  // Ensure shared workspace structure first so every caller gets the same layout.
   await fs.mkdir(path.join(wsPath, "work"), { recursive: true });
+  await fs.mkdir(path.join(wsPath, "resources"), { recursive: true });
+  await fs.mkdir(path.join(wsPath, "extracted"), { recursive: true });
 
   const filesWritten: string[] = [];
   const filesSkipped: string[] = [];
   const now = new Date().toISOString();
 
-  // assignment.json — always refresh with latest data
-  await fs.writeFile(
+  await writeAtomic(
     path.join(wsPath, "assignment.json"),
     JSON.stringify(detail, null, 2) + "\n",
-    "utf-8"
   );
   filesWritten.push("assignment.json");
 
-  // assignment.md — always refresh with latest data
-  await fs.writeFile(
+  const assignmentMarkdown = options.workup
+    ? generateWorkAssignmentMarkdown(detail, options.workup)
+    : generateAssignmentMarkdown(detail);
+  await writeAtomic(
     path.join(wsPath, "assignment.md"),
-    generateAssignmentMarkdown(detail),
-    "utf-8"
+    assignmentMarkdown,
   );
   filesWritten.push("assignment.md");
 
-  // session.json — create or update
-  const sessionJsonPath = path.join(wsPath, "session.json");
-  let session: SessionMeta;
+  if (options.workup) {
+    await writeAtomic(
+      path.join(wsPath, "workup.json"),
+      JSON.stringify(options.workup, null, 2) + "\n",
+    );
+    filesWritten.push("workup.json");
 
-  if (await fileExists(sessionJsonPath)) {
-    const existing = JSON.parse(
-      await fs.readFile(sessionJsonPath, "utf-8")
-    ) as SessionMeta;
-    session = {
-      ...existing,
-      updatedAt: now,
-      assignmentName: detail.name,
-      courseName: course.name,
-      courseCode: course.courseCode,
-      workspacePath: wsPath,
-      sessionSlug: slug,
-    };
-  } else {
-    session = {
-      version: 1,
-      createdAt: now,
-      updatedAt: now,
-      sessionSlug: slug,
-      workspacePath: wsPath,
-      assignmentId: detail.id,
-      assignmentName: detail.name,
-      courseId: course.id,
-      courseName: course.name,
-      courseCode: course.courseCode,
-    };
+    await writeAtomic(
+      path.join(wsPath, "plan.md"),
+      generatePlanMarkdown(detail, options.workup),
+    );
+    filesWritten.push("plan.md");
   }
 
-  await fs.writeFile(
-    sessionJsonPath,
-    JSON.stringify(session, null, 2) + "\n",
-    "utf-8"
+  const session = buildSessionMeta(
+    await loadWorkspaceSessionMeta(wsPath),
+    {
+      slug,
+      workspacePath: wsPath,
+      detail,
+      course,
+      now,
+      hasWorkup: Boolean(options.workup),
+    }
   );
+  await saveWorkspaceSessionMeta(wsPath, session);
   filesWritten.push("session.json");
 
-  // notes.md — only create if it doesn't exist
   const notesMdPath = path.join(wsPath, "notes.md");
   if (await fileExists(notesMdPath)) {
     filesSkipped.push("notes.md");
   } else {
-    await fs.writeFile(
+    const notesContent = options.workup
+      ? generateNotesMarkdown(detail, options.workup)
+      : `# Notes: ${detail.name}\n\n`;
+    await writeAtomic(
       notesMdPath,
-      `# Notes: ${detail.name}\n\n`,
-      "utf-8"
+      notesContent,
     );
     filesWritten.push("notes.md");
   }
 
-  // work/ directory already ensured above
   if (!existed) {
     filesWritten.push("work/");
+    filesWritten.push("resources/");
+    filesWritten.push("extracted/");
   }
 
-  // Download attachments from description links
+  const documentsExtracted: string[] = [];
+  if (options.state) {
+    for (const [source, text] of options.state.extractedTexts) {
+      const safeName = source
+        .replace(/[^a-zA-Z0-9._-]/g, "_")
+        .replace(/__+/g, "_");
+      const extractedPath = path.join(wsPath, "extracted", `${safeName}.txt`);
+      await writeAtomic(extractedPath, text);
+      documentsExtracted.push(`${safeName}.txt`);
+    }
+    if (documentsExtracted.length > 0) {
+      filesWritten.push(`extracted/ (${documentsExtracted.length} documents)`);
+    }
+  }
+
+  const resourcesCopied: string[] = [];
+  if (options.workup) {
+    for (const resource of options.workup.relevantResources) {
+      if (resource.location && resource.type === "pdf") {
+        resourcesCopied.push(resource.title);
+      }
+    }
+  }
+
   const linkedFiles = detail.description
     ? extractLinkedFiles(detail.description)
     : [];
-
   let attachmentResult: DownloadResult = {
     downloaded: [],
     skipped: [],
     failed: [],
   };
 
-  if (linkedFiles.length > 0) {
+  if (linkedFiles.length > 0 && options.config) {
     const attachmentsDir = path.join(wsPath, "attachments");
     attachmentResult = await downloadAttachments(
       linkedFiles,
       attachmentsDir,
-      config
+      options.config
     );
+    if (!existed && attachmentResult.downloaded.length > 0) {
+      filesWritten.push("attachments/");
+    }
   }
 
   return {
@@ -144,7 +234,44 @@ export async function createWorkspace(
     filesWritten,
     filesSkipped,
     attachments: attachmentResult,
+    resourcesCopied,
+    documentsExtracted,
   };
+}
+
+function buildSessionMeta(
+  existing: SessionMeta | null,
+  options: {
+    slug: string;
+    workspacePath: string;
+    detail: AssignmentDetail;
+    course: Course;
+    now: string;
+    hasWorkup: boolean;
+  }
+): SessionMeta {
+  return {
+    version: 1,
+    createdAt: existing?.createdAt ?? options.now,
+    updatedAt: options.now,
+    sessionSlug: options.slug,
+    workspacePath: options.workspacePath,
+    assignmentId: options.detail.id,
+    assignmentName: options.detail.name,
+    courseId: options.course.id,
+    courseName: options.course.name,
+    courseCode: options.course.courseCode,
+    preparedAt: options.hasWorkup ? options.now : existing?.preparedAt ?? options.now,
+    lastOpenedAt: existing?.lastOpenedAt,
+    workspaceState: options.hasWorkup ? "ready" : existing?.workspaceState ?? "ready",
+    lastError: options.hasWorkup ? null : existing?.lastError ?? null,
+  };
+}
+
+async function writeAtomic(filePath: string, content: string): Promise<void> {
+  const tempPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  await fs.writeFile(tempPath, content, "utf-8");
+  await fs.rename(tempPath, filePath);
 }
 
 async function dirExists(p: string): Promise<boolean> {

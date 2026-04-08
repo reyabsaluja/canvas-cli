@@ -1,23 +1,30 @@
-import { existsSync } from "node:fs";
-import { cpus, totalmem } from "node:os";
-import chalk from "chalk";
-import { showPicker, type PickerItem } from "./picker.js";
-import { runWorkspaceUI } from "./workspace-ui.js";
+import { clearScreen, hideCursor, showCursor, C } from "./screen.js";
 import {
+  invalidateAssignmentCache,
   initServices,
-  fetchAssignments,
-  openWorkspace,
-  getRecentWorkspaces,
-  getDisplayCourses,
-  formatDueCompact,
   type AppServices,
 } from "./services.js";
-import { loadCourseConfig, type CourseConfig } from "./course-config.js";
-import { loadCourseCache } from "../enrich/cache-loader.js";
-import { refreshWorkspace } from "./services.js";
-import { runCourseSetup, runCourseManagement } from "./course-setup.js";
-import { loadWorkspace } from "../ask/load-workspace.js";
+import { loadCourseConfig } from "./course-config.js";
+import { runCourseManagement, runCourseSetup } from "./course-setup.js";
+import { runChatShell } from "./chat-shell.js";
+import { USER_ABORT_EXIT_CODE } from "./chat-shell-exit.js";
+import type { AppScope } from "./chat-state.js";
+import { COMMANDS } from "./commands.js";
+import { createShellContext } from "./app-runtime.js";
+import { handleCommand } from "./app-commands.js";
+import type { ShellResult } from "./app-types.js";
+import { deleteChatSession, getChatSessionId } from "./chat-sessions.js";
 import {
+<<<<<<< HEAD
+  normalizeScopeAfterCourseManagement,
+  openAssignmentScope,
+  pickAssignmentScope,
+  pickCourse,
+  pickRecentScope,
+  refreshWorkspaceScope,
+} from "./app-navigation.js";
+import { renderSplashLoading } from "./app-banner.js";
+=======
   clearScreen,
   showCursor,
   hideCursor,
@@ -33,16 +40,117 @@ import {
 import type { Course } from "../domain/models.js";
 import type { AssignmentWorkup } from "../work/types.js";
 import { isInteractiveTerminal, startTerminalSession } from "./terminal.js";
+>>>>>>> main
 
-/**
- * Main interactive TUI application.
- */
 export async function launchApp(): Promise<void> {
-  if (!isInteractiveTerminal()) {
+<<<<<<< HEAD
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.error("canvas-cli interactive mode requires a TTY.");
     process.exit(1);
   }
 
+  const handleSigint = (): void => {
+    showCursor();
+    clearScreen();
+    process.exit(USER_ABORT_EXIT_CODE);
+  };
+
+  process.once("SIGINT", handleSigint);
+
+  try {
+    clearScreen();
+    hideCursor();
+    renderSplashLoading();
+
+    const services = await connectServices();
+    await ensureCourseConfig(services);
+
+    let scope: AppScope = { type: "global" };
+
+    while (true) {
+      const shellContext = await createShellContext(services, scope);
+      const result = await runChatShell<ShellResult>({
+        session: shellContext.session,
+        runtime: shellContext.runtime,
+        commands: COMMANDS,
+        modelLabel: services.aiConfig?.model ?? "no model",
+        bannerRenderer: shellContext.bannerRenderer,
+        extraHelpCommands: shellContext.extraHelpCommands,
+        pinOptions: shellContext.pinOptions,
+        getOpenOptions: shellContext.getOpenOptions,
+        onClear: shellContext.onClear,
+        resolvePinContent: shellContext.resolvePinContent,
+        onReady: shellContext.onReady,
+        onAsk: shellContext.onAsk,
+        onCommand: (command, args, api) =>
+          handleCommand(
+            command,
+            args,
+            {
+              ...api,
+              getLoadedWorkspace: shellContext.getLoadedWorkspace,
+              getCourseCache: shellContext.getCourseCache,
+            },
+            services
+          ),
+      });
+
+      if (!result || result.type === "quit") {
+        showCursor();
+        clearScreen();
+        return;
+      }
+
+      const nextScope = await resolveShellResult(
+        services,
+        scope,
+        shellContext.runtime.scope,
+        result
+      );
+      if (
+        shellContext.runtime.scope.type === "global" &&
+        nextScope.type !== "global"
+      ) {
+        await deleteChatSession(getChatSessionId(shellContext.runtime.scope));
+      }
+      scope = nextScope;
+    }
+  } finally {
+    process.removeListener("SIGINT", handleSigint);
+  }
+}
+
+async function connectServices(): Promise<AppServices> {
+  try {
+    return await initServices();
+  } catch (error) {
+    showCursor();
+    clearScreen();
+    console.error(
+      C.error(
+        `\n  Failed to connect: ${error instanceof Error ? error.message : "unknown error"}`
+      )
+    );
+    console.error(
+      C.dim("  Check your CANVAS_BASE_URL and CANVAS_ACCESS_TOKEN in .env")
+    );
+=======
+  if (!isInteractiveTerminal()) {
+    console.error("canvas-cli interactive mode requires a TTY.");
+>>>>>>> main
+    process.exit(1);
+  }
+}
+
+<<<<<<< HEAD
+async function ensureCourseConfig(services: AppServices): Promise<void> {
+  let courseConfig = await loadCourseConfig();
+  if (!courseConfig || courseConfig.courses.length === 0) {
+    clearScreen();
+    courseConfig = await runCourseSetup(services.allCourses);
+  }
+  services.courseConfig = courseConfig;
+=======
   const handleSigint = (): void => {
     showCursor();
     clearScreen();
@@ -165,22 +273,22 @@ export async function launchApp(): Promise<void> {
   } finally {
     process.removeListener("SIGINT", handleSigint);
   }
+>>>>>>> main
 }
 
-// --- Splash Loading (shown briefly while connecting) ---
-
-function renderSplashLoading(): void {
-  const { cols } = getTermSize();
-  console.log("");
-  renderCenteredAscii(cols);
-  console.log("");
-  console.log(centerText(C.dim("connecting to canvas..."), cols));
-}
-
-// --- Unified Home Screen ---
-
-async function showHomeScreen(
+export async function resolveShellResult(
   services: AppServices,
+<<<<<<< HEAD
+  currentScope: AppScope,
+  runtimeScope: AppScope,
+  result: ShellResult
+): Promise<AppScope> {
+  if (result.type === "scope") {
+    return result.scope;
+  }
+
+  if (result.type === "course-management") {
+=======
   recent: Array<{ name: string; course: string; slug: string; path: string }>
 ): Promise<string | null> {
   return new Promise((resolve) => {
@@ -1014,171 +1122,52 @@ async function enterNewWorkspace(
 ): Promise<"back" | "courses" | "quit"> {
   // Loop handles /refresh — re-runs pipeline and re-enters workspace
   while (true) {
+>>>>>>> main
     clearScreen();
-    console.log("");
-    console.log(C.primaryBold(`  ${assignmentName}`));
-    console.log(C.dim(`  ${course.name}`));
-    console.log("");
+    const updated = await runCourseManagement(
+      services.courseConfig ?? { courses: [] },
+      services.allCourses
+    );
+    services.courseConfig = updated;
+    invalidateAssignmentCache(services);
+    return normalizeScopeAfterCourseManagement(currentScope, services);
+  }
 
-    let wsData;
-    try {
-      wsData = await openWorkspace(
+  if (result.type === "course-picker") {
+    const nextCourse = await pickCourse(services);
+    return nextCourse ? { type: "course", courseId: nextCourse.id } : runtimeScope;
+  }
+
+  if (result.type === "recent-picker") {
+    return (await pickRecentScope(services)) ?? runtimeScope;
+  }
+
+  if (result.type === "assignment-picker") {
+    return (await pickAssignmentScope(services, result.courseId)) ?? runtimeScope;
+  }
+
+  if (result.type === "open-assignment") {
+    return (
+      (await openAssignmentScope(
         services,
-        course,
-        assignmentName,
-        (stage) => {
-          console.log(`  ${C.dim("›")} ${C.dim(stage)}`);
-        }
-      );
-    } catch (err) {
-      console.error(
-        C.error(
-          `\n  Failed: ${err instanceof Error ? err.message : "unknown"}`
-        )
-      );
-      showCursor();
-      console.log(C.dim("\n  Press any key to continue..."));
-      await waitForKey();
-      return "back";
-    }
-
-    clearScreen();
-    const courseDisplayName = findCourseDisplayName(services, wsData.loaded.courseName);
-    const cache = await loadCourseCache(course.courseCode, course.id);
-    const result = await runWorkspaceUI({
-      workspacePath: wsData.workspacePath,
-      workup: wsData.workup,
-      loaded: wsData.loaded,
-      aiConfig: services.aiConfig,
-      courseDisplayName,
-      agentContext: {
-        cache,
-        client: services.client,
-        config: services.config,
-        courseId: course.id,
-      },
-    });
-
-    if (result === "refresh") {
-      // Re-run ingest + work
-      clearScreen();
-      console.log("");
-      console.log(C.primaryBold(`  Refreshing ${assignmentName}`));
-      console.log(C.dim(`  ${course.name}`));
-      console.log("");
-      try {
-        await refreshWorkspace(services, course, assignmentName, (stage) => {
-          console.log(`  ${C.dim("›")} ${C.dim(stage)}`);
-        });
-      } catch (err) {
-        console.error(
-          C.error(`\n  Refresh failed: ${err instanceof Error ? err.message : "unknown"}`)
-        );
-        showCursor();
-        console.log(C.dim("\n  Press any key to continue..."));
-        await waitForKey();
-      }
-      // Loop back to re-enter workspace with fresh data
-      continue;
-    }
-
-    return result;
+        result.courseId,
+        result.assignmentTarget
+      )) ?? runtimeScope
+    );
   }
-}
 
-async function enterExistingWorkspace(
-  wsPath: string,
-  services: AppServices
-): Promise<"back" | "courses" | "quit"> {
-  while (true) {
-    clearScreen();
-    console.log(C.dim("\n  loading workspace..."));
-
-    let loaded;
-    try {
-      loaded = await loadWorkspace(wsPath);
-    } catch (err) {
-      console.error(
-        C.error(`\n  Failed to load workspace: ${err instanceof Error ? err.message : "unknown"}`)
-      );
-      await waitForKey();
-      return "back";
-    }
-
-    let workup: AssignmentWorkup | null = null;
-    if (loaded.workupJson) {
-      workup = loaded.workupJson as unknown as AssignmentWorkup;
-    }
-
-    const courseDisplayName = findCourseDisplayName(services, loaded.courseName);
-    let agentCache = null;
-    let courseId: number | null = null;
-    let matchedCourse: Course | null = null;
-
-    // Find course from config or allCourses
-    if (services.courseConfig) {
-      const uc = services.courseConfig.courses.find(
-        (c) => c.originalName === loaded.courseName
-      );
-      if (uc) {
-        courseId = uc.id;
-        agentCache = await loadCourseCache(uc.originalCode, uc.id);
-        matchedCourse = services.allCourses.find((c) => c.id === uc.id) ?? null;
-      }
-    }
-
-    clearScreen();
-    const result = await runWorkspaceUI({
-      workspacePath: wsPath,
-      workup,
-      loaded,
-      aiConfig: services.aiConfig,
-      courseDisplayName,
-      agentContext: {
-        cache: agentCache,
-        client: services.client,
-        config: services.config,
-        courseId,
-      },
-    });
-
-    if (result === "refresh" && matchedCourse) {
-      clearScreen();
-      console.log("");
-      console.log(C.primaryBold(`  Refreshing ${loaded.assignmentName}`));
-      console.log(C.dim(`  ${loaded.courseName}`));
-      console.log("");
-      try {
-        const refreshed = await refreshWorkspace(
-          services,
-          matchedCourse,
-          loaded.assignmentName,
-          (stage) => console.log(`  ${C.dim("›")} ${C.dim(stage)}`)
-        );
-        wsPath = refreshed.workspacePath;
-      } catch (err) {
-        console.error(
-          C.error(`\n  Refresh failed: ${err instanceof Error ? err.message : "unknown"}`)
-        );
-        showCursor();
-        console.log(C.dim("\n  Press any key to continue..."));
-        await waitForKey();
-      }
-      continue;
-    }
-
-    if (result === "refresh") {
-      // Can't refresh without course info
-      clearScreen();
-      console.log(C.dim("\n  Cannot refresh — course not found in config."));
-      await sleep(2000);
-      continue;
-    }
-
-    return result;
+  if (result.type === "workspace-refresh") {
+    return refreshWorkspaceScope(
+      services,
+      result.courseId,
+      result.assignmentTarget,
+      runtimeScope
+    );
   }
-}
 
+<<<<<<< HEAD
+  return runtimeScope;
+=======
 /**
  * Find the user's display name for a course by matching the original Canvas name.
  */
@@ -1209,4 +1198,5 @@ function waitForKey(): Promise<void> {
       }
     );
   });
+>>>>>>> main
 }

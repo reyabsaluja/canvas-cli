@@ -25,8 +25,25 @@ export interface ContentChunk {
   section: string;
   /** The text content. */
   text: string;
+  /** Short canonical excerpt from the shared knowledge store. */
+  excerpt?: string;
   /** Kind for display: "workup", "plan", "notes", "extracted", "assignment". */
   kind: string;
+  /** Shared artifact identifier from the knowledge store, when available. */
+  artifactId?: string;
+  /** Shared section identifier from the knowledge store, when available. */
+  sectionId?: string;
+  /** Precomputed search tokens from the knowledge store. */
+  searchTokens?: string[];
+  /** Retrieval weight hint from the knowledge store. */
+  scoreBoost?: number;
+  /** Shared-section relevance score for the current query, when available. */
+  score?: number;
+}
+
+export interface ExtractedWorkspaceFile {
+  name: string;
+  relativePath: string;
 }
 
 /**
@@ -35,11 +52,17 @@ export interface ContentChunk {
 export interface LoadedWorkspace {
   path: string;
   sessionSlug: string;
+  assignmentId: number | null;
   assignmentName: string;
+  courseId: number | null;
   courseName: string;
+  courseCode: string | null;
+  preparedAt: string | null;
+  workspaceState: string | null;
   assignmentMd: string | null;
   planMd: string | null;
   notesMd: string | null;
   workupJson: Record<string, unknown> | null;
-  extractedFiles: Array<{ name: string; content: string }>;
+  extractedFiles: ExtractedWorkspaceFile[];
+  extractedFileCache?: Map<string, string>;
 }
