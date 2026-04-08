@@ -1,12 +1,11 @@
-import fs from "node:fs/promises";
 import type { AssignmentDetail } from "../domain/models.js";
 import type { EnrichmentSummary } from "../enrich/types.js";
 import type { CourseCache } from "../enrich/cache-loader.js";
 import { htmlToText } from "../format/html-to-text.js";
 import {
-  getExtractedAttachmentPath,
-  getExtractedSyllabusPath,
-} from "../enrich/course-documents.js";
+  loadArtifactIndex,
+  readArtifactContent,
+} from "../knowledge/artifact-index.js";
 
 /**
  * Assembled context bundle for the AI model.
@@ -85,59 +84,47 @@ export async function buildContextBundle(
 
   // Load extracted texts: syllabus, then all downloaded attachments
   let totalTextLoaded = 0;
+  const artifactIndex = await loadArtifactIndex({ cache });
+  const loadedArtifactIds = new Set<string>();
 
-  // 1. Always include syllabus body if it exists
-  const syllabusTextPath = getExtractedSyllabusPath(cache.coursePath);
-  const syllabusText = await readTextSafe(syllabusTextPath);
-  if (syllabusText && syllabusText.length > 50) {
-    const content = truncate(syllabusText, MAX_TEXT_PER_SOURCE);
-    bundle.extractedTexts.push({
-      source: "Course syllabus",
-      content,
-    });
-    totalTextLoaded += content.length;
+  const syllabusArtifact = artifactIndex.artifacts.find(
+    (artifact) => artifact.scope === "course" && artifact.kind === "syllabus"
+  );
+  if (syllabusArtifact) {
+    totalTextLoaded = await appendArtifactText(
+      artifactIndex,
+      syllabusArtifact.id,
+      bundle,
+      loadedArtifactIds,
+      totalTextLoaded
+    );
   }
 
-  // 2. Read ALL downloaded attachments (PDFs, text, html, etc.)
-  for (const att of cache.attachments) {
-    if (att.status !== "downloaded" && att.status !== "skipped") continue;
+  for (const attachment of cache.attachments) {
+    if (attachment.status !== "downloaded" && attachment.status !== "skipped") {
+      continue;
+    }
     if (totalTextLoaded >= MAX_TOTAL_TEXT) break;
 
-    const extractedPath = getExtractedAttachmentPath(
-      cache.coursePath,
-      att.localPath
+    totalTextLoaded = await appendArtifactText(
+      artifactIndex,
+      `course:attachment:${attachment.localPath}:${attachment.originalFilename}`,
+      bundle,
+      loadedArtifactIds,
+      totalTextLoaded
     );
-    const text = await readTextSafe(extractedPath);
-    if (text && text.length > 20 && !text.startsWith("[")) {
-      const content = truncate(text, MAX_TEXT_PER_SOURCE);
-      bundle.extractedTexts.push({
-        source: att.originalFilename,
-        content,
-      });
-      totalTextLoaded += content.length;
-    }
   }
 
-  // 3. Read related attachments from enrichment that aren't already loaded
   if (enrichment) {
-    const loadedSources = new Set(bundle.extractedTexts.map((t) => t.source));
-    for (const att of enrichment.relatedAttachments) {
+    for (const attachment of enrichment.relatedAttachments) {
       if (totalTextLoaded >= MAX_TOTAL_TEXT) break;
-      if (loadedSources.has(att.filename)) continue;
-
-      const extractedPath = getExtractedAttachmentPath(
-        cache.coursePath,
-        att.localPath
+      totalTextLoaded = await appendArtifactText(
+        artifactIndex,
+        `course:attachment:${attachment.localPath}:${attachment.filename}`,
+        bundle,
+        loadedArtifactIds,
+        totalTextLoaded
       );
-      const text = await readTextSafe(extractedPath);
-      if (text && text.length > 20 && !text.startsWith("[")) {
-        const content = truncate(text, MAX_TEXT_PER_SOURCE);
-        bundle.extractedTexts.push({
-          source: att.filename,
-          content,
-        });
-        totalTextLoaded += content.length;
-      }
     }
   }
 
@@ -178,12 +165,30 @@ function buildAssignmentList(cache: CourseCache): string | null {
   return lines.join("\n");
 }
 
-async function readTextSafe(filePath: string): Promise<string | null> {
-  try {
-    return await fs.readFile(filePath, "utf-8");
-  } catch {
-    return null;
+async function appendArtifactText(
+  artifactIndex: Awaited<ReturnType<typeof loadArtifactIndex>>,
+  artifactId: string,
+  bundle: ContextBundle,
+  loadedArtifactIds: Set<string>,
+  totalTextLoaded: number
+): Promise<number> {
+  const artifact = artifactIndex.artifactsById.get(artifactId);
+  if (!artifact || loadedArtifactIds.has(artifact.id) || totalTextLoaded >= MAX_TOTAL_TEXT) {
+    return totalTextLoaded;
   }
+
+  const text = await readArtifactContent(artifactIndex, artifact.id);
+  if (!text || text.length <= 20 || text.startsWith("[")) {
+    return totalTextLoaded;
+  }
+
+  const content = truncate(text, MAX_TEXT_PER_SOURCE);
+  bundle.extractedTexts.push({
+    source: artifact.title,
+    content,
+  });
+  loadedArtifactIds.add(artifact.id);
+  return totalTextLoaded + content.length;
 }
 
 function truncate(text: string, maxLength: number): string {

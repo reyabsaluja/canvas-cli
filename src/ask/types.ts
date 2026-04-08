@@ -27,6 +27,14 @@ export interface ContentChunk {
   text: string;
   /** Kind for display: "workup", "plan", "notes", "extracted", "assignment". */
   kind: string;
+  /** Shared artifact identifier from the knowledge store, when available. */
+  artifactId?: string;
+  /** Shared section identifier from the knowledge store, when available. */
+  sectionId?: string;
+  /** Precomputed search tokens from the knowledge store. */
+  searchTokens?: string[];
+  /** Retrieval weight hint from the knowledge store. */
+  scoreBoost?: number;
 }
 
 export interface ExtractedWorkspaceFile {
