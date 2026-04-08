@@ -1,11 +1,16 @@
 import chalk from "chalk";
 import readline from "node:readline";
+<<<<<<< HEAD
+import { hideCursor, showCursor, createBuffer, clearScreen, C } from "./screen.js";
+import { USER_ABORT_EXIT_CODE } from "./chat-shell-exit.js";
+=======
 import {
   showCursor,
   createBuffer,
   clearScreen,
   C,
 } from "./screen.js";
+>>>>>>> main
 import type { Course } from "../domain/models.js";
 import type { UserCourse, CourseConfig } from "./course-config.js";
 import { saveCourseConfig } from "./course-config.js";
@@ -45,7 +50,7 @@ export function showMultiSelect(
         selected = Math.max(0, filtered.length - 1);
 
       buf.push("");
-      buf.push(C.primaryBold(`  ${title}`));
+      buf.push(C.bold(`  ${title}`));
       buf.push(C.dim(`  ${subtitle}`));
       buf.push("");
 
@@ -88,7 +93,7 @@ export function showMultiSelect(
           const isSel = itemIndex === selected;
           const isChecked = checked.has(c.id);
           const box = isChecked ? C.success("◉ ") : C.dim("○ ");
-          const pointer = isSel ? C.primary("❯ ") : "  ";
+          const pointer = isSel ? C.bold("❯ ") : "  ";
           const label = isSel
             ? C.bold(c.courseCode || c.name)
             : C.text(c.courseCode || c.name);
@@ -197,7 +202,7 @@ export function showMultiSelect(
       // Ctrl+C
       if (key === "\x03") {
         cleanup();
-        process.exit(0);
+        process.exit(USER_ABORT_EXIT_CODE);
       }
 
       // Regular character for filtering (skip 'd' since it's the done key)
@@ -227,7 +232,7 @@ export async function promptRenames(
   clearScreen();
   showCursor();
   console.log("");
-  console.log(C.primaryBold("  Rename your courses"));
+  console.log(C.bold("  Rename your courses"));
   console.log(C.dim("  Give them short names, or press enter to keep the original"));
   console.log("");
 

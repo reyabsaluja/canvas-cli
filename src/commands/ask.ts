@@ -1,7 +1,10 @@
 import { getAIConfig } from "../ai/provider.js";
 import { resolveWorkspace, listWorkspaces } from "../ask/resolve-workspace.js";
 import { loadWorkspace } from "../ask/load-workspace.js";
-import { buildChunks, retrieveRelevant } from "../ask/retrieve.js";
+import {
+  buildWorkspaceRetrievalContext,
+  retrieveRelevant,
+} from "../ask/retrieve.js";
 import { answerQuestion } from "../ask/answer.js";
 import { renderWorkspaceAnswer } from "../ask/render.js";
 import chalk from "chalk";
@@ -57,22 +60,24 @@ export async function askCommand(
     process.exit(1);
   }
 
-  // Build chunks and retrieve
-  const chunks = buildChunks(ws);
+  // Build retrieval context and retrieve
+  const retrievalContext = await buildWorkspaceRetrievalContext(ws);
 
-  if (chunks.length === 0) {
+  if (retrievalContext.chunks.length === 0) {
     console.error("Workspace has no content to answer from.");
     process.exit(1);
   }
 
-  const relevant = retrieveRelevant(question, chunks);
+  const relevant = retrieveRelevant(question, retrievalContext);
 
   if (options.debug) {
     console.log(chalk.dim("\n--- Debug: Retrieved chunks ---"));
     for (const c of relevant) {
       console.log(
         chalk.dim(
-          `  [${c.kind}] ${c.source} / ${c.section} (${c.text.length} chars)`
+          `  [${c.kind}] ${c.source} / ${c.section} (${c.text.length} chars, score ${(
+            c.score ?? 0
+          ).toFixed(2)})`
         )
       );
     }

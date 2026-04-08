@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { LoadedWorkspace } from "../ask/types.js";
 import type { CourseCache } from "../enrich/cache-loader.js";
+import { getExtractedAttachmentPath } from "../enrich/course-documents.js";
 import type { CanvasClient } from "../canvas/client.js";
 import type { Config } from "../config/env.js";
 import type { WorkspaceAnswer } from "../ask/types.js";
@@ -10,8 +11,18 @@ import {
   type AIProviderConfig,
   type ToolDefinition,
 } from "../ai/provider.js";
-import { buildChunks, retrieveRelevant } from "../ask/retrieve.js";
 import { extractFileText } from "../extract/extract-text.js";
+import { handleOpenResourceQuery } from "./open-resources.js";
+import {
+  renderCourseArtifactSearchResult,
+  searchCourseKnowledge,
+} from "./course-retrieval.js";
+import {
+  listWorkspaceKnowledgeArtifacts,
+  readWorkspaceKnowledgeArtifact,
+  registerDownloadedCourseAttachment,
+  searchWorkspaceKnowledge,
+} from "./workspace-knowledge.js";
 
 const MAX_DOC_TEXT = 30000;
 const MAX_CONVERSATION_MESSAGES = 12;
@@ -71,6 +82,17 @@ const CHAT_TOOLS: ToolDefinition[] = [
       required: ["title"],
     },
   },
+  {
+    name: "open_resource",
+    description: "Open a workspace or course resource on the user's machine. Use this when the user explicitly asks to open a PDF, file, page, assignment, or resource.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Resource name or description to open" },
+      },
+      required: ["query"],
+    },
+  },
 ];
 
 function buildSystemPrompt(ctx: ChatAgentContext): string {
@@ -89,6 +111,7 @@ IMPORTANT tool usage rules:
 - If you already read a file earlier in this conversation, DO NOT read it again. Use the content from the earlier read.
 - read_file returns the FULL content of the file. After reading, IMMEDIATELY use that content to answer in detail.
 - If a file is inside a zip (e.g., lab4.pdf inside lab4.zip), use read_file with the PDF name — it extracts the content from the zip.
+- If the user explicitly asks you to open a file, PDF, assignment page, or resource, immediately call open_resource.
 - After reading a file, give a DETAILED and SPECIFIC answer based on what you read. Do not give vague summaries.
 - When the user asks to "explain part X in depth", find the specific section in the document and quote the actual requirements, addresses, functionality needed, etc.
 - Do NOT re-read files you already have in the conversation. Just reference the earlier content.
@@ -167,7 +190,19 @@ export interface ChatAgentContext {
   config: Config | null;
   courseId: number | null;
   /** Persistent conversation history for multi-turn context. */
-  conversationHistory: Array<{ role: string; content: string }>;
+  conversationHistory: ChatAgentConversationEntry[];
+}
+
+export interface ChatAgentConversationEntry {
+  role: string;
+  content: string;
+}
+
+export interface ChatAgentExtraContext {
+  cache: CourseCache | null;
+  client: CanvasClient | null;
+  config: Config | null;
+  courseId: number | null;
 }
 
 export interface ToolCallEvent {
@@ -195,6 +230,8 @@ function mapToolCall(
       return { action: "list", target: "files", color: "green" };
     case "download_course_file":
       return { action: "download", target: (input.title as string) ?? "file", color: "green" };
+    case "open_resource":
+      return { action: "open", target: (input.query as string) ?? "resource", color: "green" };
     default:
       return { action: name, target: "", color: "green" };
   }
@@ -228,7 +265,14 @@ export async function runChatAgent(
     {
       onToolCall: (name, input, toolResult) => {
         const { action, target, color } = mapToolCall(name, input);
-        onToolCall({ action, target, result: toolResult, color });
+        const nextColor =
+          name === "open_resource" &&
+          /No openable resource|Multiple resources matched|Failed to open|missing/i.test(
+            toolResult
+          )
+            ? "red"
+            : color;
+        onToolCall({ action, target, result: toolResult, color: nextColor });
       },
       onTextDelta,
     },
@@ -328,142 +372,87 @@ async function executeToolCall(
 ): Promise<string> {
   switch (name) {
     case "search_workspace":
-      return searchWorkspace(input.query as string, ctx);
+      return await searchWorkspace(input.query as string, ctx);
     case "read_file":
       return readFile(input.filename as string, ctx);
     case "list_files":
       return listFiles(ctx);
     case "search_course":
-      return searchCourse(input.query as string, ctx);
+      return await searchCourse(input.query as string, ctx);
     case "download_course_file":
       return downloadCourseFile(input.title as string, ctx);
+    case "open_resource":
+      return openResource(input.query as string, ctx);
     default:
       return `Unknown tool: ${name}`;
   }
 }
 
-function searchWorkspace(query: string, ctx: ChatAgentContext): string {
-  const chunks = buildChunks(ctx.loaded);
-  const relevant = retrieveRelevant(query, chunks, 5);
+async function searchWorkspace(query: string, ctx: ChatAgentContext): Promise<string> {
+  const relevant = await searchWorkspaceKnowledge(ctx.loaded, ctx.cache, query, 5);
   if (relevant.length === 0) return "No relevant content found for that query.";
   const results: string[] = [];
-  for (const chunk of relevant) {
-    results.push(`--- ${chunk.source} / ${chunk.section} ---`);
-    results.push(chunk.text.slice(0, 2000));
+  for (const match of relevant) {
+    results.push(match.header);
+    results.push(match.preview);
     results.push("");
   }
   return results.join("\n");
 }
 
-function searchCourse(query: string, ctx: ChatAgentContext): string {
-  if (!ctx.cache) return "Course cache not available.";
-  const q = query.toLowerCase();
-  const results: string[] = [];
-  for (const mod of ctx.cache.modules) {
-    if (mod.name.toLowerCase().includes(q)) {
-      results.push(`Module: "${mod.name}" (${mod.items.length} items)`);
-    }
-    for (const item of mod.items) {
-      if (item.title.toLowerCase().includes(q)) {
-        const downloadable = item.type === "File" ? " [downloadable]" : "";
-        results.push(`  [${item.type}] "${item.title}" in "${mod.name}"${downloadable}`);
-      }
-    }
-  }
-  for (const f of ctx.cache.files) {
-    if (f.displayName.toLowerCase().includes(q) || f.filename.toLowerCase().includes(q)) {
-      results.push(`File: "${f.displayName}" (${f.contentType})`);
-    }
-  }
-  for (const att of ctx.cache.attachments) {
-    if (att.originalFilename.toLowerCase().includes(q) && (att.status === "downloaded" || att.status === "skipped")) {
-      results.push(`Downloaded: "${att.originalFilename}" [${att.sourceType}]`);
-    }
-  }
-  if (results.length === 0) return `No course materials matching "${query}" found.`;
-  return results.join("\n");
+async function searchCourse(
+  query: string,
+  ctx: ChatAgentContext
+): Promise<string> {
+  const result = await searchCourseKnowledge(ctx.cache, query);
+  return renderCourseArtifactSearchResult(result, query);
 }
 
 async function readFile(filename: string, ctx: ChatAgentContext): Promise<string> {
-  const q = filename.toLowerCase().trim();
-  // Strip .txt suffix (workspace extracts add .txt)
-  const qClean = q.endsWith(".txt") ? q.slice(0, -4) : q;
-  // Base name without any extension: "lab4.pdf" -> "lab4"
-  const qBase = qClean.replace(/\.[^.]+$/, "");
-
-  // Helper: find a downloaded file in course cache
-  const findInCache = (test: (name: string) => boolean) => {
-    if (!ctx.cache) return null;
-    for (const att of ctx.cache.attachments) {
-      if ((att.status === "downloaded" || att.status === "skipped") && test(att.originalFilename.toLowerCase())) {
-        return { path: path.join(ctx.cache.coursePath, att.localPath), name: att.originalFilename };
-      }
-    }
-    return null;
-  };
-
-  // 1. Direct match in course cache (e.g., "lab4_rubric.pdf" -> "lab4_rubric.pdf")
-  const direct = findInCache((n) => n === qClean || n === q);
-  if (direct) return extractFileText(direct.path, direct.name);
-
-  // 2. Contains match in course cache (e.g., "rubric" -> "lab4_rubric-1.pdf")
-  const contains = findInCache((n) => n.includes(qClean) || n.includes(q));
-  if (contains) return extractFileText(contains.path, contains.name);
-
-  // 3. Zip match: requested file might be INSIDE a zip (e.g., "lab4.pdf" is inside "lab4.zip")
-  const zipMatch = findInCache((n) => n.endsWith(".zip") && n.includes(qBase));
-  if (zipMatch) {
-    const fullContent = await extractFileText(zipMatch.path, zipMatch.name);
-    // Extract just the specific file section from the zip output
-    const lines = fullContent.split("\n");
-    const hdr = lines.findIndex((l) => {
-      const ll = l.toLowerCase();
-      return ll.includes(`--- ${qClean}`) || ll.includes(`/${qClean} ---`) || ll.includes(`/${qClean}`);
-    });
-    if (hdr >= 0) {
-      // Return from this header to end (the PDF text section)
-      return lines.slice(hdr).join("\n").slice(0, MAX_DOC_TEXT);
-    }
-    return fullContent.slice(0, MAX_DOC_TEXT);
+  const artifact = await readWorkspaceKnowledgeArtifact(
+    ctx.loaded,
+    ctx.cache,
+    filename,
+    MAX_DOC_TEXT
+  );
+  switch (artifact.status) {
+    case "ok":
+      return artifact.content;
+    case "empty_query":
+      return "Provide a file name to read from the workspace or course cache.";
+    case "missing_text":
+      return renderWorkspaceArtifactLookupFailure(filename, artifact);
+    case "not_found":
+    default:
+      return `File "${filename}" not found. Use list_files to see available files.`;
   }
-
-  // 4. Workspace markdown files
-  if (qClean.includes("assignment.md") && ctx.loaded.assignmentMd) return ctx.loaded.assignmentMd.slice(0, MAX_DOC_TEXT);
-  if (qClean.includes("plan.md") && ctx.loaded.planMd) return ctx.loaded.planMd.slice(0, MAX_DOC_TEXT);
-  if (qClean.includes("notes.md") && ctx.loaded.notesMd) return ctx.loaded.notesMd.slice(0, MAX_DOC_TEXT);
-  if (qClean.includes("workup") && ctx.loaded.workupJson) return JSON.stringify(ctx.loaded.workupJson, null, 2).slice(0, MAX_DOC_TEXT);
-
-  // 5. Workspace extracted files
-  for (const ef of ctx.loaded.extractedFiles) {
-    const en = ef.name.toLowerCase();
-    if (en === q || en === qClean || en === qClean + ".txt" || en.includes(qClean)) {
-      return ef.content.slice(0, MAX_DOC_TEXT);
-    }
-  }
-
-  return `File "${filename}" not found. Use list_files to see available files.`;
 }
 
-function listFiles(ctx: ChatAgentContext): string {
+async function listFiles(ctx: ChatAgentContext): Promise<string> {
+  const fileList = await listWorkspaceKnowledgeArtifacts(ctx.loaded, ctx.cache);
   const lines: string[] = [];
   lines.push("Workspace files:");
-  if (ctx.loaded.assignmentMd) lines.push("  - assignment.md");
-  if (ctx.loaded.planMd) lines.push("  - plan.md");
-  if (ctx.loaded.notesMd) lines.push("  - notes.md");
-  if (ctx.loaded.workupJson) lines.push("  - workup.json");
-  if (ctx.loaded.extractedFiles.length > 0) {
-    lines.push("\nExtracted documents (use read_file to access):");
-    for (const ef of ctx.loaded.extractedFiles) {
-      const isZip = ef.name.endsWith(".zip.txt");
-      lines.push(`  - ${ef.name}${isZip ? " (contains extracted files — PDFs inside are readable)" : ""}`);
+  if (fileList.workspaceFiles.length === 0) {
+    lines.push("  - No workspace documents indexed yet.");
+  } else {
+    for (const entry of fileList.workspaceFiles) {
+      lines.push(`  - ${entry.label}`);
     }
   }
-  if (ctx.cache) {
-    const downloaded = ctx.cache.attachments.filter((a) => a.status === "downloaded" || a.status === "skipped");
-    if (downloaded.length > 0) {
-      lines.push("\nCourse attachments (downloaded):");
-      for (const a of downloaded) lines.push(`  - ${a.originalFilename} [${a.sourceType}]`);
+  if (fileList.extractedDocuments.length > 0) {
+    lines.push("\nExtracted documents (use read_file to access):");
+    for (const entry of fileList.extractedDocuments) {
+      lines.push(`  - ${entry.label}${entry.hint ? ` (${entry.hint})` : ""}`);
     }
+  }
+  if (fileList.courseDocuments.length > 0) {
+    lines.push("\nCourse documents (shared knowledge store):");
+    for (const entry of fileList.courseDocuments) {
+      lines.push(`  - ${entry.label}${entry.hint ? ` (${entry.hint})` : ""}`);
+    }
+  } else if (ctx.cache) {
+    lines.push("\nCourse documents (shared knowledge store):");
+    lines.push("  - No readable course documents indexed yet.");
   }
   return lines.join("\n");
 }
@@ -487,5 +476,63 @@ async function downloadCourseFile(title: string, ctx: ChatAgentContext): Promise
   await fs.mkdir(downloadDir, { recursive: true });
   const localPath = path.join(downloadDir, fileMeta.display_name);
   await fs.writeFile(localPath, buffer);
-  return await extractFileText(localPath, fileMeta.display_name);
+  const relativeLocalPath = path.relative(ctx.cache.coursePath, localPath);
+  await registerDownloadedCourseAttachment(ctx.cache, {
+    canvasFileId: fileMeta.id,
+    originalFilename: fileMeta.display_name,
+    localPath: relativeLocalPath,
+    contentType: fileMeta.content_type,
+    size: fileMeta.size,
+    downloadUrl: fileMeta.url,
+    reason: `downloaded on demand from module item "${foundItem.title}"`,
+    sourceType: "module_linked",
+  });
+  try {
+    const extracted = await extractFileText(localPath, fileMeta.display_name);
+    if (extracted && !extracted.startsWith("[") && extracted.trim().length > 0) {
+      const extractedPath = getExtractedAttachmentPath(
+        ctx.cache.coursePath,
+        relativeLocalPath
+      );
+      await fs.mkdir(path.dirname(extractedPath), { recursive: true });
+      await fs.writeFile(
+        extractedPath,
+        extracted.endsWith("\n") ? extracted : extracted + "\n",
+        "utf-8"
+      );
+      return extracted;
+    }
+  } catch {
+    // Fall through to a guidance message below.
+  }
+  return `Downloaded "${fileMeta.display_name}", but extracted text is not available yet. Refresh the course cache to rebuild it.`;
+}
+
+async function openResource(query: string, ctx: ChatAgentContext): Promise<string> {
+  const result = await handleOpenResourceQuery(query, {
+    loaded: ctx.loaded,
+    cache: ctx.cache,
+  });
+  return result.message;
+}
+
+function renderWorkspaceArtifactLookupFailure(
+  filename: string,
+  result: Awaited<ReturnType<typeof readWorkspaceKnowledgeArtifact>>
+): string {
+  switch (result.status) {
+    case "missing_text":
+      if (!result.artifact) {
+        return `File "${filename}" was indexed, but the readable text is missing. Refresh the workspace or course cache to rebuild it.`;
+      }
+      return result.artifact.scope === "course"
+        ? `Matched ${result.artifact.title}, but the cached extracted text is missing. Refresh the course cache to rebuild it.`
+        : `Matched ${result.artifact.title}, but the workspace text is missing. Rebuild or refresh the workspace to restore it.`;
+    case "empty_query":
+      return "Provide a file name to read from the workspace or course cache.";
+    case "ok":
+    case "not_found":
+    default:
+      return `File "${filename}" not found. Use list_files to see available files.`;
+  }
 }

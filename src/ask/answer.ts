@@ -1,5 +1,4 @@
-import type { ContentChunk } from "./types.js";
-import type { WorkspaceAnswer } from "./types.js";
+import type { ContentChunk, WorkspaceAnswer } from "./types.js";
 import { callModel, type AIProviderConfig } from "../ai/provider.js";
 
 const SYSTEM_PROMPT = `You are an assignment workspace assistant. You answer questions about a specific assignment using only the workspace context provided to you.
@@ -10,13 +9,13 @@ Rules:
 - If the context doesn't contain the answer, say so clearly.
 - Distinguish between confirmed information (from instruction docs) and inferred information (from syllabus/schedule/patterns).
 - Use bullet points for lists of items.
-- Cite which source each key fact comes from.
+- Cite evidence using the exact "ref" ids from the context blocks that support the answer.
 
 Respond with valid JSON:
 {
   "answer": "string — direct answer to the question (2-4 sentences)",
   "bullet_points": ["string — key specific points relevant to the question"],
-  "sources": [{"title": "string — source filename or section", "kind": "string — workup|plan|extracted|assignment|notes", "excerpt": "string or null — short relevant quote if applicable"}],
+  "source_ids": ["string — exact ref ids copied from the context blocks"],
   "confidence": "high | medium | low"
 }
 
@@ -30,19 +29,29 @@ export async function answerQuestion(
   question: string,
   context: ContentChunk[]
 ): Promise<WorkspaceAnswer> {
-  const userMessage = buildUserMessage(question, context);
+  const userMessage = buildWorkspaceQuestionMessage(question, context);
   const rawResponse = await callModel(config, SYSTEM_PROMPT, userMessage);
-  return parseResponse(question, rawResponse);
+  return parseWorkspaceAnswerResponse(question, rawResponse, context);
 }
 
-function buildUserMessage(question: string, chunks: ContentChunk[]): string {
+export function buildWorkspaceQuestionMessage(
+  question: string,
+  chunks: ContentChunk[]
+): string {
   const sections: string[] = [];
 
   sections.push(`## Question\n${question}\n`);
   sections.push("## Workspace context\n");
 
   for (const chunk of chunks) {
-    sections.push(`### [${chunk.kind}] ${chunk.source} — ${chunk.section}`);
+    const refId = getChunkReferenceId(chunk);
+    sections.push(
+      `### [ref:${refId}] [${chunk.kind}] ${chunk.source} — ${chunk.section}`
+    );
+    sections.push(`Reference ID: ${refId}`);
+    if (chunk.excerpt) {
+      sections.push(`Excerpt: ${chunk.excerpt}`);
+    }
     sections.push(chunk.text);
     sections.push("");
   }
@@ -52,13 +61,13 @@ function buildUserMessage(question: string, chunks: ContentChunk[]): string {
   return sections.join("\n");
 }
 
-function parseResponse(question: string, raw: string): WorkspaceAnswer {
-  let cleaned = raw.trim();
-  if (cleaned.startsWith("```")) {
-    cleaned = cleaned
-      .replace(/^```(?:json)?\s*\n?/, "")
-      .replace(/\n?```\s*$/, "");
-  }
+export function parseWorkspaceAnswerResponse(
+  question: string,
+  raw: string,
+  context: ContentChunk[]
+): WorkspaceAnswer {
+  const cleaned = stripMarkdownFence(raw);
+  const fallbackSources = buildFallbackSources(context);
 
   let parsed: unknown;
   try {
@@ -66,14 +75,23 @@ function parseResponse(question: string, raw: string): WorkspaceAnswer {
   } catch {
     const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      parsed = JSON.parse(jsonMatch[0]);
+      try {
+        parsed = JSON.parse(jsonMatch[0]);
+      } catch {
+        return {
+          question,
+          answer: cleaned,
+          bulletPoints: [],
+          sources: fallbackSources,
+          confidence: "low",
+        };
+      }
     } else {
-      // Fallback: treat raw text as the answer
       return {
         question,
         answer: cleaned,
         bulletPoints: [],
-        sources: [],
+        sources: fallbackSources,
         confidence: "low",
       };
     }
@@ -90,15 +108,11 @@ function parseResponse(question: string, raw: string): WorkspaceAnswer {
     ? obj.bullet_points.filter((x): x is string => typeof x === "string")
     : [];
 
-  const sources = Array.isArray(obj.sources)
-    ? obj.sources
-        .filter((x) => x && typeof x === "object")
-        .map((x: any) => ({
-          title: typeof x.title === "string" ? x.title : "",
-          kind: typeof x.kind === "string" ? x.kind : "unknown",
-          excerpt: typeof x.excerpt === "string" ? x.excerpt : null,
-        }))
+  const sourceIds = Array.isArray(obj.source_ids)
+    ? obj.source_ids.filter((x): x is string => typeof x === "string")
     : [];
+
+  const sources = resolveSources(context, sourceIds, obj.sources, fallbackSources);
 
   const confidence = ["high", "medium", "low"].includes(
     obj.confidence as string
@@ -107,4 +121,99 @@ function parseResponse(question: string, raw: string): WorkspaceAnswer {
     : "medium";
 
   return { question, answer, bulletPoints, sources, confidence };
+}
+
+function stripMarkdownFence(raw: string): string {
+  let cleaned = raw.trim();
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned
+      .replace(/^```(?:json)?\s*\n?/, "")
+      .replace(/\n?```\s*$/, "");
+  }
+  return cleaned;
+}
+
+function resolveSources(
+  context: ContentChunk[],
+  sourceIds: string[],
+  legacySources: unknown,
+  fallbackSources: WorkspaceAnswer["sources"]
+): WorkspaceAnswer["sources"] {
+  const sectionsByRef = new Map(
+    context.map((chunk) => [getChunkReferenceId(chunk), chunk] as const)
+  );
+
+  const resolved: WorkspaceAnswer["sources"] = [];
+  const seen = new Set<string>();
+  const addChunk = (chunk: ContentChunk | undefined): void => {
+    if (!chunk) return;
+    const refId = getChunkReferenceId(chunk);
+    if (seen.has(refId)) return;
+    seen.add(refId);
+    resolved.push({
+      title: formatSourceTitle(chunk),
+      kind: chunk.kind,
+      excerpt: chunk.excerpt ?? buildExcerpt(chunk.text),
+    });
+  };
+
+  for (const sourceId of sourceIds) {
+    addChunk(sectionsByRef.get(normalizeReferenceId(sourceId)));
+  }
+
+  if (resolved.length === 0 && Array.isArray(legacySources)) {
+    for (const source of legacySources) {
+      if (!source || typeof source !== "object") continue;
+      const title =
+        typeof (source as Record<string, unknown>).title === "string"
+          ? ((source as Record<string, unknown>).title as string)
+          : "";
+      const match = context.find((chunk) => {
+        const sourceTitle = formatSourceTitle(chunk);
+        return (
+          chunk.source === title ||
+          sourceTitle === title ||
+          `${chunk.source} / ${chunk.section}` === title
+        );
+      });
+      addChunk(match);
+    }
+  }
+
+  return resolved.length > 0 ? resolved : fallbackSources;
+}
+
+function buildFallbackSources(
+  context: ContentChunk[]
+): WorkspaceAnswer["sources"] {
+  return context.slice(0, 3).map((chunk) => ({
+    title: formatSourceTitle(chunk),
+    kind: chunk.kind,
+    excerpt: chunk.excerpt ?? buildExcerpt(chunk.text),
+  }));
+}
+
+function formatSourceTitle(chunk: ContentChunk): string {
+  if (!chunk.section || chunk.section === "Full text" || chunk.section === "Top") {
+    return chunk.source;
+  }
+  return `${chunk.source} — ${chunk.section}`;
+}
+
+function getChunkReferenceId(chunk: ContentChunk): string {
+  return chunk.sectionId ?? `${chunk.source}::${chunk.section}`;
+}
+
+function normalizeReferenceId(value: string): string {
+  return value
+    .trim()
+    .replace(/^\[?ref:/i, "")
+    .replace(/\]$/, "")
+    .trim();
+}
+
+function buildExcerpt(text: string): string {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= 140) return cleaned;
+  return `${cleaned.slice(0, 137)}...`;
 }
