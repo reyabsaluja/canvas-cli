@@ -107,10 +107,15 @@ export function renderChatFrame(
           ),
         ]
       : [];
+  const spinnerLines =
+    options.isProcessing && options.currentSpinnerLine
+      ? [`  ${options.currentSpinnerLine}`]
+      : [];
   const totalVirtualLines =
     headerLines.length +
     olderHintLines.length +
     options.transcriptLines.length +
+    spinnerLines.length +
     CHAT_GAP_ROWS;
   const maxContent = Math.max(1, rows - MAIN_VIEW_BOTTOM_RESERVE);
   const maxScroll = Math.max(0, totalVirtualLines - maxContent);
@@ -130,12 +135,22 @@ export function renderChatFrame(
     end,
     headerLines.length + olderHintLines.length
   );
+  appendVisibleLines(
+    buf,
+    spinnerLines,
+    start,
+    end,
+    headerLines.length + olderHintLines.length + options.transcriptLines.length
+  );
   appendVisibleBlankSection(
     buf,
     CHAT_GAP_ROWS,
     start,
     end,
-    headerLines.length + olderHintLines.length + options.transcriptLines.length
+    headerLines.length +
+      olderHintLines.length +
+      options.transcriptLines.length +
+      spinnerLines.length
   );
 
   buf.flush(MAIN_VIEW_BOTTOM_RESERVE, chatScrollOffset);
@@ -145,8 +160,7 @@ export function renderChatFrame(
       options.inputBuffer,
       options.runtime.scopeLabel,
       options.runtime.statusLabel,
-      options.modelLabel,
-      options.currentSpinnerLine
+      options.modelLabel
     ) +
       renderAutocompleteOverlay(
         options.slashMatches,
@@ -168,7 +182,6 @@ export function renderInputFooter(options: {
   scopeLabel: string;
   statusLabel?: string;
   modelLabel: string;
-  currentSpinnerLine: string;
   slashMatches: CommandDefinition[];
   openMatches: ShellOpenOption[];
   pinMatches: ShellPinOption[];
@@ -182,8 +195,7 @@ export function renderInputFooter(options: {
       options.inputBuffer,
       options.scopeLabel,
       options.statusLabel,
-      options.modelLabel,
-      options.currentSpinnerLine
+      options.modelLabel
     ) +
       renderAutocompleteOverlay(
         options.slashMatches,
@@ -305,8 +317,7 @@ function renderStickyBottom(
   inputBuffer: string,
   leftStatus: string,
   runtimeStatus: string | undefined,
-  modelLabel: string,
-  currentSpinnerLine: string
+  modelLabel: string
 ): string {
   const { cols, rows } = getTermSize();
   const footerIndent = "  ";
@@ -349,17 +360,12 @@ function renderStickyBottom(
   let left = runtimeStatus ? `${leftStatus} · ${runtimeStatus}` : leftStatus;
   let right = modelLabel;
   const rightVisible = stripAnsi(right).length;
-  const spinnerVisible = currentSpinnerLine
-    ? stripAnsi(currentSpinnerLine).length + stripAnsi(C.dim(" · ")).length
-    : 0;
-  if (stripAnsi(left).length + spinnerVisible + rightVisible + 1 > footerWidth) {
-    const maxLeft = Math.max(0, footerWidth - rightVisible - spinnerVisible - 1);
+  if (stripAnsi(left).length + rightVisible + 1 > footerWidth) {
+    const maxLeft = Math.max(0, footerWidth - rightVisible - 1);
     left =
       maxLeft > 3 ? left.slice(0, maxLeft - 3) + "..." : left.slice(0, maxLeft);
   }
-  const leftStyled = currentSpinnerLine
-    ? `${statusBarGrey(left)}${C.dim(" · ")}${currentSpinnerLine}`
-    : statusBarGrey(left);
+  const leftStyled = statusBarGrey(left);
   const gap = Math.max(
     0,
     footerWidth - stripAnsi(leftStyled).length - rightVisible

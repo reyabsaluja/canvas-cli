@@ -250,7 +250,6 @@ export async function runChatShell<TExit>(
       scopeLabel: options.runtime.scopeLabel,
       statusLabel: options.runtime.statusLabel,
       modelLabel: options.modelLabel,
-      currentSpinnerLine,
       slashMatches: showSlashMenu ? getSlashMatches() : [],
       openMatches: getOpenMatches(),
       pinMatches: getPinMatches(),
@@ -268,7 +267,7 @@ export async function runChatShell<TExit>(
       currentSpinnerLine = `${C.dim(SPINNER[spinnerFrame])} ${C.text(
         currentVerb
       )}${C.dim("...")}`;
-      renderInputOnly();
+      render();
     }, 80);
   }
 
