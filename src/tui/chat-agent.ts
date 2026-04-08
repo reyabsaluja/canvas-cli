@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { LoadedWorkspace } from "../ask/types.js";
-import { readWorkspaceExtractedFile } from "../ask/load-workspace.js";
 import type { CourseCache } from "../enrich/cache-loader.js";
 import { getExtractedAttachmentPath } from "../enrich/course-documents.js";
 import type { CanvasClient } from "../canvas/client.js";
@@ -12,16 +11,15 @@ import {
   type AIProviderConfig,
   type ToolDefinition,
 } from "../ai/provider.js";
-import {
-  buildWorkspaceRetrievalContext,
-  retrieveRelevant,
-} from "../ask/retrieve.js";
 import { extractFileText } from "../extract/extract-text.js";
 import { handleOpenResourceQuery } from "./open-resources.js";
+import { searchCourseIndex } from "./course-retrieval.js";
 import {
-  readCourseDocument,
-  searchCourseIndex,
-} from "./course-retrieval.js";
+  listWorkspaceKnowledgeArtifacts,
+  readWorkspaceKnowledgeArtifact,
+  registerDownloadedCourseAttachment,
+  searchWorkspaceKnowledge,
+} from "./workspace-knowledge.js";
 
 const MAX_DOC_TEXT = 30000;
 
@@ -309,13 +307,12 @@ async function executeToolCall(
 }
 
 async function searchWorkspace(query: string, ctx: ChatAgentContext): Promise<string> {
-  const retrievalContext = await buildWorkspaceRetrievalContext(ctx.loaded);
-  const relevant = retrieveRelevant(query, retrievalContext, 5);
+  const relevant = await searchWorkspaceKnowledge(ctx.loaded, ctx.cache, query, 5);
   if (relevant.length === 0) return "No relevant content found for that query.";
   const results: string[] = [];
-  for (const chunk of relevant) {
-    results.push(`--- ${chunk.source} / ${chunk.section} ---`);
-    results.push(chunk.text.slice(0, 2000));
+  for (const match of relevant) {
+    results.push(match.header);
+    results.push(match.preview);
     results.push("");
   }
   return results.join("\n");
@@ -329,62 +326,50 @@ async function searchCourse(
 }
 
 async function readFile(filename: string, ctx: ChatAgentContext): Promise<string> {
-  const q = filename.toLowerCase().trim();
-  // Strip .txt suffix (workspace extracts add .txt)
-  const qClean = q.endsWith(".txt") ? q.slice(0, -4) : q;
-  // 1. Workspace markdown files
-  if (qClean.includes("assignment.md") && ctx.loaded.assignmentMd) return ctx.loaded.assignmentMd.slice(0, MAX_DOC_TEXT);
-  if (qClean.includes("plan.md") && ctx.loaded.planMd) return ctx.loaded.planMd.slice(0, MAX_DOC_TEXT);
-  if (qClean.includes("notes.md") && ctx.loaded.notesMd) return ctx.loaded.notesMd.slice(0, MAX_DOC_TEXT);
-  if (qClean.includes("workup") && ctx.loaded.workupJson) return JSON.stringify(ctx.loaded.workupJson, null, 2).slice(0, MAX_DOC_TEXT);
-
-  const courseDocument = await readCourseDocument(ctx.cache, filename, MAX_DOC_TEXT);
-  switch (courseDocument.status) {
+  const artifact = await readWorkspaceKnowledgeArtifact(
+    ctx.loaded,
+    ctx.cache,
+    filename,
+    MAX_DOC_TEXT
+  );
+  switch (artifact.status) {
     case "ok":
-      return courseDocument.document.content;
-    case "missing_cache":
+      return artifact.content;
     case "empty_query":
+      return "Provide a file name to read from the workspace or course cache.";
     case "missing_text":
-      return renderCourseDocumentLookupFailure(filename, courseDocument);
+      return renderWorkspaceArtifactLookupFailure(filename, artifact);
     case "not_found":
     default:
-      break;
+      return `File "${filename}" not found. Use list_files to see available files.`;
   }
-
-  // 2. Workspace extracted files
-  for (const ef of ctx.loaded.extractedFiles) {
-    const en = ef.name.toLowerCase();
-    if (en === q || en === qClean || en === qClean + ".txt" || en.includes(qClean)) {
-      const content = await readWorkspaceExtractedFile(ctx.loaded, ef);
-      if (content) {
-        return content.slice(0, MAX_DOC_TEXT);
-      }
-    }
-  }
-
-  return `File "${filename}" not found. Use list_files to see available files.`;
 }
 
-function listFiles(ctx: ChatAgentContext): string {
+async function listFiles(ctx: ChatAgentContext): Promise<string> {
+  const fileList = await listWorkspaceKnowledgeArtifacts(ctx.loaded, ctx.cache);
   const lines: string[] = [];
   lines.push("Workspace files:");
-  if (ctx.loaded.assignmentMd) lines.push("  - assignment.md");
-  if (ctx.loaded.planMd) lines.push("  - plan.md");
-  if (ctx.loaded.notesMd) lines.push("  - notes.md");
-  if (ctx.loaded.workupJson) lines.push("  - workup.json");
-  if (ctx.loaded.extractedFiles.length > 0) {
-    lines.push("\nExtracted documents (use read_file to access):");
-    for (const ef of ctx.loaded.extractedFiles) {
-      const isZip = ef.name.endsWith(".zip.txt");
-      lines.push(`  - ${ef.name}${isZip ? " (contains extracted files — PDFs inside are readable)" : ""}`);
+  if (fileList.workspaceFiles.length === 0) {
+    lines.push("  - No workspace documents indexed yet.");
+  } else {
+    for (const entry of fileList.workspaceFiles) {
+      lines.push(`  - ${entry.label}`);
     }
   }
-  if (ctx.cache) {
-    const downloaded = ctx.cache.attachments.filter((a) => a.status === "downloaded" || a.status === "skipped");
-    if (downloaded.length > 0) {
-      lines.push("\nCourse attachments (downloaded):");
-      for (const a of downloaded) lines.push(`  - ${a.originalFilename} [${a.sourceType}]`);
+  if (fileList.extractedDocuments.length > 0) {
+    lines.push("\nExtracted documents (use read_file to access):");
+    for (const entry of fileList.extractedDocuments) {
+      lines.push(`  - ${entry.label}${entry.hint ? ` (${entry.hint})` : ""}`);
     }
+  }
+  if (fileList.courseDocuments.length > 0) {
+    lines.push("\nCourse documents (shared knowledge store):");
+    for (const entry of fileList.courseDocuments) {
+      lines.push(`  - ${entry.label}${entry.hint ? ` (${entry.hint})` : ""}`);
+    }
+  } else if (ctx.cache) {
+    lines.push("\nCourse documents (shared knowledge store):");
+    lines.push("  - No readable course documents indexed yet.");
   }
   return lines.join("\n");
 }
@@ -408,12 +393,23 @@ async function downloadCourseFile(title: string, ctx: ChatAgentContext): Promise
   await fs.mkdir(downloadDir, { recursive: true });
   const localPath = path.join(downloadDir, fileMeta.display_name);
   await fs.writeFile(localPath, buffer);
+  const relativeLocalPath = path.relative(ctx.cache.coursePath, localPath);
+  await registerDownloadedCourseAttachment(ctx.cache, {
+    canvasFileId: fileMeta.id,
+    originalFilename: fileMeta.display_name,
+    localPath: relativeLocalPath,
+    contentType: fileMeta.content_type,
+    size: fileMeta.size,
+    downloadUrl: fileMeta.url,
+    reason: `downloaded on demand from module item "${foundItem.title}"`,
+    sourceType: "module_linked",
+  });
   try {
     const extracted = await extractFileText(localPath, fileMeta.display_name);
     if (extracted && !extracted.startsWith("[") && extracted.trim().length > 0) {
       const extractedPath = getExtractedAttachmentPath(
         ctx.cache.coursePath,
-        path.relative(ctx.cache.coursePath, localPath)
+        relativeLocalPath
       );
       await fs.mkdir(path.dirname(extractedPath), { recursive: true });
       await fs.writeFile(
@@ -437,22 +433,23 @@ async function openResource(query: string, ctx: ChatAgentContext): Promise<strin
   return result.message;
 }
 
-function renderCourseDocumentLookupFailure(
+function renderWorkspaceArtifactLookupFailure(
   filename: string,
-  result: Awaited<ReturnType<typeof readCourseDocument>>
+  result: Awaited<ReturnType<typeof readWorkspaceKnowledgeArtifact>>
 ): string {
   switch (result.status) {
-    case "missing_cache":
-      return "Could not read course documents because the course cache is missing.";
-    case "empty_query":
-      return "Provide a document name or title to read from the course cache.";
     case "missing_text":
-      return result.artifact
+      if (!result.artifact) {
+        return `File "${filename}" was indexed, but the readable text is missing. Refresh the workspace or course cache to rebuild it.`;
+      }
+      return result.artifact.scope === "course"
         ? `Matched ${result.artifact.title}, but the cached extracted text is missing. Refresh the course cache to rebuild it.`
-        : `Could not find a course document matching "${filename}".`;
+        : `Matched ${result.artifact.title}, but the workspace text is missing. Rebuild or refresh the workspace to restore it.`;
+    case "empty_query":
+      return "Provide a file name to read from the workspace or course cache.";
     case "ok":
     case "not_found":
     default:
-      return `Could not find a course document matching "${filename}".`;
+      return `File "${filename}" not found. Use list_files to see available files.`;
   }
 }
