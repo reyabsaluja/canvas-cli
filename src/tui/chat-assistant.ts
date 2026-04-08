@@ -15,6 +15,7 @@ import {
   readCourseDocumentFromIndex,
   searchCourseIndex,
 } from "./course-retrieval.js";
+import { handleOpenResourceQuery } from "./open-resources.js";
 
 const GLOBAL_TOOLS: ToolDefinition[] = [
   {
@@ -90,6 +91,18 @@ const COURSE_TOOLS: ToolDefinition[] = [
         name: { type: "string", description: "Document name or page title" },
       },
       required: ["name"],
+    },
+  },
+  {
+    name: "open_course_resource",
+    description:
+      "Open a cached course resource or link on the user's machine. Use this when the user explicitly asks you to open a file, PDF, page, assignment, or resource.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Resource name or description to open" },
+      },
+      required: ["query"],
     },
   },
 ];
@@ -242,6 +255,22 @@ export async function answerCourseQuestion(
           });
           return result;
         }
+        case "open_course_resource": {
+          const query = String(input.query ?? "");
+          const result = await handleOpenResourceQuery(query, {
+            cache: options.cache,
+          });
+          options.onToolCall?.({
+            action: "open",
+            target: query || "resource",
+            result: result.message,
+            color:
+              result.status === "opened" || result.status === "listed"
+                ? "green"
+                : "red",
+          });
+          return result.message;
+        }
         default:
           return `Unknown tool: ${toolName}`;
       }
@@ -320,6 +349,7 @@ function buildCourseSystemPrompt(
     `You are the course assistant for ${courseName} (${courseCode}).`,
     "Answer questions about assignments, modules, files, and course structure.",
     "Use tools when the user asks for details that require searching or reading cached course materials.",
+    "If the user explicitly asks to open a file, PDF, page, assignment, or resource, immediately use the open_course_resource tool instead of just describing it.",
     "Ground answers in the indexed local cache. If the cache does not contain the answer, say so plainly.",
     "If the cache is missing, say that clearly and guide the user toward opening a workspace or refreshing.",
     "",

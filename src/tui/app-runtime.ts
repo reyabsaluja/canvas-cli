@@ -32,6 +32,10 @@ import {
 } from "./app-workspace-content.js";
 import { workspaceExists } from "./app-navigation.js";
 import type { ShellContext, ShellRuntimeApi } from "./app-types.js";
+import {
+  buildShellOpenOptions,
+  collectOpenableResources,
+} from "./open-resources.js";
 
 function getGlobalScopeLabel(): string {
   const schoolUrl = process.env.CANVAS_BASE_URL ?? "";
@@ -114,6 +118,7 @@ export async function createShellContext(
 
     let assignments: Assignment[] = [];
     let cache = null as Awaited<ReturnType<typeof loadCourseCache>>;
+    let openOptions = [] as ReturnType<typeof buildShellOpenOptions>;
     let hydrationPromise: Promise<void> | null = null;
     const session = await loadOrCreateChatSession(scope, {
       title: course.name,
@@ -152,6 +157,11 @@ export async function createShellContext(
           ]);
           assignments = nextAssignments;
           cache = nextCache;
+          openOptions = nextCache
+            ? buildShellOpenOptions(
+                await collectOpenableResources({ cache: nextCache })
+              )
+            : [];
 
           if (runtime) {
             setCourseStatus(
@@ -208,6 +218,7 @@ export async function createShellContext(
         statusLabel: "Status: loading course data",
         placeholder: "Ask about this course, or use /assignments",
       },
+      getOpenOptions: () => openOptions,
       onReady: async (api) => {
         await hydrateCourseData(api);
       },
@@ -278,6 +289,9 @@ async function loadOrCreateWorkspaceShell(
   const courseId = loaded.courseId ?? scope.courseId;
   const course = courseId ? getCourseById(services, courseId) : null;
   const cache = course ? await loadCourseCache(course.courseCode, course.id) : null;
+  const openOptions = buildShellOpenOptions(
+    await collectOpenableResources({ loaded, cache })
+  );
   const lifecycleState = getWorkspaceLifecycleState(
     loaded.preparedAt,
     loaded.workspaceState,
@@ -339,6 +353,7 @@ async function loadOrCreateWorkspaceShell(
     },
     getLoadedWorkspace: () => loaded,
     getCourseCache: () => cache,
+    getOpenOptions: () => openOptions,
     pinOptions: buildWorkspacePinOptions(loaded, cache),
     resolvePinContent: async (pin) => resolveWorkspacePinContent(loaded, cache, pin),
     onAsk: async (input, callbacks) => {

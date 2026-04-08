@@ -58,6 +58,7 @@ export async function launchApp(): Promise<void> {
         bannerRenderer: shellContext.bannerRenderer,
         extraHelpCommands: shellContext.extraHelpCommands,
         pinOptions: shellContext.pinOptions,
+        getOpenOptions: shellContext.getOpenOptions,
         resolvePinContent: shellContext.resolvePinContent,
         onReady: shellContext.onReady,
         onAsk: shellContext.onAsk,

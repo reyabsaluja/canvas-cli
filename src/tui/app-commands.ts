@@ -115,8 +115,17 @@ export async function handleCommand(
 
     if (command === "/open") {
       const trimmed = args.trim();
+      const cache = await loadCourseCache(course.courseCode, course.id);
       if (!trimmed) {
-        return { type: "assignment-picker", courseId: course.id };
+        const result = await handleOpenResourceQuery("", { cache });
+        await api.addMessage({
+          role:
+            result.status === "opened" || result.status === "listed"
+              ? "assistant"
+              : "system",
+          content: result.message,
+        });
+        return;
       }
 
       const assignments = await fetchAssignments(services, course.id, course.name);
@@ -143,7 +152,6 @@ export async function handleCommand(
         return;
       }
 
-      const cache = await loadCourseCache(course.courseCode, course.id);
       const result = await handleOpenResourceQuery(trimmed, { cache });
       await api.addMessage({
         role: result.status === "opened" || result.status === "listed" ? "assistant" : "system",

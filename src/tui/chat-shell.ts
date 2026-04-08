@@ -11,13 +11,17 @@ import {
   getAvailableCommands,
   resolveCommand,
 } from "./commands.js";
-import type { ShellPinOption, ShellRuntimeApi } from "./app-types.js";
-import { resolveImplicitCommandIntent } from "./input-intents.js";
+import type {
+  ShellOpenOption,
+  ShellPinOption,
+  ShellRuntimeApi,
+} from "./app-types.js";
 import {
   extractInlinePins,
   mergePinOptions,
   resolvePinReferences,
 } from "./pins.js";
+import { searchOpenableResources } from "./open-resources.js";
 import {
   MAIN_VIEW_BOTTOM_RESERVE,
   buildBannerLines,
@@ -54,6 +58,7 @@ export interface ChatShellOptions<TExit> {
   bannerRenderer?: (buf: { push(line?: string): void }) => void;
   extraHelpCommands?: Array<{ cmd: string; desc: string }>;
   pinOptions?: ShellPinOption[];
+  getOpenOptions?: () => ShellOpenOption[];
   resolvePinContent?: (pin: ShellPinOption) => Promise<string | null>;
   onAsk: (input: string, callbacks: AskCallbacks) => Promise<{
     content: string;
@@ -93,6 +98,7 @@ export async function runChatShell<TExit>(
 
   let inputBuffer = "";
   let slashSelected = 0;
+  let openSelected = 0;
   let pinSelected = 0;
   let showSlashMenu = false;
   let isProcessing = false;
@@ -148,12 +154,55 @@ export async function runChatShell<TExit>(
 
   function getSlashMatches(): CommandDefinition[] {
     if (!inputBuffer.startsWith("/")) return [];
+    if (getActiveOpenPartial() !== null && getOpenMatches().length > 0) {
+      return [];
+    }
     const partial = inputBuffer.toLowerCase();
     return availableCommands.filter((command) =>
       [command.name, ...(command.aliases ?? [])].some((alias) =>
         alias.startsWith(partial)
       )
     );
+  }
+
+  function getOpenOptions(): ShellOpenOption[] {
+    return options.getOpenOptions?.() ?? [];
+  }
+
+  function getActiveOpenPartial(): string | null {
+    if (options.runtime.scope.type === "global") return null;
+    const match = inputBuffer.match(/\/open(?:\s+(.*))?$/i);
+    if (!match) return null;
+    return (match[1] ?? "").trim();
+  }
+
+  function getOpenMatches(): ShellOpenOption[] {
+    const partial = getActiveOpenPartial();
+    if (partial === null) return [];
+    const openOptions = getOpenOptions();
+    if (!partial) return openOptions;
+    const ranked = searchOpenableResources(
+      partial,
+      openOptions.map((option, index) => ({
+        id: String(index),
+        title: option.title,
+        kind: option.detail ?? "resource",
+        targetType: "file" as const,
+        target: option.query,
+        detail: option.detail,
+        searchTerms:
+          option.searchTerms ?? [option.title, option.query, option.detail ?? ""],
+      })),
+      openOptions.length
+    );
+    return ranked
+      .map((resource) =>
+        openOptions.find(
+          (option) =>
+            option.title === resource.title && option.query === resource.target
+        )
+      )
+      .filter((option): option is ShellOpenOption => option !== undefined);
   }
 
   function getActivePinPartial(): string | null {
@@ -184,8 +233,10 @@ export async function runChatShell<TExit>(
       bannerLines: getCachedBannerLines(),
       transcriptLines: getCachedTranscriptLines(),
       slashMatches: showSlashMenu ? getSlashMatches() : [],
+      openMatches: getOpenMatches(),
       pinMatches: getPinMatches(),
       slashSelected,
+      openSelected,
       pinSelected,
     });
     chatScrollOffset = next.chatScrollOffset;
@@ -200,8 +251,10 @@ export async function runChatShell<TExit>(
       statusLabel: options.runtime.statusLabel,
       modelLabel: options.modelLabel,
       slashMatches: showSlashMenu ? getSlashMatches() : [],
+      openMatches: getOpenMatches(),
       pinMatches: getPinMatches(),
       slashSelected,
+      openSelected,
       pinSelected,
     });
   }
@@ -691,6 +744,20 @@ export async function runChatShell<TExit>(
       if (key === "\r" || key === "\n") {
         setChatScrollOffset(0);
 
+        const openPartial = getActiveOpenPartial();
+        if (openPartial !== null) {
+          const openMatches = getOpenMatches();
+          if (openMatches.length > 0) {
+            const selected = openMatches[openSelected]!;
+            await handleCommandInput(
+              `/open ${selected.query}`,
+              "/open",
+              selected.query
+            );
+            return;
+          }
+        }
+
         const pinPartial = getActivePinPartial();
         if (pinPartial !== null) {
           const pinMatches = getPinMatches();
@@ -724,24 +791,9 @@ export async function runChatShell<TExit>(
           return;
         }
 
-        const implicitCommand = resolveImplicitCommandIntent(
-          input,
-          availableCommands,
-          options.runtime.scope.type
-        );
-
-        if (input.startsWith("/") || implicitCommand) {
-          if (input.startsWith("/")) {
-            const [commandName, ...rest] = input.split(/\s+/);
-            await handleCommandInput(input, commandName, rest.join(" "));
-            return;
-          }
-
-          await handleCommandInput(
-            input,
-            implicitCommand!.commandName,
-            implicitCommand!.args
-          );
+        if (input.startsWith("/")) {
+          const [commandName, ...rest] = input.split(/\s+/);
+          await handleCommandInput(input, commandName, rest.join(" "));
           return;
         }
 
@@ -750,6 +802,24 @@ export async function runChatShell<TExit>(
         return;
       }
 
+      if (
+        key === "\x1B[A" &&
+        getActiveOpenPartial() !== null &&
+        getOpenMatches().length > 0
+      ) {
+        openSelected = Math.max(0, openSelected - 1);
+        renderInputOnly();
+        return;
+      }
+      if (
+        key === "\x1B[B" &&
+        getActiveOpenPartial() !== null &&
+        getOpenMatches().length > 0
+      ) {
+        openSelected = Math.min(getOpenMatches().length - 1, openSelected + 1);
+        renderInputOnly();
+        return;
+      }
       if (
         key === "\x1B[A" &&
         getActivePinPartial() !== null &&
@@ -797,14 +867,33 @@ export async function runChatShell<TExit>(
           inputBuffer = inputBuffer.slice(0, -1);
           const wasSlash = showSlashMenu;
           showSlashMenu = inputBuffer.startsWith("/");
-          slashSelected = 0;
+          if (getActiveOpenPartial() !== null) {
+            openSelected = 0;
+          } else {
+            slashSelected = 0;
+          }
           if (wasSlash && !showSlashMenu) {
             render();
-          } else if (showSlashMenu || getActivePinPartial() !== null) {
+          } else if (
+            showSlashMenu ||
+            getActiveOpenPartial() !== null ||
+            getActivePinPartial() !== null
+          ) {
             render();
           } else {
             renderInputOnly();
           }
+        }
+        return;
+      }
+
+      if (key === "\t" && getActiveOpenPartial() !== null) {
+        const openMatches = getOpenMatches();
+        if (openMatches.length > 0) {
+          const selected = openMatches[openSelected]!;
+          inputBuffer = `/open ${selected.query}`;
+          openSelected = 0;
+          render();
         }
         return;
       }
@@ -838,7 +927,10 @@ export async function runChatShell<TExit>(
         inputBuffer += key;
         const wasSlash = showSlashMenu;
         showSlashMenu = inputBuffer.startsWith("/");
-        if (getActivePinPartial() !== null) {
+        if (getActiveOpenPartial() !== null) {
+          openSelected = 0;
+          render();
+        } else if (getActivePinPartial() !== null) {
           pinSelected = 0;
           render();
         } else if (showSlashMenu) {

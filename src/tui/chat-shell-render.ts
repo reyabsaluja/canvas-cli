@@ -11,7 +11,7 @@ import type {
   CommandDefinition,
   ScopeRuntime,
 } from "./chat-state.js";
-import type { ShellPinOption } from "./app-types.js";
+import type { ShellOpenOption, ShellPinOption } from "./app-types.js";
 
 const userBubbleBg = chalk.bgHex("#3a445d");
 const inputBg = userBubbleBg;
@@ -39,8 +39,10 @@ export interface RenderChatFrameOptions {
   bannerLines: string[];
   transcriptLines: string[];
   slashMatches: CommandDefinition[];
+  openMatches: ShellOpenOption[];
   pinMatches: ShellPinOption[];
   slashSelected: number;
+  openSelected: number;
   pinSelected: number;
 }
 
@@ -152,8 +154,10 @@ export function renderChatFrame(
     ) +
       renderSlashPinOverlay(
         options.slashMatches,
+        options.openMatches,
         options.pinMatches,
         options.slashSelected,
+        options.openSelected,
         options.pinSelected,
         options.inputBuffer
       )
@@ -169,8 +173,10 @@ export function renderInputFooter(options: {
   statusLabel?: string;
   modelLabel: string;
   slashMatches: CommandDefinition[];
+  openMatches: ShellOpenOption[];
   pinMatches: ShellPinOption[];
   slashSelected: number;
+  openSelected: number;
   pinSelected: number;
 }): void {
   process.stdout.write(
@@ -183,8 +189,10 @@ export function renderInputFooter(options: {
     ) +
       renderSlashPinOverlay(
         options.slashMatches,
+        options.openMatches,
         options.pinMatches,
         options.slashSelected,
+        options.openSelected,
         options.pinSelected,
         options.inputBuffer
       )
@@ -193,8 +201,10 @@ export function renderInputFooter(options: {
 
 function renderSlashPinOverlay(
   slashMatches: CommandDefinition[],
+  openMatches: ShellOpenOption[],
   pinMatches: ShellPinOption[],
   slashSelected: number,
+  openSelected: number,
   pinSelected: number,
   inputBuffer: string
 ): string {
@@ -211,6 +221,31 @@ function renderSlashPinOverlay(
     }
     return value;
   };
+
+  if (openMatches.length > 0) {
+    const maxShow = Math.min(openMatches.length, lastRowAboveInput, 8);
+    const start = Math.max(
+      0,
+      Math.min(openSelected - Math.floor(maxShow / 2), openMatches.length - maxShow)
+    );
+    const openIndex = inputBuffer.search(/\/open/i);
+    const indent = " ".repeat(Math.max(0, openIndex + 1));
+    const firstRow = lastRowAboveInput - maxShow + 1;
+    for (let index = 0; index < maxShow; index++) {
+      const option = openMatches[start + index]!;
+      const selected = start + index === openSelected;
+      const pointer = selected ? C.bold("❯ ") : "  ";
+      const title = selected ? C.bold(option.title) : C.text(option.title);
+      writes.push(
+        `\x1B[${firstRow + index};1H\x1B[0m\x1B[2K${fitToRow(
+          `${indent}${pointer}${title}${
+            option.detail ? `  ${C.dim(option.detail)}` : ""
+          }`
+        )}`
+      );
+    }
+    return writes.join("");
+  }
 
   if (pinMatches.length > 0) {
     const maxShow = Math.min(pinMatches.length, lastRowAboveInput, 8);

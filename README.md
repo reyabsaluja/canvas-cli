@@ -172,7 +172,7 @@ Workspace scope:
 | `/help` | Show workspace commands |
 | `/quit` | Exit canvas-cli |
 
-In course and workspace scope, plain text like `open lab 4 pdf` is treated the same as `/open lab 4 pdf`.
+In course and workspace scope, `/open` shows a resource picker, and the assistant can also handle requests like `open lab 4 pdf` by calling the same opener tool.
 
 ### Automatic workspace preparation
 

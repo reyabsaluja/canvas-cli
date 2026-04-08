@@ -5,11 +5,11 @@ import path from "node:path";
 import test from "node:test";
 import type { LoadedWorkspace } from "../src/ask/types.js";
 import type { CourseCache } from "../src/enrich/cache-loader.js";
-import { resolveImplicitCommandIntent } from "../src/tui/input-intents.js";
-import { COMMANDS, getAvailableCommands } from "../src/tui/commands.js";
 import {
+  buildShellOpenOptions,
   collectOpenableResources,
   handleOpenResourceQuery,
+  searchOpenableResources,
 } from "../src/tui/open-resources.js";
 
 async function withTempDir(
@@ -22,35 +22,6 @@ async function withTempDir(
     await fs.rm(tempDir, { recursive: true, force: true });
   }
 }
-
-test("implicit open intent only triggers in course and workspace scopes", () => {
-  assert.equal(
-    resolveImplicitCommandIntent(
-      "open lab 4 pdf",
-      getAvailableCommands(COMMANDS, "global"),
-      "global"
-    ),
-    null
-  );
-
-  assert.deepEqual(
-    resolveImplicitCommandIntent(
-      "open lab 4 pdf",
-      getAvailableCommands(COMMANDS, "course"),
-      "course"
-    ),
-    { commandName: "/open", args: "lab 4 pdf" }
-  );
-
-  assert.deepEqual(
-    resolveImplicitCommandIntent(
-      "Open",
-      getAvailableCommands(COMMANDS, "workspace"),
-      "workspace"
-    ),
-    { commandName: "/open", args: "" }
-  );
-});
 
 test("collectOpenableResources includes workspace files and downloaded course attachments", async () => {
   await withTempDir(async (tempDir) => {
@@ -117,6 +88,68 @@ test("collectOpenableResources includes workspace files and downloaded course at
     assert.ok(resources.some((resource) => resource.title === "starter.zip"));
     assert.ok(resources.some((resource) => resource.title === "lab4-spec.pdf"));
   });
+});
+
+test("buildShellOpenOptions disambiguates duplicate titles for the /open picker", () => {
+  const options = buildShellOpenOptions([
+    {
+      id: "a",
+      title: "lab4.pdf",
+      kind: "downloaded attachment",
+      targetType: "file",
+      target: "/tmp/lab4.pdf",
+      detail: "lab4.pdf",
+      searchTerms: ["lab4.pdf"],
+    },
+    {
+      id: "b",
+      title: "lab4.pdf",
+      kind: "course file",
+      targetType: "url",
+      target: "https://canvas.example/lab4",
+      detail: "https://canvas.example/lab4",
+      searchTerms: ["lab4.pdf"],
+    },
+  ]);
+
+  assert.deepEqual(
+    options.map((option) => option.query),
+    ["lab4.pdf downloaded attachment", "lab4.pdf course file"]
+  );
+});
+
+test("buildShellOpenOptions preserves aliases for picker search", () => {
+  const [option] = buildShellOpenOptions([
+    {
+      id: "a",
+      title: "lab4.pdf",
+      kind: "downloaded attachment",
+      targetType: "file",
+      target: "/tmp/lab4.pdf",
+      detail: "/tmp/lab4.pdf",
+      searchTerms: ["lab 4 handout", "week 5 module", "starter pdf"],
+    },
+  ]);
+
+  assert.deepEqual(option?.searchTerms?.includes("week 5 module"), true);
+
+  const matches = searchOpenableResources(
+    "week 5",
+    [
+      {
+        id: "picker-option",
+        title: option!.title,
+        kind: option!.detail ?? "resource",
+        targetType: "file",
+        target: option!.query,
+        detail: option!.detail,
+        searchTerms: option!.searchTerms ?? [],
+      },
+    ],
+    8
+  );
+
+  assert.equal(matches[0]?.title, "lab4.pdf");
 });
 
 test("handleOpenResourceQuery opens matching downloaded resources and reports ambiguity", async () => {

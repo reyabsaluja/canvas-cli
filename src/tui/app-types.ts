@@ -32,12 +32,20 @@ export interface ShellPinOption {
   localPath?: string;
 }
 
+export interface ShellOpenOption {
+  title: string;
+  query: string;
+  detail?: string;
+  searchTerms?: string[];
+}
+
 export interface ShellContext {
   session: ChatSession;
   runtime: ScopeRuntime;
   bannerRenderer?: (buf: { push(line?: string): void }) => void;
   extraHelpCommands?: Array<{ cmd: string; desc: string }>;
   pinOptions?: ShellPinOption[];
+  getOpenOptions?: () => ShellOpenOption[];
   resolvePinContent?: (pin: ShellPinOption) => Promise<string | null>;
   getLoadedWorkspace?: () => LoadedWorkspace | null;
   getCourseCache?: () => CourseCache | null;

@@ -14,6 +14,7 @@ import {
 } from "../ai/provider.js";
 import { buildChunks, retrieveRelevant } from "../ask/retrieve.js";
 import { extractFileText } from "../extract/extract-text.js";
+import { handleOpenResourceQuery } from "./open-resources.js";
 
 const MAX_DOC_TEXT = 30000;
 
@@ -71,6 +72,17 @@ const CHAT_TOOLS: ToolDefinition[] = [
       required: ["title"],
     },
   },
+  {
+    name: "open_resource",
+    description: "Open a workspace or course resource on the user's machine. Use this when the user explicitly asks to open a PDF, file, page, assignment, or resource.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Resource name or description to open" },
+      },
+      required: ["query"],
+    },
+  },
 ];
 
 function buildSystemPrompt(ctx: ChatAgentContext): string {
@@ -89,6 +101,7 @@ IMPORTANT tool usage rules:
 - If you already read a file earlier in this conversation, DO NOT read it again. Use the content from the earlier read.
 - read_file returns the FULL content of the file. After reading, IMMEDIATELY use that content to answer in detail.
 - If a file is inside a zip (e.g., lab4.pdf inside lab4.zip), use read_file with the PDF name — it extracts the content from the zip.
+- If the user explicitly asks you to open a file, PDF, assignment page, or resource, immediately call open_resource.
 - After reading a file, give a DETAILED and SPECIFIC answer based on what you read. Do not give vague summaries.
 - When the user asks to "explain part X in depth", find the specific section in the document and quote the actual requirements, addresses, functionality needed, etc.
 - Do NOT re-read files you already have in the conversation. Just reference the earlier content.
@@ -204,6 +217,8 @@ function mapToolCall(
       return { action: "list", target: "files", color: "green" };
     case "download_course_file":
       return { action: "download", target: (input.title as string) ?? "file", color: "green" };
+    case "open_resource":
+      return { action: "open", target: (input.query as string) ?? "resource", color: "green" };
     default:
       return { action: name, target: "", color: "green" };
   }
@@ -236,7 +251,14 @@ export async function runChatAgent(
     {
       onToolCall: (name, input, toolResult) => {
         const { action, target, color } = mapToolCall(name, input);
-        onToolCall({ action, target, result: toolResult, color });
+        const nextColor =
+          name === "open_resource" &&
+          /No openable resource|Multiple resources matched|Failed to open|missing/i.test(
+            toolResult
+          )
+            ? "red"
+            : color;
+        onToolCall({ action, target, result: toolResult, color: nextColor });
       },
       onTextDelta,
     },
@@ -272,6 +294,8 @@ async function executeToolCall(
       return searchCourse(input.query as string, ctx);
     case "download_course_file":
       return downloadCourseFile(input.title as string, ctx);
+    case "open_resource":
+      return openResource(input.query as string, ctx);
     default:
       return `Unknown tool: ${name}`;
   }
@@ -461,6 +485,14 @@ async function downloadCourseFile(title: string, ctx: ChatAgentContext): Promise
     // Fall through to a guidance message below.
   }
   return `Downloaded "${fileMeta.display_name}", but extracted text is not available yet. Refresh the course cache to rebuild it.`;
+}
+
+async function openResource(query: string, ctx: ChatAgentContext): Promise<string> {
+  const result = await handleOpenResourceQuery(query, {
+    loaded: ctx.loaded,
+    cache: ctx.cache,
+  });
+  return result.message;
 }
 
 async function readCachedCourseAttachment(

@@ -7,6 +7,7 @@ import {
   getExtractedFrontPagePath,
   getExtractedSyllabusPath,
 } from "../enrich/course-documents.js";
+import type { ShellOpenOption } from "./app-types.js";
 
 export interface OpenableResource {
   id: string;
@@ -377,6 +378,52 @@ export async function collectOpenableResources(
   }
 
   return resources.sort(compareResources);
+}
+
+export function buildShellOpenOptions(
+  resources: OpenableResource[]
+): ShellOpenOption[] {
+  const titleCounts = new Map<string, number>();
+  for (const resource of resources) {
+    const normalized = normalizeDuplicateTitle(resource.title);
+    titleCounts.set(normalized, (titleCounts.get(normalized) ?? 0) + 1);
+  }
+
+  return resources.map((resource) => {
+    const normalized = normalizeDuplicateTitle(resource.title);
+    const isDuplicateTitle = (titleCounts.get(normalized) ?? 0) > 1;
+    const query = isDuplicateTitle
+      ? `${resource.title} ${resource.kind}`
+      : resource.title;
+    return {
+      title: resource.title,
+      query,
+      detail: resource.kind,
+      searchTerms: mergeSearchTerms(resource.searchTerms, [query, resource.kind]),
+    };
+  });
+}
+
+export function searchOpenableResources(
+  query: string,
+  resources: OpenableResource[],
+  limit: number = 8
+): OpenableResource[] {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return resources.slice(0, limit);
+  }
+  const normalizedQuery = normalizeSearchText(trimmed);
+  const queryTokens = tokenize(normalizedQuery);
+  if (queryTokens.length === 0) {
+    return resources.slice(0, limit);
+  }
+  return resources
+    .map((resource) => rankResource(queryTokens, normalizedQuery, resource))
+    .filter((entry) => entry.score > 0)
+    .sort(compareRankedResources)
+    .slice(0, limit)
+    .map((entry) => entry.resource);
 }
 
 export function resolveOpenableResource(
