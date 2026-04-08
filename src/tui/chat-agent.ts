@@ -18,6 +18,10 @@ import {
 } from "../ask/retrieve.js";
 import { extractFileText } from "../extract/extract-text.js";
 import { handleOpenResourceQuery } from "./open-resources.js";
+import {
+  readCourseDocument,
+  searchCourseIndex,
+} from "./course-retrieval.js";
 
 const MAX_DOC_TEXT = 30000;
 
@@ -294,7 +298,7 @@ async function executeToolCall(
     case "list_files":
       return listFiles(ctx);
     case "search_course":
-      return searchCourse(input.query as string, ctx);
+      return await searchCourse(input.query as string, ctx);
     case "download_course_file":
       return downloadCourseFile(input.title as string, ctx);
     case "open_resource":
@@ -317,102 +321,37 @@ async function searchWorkspace(query: string, ctx: ChatAgentContext): Promise<st
   return results.join("\n");
 }
 
-function searchCourse(query: string, ctx: ChatAgentContext): string {
-  if (!ctx.cache) return "Course cache not available.";
-  const q = query.toLowerCase();
-  const results: string[] = [];
-  for (const mod of ctx.cache.modules) {
-    if (mod.name.toLowerCase().includes(q)) {
-      results.push(`Module: "${mod.name}" (${mod.items.length} items)`);
-    }
-    for (const item of mod.items) {
-      if (item.title.toLowerCase().includes(q)) {
-        const downloadable = item.type === "File" ? " [downloadable]" : "";
-        results.push(`  [${item.type}] "${item.title}" in "${mod.name}"${downloadable}`);
-      }
-    }
-  }
-  for (const f of ctx.cache.files) {
-    if (f.displayName.toLowerCase().includes(q) || f.filename.toLowerCase().includes(q)) {
-      results.push(`File: "${f.displayName}" (${f.contentType})`);
-    }
-  }
-  for (const att of ctx.cache.attachments) {
-    if (att.originalFilename.toLowerCase().includes(q) && (att.status === "downloaded" || att.status === "skipped")) {
-      results.push(`Downloaded: "${att.originalFilename}" [${att.sourceType}]`);
-    }
-  }
-  if (results.length === 0) return `No course materials matching "${query}" found.`;
-  return results.join("\n");
+async function searchCourse(
+  query: string,
+  ctx: ChatAgentContext
+): Promise<string> {
+  return await searchCourseIndex(ctx.cache, query);
 }
 
 async function readFile(filename: string, ctx: ChatAgentContext): Promise<string> {
   const q = filename.toLowerCase().trim();
   // Strip .txt suffix (workspace extracts add .txt)
   const qClean = q.endsWith(".txt") ? q.slice(0, -4) : q;
-  // Base name without any extension: "lab4.pdf" -> "lab4"
-  const qBase = qClean.replace(/\.[^.]+$/, "");
-
-  // Helper: find a downloaded file in course cache
-  const findInCache = (test: (name: string) => boolean) => {
-    if (!ctx.cache) return null;
-    for (const att of ctx.cache.attachments) {
-      if ((att.status === "downloaded" || att.status === "skipped") && test(att.originalFilename.toLowerCase())) {
-        return {
-          path: path.join(ctx.cache.coursePath, att.localPath),
-          localPath: att.localPath,
-          name: att.originalFilename,
-        };
-      }
-    }
-    return null;
-  };
-
-  // 1. Direct match in course cache (e.g., "lab4_rubric.pdf" -> "lab4_rubric.pdf")
-  const direct = findInCache((n) => n === qClean || n === q);
-  if (direct) {
-    return (
-      (await readCachedCourseAttachment(ctx, direct.localPath)) ??
-      `Cached extracted text for "${direct.name}" is missing. Refresh the course cache to rebuild it.`
-    );
-  }
-
-  // 2. Contains match in course cache (e.g., "rubric" -> "lab4_rubric-1.pdf")
-  const contains = findInCache((n) => n.includes(qClean) || n.includes(q));
-  if (contains) {
-    return (
-      (await readCachedCourseAttachment(ctx, contains.localPath)) ??
-      `Cached extracted text for "${contains.name}" is missing. Refresh the course cache to rebuild it.`
-    );
-  }
-
-  // 3. Zip match: requested file might be INSIDE a zip (e.g., "lab4.pdf" is inside "lab4.zip")
-  const zipMatch = findInCache((n) => n.endsWith(".zip") && n.includes(qBase));
-  if (zipMatch) {
-    const fullContent = await readCachedCourseAttachment(ctx, zipMatch.localPath);
-    if (!fullContent) {
-      return `Cached extracted text for "${zipMatch.name}" is missing. Refresh the course cache to rebuild it.`;
-    }
-    // Extract just the specific file section from the zip output
-    const lines = fullContent.split("\n");
-    const hdr = lines.findIndex((l) => {
-      const ll = l.toLowerCase();
-      return ll.includes(`--- ${qClean}`) || ll.includes(`/${qClean} ---`) || ll.includes(`/${qClean}`);
-    });
-    if (hdr >= 0) {
-      // Return from this header to end (the PDF text section)
-      return lines.slice(hdr).join("\n").slice(0, MAX_DOC_TEXT);
-    }
-    return fullContent.slice(0, MAX_DOC_TEXT);
-  }
-
-  // 4. Workspace markdown files
+  // 1. Workspace markdown files
   if (qClean.includes("assignment.md") && ctx.loaded.assignmentMd) return ctx.loaded.assignmentMd.slice(0, MAX_DOC_TEXT);
   if (qClean.includes("plan.md") && ctx.loaded.planMd) return ctx.loaded.planMd.slice(0, MAX_DOC_TEXT);
   if (qClean.includes("notes.md") && ctx.loaded.notesMd) return ctx.loaded.notesMd.slice(0, MAX_DOC_TEXT);
   if (qClean.includes("workup") && ctx.loaded.workupJson) return JSON.stringify(ctx.loaded.workupJson, null, 2).slice(0, MAX_DOC_TEXT);
 
-  // 5. Workspace extracted files
+  const courseDocument = await readCourseDocument(ctx.cache, filename, MAX_DOC_TEXT);
+  switch (courseDocument.status) {
+    case "ok":
+      return courseDocument.document.content;
+    case "missing_cache":
+    case "empty_query":
+    case "missing_text":
+      return renderCourseDocumentLookupFailure(filename, courseDocument);
+    case "not_found":
+    default:
+      break;
+  }
+
+  // 2. Workspace extracted files
   for (const ef of ctx.loaded.extractedFiles) {
     const en = ef.name.toLowerCase();
     if (en === q || en === qClean || en === qClean + ".txt" || en.includes(qClean)) {
@@ -498,15 +437,22 @@ async function openResource(query: string, ctx: ChatAgentContext): Promise<strin
   return result.message;
 }
 
-async function readCachedCourseAttachment(
-  ctx: ChatAgentContext,
-  localPath: string
-): Promise<string | null> {
-  if (!ctx.cache) return null;
-  const extractedPath = getExtractedAttachmentPath(ctx.cache.coursePath, localPath);
-  try {
-    return await fs.readFile(extractedPath, "utf-8");
-  } catch {
-    return null;
+function renderCourseDocumentLookupFailure(
+  filename: string,
+  result: Awaited<ReturnType<typeof readCourseDocument>>
+): string {
+  switch (result.status) {
+    case "missing_cache":
+      return "Could not read course documents because the course cache is missing.";
+    case "empty_query":
+      return "Provide a document name or title to read from the course cache.";
+    case "missing_text":
+      return result.artifact
+        ? `Matched ${result.artifact.title}, but the cached extracted text is missing. Refresh the course cache to rebuild it.`
+        : `Could not find a course document matching "${filename}".`;
+    case "ok":
+    case "not_found":
+    default:
+      return `Could not find a course document matching "${filename}".`;
   }
 }
