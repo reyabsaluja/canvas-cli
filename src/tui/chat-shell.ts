@@ -12,6 +12,7 @@ import {
   resolveCommand,
 } from "./commands.js";
 import type { ShellPinOption, ShellRuntimeApi } from "./app-types.js";
+import { resolveImplicitCommandIntent } from "./input-intents.js";
 import {
   extractInlinePins,
   mergePinOptions,
@@ -451,6 +452,194 @@ export async function runChatShell<TExit>(
       render();
     }
 
+    async function handleCommandInput(
+      rawInput: string,
+      commandName: string,
+      args: string
+    ): Promise<void> {
+      markTranscriptDirty();
+      await persistence.addMessage({ role: "user", content: rawInput });
+
+      if (commandName === "/help") {
+        const helpLines = availableCommands.map(
+          (command) =>
+            `${C.text(command.name.padEnd(16))}${command.description}`
+        );
+        for (const extra of options.extraHelpCommands ?? []) {
+          helpLines.push(`${C.text(extra.cmd.padEnd(16))}${extra.desc}`);
+        }
+        markTranscriptDirty();
+        await persistence.addMessage({
+          role: "assistant",
+          content: helpLines.join("\n"),
+        });
+        render();
+        return;
+      }
+
+      if (commandName === "/pin") {
+        const pinCommand = resolveCommand(options.commands, commandName);
+        if (
+          !pinCommand ||
+          !pinCommand.scopes.includes(options.runtime.scope.type)
+        ) {
+          markTranscriptDirty();
+          await persistence.addMessage({
+            role: "system",
+            content: `${commandName} is only available in ${formatScopeTargets(
+              pinCommand?.scopes ?? ["workspace"]
+            )}.`,
+          });
+          render();
+          return;
+        }
+
+        const availablePins = options.pinOptions ?? [];
+        const pinArgs = args.split(/\s+/).filter(Boolean);
+        const requested = pinArgs[0]?.toLowerCase() ?? "";
+
+        if (availablePins.length === 0) {
+          markTranscriptDirty();
+          await persistence.addMessage({
+            role: "system",
+            content: "No pinnable files are available in this workspace yet.",
+          });
+          render();
+          return;
+        }
+
+        if (pinArgs.length === 0 || requested === "list") {
+          const lines = [
+            "Available pins",
+            "",
+            ...availablePins.map(
+              (pin) => `• \`${pin.label}\` — ${pin.name}`
+            ),
+          ];
+          if (pendingPins.length > 0) {
+            lines.push(
+              "",
+              `Queued for your next prompt: ${pendingPins
+                .map((pin) => `\`${pin.label}\``)
+                .join(", ")}`
+            );
+          }
+          lines.push(
+            "",
+            "Use `/pin <label>` to queue a file for your next prompt.",
+            "Use `/pin clear` to remove queued pins."
+          );
+          markTranscriptDirty();
+          await persistence.addMessage({
+            role: "assistant",
+            content: lines.join("\n"),
+          });
+          render();
+          return;
+        }
+
+        if (requested === "clear" || requested === "reset") {
+          pendingPins = [];
+          markTranscriptDirty();
+          await persistence.addMessage({
+            role: "assistant",
+            content: "Cleared queued pins for the next prompt.",
+          });
+          render();
+          return;
+        }
+
+        const resolution = resolvePinReferences(pinArgs, availablePins);
+        pendingPins = mergePinOptions(pendingPins, resolution.resolved);
+
+        const lines: string[] = [];
+        if (resolution.resolved.length > 0) {
+          lines.push(
+            `Queued for your next prompt: ${resolution.resolved
+              .map((pin) => `\`${pin.label}\``)
+              .join(", ")}.`
+          );
+        }
+        if (resolution.missing.length > 0) {
+          lines.push(
+            `No pinnable file matched: ${resolution.missing
+              .map((label) => `\`${label}\``)
+              .join(", ")}.`
+          );
+        }
+        for (const item of resolution.ambiguous) {
+          lines.push(
+            `Pin \`${item.query}\` is ambiguous. Matches: ${item.matches
+              .slice(0, 5)
+              .map((match) => `\`${match.label}\``)
+              .join(", ")}.`
+          );
+        }
+
+        if (pendingPins.length > 0) {
+          lines.push(
+            `Queued pins now: ${pendingPins
+              .map((pin) => `\`${pin.label}\``)
+              .join(", ")}.`
+          );
+          lines.push("Send your question when you're ready.");
+        } else if (lines.length === 0) {
+          lines.push("Nothing was queued. Use `/pin` to see available files.");
+        }
+
+        markTranscriptDirty();
+        await persistence.addMessage({
+          role: resolution.resolved.length > 0 ? "assistant" : "system",
+          content: lines.join("\n"),
+        });
+        render();
+        return;
+      }
+
+      const resolvedCommand = resolveCommand(options.commands, commandName);
+      if (!resolvedCommand) {
+        markTranscriptDirty();
+        await persistence.addMessage({
+          role: "system",
+          content: `Unknown command: ${commandName}. Type /help for options.`,
+        });
+        render();
+        return;
+      }
+
+      if (!resolvedCommand.scopes.includes(options.runtime.scope.type)) {
+        markTranscriptDirty();
+        await persistence.addMessage({
+          role: "system",
+          content: `${commandName} is only available in ${formatScopeTargets(
+            resolvedCommand.scopes
+          )}.`,
+        });
+        render();
+        return;
+      }
+
+      try {
+        const exit = await options.onCommand(commandName, args, api);
+        if (exit !== undefined) {
+          const persistError = await closeShellOnce();
+          if (persistError) {
+            console.error(`Failed to save chat session: ${persistError}`);
+          }
+          resolve(exit ?? null);
+          return;
+        }
+        render();
+      } catch (error) {
+        markTranscriptDirty();
+        await persistence.addMessage({
+          role: "system",
+          content: `Error: ${error instanceof Error ? error.message : "unknown"}`,
+        });
+        render();
+      }
+    }
+
     async function handleKey(key: string): Promise<void> {
       if (shellClosed) return;
       if (isProcessing && !keyOkWhileProcessing(key)) return;
@@ -535,190 +724,25 @@ export async function runChatShell<TExit>(
           return;
         }
 
-        if (input.startsWith("/")) {
-          markTranscriptDirty();
-          await persistence.addMessage({ role: "user", content: input });
-          const [commandName, ...rest] = input.split(/\s+/);
-          if (commandName === "/help") {
-            const helpLines = availableCommands.map(
-              (command) =>
-                `${C.text(command.name.padEnd(16))}${command.description}`
-            );
-            for (const extra of options.extraHelpCommands ?? []) {
-              helpLines.push(`${C.text(extra.cmd.padEnd(16))}${extra.desc}`);
-            }
-            markTranscriptDirty();
-            await persistence.addMessage({
-              role: "assistant",
-              content: helpLines.join("\n"),
-            });
-            render();
+        const implicitCommand = resolveImplicitCommandIntent(
+          input,
+          availableCommands,
+          options.runtime.scope.type
+        );
+
+        if (input.startsWith("/") || implicitCommand) {
+          if (input.startsWith("/")) {
+            const [commandName, ...rest] = input.split(/\s+/);
+            await handleCommandInput(input, commandName, rest.join(" "));
             return;
           }
 
-          if (commandName === "/pin") {
-            const pinCommand = resolveCommand(options.commands, commandName);
-            if (
-              !pinCommand ||
-              !pinCommand.scopes.includes(options.runtime.scope.type)
-            ) {
-              markTranscriptDirty();
-              await persistence.addMessage({
-                role: "system",
-                content: `${commandName} is only available in ${formatScopeTargets(
-                  pinCommand?.scopes ?? ["workspace"]
-                )}.`,
-              });
-              render();
-              return;
-            }
-
-            const availablePins = options.pinOptions ?? [];
-            const args = rest.filter(Boolean);
-            const requested = args[0]?.toLowerCase() ?? "";
-
-            if (availablePins.length === 0) {
-              markTranscriptDirty();
-              await persistence.addMessage({
-                role: "system",
-                content: "No pinnable files are available in this workspace yet.",
-              });
-              render();
-              return;
-            }
-
-            if (args.length === 0 || requested === "list") {
-              const lines = [
-                "Available pins",
-                "",
-                ...availablePins.map(
-                  (pin) => `• \`${pin.label}\` — ${pin.name}`
-                ),
-              ];
-              if (pendingPins.length > 0) {
-                lines.push(
-                  "",
-                  `Queued for your next prompt: ${pendingPins
-                    .map((pin) => `\`${pin.label}\``)
-                    .join(", ")}`
-                );
-              }
-              lines.push(
-                "",
-                "Use `/pin <label>` to queue a file for your next prompt.",
-                "Use `/pin clear` to remove queued pins."
-              );
-              markTranscriptDirty();
-              await persistence.addMessage({
-                role: "assistant",
-                content: lines.join("\n"),
-              });
-              render();
-              return;
-            }
-
-            if (requested === "clear" || requested === "reset") {
-              pendingPins = [];
-              markTranscriptDirty();
-              await persistence.addMessage({
-                role: "assistant",
-                content: "Cleared queued pins for the next prompt.",
-              });
-              render();
-              return;
-            }
-
-            const resolution = resolvePinReferences(args, availablePins);
-            pendingPins = mergePinOptions(pendingPins, resolution.resolved);
-
-            const lines: string[] = [];
-            if (resolution.resolved.length > 0) {
-              lines.push(
-                `Queued for your next prompt: ${resolution.resolved
-                  .map((pin) => `\`${pin.label}\``)
-                  .join(", ")}.`
-              );
-            }
-            if (resolution.missing.length > 0) {
-              lines.push(
-                `No pinnable file matched: ${resolution.missing
-                  .map((label) => `\`${label}\``)
-                  .join(", ")}.`
-              );
-            }
-            for (const item of resolution.ambiguous) {
-              lines.push(
-                `Pin \`${item.query}\` is ambiguous. Matches: ${item.matches
-                  .slice(0, 5)
-                  .map((match) => `\`${match.label}\``)
-                  .join(", ")}.`
-              );
-            }
-
-            if (pendingPins.length > 0) {
-              lines.push(
-                `Queued pins now: ${pendingPins
-                  .map((pin) => `\`${pin.label}\``)
-                  .join(", ")}.`
-              );
-              lines.push("Send your question when you're ready.");
-            } else if (lines.length === 0) {
-              lines.push("Nothing was queued. Use `/pin` to see available files.");
-            }
-
-            markTranscriptDirty();
-            await persistence.addMessage({
-              role: resolution.resolved.length > 0 ? "assistant" : "system",
-              content: lines.join("\n"),
-            });
-            render();
-            return;
-          }
-
-          const resolvedCommand = resolveCommand(options.commands, commandName);
-          if (!resolvedCommand) {
-            markTranscriptDirty();
-            await persistence.addMessage({
-              role: "system",
-              content: `Unknown command: ${commandName}. Type /help for options.`,
-            });
-            render();
-            return;
-          }
-
-          if (!resolvedCommand.scopes.includes(options.runtime.scope.type)) {
-            markTranscriptDirty();
-            await persistence.addMessage({
-              role: "system",
-              content: `${commandName} is only available in ${formatScopeTargets(
-                resolvedCommand.scopes
-              )}.`,
-            });
-            render();
-            return;
-          }
-
-          try {
-            const exit = await options.onCommand(commandName, rest.join(" "), api);
-            if (exit !== undefined) {
-              const persistError = await closeShellOnce();
-              if (persistError) {
-                console.error(`Failed to save chat session: ${persistError}`);
-              }
-              resolve(exit ?? null);
-              return;
-            }
-            render();
-            return;
-          } catch (error) {
-            markTranscriptDirty();
-            await persistence.addMessage({
-              role: "system",
-              content: `Error: ${error instanceof Error ? error.message : "unknown"}`,
-            });
-            render();
-            return;
-          }
+          await handleCommandInput(
+            input,
+            implicitCommand!.commandName,
+            implicitCommand!.args
+          );
+          return;
         }
 
         await handlePrompt(input);

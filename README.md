@@ -147,7 +147,7 @@ Course scope:
 | `/files` | Show cached files and downloads for the course |
 | `/modules` | Show course modules |
 | `/manage-courses` | Add, remove, or rename configured courses |
-| `/open` | Open an assignment directly |
+| `/open` | Open an assignment or cached course resource |
 | `/back` | Return to global scope |
 | `/home` | Return to global scope |
 | `/help` | Show course-scope commands |
@@ -163,6 +163,7 @@ Workspace scope:
 | `/resources` | Show key resources |
 | `/evidence` | Show confirmed vs inferred sources |
 | `/status` | Show workspace status |
+| `/open` | Open a workspace or course resource by name |
 | `/pin` | Attach a workspace file or cached attachment to your next prompt |
 | `/refresh` | Refresh the workspace from the latest course cache |
 | `/manage-courses` | Add, remove, or rename configured courses |
@@ -170,6 +171,8 @@ Workspace scope:
 | `/home` | Return to the global home session |
 | `/help` | Show workspace commands |
 | `/quit` | Exit canvas-cli |
+
+In course and workspace scope, plain text like `open lab 4 pdf` is treated the same as `/open lab 4 pdf`.
 
 ### Automatic workspace preparation
 

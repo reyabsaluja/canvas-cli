@@ -1,6 +1,7 @@
 import { loadCourseCache } from "../enrich/cache-loader.js";
 import type { LoadedWorkspace } from "../ask/types.js";
 import type { AssignmentWorkup } from "../work/types.js";
+import { matchAssignments } from "../domain/matching.js";
 import {
   fetchAssignments,
   getCourseById,
@@ -9,7 +10,8 @@ import {
   type AppServices,
 } from "./services.js";
 import type { CommandApi, ShellResult } from "./app-types.js";
-import { resolveCourseAssignmentOpen, resolveGlobalOpen } from "./app-navigation.js";
+import { resolveGlobalOpen } from "./app-navigation.js";
+import { handleOpenResourceQuery } from "./open-resources.js";
 
 export async function handleCommand(
   command: string,
@@ -107,24 +109,47 @@ export async function handleCommand(
       return { type: "scope", scope: { type: "global" } };
     }
 
-    if (command === "/assignments" || command === "/open") {
-      const result = await resolveCourseAssignmentOpen(
-        services,
-        course.id,
-        args
-      );
-      if (!result) {
+    if (command === "/assignments") {
+      return { type: "assignment-picker", courseId: course.id };
+    }
+
+    if (command === "/open") {
+      const trimmed = args.trim();
+      if (!trimmed) {
+        return { type: "assignment-picker", courseId: course.id };
+      }
+
+      const assignments = await fetchAssignments(services, course.id, course.name);
+      const matches = matchAssignments(trimmed, assignments);
+      if (matches.length === 1) {
+        return {
+          type: "open-assignment",
+          courseId: course.id,
+          assignmentTarget: {
+            id: matches[0]!.id,
+            name: matches[0]!.name,
+          },
+        };
+      }
+      if (matches.length > 1) {
         await api.addMessage({
           role: "system",
-          content: "That course is no longer available. Use /courses to pick another one.",
+          content: [
+            `Multiple assignments in ${course.name} matched "${trimmed}".`,
+            "Be more specific or use /assignments:",
+            ...matches.slice(0, 5).map((assignment) => `• ${assignment.name}`),
+          ].join("\n"),
         });
-        return { type: "scope", scope: { type: "global" } };
-      }
-      if (result.type === "message") {
-        await api.addMessage({ role: "system", content: result.content });
         return;
       }
-      return result;
+
+      const cache = await loadCourseCache(course.courseCode, course.id);
+      const result = await handleOpenResourceQuery(trimmed, { cache });
+      await api.addMessage({
+        role: result.status === "opened" || result.status === "listed" ? "assistant" : "system",
+        content: result.message,
+      });
+      return;
     }
 
     const cache = await loadCourseCache(course.courseCode, course.id);
@@ -326,5 +351,31 @@ export async function handleCommand(
         name: api.session.metadata.assignmentName ?? api.session.title,
       },
     };
+  }
+
+  if (command === "/open") {
+    const loaded = getCurrentWorkspace();
+    if (!loaded) {
+      await api.addMessage({
+        role: "system",
+        content: "No workspace is loaded right now.",
+      });
+      return;
+    }
+
+    const cache =
+      api.getCourseCache?.() ??
+      (loaded.courseCode && loaded.courseId
+        ? await loadCourseCache(loaded.courseCode, loaded.courseId)
+        : null);
+    const result = await handleOpenResourceQuery(args, {
+      loaded,
+      cache,
+    });
+    await api.addMessage({
+      role: result.status === "opened" || result.status === "listed" ? "assistant" : "system",
+      content: result.message,
+    });
+    return;
   }
 }

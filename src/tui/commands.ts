@@ -10,8 +10,8 @@ export const COMMANDS: CommandDefinition[] = [
   { name: "/recent", description: "Reopen a recent course or workspace", scopes: ["global"] },
   {
     name: "/open",
-    description: "Open a course, assignment, or recent item",
-    scopes: ["global", "course"],
+    description: "Open a course, assignment, or resource",
+    scopes: ["global", "course", "workspace"],
   },
   { name: "/assignments", description: "Open the assignment picker", scopes: ["course"] },
   { name: "/files", description: "List course files and cached downloads", scopes: ["course"] },
