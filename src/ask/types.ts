@@ -25,6 +25,8 @@ export interface ContentChunk {
   section: string;
   /** The text content. */
   text: string;
+  /** Short canonical excerpt from the shared knowledge store. */
+  excerpt?: string;
   /** Kind for display: "workup", "plan", "notes", "extracted", "assignment". */
   kind: string;
   /** Shared artifact identifier from the knowledge store, when available. */
@@ -35,6 +37,8 @@ export interface ContentChunk {
   searchTokens?: string[];
   /** Retrieval weight hint from the knowledge store. */
   scoreBoost?: number;
+  /** Shared-section relevance score for the current query, when available. */
+  score?: number;
 }
 
 export interface ExtractedWorkspaceFile {

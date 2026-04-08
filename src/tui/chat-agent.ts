@@ -12,7 +12,10 @@ import {
   type AIProviderConfig,
   type ToolDefinition,
 } from "../ai/provider.js";
-import { buildChunks, retrieveRelevant } from "../ask/retrieve.js";
+import {
+  buildWorkspaceRetrievalContext,
+  retrieveRelevant,
+} from "../ask/retrieve.js";
 import { extractFileText } from "../extract/extract-text.js";
 import { handleOpenResourceQuery } from "./open-resources.js";
 
@@ -302,8 +305,8 @@ async function executeToolCall(
 }
 
 async function searchWorkspace(query: string, ctx: ChatAgentContext): Promise<string> {
-  const chunks = await buildChunks(ctx.loaded);
-  const relevant = retrieveRelevant(query, chunks, 5);
+  const retrievalContext = await buildWorkspaceRetrievalContext(ctx.loaded);
+  const relevant = retrieveRelevant(query, retrievalContext, 5);
   if (relevant.length === 0) return "No relevant content found for that query.";
   const results: string[] = [];
   for (const chunk of relevant) {
