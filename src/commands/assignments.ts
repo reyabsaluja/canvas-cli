@@ -4,7 +4,7 @@ import { normalizeAssignment, normalizeCourse } from "../domain/normalize.js";
 import { filterRelevantAssignments } from "../domain/assignment-relevance.js";
 import { matchCourses } from "../domain/matching.js";
 import { sortByUrgency } from "../domain/sorting.js";
-import { renderAssignments } from "../format/renderAssignments.js";
+import { renderAssignments } from "../format/render-assignments.js";
 import { handleError } from "../errors.js";
 import { loadCourseCache } from "../enrich/cache-loader.js";
 import { enrichAssignment } from "../enrich/enrich-assignment.js";

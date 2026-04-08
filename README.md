@@ -1,43 +1,62 @@
 # canvas-cli
 
-An interactive terminal interface for Canvas LMS. Browse courses, open assignments, and get AI-powered assignment understanding — all from your terminal.
+`canvas-cli` is a TypeScript command-line interface for working with Canvas LMS from the terminal. It combines direct Canvas API access, local course ingestion, an interactive TUI, and optional AI-assisted assignment investigation.
 
-## Setup
+## Highlights
 
-1. Install dependencies:
+- Browse Canvas courses and assignments without leaving the terminal
+- Ingest course materials into a reusable local cache
+- Generate assignment workspaces with summaries, plans, and extracted artifacts
+- Ask grounded questions against an existing workspace
+- Launch an interactive terminal UI by running the CLI with no subcommand
+
+## Quick Start
 
 ```bash
 npm install
-```
-
-2. Create a `.env` file from the example:
-
-```bash
 cp .env.example .env
-```
-
-3. Fill in your Canvas credentials in `.env`:
-
-- **`CANVAS_BASE_URL`** — Your institution's Canvas API base URL (e.g. `https://q.utoronto.ca/api/v1`)
-- **`CANVAS_ACCESS_TOKEN`** — Generate one from Canvas: Account → Settings → New Access Token
-- **`ANTHROPIC_API_KEY`** (optional) — Required for `--smart` AI features. Get one from [console.anthropic.com](https://console.anthropic.com)
-
-4. Build the project:
-
-```bash
 npm run build
+npm start
 ```
 
-## Interactive Mode (Flagship)
+Configure `.env` with:
 
-The primary way to use canvas-cli is the interactive terminal UI:
+- `CANVAS_BASE_URL`
+- `CANVAS_ACCESS_TOKEN`
+- One optional AI provider key for smart features: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_API_KEY`
+
+## Commands
+
+| Command | Purpose |
+| --- | --- |
+| `canvas-cli` | Launch the interactive TUI |
+| `canvas-cli courses` | List courses |
+| `canvas-cli assignments` | List assignments |
+| `canvas-cli show assignment <name>` | Show detailed assignment information |
+| `canvas-cli ingest <course>` | Cache course materials locally |
+| `canvas-cli work <assignment>` | Build an AI-assisted assignment workspace |
+| `canvas-cli ask <question>` | Ask a question about an existing workspace |
+
+## Local State
+
+Generated local state is stored under `.canvas-cli/` and ignored by git:
+
+- `.canvas-cli/courses/`: ingested course data and attachments
+- `.canvas-cli/sessions/`: assignment workspaces, extracted text, notes, and plans
+
+## Development
 
 ```bash
-canvas-cli
+npm run dev
+npm run typecheck
+npm run test
+npm run build
+npm run check
 ```
 
-This launches an interactive application where you can:
+## Documentation
 
+<<<<<<< HEAD
 1. **Start in global chat** — open directly into a persistent home session
 2. **Move between scopes** — global, course, and workspace all use the same shell
 3. **Open pickers from commands** — `/courses`, `/recent`, `/assignments`, `/open`
@@ -63,9 +82,17 @@ The interactive TUI uses persistent chat sessions stored under `.canvas-cli/chat
 - Each workspace gets its own persistent workspace session
 
 Reopening a course or workspace restores the prior thread instead of starting from scratch.
+=======
+- [Documentation index](docs/README.md)
+- [Architecture overview](docs/architecture.md)
+- [Project structure](docs/project-structure.md)
+- [Development guide](docs/development.md)
+- [Contributing guide](CONTRIBUTING.md)
+>>>>>>> main
 
-### Example flow
+## Conventions
 
+<<<<<<< HEAD
 ```
 $ canvas-cli
 
@@ -795,3 +822,8 @@ src/
   config/
     env.ts                        — Environment variable loading
 ```
+=======
+- `src/` is the source root and `dist/` is build output.
+- Source folders are organized by responsibility rather than by command surface alone.
+- New source files should use kebab-case names.
+>>>>>>> main
