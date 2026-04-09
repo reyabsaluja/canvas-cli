@@ -4,6 +4,8 @@ import type {
   CanvasAssignmentDetail,
   CanvasCourse,
   CanvasCourseDetail,
+  CanvasDiscussionTopic,
+  CanvasDiscussionTopicView,
   CanvasFile,
   CanvasModule,
   CanvasModuleItem,
@@ -189,6 +191,32 @@ export class CanvasClient {
       });
       if (!response.ok) return null;
       return Buffer.from(await response.arrayBuffer());
+    } catch {
+      return null;
+    }
+  }
+
+  /** Get announcements for a course. Returns empty array on access errors. */
+  async getAnnouncementsSafe(courseId: number): Promise<CanvasDiscussionTopic[]> {
+    const url = `${this.baseUrl}/courses/${courseId}/discussion_topics?only_announcements=true&per_page=30&order_by=recent_activity`;
+    return this.fetchPaginatedSafe<CanvasDiscussionTopic>(url);
+  }
+
+  /** Get discussion topics for a course (excludes announcements). Returns empty array on access errors. */
+  async getDiscussionTopicsSafe(courseId: number): Promise<CanvasDiscussionTopic[]> {
+    const url = `${this.baseUrl}/courses/${courseId}/discussion_topics?per_page=30&order_by=recent_activity`;
+    const topics = await this.fetchPaginatedSafe<CanvasDiscussionTopic>(url);
+    return topics.filter((t) => !t.is_announcement);
+  }
+
+  /** Get the full thread view for a discussion topic. Returns null on error. */
+  async getDiscussionTopicViewSafe(
+    courseId: number,
+    topicId: number
+  ): Promise<CanvasDiscussionTopicView | null> {
+    try {
+      const url = `${this.baseUrl}/courses/${courseId}/discussion_topics/${topicId}/view?include_new_entries=1`;
+      return await this.fetchOne<CanvasDiscussionTopicView>(url);
     } catch {
       return null;
     }

@@ -7,6 +7,7 @@ import type { LoadedWorkspace } from "../../ask/types.js";
 import type { CourseConfig, UserCourse } from "../course-config.js";
 import type { AssignmentWorkup } from "../../work/types.js";
 import type { WorkspaceLifecycleState } from "../chat-state.js";
+import type { RadarService } from "./radar-service.js";
 
 /**
  * Shared service state — initialized once, reused across TUI screens.
@@ -24,6 +25,7 @@ export interface AppServices {
     number,
     { courseName: string; assignmentsPromise: Promise<Assignment[]> }
   >;
+  radar: RadarService;
 }
 
 export interface WorkspaceOpenResult {

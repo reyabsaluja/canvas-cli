@@ -239,6 +239,8 @@ export async function createShellContext(
         await hydrateCourseData();
         const answer = await answerCourseQuestion({
           aiConfig: services.aiConfig,
+          services,
+          courseId: course.id,
           courseName: course.name,
           courseCode: course.courseCode,
           cache,

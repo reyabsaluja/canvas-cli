@@ -18,6 +18,11 @@ import {
   searchCourseKnowledge,
 } from "./course-retrieval.js";
 import { handleOpenResourceQuery } from "./open-resources.js";
+import {
+  formatRadarItems,
+  resolveAndRenderThread,
+} from "./radar-commands.js";
+import type { RadarFilter } from "./services.js";
 
 const GLOBAL_TOOLS: ToolDefinition[] = [
   {
@@ -56,6 +61,41 @@ const GLOBAL_TOOLS: ToolDefinition[] = [
         query: { type: "string", description: "Keyword or phrase to search for" },
       },
       required: ["query"],
+    },
+  },
+  {
+    name: "list_radar",
+    description:
+      "List recent announcements and discussion topics across all courses. Optionally filter by type and search by keyword.",
+    parameters: {
+      type: "object",
+      properties: {
+        filter: {
+          type: "string",
+          enum: ["all", "announcements", "discussions"],
+          description: "Type of items to list. Default: all.",
+        },
+        query: {
+          type: "string",
+          description: "Optional keyword to search titles.",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "read_thread",
+    description:
+      "Read a full discussion thread including all replies. Identify the thread by topic ID or partial title.",
+    parameters: {
+      type: "object",
+      properties: {
+        topic: {
+          type: "string",
+          description: "Topic ID (number) or partial title to match.",
+        },
+      },
+      required: ["topic"],
     },
   },
 ];
@@ -107,6 +147,41 @@ const COURSE_TOOLS: ToolDefinition[] = [
       required: ["query"],
     },
   },
+  {
+    name: "list_radar",
+    description:
+      "List recent announcements and discussion topics for this course. Optionally filter by type and search by keyword.",
+    parameters: {
+      type: "object",
+      properties: {
+        filter: {
+          type: "string",
+          enum: ["all", "announcements", "discussions"],
+          description: "Type of items to list. Default: all.",
+        },
+        query: {
+          type: "string",
+          description: "Optional keyword to search titles.",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "read_thread",
+    description:
+      "Read a full discussion thread including all replies. Identify the thread by topic ID or partial title.",
+    parameters: {
+      type: "object",
+      properties: {
+        topic: {
+          type: "string",
+          description: "Topic ID (number) or partial title to match.",
+        },
+      },
+      required: ["topic"],
+    },
+  },
 ];
 
 export interface ScopeToolCallEvent {
@@ -118,6 +193,8 @@ export interface ScopeToolCallEvent {
 
 interface CourseAssistantOptions {
   aiConfig: AIProviderConfig;
+  services: AppServices;
+  courseId: number;
   courseName: string;
   courseCode: string;
   cache: CourseCache | null;
@@ -196,6 +273,40 @@ export async function answerGlobalQuestion(options: {
             color: "green",
           });
           return result;
+        }
+        case "list_radar": {
+          const filter = (input.filter as RadarFilter) ?? "all";
+          const query = (input.query as string) ?? "";
+          const courses = getDisplayCourses(options.services);
+          const items = await options.services.radar.getRadarItemsMultiCourse(
+            courses.map((c) => ({ id: c.id, name: c.name })),
+            filter,
+            query || undefined
+          );
+          const result = formatRadarItems(items, filter, query);
+          options.onToolCall?.({
+            action: "list",
+            target: "radar",
+            result,
+            color: "green",
+          });
+          return result;
+        }
+        case "read_thread": {
+          const topicQuery = String(input.topic ?? "");
+          const courses = getDisplayCourses(options.services);
+          const resolved = await resolveAndRenderThread(
+            options.services,
+            courses,
+            topicQuery
+          );
+          options.onToolCall?.({
+            action: "read",
+            target: topicQuery || "thread",
+            result: resolved.content,
+            color: resolved.found ? "green" : "red",
+          });
+          return resolved.content;
         }
         default:
           return `Unknown tool: ${toolName}`;
@@ -278,6 +389,43 @@ export async function answerCourseQuestion(
           });
           return result.message;
         }
+        case "list_radar": {
+          const filter = (input.filter as RadarFilter) ?? "all";
+          const query = (input.query as string) ?? "";
+          const items = await options.services.radar.getRadarItems(
+            options.courseId,
+            options.courseName,
+            filter,
+            query || undefined
+          );
+          const result = formatRadarItems(items, filter, query);
+          options.onToolCall?.({
+            action: "list",
+            target: "radar",
+            result,
+            color: "green",
+          });
+          return result;
+        }
+        case "read_thread": {
+          const topicQuery = String(input.topic ?? "");
+          const course = {
+            id: options.courseId,
+            name: options.courseName,
+          };
+          const resolved = await resolveAndRenderThread(
+            options.services,
+            [course],
+            topicQuery
+          );
+          options.onToolCall?.({
+            action: "read",
+            target: topicQuery || "thread",
+            result: resolved.content,
+            color: resolved.found ? "green" : "red",
+          });
+          return resolved.content;
+        }
         default:
           return `Unknown tool: ${toolName}`;
       }
@@ -302,6 +450,7 @@ function buildGlobalSystemPrompt(
     "This scope is navigation-oriented. Help the user with cross-course questions, upcoming work, and where to go next.",
     "Do not pretend you can read assignment documents from global scope.",
     "If the user needs assignment-level detail, tell them to open the course or workspace.",
+    "Use list_radar and read_thread to check announcements and discussions across courses.",
     "",
     "Available configured courses:",
   ];
@@ -357,6 +506,7 @@ function buildCourseSystemPrompt(
     "Answer questions about assignments, modules, files, and course structure.",
     "Use tools when the user asks for details that require searching or reading cached course materials.",
     "If the user explicitly asks to open a file, PDF, page, assignment, or resource, immediately use the open_course_resource tool instead of just describing it.",
+    "Use list_radar and read_thread to check announcements and discussions for this course.",
     "Ground answers in the indexed local cache. If the cache does not contain the answer, say so plainly.",
     "If the cache is missing, say that clearly and guide the user toward opening a workspace or refreshing.",
     "",
