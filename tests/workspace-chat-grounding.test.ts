@@ -803,6 +803,68 @@ test("workspace retrieval gate reuses remembered workspace discoveries before re
   });
 });
 
+test("workspace retrieval gate prefers grounded memory over later discovered artifacts", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+
+    const decision = await decideWorkspaceRetrieval({
+      question: "Explain the branch hazard requirement in detail.",
+      runState: {
+        observations: [
+          {
+            tool: "read_file",
+            status: "ok",
+            summary: "Read docs/reference.txt.",
+            artifacts: [
+              {
+                artifactId: "workspace:extracted:docs/reference.txt",
+                title: "docs/reference.txt",
+                kind: "extracted",
+                excerpt:
+                  "The branch hazard requirement is to show the stall cycles clearly in the waveform.",
+              },
+            ],
+            content:
+              "The branch hazard requirement is to show the stall cycles clearly in the waveform.",
+          },
+          {
+            tool: "search_workspace",
+            status: "ok",
+            summary: 'Found 1 relevant workspace match for "branch hazard".',
+            artifacts: [
+              {
+                artifactId: "workspace:extracted:docs/reference.txt",
+                title: "docs/reference.txt",
+                kind: "extracted",
+                excerpt:
+                  "The branch hazard requirement is to show the stall cycles clearly in the waveform.",
+              },
+              {
+                artifactId: "workspace:assignment:assignment.md",
+                title: "assignment.md",
+                kind: "assignment",
+                excerpt: "Explain branch behavior and show the relevant waveform details.",
+              },
+            ],
+          },
+        ],
+        readArtifactIds: ["workspace:extracted:docs/reference.txt"],
+        stepCount: 2,
+      },
+      loaded,
+      cache,
+    });
+
+    assert.deepEqual(decision, {
+      action: "answer_from_memory",
+      reason: "already_read_relevant_artifact",
+      sourceArtifactIds: ["workspace:extracted:docs/reference.txt"],
+    });
+  });
+});
+
 test("workspace retrieval gate ignores weak remembered course evidence when the question is unrelated", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
