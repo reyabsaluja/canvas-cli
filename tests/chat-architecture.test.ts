@@ -621,6 +621,13 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
         extractedTexts: new Map([["lab-spec", "Important extracted text"]]),
         evidenceNotes: [],
         toolCallCount: 0,
+        runState: {
+          observations: [],
+          readArtifactIds: [],
+          stepCount: 0,
+        },
+        primaryInstructionSourceIds: [],
+        dueDateSourceIds: [],
       };
 
       const workResult = await createWorkWorkspace(

@@ -1,6 +1,10 @@
 import type { AssignmentDetail, Course } from "../domain/models.js";
 import type { EnrichmentSummary } from "../enrich/types.js";
-import type { AssignmentWorkup, InvestigationState } from "./types.js";
+import type {
+  AssignmentWorkup,
+  InvestigationState,
+  WorkVerificationResult,
+} from "./types.js";
 import { callModel, type AIProviderConfig } from "../ai/provider.js";
 import { htmlToText } from "../format/html-to-text.js";
 
@@ -42,17 +46,25 @@ export async function synthesizeWorkup(
   course: Course,
   enrichment: EnrichmentSummary | null,
   state: InvestigationState,
-  investigationSummary: string
+  investigationSummary: string,
+  verification: WorkVerificationResult
 ): Promise<AssignmentWorkup> {
-  const userMessage = buildSynthesisMessage(detail, state, investigationSummary);
+  const userMessage = buildSynthesisMessage(
+    detail,
+    state,
+    investigationSummary,
+    verification
+  );
   const rawResponse = await callModel(config, SYNTHESIS_SYSTEM_PROMPT, userMessage);
-  return parseSynthesisResponse(rawResponse);
+  const parsed = parseSynthesisResponse(rawResponse);
+  return applyInvestigationVerification(parsed, verification);
 }
 
 function buildSynthesisMessage(
   detail: AssignmentDetail,
   state: InvestigationState,
-  investigationSummary: string
+  investigationSummary: string,
+  verification: WorkVerificationResult
 ): string {
   const sections: string[] = [];
 
@@ -77,6 +89,13 @@ function buildSynthesisMessage(
 
   sections.push(`\n# Sources visited: ${state.visitedSources.join(", ") || "none"}`);
 
+  sections.push("\n# Investigation verification");
+  sections.push(`Complete: ${verification.ok ? "yes" : "no"}`);
+  sections.push(`Confidence cap: ${verification.confidence}`);
+  sections.push(
+    `Missing evidence: ${verification.missing.join(", ") || "none"}`
+  );
+
   // Include all extracted texts
   if (state.extractedTexts.size > 0) {
     sections.push("\n# Extracted document contents");
@@ -88,6 +107,33 @@ function buildSynthesisMessage(
   sections.push("\nBased on all of the above, produce the structured assignment workup.");
 
   return sections.join("\n");
+}
+
+export function applyInvestigationVerification(
+  workup: AssignmentWorkup,
+  verification: WorkVerificationResult
+): AssignmentWorkup {
+  const uncertainties = [...workup.uncertainties];
+
+  if (verification.missing.includes("primary_instruction")) {
+    pushUniqueUncertainty(
+      uncertainties,
+      "The investigation did not confirm that a primary instruction document was read, so some requirements may be incomplete."
+    );
+  }
+
+  if (verification.missing.includes("due_date_source")) {
+    pushUniqueUncertainty(
+      uncertainties,
+      "The investigation did not confirm a due-date source, so schedule details may be incomplete."
+    );
+  }
+
+  return {
+    ...workup,
+    confidence: capConfidence(workup.confidence, verification.confidence),
+    uncertainties,
+  };
 }
 
 function parseSynthesisResponse(raw: string): AssignmentWorkup {
@@ -165,4 +211,22 @@ function asSourceTraceArray(v: unknown): AssignmentWorkup["sourceTrace"] {
       conclusion: asString(x.conclusion, ""),
       source: asString(x.source, ""),
     }));
+}
+
+function capConfidence(
+  current: AssignmentWorkup["confidence"],
+  cap: WorkVerificationResult["confidence"]
+): AssignmentWorkup["confidence"] {
+  const rank = {
+    high: 3,
+    medium: 2,
+    low: 1,
+  };
+  return rank[current] <= rank[cap] ? current : cap;
+}
+
+function pushUniqueUncertainty(target: string[], value: string): void {
+  if (!target.includes(value)) {
+    target.push(value);
+  }
 }

@@ -1,3 +1,5 @@
+import type { RunState } from "../agent/run-state.js";
+
 /**
  * Structured result of the agent's investigation and synthesis.
  * This is the primary artifact produced by `canvas-cli work`.
@@ -59,6 +61,18 @@ export interface InvestigationState {
   evidenceNotes: string[];
   /** Number of tool calls made. */
   toolCallCount: number;
+  /** Structured observations from the investigation loop. */
+  runState: RunState;
+  /** Evidence that a real instruction document was read. */
+  primaryInstructionSourceIds: string[];
+  /** Evidence that a due-date source was checked. */
+  dueDateSourceIds: string[];
+}
+
+export interface WorkVerificationResult {
+  ok: boolean;
+  missing: Array<"primary_instruction" | "due_date_source">;
+  confidence: "high" | "medium" | "low";
 }
 
 /**

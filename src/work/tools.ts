@@ -114,7 +114,7 @@ export const INVESTIGATION_TOOLS: ToolDefinition[] = [
   {
     name: "complete_investigation",
     description:
-      "Signal that you have gathered enough evidence and are ready to produce the final assignment workup. Call this ONLY when you have actually read the relevant instruction documents (not just listed them). Include a detailed summary of your key findings.",
+      "Signal that you have gathered enough evidence and are ready to produce the final assignment workup. Call this ONLY when you have actually read the relevant instruction documents (not just listed them) and confirmed a due-date source from Canvas, list_assignments, or get_syllabus. The runtime will reject this call if those minimum evidence requirements are still missing. Include a detailed summary of your key findings.",
     parameters: {
       type: "object" as const,
       properties: {
