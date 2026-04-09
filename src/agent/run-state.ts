@@ -1,4 +1,5 @@
 import type { Observation } from "./observation.js";
+import { isGroundedContentObservation } from "./observation-relevance.js";
 
 const MAX_RUN_STATE_OBSERVATIONS = 24;
 const MAX_RECENT_TRANSIENT_OBSERVATIONS = 8;
@@ -23,7 +24,7 @@ export function appendObservation(
   observation: Observation
 ): void {
   runState.stepCount += 1;
-  if (isDuplicateGroundedObservation(runState.observations, observation)) {
+  if (isDuplicateObservation(runState.observations, observation)) {
     return;
   }
   runState.observations.push(observation);
@@ -74,7 +75,7 @@ export function compactRunState(runState: RunState): void {
     }
 
     const observation = runState.observations[index]!;
-    if (!shouldRememberReadArtifact(observation)) {
+    if (!isGroundedContentObservation(observation)) {
       continue;
     }
 
@@ -99,11 +100,16 @@ export function compactRunState(runState: RunState): void {
 }
 
 function shouldRememberReadArtifact(observation: Observation): boolean {
+  return isGroundedContentObservation(observation);
+}
+
+function isDuplicateObservation(
+  observations: Observation[],
+  nextObservation: Observation
+): boolean {
   return (
-    observation.status === "ok" &&
-    observation.artifacts.length > 0 &&
-    typeof observation.content === "string" &&
-    observation.content.trim().length > 0
+    isDuplicateGroundedObservation(observations, nextObservation) ||
+    isDuplicateArtifactFailureObservation(observations, nextObservation)
   );
 }
 
@@ -132,6 +138,42 @@ function isDuplicateGroundedObservation(
   });
 }
 
+function isDuplicateArtifactFailureObservation(
+  observations: Observation[],
+  nextObservation: Observation
+): boolean {
+  if (!shouldRememberArtifactFailure(nextObservation)) {
+    return false;
+  }
+
+  const nextArtifactKey = buildObservationArtifactKey(nextObservation);
+  const nextSummary = normalizeObservationSummary(nextObservation.summary);
+  if (!nextArtifactKey || !nextSummary) {
+    return false;
+  }
+
+  return observations.some((observation) => {
+    if (!shouldRememberArtifactFailure(observation)) {
+      return false;
+    }
+    return (
+      observation.status === nextObservation.status &&
+      observation.tool === nextObservation.tool &&
+      buildObservationArtifactKey(observation) === nextArtifactKey &&
+      normalizeObservationSummary(observation.summary) === nextSummary
+    );
+  });
+}
+
+function shouldRememberArtifactFailure(observation: Observation): boolean {
+  return (
+    observation.status !== "ok" &&
+    observation.artifacts.length > 0 &&
+    (observation.tool === "read_file" ||
+      observation.tool === "download_course_file")
+  );
+}
+
 function buildObservationArtifactKey(observation: Observation): string {
   return [...new Set(
     observation.artifacts
@@ -144,6 +186,10 @@ function buildObservationArtifactKey(observation: Observation): string {
 
 function normalizeObservationContent(content?: string): string {
   return (content ?? "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeObservationSummary(summary?: string): string {
+  return (summary ?? "").replace(/\s+/g, " ").trim();
 }
 
 function collectRememberedArtifactIds(observations: Observation[]): string[] {

@@ -1521,6 +1521,40 @@ test("run-state does not store duplicate grounded observations for the same evid
   assert.equal(runState.observations[0]?.tool, "read_file");
 });
 
+test("run-state does not store duplicate failed artifact observations for the same dead end", () => {
+  const runState = createEmptyRunState();
+
+  appendObservation(runState, {
+    tool: "read_file",
+    status: "missing_text",
+    summary: "Matched lab4-brief.txt, but readable text is missing.",
+    artifacts: [
+      {
+        artifactId: "course:attachment:attachments/modules/lab4-brief.txt:lab4-brief.txt",
+        title: "lab4-brief.txt",
+        kind: "attachment",
+      },
+    ],
+  });
+
+  appendObservation(runState, {
+    tool: "read_file",
+    status: "missing_text",
+    summary: "Matched lab4-brief.txt, but readable text is missing.",
+    artifacts: [
+      {
+        artifactId: "course:attachment:attachments/modules/lab4-brief.txt:lab4-brief.txt",
+        title: "lab4-brief.txt",
+        kind: "attachment",
+      },
+    ],
+  });
+
+  assert.equal(runState.stepCount, 2);
+  assert.equal(runState.observations.length, 1);
+  assert.equal(runState.observations[0]?.status, "missing_text");
+});
+
 test("read_file reuses previously read content across turns", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
