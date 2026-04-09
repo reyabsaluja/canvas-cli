@@ -107,7 +107,11 @@ export class RadarService {
   async resolveTopicByPartialTitle(
     courses: Array<{ id: number; name: string }>,
     query: string
-  ): Promise<{ item: RadarItem; courseId: number } | null> {
+  ): Promise<
+    | { status: "found"; item: RadarItem; courseId: number }
+    | { status: "ambiguous"; matches: RadarItem[] }
+    | null
+  > {
     const results = await Promise.all(
       courses.map(async (course) => {
         try {
@@ -131,13 +135,13 @@ export class RadarService {
     const exact = allItems.find(
       (item) => item.title.toLowerCase() === normalized
     );
-    if (exact) return { item: exact, courseId: exact.courseId };
+    if (exact) return { status: "found", item: exact, courseId: exact.courseId };
 
     const partial = allItems.filter((item) =>
       item.title.toLowerCase().includes(normalized)
     );
-    if (partial.length === 1) return { item: partial[0]!, courseId: partial[0]!.courseId };
-    if (partial.length > 1) return { item: partial[0]!, courseId: partial[0]!.courseId };
+    if (partial.length === 1) return { status: "found", item: partial[0]!, courseId: partial[0]!.courseId };
+    if (partial.length > 1) return { status: "ambiguous", matches: partial };
 
     return null;
   }

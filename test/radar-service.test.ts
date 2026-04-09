@@ -125,6 +125,19 @@ test("formatRadarItems: shows unread count when present", () => {
   assert.ok(result.includes("3 unread"));
 });
 
+test("formatRadarItems: uses lastReplyAt for age when available", () => {
+  const items = [
+    makeItem({
+      postedAt: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000), // 6 days ago
+      lastReplyAt: new Date(Date.now() - 60 * 60 * 1000),        // 1 hour ago
+    }),
+  ];
+  const result = formatRadarItems(items, "all", "");
+  // Should show ~1h, not ~6d
+  assert.ok(result.includes("1h ago"));
+  assert.ok(!result.includes("6d ago"));
+});
+
 // ---------------------------------------------------------------------------
 // formatThread
 // ---------------------------------------------------------------------------
@@ -268,8 +281,9 @@ test("RadarService.resolveTopicByPartialTitle finds older read discussions outsi
     "archived setup"
   );
   assert.ok(match);
-  assert.equal(match.item.topicId, 40);
-  assert.equal(match.item.title, "Archived Setup Thread");
+  assert.equal(match.status, "found");
+  assert.equal(match.status === "found" && match.item.topicId, 40);
+  assert.equal(match.status === "found" && match.item.title, "Archived Setup Thread");
 });
 
 test("RadarService reuses the per-course topic catalog across feed listing and title lookup", async () => {
@@ -301,6 +315,7 @@ test("RadarService reuses the per-course topic catalog across feed listing and t
   );
 
   assert.ok(match);
+  assert.equal(match.status, "found");
   assert.equal(announcementCalls, 1);
   assert.equal(discussionCalls, 1);
 });
@@ -396,10 +411,11 @@ test("RadarService.resolveTopicByPartialTitle finds exact match", async () => {
     "Midterm Review Session"
   );
   assert.ok(result);
-  assert.equal(result.item.title, "Midterm Review Session");
+  assert.equal(result.status, "found");
+  assert.equal(result.status === "found" && result.item.title, "Midterm Review Session");
 });
 
-test("RadarService.resolveTopicByPartialTitle finds partial match", async () => {
+test("RadarService.resolveTopicByPartialTitle finds unique partial match", async () => {
   const ann = makeTopic({ id: 1, title: "Midterm Review Session", is_announcement: true, posted_at: new Date().toISOString() });
   const client = stubClient({ announcements: [ann] });
   const service = new RadarService(client);
@@ -409,7 +425,23 @@ test("RadarService.resolveTopicByPartialTitle finds partial match", async () => 
     "midterm"
   );
   assert.ok(result);
-  assert.equal(result.item.title, "Midterm Review Session");
+  assert.equal(result.status, "found");
+  assert.equal(result.status === "found" && result.item.title, "Midterm Review Session");
+});
+
+test("RadarService.resolveTopicByPartialTitle returns ambiguous for multiple partial matches", async () => {
+  const ann1 = makeTopic({ id: 1, title: "Midterm Review Session", is_announcement: true, posted_at: new Date().toISOString() });
+  const ann2 = makeTopic({ id: 2, title: "Midterm Study Guide", is_announcement: true, posted_at: new Date().toISOString() });
+  const client = stubClient({ announcements: [ann1, ann2] });
+  const service = new RadarService(client);
+
+  const result = await service.resolveTopicByPartialTitle(
+    [{ id: 1, name: "CS 101" }],
+    "midterm"
+  );
+  assert.ok(result);
+  assert.equal(result.status, "ambiguous");
+  assert.equal(result.status === "ambiguous" && result.matches.length, 2);
 });
 
 test("RadarService.resolveTopicByPartialTitle returns null when no match", async () => {
