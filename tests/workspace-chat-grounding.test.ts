@@ -185,10 +185,16 @@ test("workspace retrieval gate prefers workup, then direct reads, then prior mem
     });
     assert.equal(fromWorkup.action, "answer_from_workup");
 
-    const topMatch = (
-      await searchWorkspaceKnowledge(loaded, cache, "branch hazard", 1)
-    )[0];
-    assert.ok(topMatch);
+    const matches = await searchWorkspaceKnowledge(
+      loaded,
+      cache,
+      "branch hazard",
+      3
+    );
+    const directDocumentMatch = matches.find(
+      (match) => match.artifact.kind !== "workup"
+    );
+    assert.ok(directDocumentMatch);
 
     const fromSearch = await decideWorkspaceRetrieval({
       question: "Explain the branch hazard requirement in detail.",
@@ -199,13 +205,13 @@ test("workspace retrieval gate prefers workup, then direct reads, then prior mem
     assert.deepEqual(fromSearch, {
       action: "read_artifact",
       reason: "top_workspace_match_needs_read",
-      artifactId: topMatch!.artifact.id,
+      artifactId: directDocumentMatch!.artifact.id,
     });
 
     const readResult = await readWorkspaceKnowledgeArtifactById(
       loaded,
       cache,
-      topMatch!.artifact.id,
+      directDocumentMatch!.artifact.id,
       30000
     );
     assert.equal(readResult.status, "ok");
@@ -243,6 +249,35 @@ test("workspace retrieval gate prefers workup, then direct reads, then prior mem
       reason: "already_read_relevant_artifact",
       sourceArtifactIds: [readResult.artifact.id],
     });
+  });
+});
+
+test("workspace retrieval gate only trusts explicit workup fields, not generic overlap", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+    const emptyRunState = {
+      observations: [],
+      readArtifactIds: [],
+      stepCount: 0,
+    };
+
+    const fromOverview = await decideWorkspaceRetrieval({
+      question: "Give me a summary of what this assignment is about.",
+      runState: emptyRunState,
+      loaded,
+      cache,
+    });
+    assert.equal(fromOverview.action, "answer_from_workup");
+
+    const fromGenericOverlap = await decideWorkspaceRetrieval({
+      question: "Explain branch behavior in detail.",
+      runState: emptyRunState,
+      loaded,
+      cache,
+    });
+    assert.notEqual(fromGenericOverlap.action, "answer_from_workup");
   });
 });
 
