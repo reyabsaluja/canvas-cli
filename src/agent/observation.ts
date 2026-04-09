@@ -2,8 +2,7 @@ export type ObservationStatus =
   | "ok"
   | "not_found"
   | "missing_text"
-  | "retryable_error"
-  | "fatal_error";
+  | "error";
 
 export interface ArtifactRef {
   artifactId: string;
@@ -19,8 +18,6 @@ export interface Observation {
   summary: string;
   artifacts: ArtifactRef[];
   content?: string;
-  errorCode?: string;
-  retryable?: boolean;
 }
 
 export interface ToolExecutionResult {

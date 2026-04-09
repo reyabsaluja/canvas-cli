@@ -26,7 +26,6 @@ import { verifyWorkspaceAnswer } from "../agent/verify.js";
 import { extractFileText } from "../extract/extract-text.js";
 import { handleOpenResourceQuery } from "./open-resources.js";
 import {
-  searchCourseArtifacts,
   renderCourseArtifactSearchResult,
   searchCourseKnowledge,
 } from "./course-retrieval.js";
@@ -481,10 +480,9 @@ async function executeToolCallDetailed(
       return {
         observation: {
           tool: name,
-          status: "fatal_error",
+          status: "error",
           summary: `Unknown tool: ${name}`,
           artifacts: [],
-          errorCode: "unknown_tool",
         },
         modelText: `Unknown tool: ${name}`,
         uiText: `Unknown tool: ${name}`,
@@ -517,20 +515,19 @@ async function searchWorkspace(
   }
   const rendered = results.join("\n");
   return {
-    observation: {
-      tool: "search_workspace",
-      status: "ok",
-      summary: `Found ${relevant.length} relevant workspace matches for "${query}".`,
-      artifacts: relevant.map((match) => ({
-        artifactId: match.artifact.id,
-        title: match.artifact.title,
-        kind: match.artifact.kind,
-        excerpt: match.section.excerpt,
-        sectionIds: [match.section.id],
-      })),
-    },
-    modelText: rendered,
-    uiText: rendered,
+      observation: {
+        tool: "search_workspace",
+        status: "ok",
+        summary: `Found ${relevant.length} relevant workspace matches for "${query}".`,
+        artifacts: relevant.map((match) => ({
+          artifactId: match.artifact.id,
+          title: match.artifact.title,
+          kind: match.artifact.kind,
+          excerpt: match.section.excerpt,
+        })),
+      },
+      modelText: rendered,
+      uiText: rendered,
   };
 }
 
@@ -547,7 +544,7 @@ async function searchCourse(
         status:
           result.status === "not_found" || result.status === "empty_query"
             ? "not_found"
-            : "fatal_error",
+            : "error",
         summary: uiText,
         artifacts: [],
       },
@@ -613,7 +610,6 @@ async function readFile(
           status: "missing_text",
           summary: renderWorkspaceArtifactLookupFailure(filename, artifact),
           artifacts: artifact.artifact ? [toArtifactRef(artifact.artifact)] : [],
-          errorCode: "missing_text",
         },
         modelText: renderWorkspaceArtifactLookupFailure(filename, artifact),
         uiText: renderWorkspaceArtifactLookupFailure(filename, artifact),
@@ -626,7 +622,6 @@ async function readFile(
           status: "not_found",
           summary: `File "${filename}" not found. Use list_files to see available files.`,
           artifacts: [],
-          errorCode: "not_found",
         },
         modelText: `File "${filename}" not found. Use list_files to see available files.`,
         uiText: `File "${filename}" not found. Use list_files to see available files.`,
@@ -666,16 +661,7 @@ async function listFiles(ctx: ChatAgentContext): Promise<ToolExecutionResult> {
       tool: "list_files",
       status: "ok",
       summary: "Listed workspace and course files available to chat.",
-      artifacts: [
-        ...fileList.workspaceFiles,
-        ...fileList.extractedDocuments,
-        ...fileList.courseDocuments,
-      ].slice(0, 20).map((entry) => ({
-        artifactId: entry.artifactId,
-        title: entry.label,
-        kind: entry.kind,
-        excerpt: entry.hint,
-      })),
+      artifacts: [],
     },
     modelText: rendered,
     uiText: rendered,
@@ -690,10 +676,9 @@ async function downloadCourseFile(
     return {
       observation: {
         tool: "download_course_file",
-        status: "fatal_error",
+        status: "error",
         summary: "Cannot download files — no course cache or Canvas client available.",
         artifacts: [],
-        errorCode: "missing_course_context",
       },
       modelText: "Cannot download files — no course cache or Canvas client available.",
       uiText: "Cannot download files — no course cache or Canvas client available.",
@@ -724,11 +709,9 @@ async function downloadCourseFile(
     return {
       observation: {
         tool: "download_course_file",
-        status: "retryable_error",
+        status: "error",
         summary: `Could not access file "${title}" from Canvas.`,
         artifacts: [],
-        retryable: true,
-        errorCode: "canvas_file_access_failed",
       },
       modelText: `Could not access file "${title}" from Canvas.`,
       uiText: `Could not access file "${title}" from Canvas.`,
@@ -739,11 +722,9 @@ async function downloadCourseFile(
     return {
       observation: {
         tool: "download_course_file",
-        status: "retryable_error",
+        status: "error",
         summary: `Failed to download "${fileMeta.display_name}".`,
         artifacts: [],
-        retryable: true,
-        errorCode: "canvas_download_failed",
       },
       modelText: `Failed to download "${fileMeta.display_name}".`,
       uiText: `Failed to download "${fileMeta.display_name}".`,
@@ -777,18 +758,12 @@ async function downloadCourseFile(
         extracted.endsWith("\n") ? extracted : extracted + "\n",
         "utf-8"
       );
-      const refreshed = await searchCourseArtifacts(ctx.cache, fileMeta.display_name, {
-        kinds: ["attachment"],
-        limit: 1,
-      });
       return {
         observation: {
           tool: "download_course_file",
           status: "ok",
           summary: `Downloaded and extracted ${fileMeta.display_name}.`,
-          artifacts: refreshed[0]
-            ? [toArtifactRef(refreshed[0].artifact)]
-            : [],
+          artifacts: [],
           content: extracted,
         },
         modelText: extracted,
@@ -805,7 +780,6 @@ async function downloadCourseFile(
       status: "missing_text",
       summary: message,
       artifacts: [],
-      errorCode: "missing_extracted_text",
     },
     modelText: message,
     uiText: message,
@@ -865,7 +839,6 @@ async function readArtifactForGate(
           status: "missing_text",
           summary: `Matched ${artifact.artifact?.title ?? artifactId}, but readable text is missing.`,
           artifacts: artifact.artifact ? [toArtifactRef(artifact.artifact)] : [],
-          errorCode: "missing_text",
         },
         modelText: `Matched ${artifact.artifact?.title ?? artifactId}, but readable text is missing.`,
         uiText: `Matched ${artifact.artifact?.title ?? artifactId}, but readable text is missing.`,
@@ -879,7 +852,6 @@ async function readArtifactForGate(
           status: "not_found",
           summary: `Could not read artifact "${artifactId}" from the workspace knowledge store.`,
           artifacts: [],
-          errorCode: "not_found",
         },
         modelText: `Could not read artifact "${artifactId}" from the workspace knowledge store.`,
         uiText: `Could not read artifact "${artifactId}" from the workspace knowledge store.`,
