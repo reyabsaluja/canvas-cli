@@ -634,22 +634,6 @@ export async function runChatShell<TExit>(
 
       const pins = mergePinOptions(pendingPins, extractedPins.resolved);
       const cleanInput = extractedPins.cleanInput;
-      let fullInput = cleanInput;
-
-      if (pins.length > 0 && options.resolvePinContent) {
-        const attached: string[] = [];
-        for (const pin of pins) {
-          const content = await options.resolvePinContent(pin);
-          if (content) {
-            attached.push(
-              `--- Begin pinned file: ${pin.name} ---\n${content}\n--- End ${pin.name} ---`
-            );
-          }
-        }
-        if (attached.length > 0) {
-          fullInput = `${attached.join("\n\n")}\n\nUser question: ${cleanInput}`;
-        }
-      }
       await appendPersistedMessage({ role: "user", content: input });
       isProcessing = true;
       currentVerb = VERBS[Math.floor(Math.random() * VERBS.length)]!;
@@ -707,6 +691,25 @@ export async function runChatShell<TExit>(
       }
 
       try {
+        let fullInput = cleanInput;
+        if (pins.length > 0 && options.resolvePinContent) {
+          const attached = (
+            await Promise.all(
+              pins.map(async (pin) => {
+                const content = await options.resolvePinContent!(pin);
+                if (!content) {
+                  return null;
+                }
+                return `--- Begin pinned file: ${pin.name} ---\n${content}\n--- End ${pin.name} ---`;
+              })
+            )
+          ).filter((entry): entry is string => entry !== null);
+
+          if (attached.length > 0) {
+            fullInput = `${attached.join("\n\n")}\n\nUser question: ${cleanInput}`;
+          }
+        }
+
         const final = await options.onAsk(fullInput, {
           onToolCall: async (event) => {
             flushPendingStreamDelta();
