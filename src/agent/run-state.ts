@@ -171,10 +171,6 @@ export function compactRunState(runState: RunState): void {
   runState.readArtifactIds = collectRememberedArtifactIds(runState.observations);
 }
 
-function shouldRememberReadArtifact(observation: Observation): boolean {
-  return isGroundedContentObservation(observation);
-}
-
 function isDuplicateObservation(
   observations: Observation[],
   nextObservation: Observation
@@ -191,7 +187,7 @@ function isDuplicateGroundedObservation(
   observations: Observation[],
   nextObservation: Observation
 ): boolean {
-  if (!shouldRememberReadArtifact(nextObservation)) {
+  if (!isGroundedContentObservation(nextObservation)) {
     return false;
   }
 
@@ -202,7 +198,7 @@ function isDuplicateGroundedObservation(
   }
 
   return observations.some((observation) => {
-    if (!shouldRememberReadArtifact(observation)) {
+    if (!isGroundedContentObservation(observation)) {
       return false;
     }
     return (
@@ -369,7 +365,7 @@ function normalizeSearchMissQuery(value: string): string {
 function collectRememberedArtifactIds(observations: Observation[]): string[] {
   const remembered: string[] = [];
   for (const observation of observations) {
-    if (!shouldRememberReadArtifact(observation)) {
+    if (!isGroundedContentObservation(observation)) {
       continue;
     }
     for (const artifact of observation.artifacts) {
