@@ -50,6 +50,7 @@ const MAX_CONVERSATION_MESSAGES = 12;
 const MAX_CONVERSATION_CHARS = 80000;
 const MAX_TOOL_MEMORY_CHARS = 2400;
 const MAX_TOOL_MEMORY_DETAIL_CHARS = 220;
+const MAX_RECOVERY_READ_ATTEMPTS = 2;
 
 const CHAT_TOOLS: ToolDefinition[] = [
   {
@@ -478,12 +479,21 @@ async function runToolLoopTurn(
     question
   );
   if (fullText.trim().length === 0) {
-    const recoveryArtifactId = selectRecoveryReadArtifactId(
-      question,
-      supportingObservations,
-      ctx.runState.observations
-    );
-    if (recoveryArtifactId) {
+    const attemptedRecoveryArtifactIds = new Set<string>();
+    while (attemptedRecoveryArtifactIds.size < MAX_RECOVERY_READ_ATTEMPTS) {
+      const recoveryArtifactId = selectRecoveryReadArtifactId(
+        question,
+        supportingObservations,
+        ctx.runState.observations
+      );
+      if (
+        !recoveryArtifactId ||
+        attemptedRecoveryArtifactIds.has(recoveryArtifactId)
+      ) {
+        break;
+      }
+      attemptedRecoveryArtifactIds.add(recoveryArtifactId);
+
       const recoveryResult = await readArtifactForGate(recoveryArtifactId, ctx);
       appendObservation(ctx.runState, recoveryResult.observation);
       const recoveryFilename =
@@ -504,6 +514,9 @@ async function runToolLoopTurn(
         observationStart,
         question
       );
+      if (isGroundedContentObservation(recoveryResult.observation)) {
+        break;
+      }
     }
   }
   if (shouldRecoverFromToolLoop(fullText, verificationObservations)) {

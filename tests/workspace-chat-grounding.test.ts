@@ -1633,6 +1633,42 @@ test("tool-loop recovery prefers reading a discovered artifact and skips prior f
   assert.equal(
     selectRecoveryReadArtifactId(
       "What does the lab brief say about saturating add mode?",
+      [briefBreadcrumb, notesBreadcrumb],
+      [
+        briefBreadcrumb,
+        notesBreadcrumb,
+        {
+          tool: "read_file",
+          status: "missing_text",
+          summary: "Matched lab4-brief.txt, but readable text is missing.",
+          artifacts: [
+            {
+              artifactId: "artifact-brief",
+              title: "lab4-brief.txt",
+              kind: "attachment",
+            },
+          ],
+        },
+        {
+          tool: "read_file",
+          status: "missing_text",
+          summary: "Matched docs/saturating-add-notes.txt, but readable text is missing.",
+          artifacts: [
+            {
+              artifactId: "artifact-notes",
+              title: "docs/saturating-add-notes.txt",
+              kind: "extracted",
+            },
+          ],
+        },
+      ]
+    ),
+    null
+  );
+
+  assert.equal(
+    selectRecoveryReadArtifactId(
+      "What does the lab brief say about saturating add mode?",
       [
         {
           tool: "download_course_file",
