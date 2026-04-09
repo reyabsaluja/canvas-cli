@@ -921,7 +921,10 @@ async function searchWorkspace(
   query: string,
   ctx: ChatAgentContext
 ): Promise<ToolExecutionResult> {
-  const relevant = await searchWorkspaceKnowledge(ctx.loaded, ctx.cache, query, 5);
+  const relevant = preferViableSearchMatches(
+    await searchWorkspaceKnowledge(ctx.loaded, ctx.cache, query, 5),
+    collectFailedReadArtifactIds(ctx.runState.observations)
+  );
   if (relevant.length === 0) {
     return {
       observation: {
@@ -963,13 +966,21 @@ async function searchCourse(
   ctx: ChatAgentContext
 ): Promise<ToolExecutionResult> {
   const result = await searchCourseKnowledge(ctx.cache, query);
-  const uiText = renderCourseArtifactSearchResult(result, query);
-  if (result.status !== "ok") {
+  const failedArtifactIds = collectFailedReadArtifactIds(ctx.runState.observations);
+  const filteredResult =
+    result.status === "ok"
+      ? {
+          status: "ok" as const,
+          matches: preferViableSearchMatches(result.matches, failedArtifactIds),
+        }
+      : result;
+  const uiText = renderCourseArtifactSearchResult(filteredResult, query);
+  if (filteredResult.status !== "ok") {
     return {
       observation: {
         tool: "search_course",
         status:
-          result.status === "not_found" || result.status === "empty_query"
+          filteredResult.status === "not_found" || filteredResult.status === "empty_query"
             ? "not_found"
             : "error",
         summary: uiText,
@@ -983,8 +994,8 @@ async function searchCourse(
     observation: {
       tool: "search_course",
       status: "ok",
-      summary: `Found ${result.matches.length} course matches for "${query}".`,
-      artifacts: result.matches.map(({ artifact }) => ({
+      summary: `Found ${filteredResult.matches.length} course matches for "${query}".`,
+      artifacts: filteredResult.matches.map(({ artifact }) => ({
         artifactId: artifact.id,
         title: artifact.title,
         kind: artifact.kind,
@@ -994,6 +1005,20 @@ async function searchCourse(
     modelText: uiText,
     uiText,
   };
+}
+
+function preferViableSearchMatches<T extends { artifact: ArtifactRecord }>(
+  matches: T[],
+  failedArtifactIds: Set<string>
+): T[] {
+  if (matches.length === 0 || failedArtifactIds.size === 0) {
+    return matches;
+  }
+
+  const viable = matches.filter(
+    (match) => !failedArtifactIds.has(match.artifact.id)
+  );
+  return viable.length > 0 ? viable : matches;
 }
 
 async function readFile(
