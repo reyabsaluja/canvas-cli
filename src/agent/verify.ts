@@ -1,6 +1,7 @@
 import type { AnswerSource } from "../ask/types.js";
 import type { LoadedWorkspace } from "../ask/types.js";
 import type { Observation } from "./observation.js";
+import { workupExplicitlySupportsQuestion } from "./workup-coverage.js";
 import {
   isGroundedContentObservation,
   scoreObservationRelevance,
@@ -53,7 +54,7 @@ export function verifyWorkspaceAnswer(
   const hasDirectReadInEvidence = relevantGroundedObservations.length > 0;
   const workupSupportsQuestion = !input.usedWorkup
     ? false
-    : workupExplicitlySupportsQuestion(input.question, input.loaded);
+    : workupExplicitlySupportsQuestion(input.question, input.loaded.workupJson);
   const confidence = hasDirectReadInEvidence
     ? "high"
     : sources.length > 0
@@ -169,71 +170,4 @@ function buildExcerpt(value: string | undefined): string | null {
     return cleaned;
   }
   return `${cleaned.slice(0, 157)}...`;
-}
-
-function workupExplicitlySupportsQuestion(
-  question: string,
-  loaded: LoadedWorkspace
-): boolean {
-  const workup = loaded.workupJson;
-  if (!workup) {
-    return false;
-  }
-
-  if (isDueDateQuestion(question)) {
-    return Boolean(getWorkupDueDate(workup));
-  }
-
-  if (/\b(deliverable|submit|submission|turn in|hand in)\b/i.test(question)) {
-    return hasNonEmptyStringArray(workup.deliverables);
-  }
-
-  if (/\b(constraint|restriction|format|rubric|grading|policy|policies)\b/i.test(question)) {
-    return hasNonEmptyStringArray(workup.constraints);
-  }
-
-  if (/\b(start|first|approach|read order|plan)\b/i.test(question)) {
-    return (
-      hasNonEmptyStringArray(
-        (workup as Record<string, unknown>).recommendedReadOrder ??
-          (workup as Record<string, unknown>).recommended_read_order
-      ) ||
-      hasNonEmptyArray(
-        (workup as Record<string, unknown>).actionPlan ??
-          (workup as Record<string, unknown>).action_plan
-      )
-    );
-  }
-
-  if (
-    /\b(overvi?ew|summary|goal|purpose|expected|what is this assignment about|what is this about)\b/i.test(
-      question
-    )
-  ) {
-    return typeof workup.overview === "string" && workup.overview.trim().length > 0;
-  }
-
-  return false;
-}
-
-function isDueDateQuestion(question: string): boolean {
-  return /\b(due|deadline)\b/i.test(question);
-}
-
-function getWorkupDueDate(workup: Record<string, unknown>): string | null {
-  const dueDate = workup.dueDate ?? workup.due_date;
-  return typeof dueDate === "string" && dueDate.trim().length > 0
-    ? dueDate
-    : null;
-}
-
-function hasNonEmptyStringArray(value: unknown): boolean {
-  return (
-    Array.isArray(value) &&
-    value.some((entry) => typeof entry === "string" && entry.trim().length > 0)
-  );
-}
-
-function hasNonEmptyArray(value: unknown): boolean {
-  return Array.isArray(value) && value.length > 0;
 }
