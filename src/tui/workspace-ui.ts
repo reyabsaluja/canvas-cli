@@ -117,6 +117,8 @@ export async function runWorkspaceUI(
   let destroyed = false;
   let renderQueued = false;
   let renderTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingTextInput = "";
+  let pendingTextInputFlushQueued = false;
   let totalMessageChars = 0;
   let archivedMessageCount = 0;
   let archivedMessageChars = 0;
@@ -409,6 +411,43 @@ export async function runWorkspaceUI(
     }, 16);
   }
 
+  function commitPendingTextInput(): void {
+    if (!pendingTextInput) {
+      return;
+    }
+
+    inputBuffer += pendingTextInput;
+    pendingTextInput = "";
+    showSlashMenu = inputBuffer.startsWith("/");
+
+    const nextInputState = getInputState();
+    if (nextInputState.activePinPartial !== null) {
+      pinSelected = 0;
+    } else if (showSlashMenu) {
+      slashSelected = 0;
+    }
+
+    scheduleRender();
+  }
+
+  function flushPendingTextInput(): void {
+    pendingTextInputFlushQueued = false;
+    commitPendingTextInput();
+  }
+
+  function schedulePendingTextInputFlush(): void {
+    if (pendingTextInputFlushQueued) {
+      return;
+    }
+    pendingTextInputFlushQueued = true;
+    queueMicrotask(() => {
+      if (destroyed || !pendingTextInputFlushQueued) {
+        return;
+      }
+      flushPendingTextInput();
+    });
+  }
+
   function writeFrame(lines: string[]): void {
     const { cols, rows } = getTermSize();
     const frame = lines.slice(0, rows).map((line) => padAnsiToWidth(line, cols));
@@ -639,6 +678,10 @@ export async function runWorkspaceUI(
   return new Promise((resolve) => {
     async function handleKey(key: string): Promise<void> {
       if (destroyed) return;
+      const isPrintableText = key.length === 1 && key >= " ";
+      if (!isPrintableText && pendingTextInput) {
+        flushPendingTextInput();
+      }
 
       const mouseMatch = key.match(/^\x1b\[<(\d+);\d+;\d+[Mm]/);
       if (mouseMatch) {
@@ -899,15 +942,9 @@ export async function runWorkspaceUI(
         return;
       }
 
-      if (key.length === 1 && key >= " ") {
-        inputBuffer += key;
-        showSlashMenu = inputBuffer.startsWith("/");
-        if (getInputState().activePinPartial !== null) {
-          pinSelected = 0;
-        } else if (showSlashMenu) {
-          slashSelected = 0;
-        }
-        scheduleRender();
+      if (isPrintableText) {
+        pendingTextInput += key;
+        schedulePendingTextInputFlush();
       }
     }
 
@@ -925,6 +962,8 @@ export async function runWorkspaceUI(
 
     function cleanup(): void {
       destroyed = true;
+      pendingTextInput = "";
+      pendingTextInputFlushQueued = false;
       stopSpinner();
       if (renderTimer) {
         clearTimeout(renderTimer);
