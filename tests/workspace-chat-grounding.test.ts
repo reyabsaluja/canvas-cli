@@ -323,6 +323,79 @@ test("workspace retrieval gate prefers an already-read strong match over a highe
   });
 });
 
+test("workspace retrieval gate skips a recently failed direct-read artifact and tries the next strong match", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+
+    const addedFiles = [
+      {
+        name: "docs/branch-hazard-spec.txt",
+        body: [
+          "Branch hazard requirement specification.",
+          "Branch hazard requirement specification.",
+          "Branch hazard requirement specification.",
+        ].join("\n"),
+      },
+      {
+        name: "docs/branch-hazard-walkthrough.txt",
+        body: [
+          "Branch hazard requirement walkthrough.",
+          "Branch hazard requirement walkthrough.",
+        ].join("\n"),
+      },
+    ];
+
+    for (const file of addedFiles) {
+      const relativePath = path.join("extracted", file.name);
+      await fs.writeFile(path.join(loaded.path, relativePath), file.body, "utf-8");
+      loaded.extractedFiles.push({ name: file.name, relativePath });
+    }
+    clearArtifactIndexCache();
+
+    const matches = await searchWorkspaceKnowledge(
+      loaded,
+      cache,
+      "branch hazard requirement",
+      3
+    );
+    assert.ok(matches.length >= 2);
+    const failedMatch = matches[0]!;
+    const nextMatch = matches[1]!;
+
+    const decision = await decideWorkspaceRetrieval({
+      question: "Explain the branch hazard requirement in detail.",
+      runState: {
+        observations: [
+          {
+            tool: "read_file",
+            status: "missing_text",
+            summary: `Matched ${failedMatch.artifact.title}, but readable text is missing.`,
+            artifacts: [
+              {
+                artifactId: failedMatch.artifact.id,
+                title: failedMatch.artifact.title,
+                kind: "extracted",
+              },
+            ],
+          },
+        ],
+        readArtifactIds: [],
+        stepCount: 1,
+      },
+      loaded,
+      cache,
+    });
+
+    assert.deepEqual(decision, {
+      action: "read_artifact",
+      reason: "top_workspace_match_needs_read",
+      artifactId: nextMatch.artifact.id,
+    });
+  });
+});
+
 test("workspace retrieval gate reuses multiple already-read strong matches before rereading", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
