@@ -7,19 +7,33 @@ import type { CanvasClient } from "../canvas/client.js";
 import type { Config } from "../config/env.js";
 import type { WorkspaceAnswer } from "../ask/types.js";
 import {
+  callModel,
   streamWithTools,
   type AIProviderConfig,
   type ToolDefinition,
 } from "../ai/provider.js";
+import type {
+  Observation,
+  ToolExecutionResult,
+  ArtifactRef,
+} from "../agent/observation.js";
+import {
+  appendObservation,
+  type RunState,
+} from "../agent/run-state.js";
+import { decideWorkspaceRetrieval } from "../agent/retrieval-gate.js";
+import { verifyWorkspaceAnswer } from "../agent/verify.js";
 import { extractFileText } from "../extract/extract-text.js";
 import { handleOpenResourceQuery } from "./open-resources.js";
 import {
+  searchCourseArtifacts,
   renderCourseArtifactSearchResult,
   searchCourseKnowledge,
 } from "./course-retrieval.js";
 import {
   listWorkspaceKnowledgeArtifacts,
   readWorkspaceKnowledgeArtifact,
+  readWorkspaceKnowledgeArtifactById,
   registerDownloadedCourseAttachment,
   searchWorkspaceKnowledge,
 } from "./workspace-knowledge.js";
@@ -191,6 +205,8 @@ export interface ChatAgentContext {
   courseId: number | null;
   /** Persistent conversation history for multi-turn context. */
   conversationHistory: ChatAgentConversationEntry[];
+  /** Minimal serialized working memory for grounding and retrieval gating. */
+  runState: RunState;
 }
 
 export interface ChatAgentConversationEntry {
@@ -210,6 +226,7 @@ export interface ToolCallEvent {
   target: string;
   result: string;
   color: "green" | "red";
+  observation?: Observation;
 }
 
 type ConversationEntry = ChatAgentContext["conversationHistory"][number];
@@ -253,41 +270,105 @@ export async function runChatAgent(
 ): Promise<WorkspaceAnswer> {
   const systemPrompt = buildSystemPrompt(ctx);
 
-  ctx.conversationHistory.push({ role: "user", content: question });
-  trimConversationHistory(ctx);
+  const observationStart = ctx.runState.observations.length;
+  const retrievalDecision = await decideWorkspaceRetrieval({
+    question,
+    runState: ctx.runState,
+    loaded: ctx.loaded,
+    cache: ctx.cache,
+  });
 
-  const fullText = await streamWithTools(
-    ctx.aiConfig,
-    systemPrompt,
-    ctx.conversationHistory,
-    CHAT_TOOLS,
-    async (name, input) => executeToolCall(name, input, ctx),
-    {
-      onToolCall: (name, input, toolResult) => {
-        const { action, target, color } = mapToolCall(name, input);
-        const nextColor =
-          name === "open_resource" &&
-          /No openable resource|Multiple resources matched|Failed to open|missing/i.test(
-            toolResult
-          )
-            ? "red"
-            : color;
-        onToolCall({ action, target, result: toolResult, color: nextColor });
+  let fullText = "";
+  let supportingObservations: Observation[] = [];
+  let usedWorkup = false;
+
+  if (retrievalDecision.action === "answer_from_workup") {
+    usedWorkup = true;
+    fullText = await answerWithoutTools(ctx, systemPrompt, question, [], onTextDelta);
+  } else if (retrievalDecision.action === "answer_from_memory") {
+    supportingObservations = findObservationsForArtifacts(
+      ctx.runState.observations,
+      retrievalDecision.sourceArtifactIds
+    );
+    fullText = await answerWithoutTools(
+      ctx,
+      systemPrompt,
+      question,
+      supportingObservations,
+      onTextDelta
+    );
+  } else if (retrievalDecision.action === "read_artifact") {
+    const toolResult = await readArtifactForGate(retrievalDecision.artifactId, ctx);
+    appendObservation(ctx.runState, toolResult.observation);
+    supportingObservations = [toolResult.observation];
+    const { action, target } = mapToolCall("read_file", {
+      filename: toolResult.observation.artifacts[0]?.title ?? retrievalDecision.artifactId,
+    });
+    onToolCall({
+      action,
+      target,
+      result: toolResult.uiText,
+      color: toolResult.observation.status === "ok" ? "green" : "red",
+      observation: toolResult.observation,
+    });
+    fullText = await answerWithoutTools(
+      ctx,
+      systemPrompt,
+      question,
+      supportingObservations,
+      onTextDelta
+    );
+  } else {
+    const pendingToolResults: ToolExecutionResult[] = [];
+    fullText = await streamWithTools(
+      ctx.aiConfig,
+      systemPrompt,
+      [...ctx.conversationHistory, { role: "user", content: question }],
+      CHAT_TOOLS,
+      async (name, input) => {
+        const result = await executeToolCallDetailed(name, input, ctx);
+        pendingToolResults.push(result);
+        appendObservation(ctx.runState, result.observation);
+        return result.modelText;
       },
-      onTextDelta,
-    },
-    10
-  );
+      {
+        onToolCall: (name, input, toolResult) => {
+          const { action, target, color } = mapToolCall(name, input);
+          const detailed = pendingToolResults.shift();
+          const observation = detailed?.observation;
+          onToolCall({
+            action,
+            target,
+            result: detailed?.uiText ?? toolResult,
+            color: observation?.status === "ok" ? color : "red",
+            observation,
+          });
+        },
+        onTextDelta,
+      },
+      10
+    );
+    supportingObservations = ctx.runState.observations.slice(observationStart);
+  }
 
-  ctx.conversationHistory.push({ role: "assistant", content: fullText });
+  const verification = verifyWorkspaceAnswer({
+    answer: fullText,
+    observations: supportingObservations,
+    usedWorkup,
+    loaded: ctx.loaded,
+  });
+  const finalAnswer = finalizeAnswerText(fullText, verification.missing);
+
+  ctx.conversationHistory.push({ role: "user", content: question });
+  ctx.conversationHistory.push({ role: "assistant", content: finalAnswer });
   trimConversationHistory(ctx);
 
   return {
     question,
-    answer: fullText || "I wasn't able to find a clear answer.",
+    answer: finalAnswer,
     bulletPoints: [],
-    sources: [],
-    confidence: "medium",
+    sources: verification.sources,
+    confidence: verification.confidence,
   };
 }
 
@@ -365,11 +446,11 @@ function conversationCharCount(
 
 // --- Tool execution ---
 
-async function executeToolCall(
+async function executeToolCallDetailed(
   name: string,
   input: Record<string, unknown>,
   ctx: ChatAgentContext
-): Promise<string> {
+): Promise<ToolExecutionResult> {
   switch (name) {
     case "search_workspace":
       return await searchWorkspace(input.query as string, ctx);
@@ -384,31 +465,104 @@ async function executeToolCall(
     case "open_resource":
       return openResource(input.query as string, ctx);
     default:
-      return `Unknown tool: ${name}`;
+      return {
+        observation: {
+          tool: name,
+          status: "fatal_error",
+          summary: `Unknown tool: ${name}`,
+          artifacts: [],
+          errorCode: "unknown_tool",
+        },
+        modelText: `Unknown tool: ${name}`,
+        uiText: `Unknown tool: ${name}`,
+      };
   }
 }
 
-async function searchWorkspace(query: string, ctx: ChatAgentContext): Promise<string> {
+async function searchWorkspace(
+  query: string,
+  ctx: ChatAgentContext
+): Promise<ToolExecutionResult> {
   const relevant = await searchWorkspaceKnowledge(ctx.loaded, ctx.cache, query, 5);
-  if (relevant.length === 0) return "No relevant content found for that query.";
+  if (relevant.length === 0) {
+    return {
+      observation: {
+        tool: "search_workspace",
+        status: "not_found",
+        summary: `No relevant workspace content found for "${query}".`,
+        artifacts: [],
+      },
+      modelText: "No relevant content found for that query.",
+      uiText: "No relevant content found for that query.",
+    };
+  }
   const results: string[] = [];
   for (const match of relevant) {
     results.push(match.header);
     results.push(match.preview);
     results.push("");
   }
-  return results.join("\n");
+  const rendered = results.join("\n");
+  return {
+    observation: {
+      tool: "search_workspace",
+      status: "ok",
+      summary: `Found ${relevant.length} relevant workspace matches for "${query}".`,
+      artifacts: relevant.map((match) => ({
+        artifactId: match.artifact.id,
+        title: match.artifact.title,
+        kind: match.artifact.kind,
+        excerpt: match.section.excerpt,
+        sectionIds: [match.section.id],
+      })),
+    },
+    modelText: rendered,
+    uiText: rendered,
+  };
 }
 
 async function searchCourse(
   query: string,
   ctx: ChatAgentContext
-): Promise<string> {
+): Promise<ToolExecutionResult> {
   const result = await searchCourseKnowledge(ctx.cache, query);
-  return renderCourseArtifactSearchResult(result, query);
+  const uiText = renderCourseArtifactSearchResult(result, query);
+  if (result.status !== "ok") {
+    return {
+      observation: {
+        tool: "search_course",
+        status:
+          result.status === "not_found" || result.status === "empty_query"
+            ? "not_found"
+            : "fatal_error",
+        summary: uiText,
+        artifacts: [],
+      },
+      modelText: uiText,
+      uiText,
+    };
+  }
+  return {
+    observation: {
+      tool: "search_course",
+      status: "ok",
+      summary: `Found ${result.matches.length} course matches for "${query}".`,
+      artifacts: result.matches.map(({ artifact }) => ({
+        artifactId: artifact.id,
+        title: artifact.title,
+        kind: artifact.kind,
+        excerpt: artifact.excerpt,
+      })),
+    },
+    modelText: uiText,
+    uiText,
+  };
 }
 
-async function readFile(filename: string, ctx: ChatAgentContext): Promise<string> {
+async function readFile(
+  filename: string,
+  ctx: ChatAgentContext
+): Promise<ToolExecutionResult> {
   const artifact = await readWorkspaceKnowledgeArtifact(
     ctx.loaded,
     ctx.cache,
@@ -417,18 +571,57 @@ async function readFile(filename: string, ctx: ChatAgentContext): Promise<string
   );
   switch (artifact.status) {
     case "ok":
-      return artifact.content;
+      return {
+        observation: {
+          tool: "read_file",
+          status: "ok",
+          summary: `Read ${artifact.artifact.title}.`,
+          artifacts: [toArtifactRef(artifact.artifact)],
+          content: artifact.content,
+        },
+        modelText: artifact.content,
+        uiText: artifact.content,
+      };
     case "empty_query":
-      return "Provide a file name to read from the workspace or course cache.";
+      return {
+        observation: {
+          tool: "read_file",
+          status: "not_found",
+          summary: "Provide a file name to read from the workspace or course cache.",
+          artifacts: [],
+        },
+        modelText: "Provide a file name to read from the workspace or course cache.",
+        uiText: "Provide a file name to read from the workspace or course cache.",
+      };
     case "missing_text":
-      return renderWorkspaceArtifactLookupFailure(filename, artifact);
+      return {
+        observation: {
+          tool: "read_file",
+          status: "missing_text",
+          summary: renderWorkspaceArtifactLookupFailure(filename, artifact),
+          artifacts: artifact.artifact ? [toArtifactRef(artifact.artifact)] : [],
+          errorCode: "missing_text",
+        },
+        modelText: renderWorkspaceArtifactLookupFailure(filename, artifact),
+        uiText: renderWorkspaceArtifactLookupFailure(filename, artifact),
+      };
     case "not_found":
     default:
-      return `File "${filename}" not found. Use list_files to see available files.`;
+      return {
+        observation: {
+          tool: "read_file",
+          status: "not_found",
+          summary: `File "${filename}" not found. Use list_files to see available files.`,
+          artifacts: [],
+          errorCode: "not_found",
+        },
+        modelText: `File "${filename}" not found. Use list_files to see available files.`,
+        uiText: `File "${filename}" not found. Use list_files to see available files.`,
+      };
   }
 }
 
-async function listFiles(ctx: ChatAgentContext): Promise<string> {
+async function listFiles(ctx: ChatAgentContext): Promise<ToolExecutionResult> {
   const fileList = await listWorkspaceKnowledgeArtifacts(ctx.loaded, ctx.cache);
   const lines: string[] = [];
   lines.push("Workspace files:");
@@ -454,11 +647,45 @@ async function listFiles(ctx: ChatAgentContext): Promise<string> {
     lines.push("\nCourse documents (shared knowledge store):");
     lines.push("  - No readable course documents indexed yet.");
   }
-  return lines.join("\n");
+  const rendered = lines.join("\n");
+  return {
+    observation: {
+      tool: "list_files",
+      status: "ok",
+      summary: "Listed workspace and course files available to chat.",
+      artifacts: [
+        ...fileList.workspaceFiles,
+        ...fileList.extractedDocuments,
+        ...fileList.courseDocuments,
+      ].slice(0, 20).map((entry) => ({
+        artifactId: entry.artifactId,
+        title: entry.label,
+        kind: entry.kind,
+        excerpt: entry.hint,
+      })),
+    },
+    modelText: rendered,
+    uiText: rendered,
+  };
 }
 
-async function downloadCourseFile(title: string, ctx: ChatAgentContext): Promise<string> {
-  if (!ctx.cache || !ctx.client) return "Cannot download files — no course cache or Canvas client available.";
+async function downloadCourseFile(
+  title: string,
+  ctx: ChatAgentContext
+): Promise<ToolExecutionResult> {
+  if (!ctx.cache || !ctx.client) {
+    return {
+      observation: {
+        tool: "download_course_file",
+        status: "fatal_error",
+        summary: "Cannot download files — no course cache or Canvas client available.",
+        artifacts: [],
+        errorCode: "missing_course_context",
+      },
+      modelText: "Cannot download files — no course cache or Canvas client available.",
+      uiText: "Cannot download files — no course cache or Canvas client available.",
+    };
+  }
   const q = title.toLowerCase();
   let foundItem = null;
   for (const mod of ctx.cache.modules) {
@@ -467,11 +694,48 @@ async function downloadCourseFile(title: string, ctx: ChatAgentContext): Promise
     }
     if (foundItem) break;
   }
-  if (!foundItem || !foundItem.contentId) return `No downloadable file matching "${title}" found.`;
+  if (!foundItem || !foundItem.contentId) {
+    return {
+      observation: {
+        tool: "download_course_file",
+        status: "not_found",
+        summary: `No downloadable file matching "${title}" found.`,
+        artifacts: [],
+      },
+      modelText: `No downloadable file matching "${title}" found.`,
+      uiText: `No downloadable file matching "${title}" found.`,
+    };
+  }
   const fileMeta = await ctx.client.getFileSafe(foundItem.contentId);
-  if (!fileMeta) return `Could not access file "${title}" from Canvas.`;
+  if (!fileMeta) {
+    return {
+      observation: {
+        tool: "download_course_file",
+        status: "retryable_error",
+        summary: `Could not access file "${title}" from Canvas.`,
+        artifacts: [],
+        retryable: true,
+        errorCode: "canvas_file_access_failed",
+      },
+      modelText: `Could not access file "${title}" from Canvas.`,
+      uiText: `Could not access file "${title}" from Canvas.`,
+    };
+  }
   const buffer = await ctx.client.downloadFile(fileMeta.url);
-  if (!buffer) return `Failed to download "${fileMeta.display_name}".`;
+  if (!buffer) {
+    return {
+      observation: {
+        tool: "download_course_file",
+        status: "retryable_error",
+        summary: `Failed to download "${fileMeta.display_name}".`,
+        artifacts: [],
+        retryable: true,
+        errorCode: "canvas_download_failed",
+      },
+      modelText: `Failed to download "${fileMeta.display_name}".`,
+      uiText: `Failed to download "${fileMeta.display_name}".`,
+    };
+  }
   const downloadDir = path.join(ctx.cache.coursePath, "attachments", "modules");
   await fs.mkdir(downloadDir, { recursive: true });
   const localPath = path.join(downloadDir, fileMeta.display_name);
@@ -500,20 +764,207 @@ async function downloadCourseFile(title: string, ctx: ChatAgentContext): Promise
         extracted.endsWith("\n") ? extracted : extracted + "\n",
         "utf-8"
       );
-      return extracted;
+      const refreshed = await searchCourseArtifacts(ctx.cache, fileMeta.display_name, {
+        kinds: ["attachment"],
+        limit: 1,
+      });
+      return {
+        observation: {
+          tool: "download_course_file",
+          status: "ok",
+          summary: `Downloaded and extracted ${fileMeta.display_name}.`,
+          artifacts: refreshed[0]
+            ? [toArtifactRef(refreshed[0].artifact)]
+            : [],
+          content: extracted,
+        },
+        modelText: extracted,
+        uiText: extracted,
+      };
     }
   } catch {
     // Fall through to a guidance message below.
   }
-  return `Downloaded "${fileMeta.display_name}", but extracted text is not available yet. Refresh the course cache to rebuild it.`;
+  const message = `Downloaded "${fileMeta.display_name}", but extracted text is not available yet. Refresh the course cache to rebuild it.`;
+  return {
+    observation: {
+      tool: "download_course_file",
+      status: "missing_text",
+      summary: message,
+      artifacts: [],
+      errorCode: "missing_extracted_text",
+    },
+    modelText: message,
+    uiText: message,
+  };
 }
 
-async function openResource(query: string, ctx: ChatAgentContext): Promise<string> {
+async function openResource(
+  query: string,
+  ctx: ChatAgentContext
+): Promise<ToolExecutionResult> {
   const result = await handleOpenResourceQuery(query, {
     loaded: ctx.loaded,
     cache: ctx.cache,
   });
-  return result.message;
+  const success = !/No openable resource|Multiple resources matched|Failed to open|missing/i.test(
+    result.message
+  );
+  return {
+    observation: {
+      tool: "open_resource",
+      status: success ? "ok" : "not_found",
+      summary: result.message,
+      artifacts: [],
+    },
+    modelText: result.message,
+    uiText: result.message,
+  };
+}
+
+async function readArtifactForGate(
+  artifactId: string,
+  ctx: ChatAgentContext
+): Promise<ToolExecutionResult> {
+  const artifact = await readWorkspaceKnowledgeArtifactById(
+    ctx.loaded,
+    ctx.cache,
+    artifactId,
+    MAX_DOC_TEXT
+  );
+  switch (artifact.status) {
+    case "ok":
+      return {
+        observation: {
+          tool: "read_file",
+          status: "ok",
+          summary: `Read ${artifact.artifact.title}.`,
+          artifacts: [toArtifactRef(artifact.artifact)],
+          content: artifact.content,
+        },
+        modelText: artifact.content,
+        uiText: artifact.content,
+      };
+    case "missing_text":
+      return {
+        observation: {
+          tool: "read_file",
+          status: "missing_text",
+          summary: `Matched ${artifact.artifact?.title ?? artifactId}, but readable text is missing.`,
+          artifacts: artifact.artifact ? [toArtifactRef(artifact.artifact)] : [],
+          errorCode: "missing_text",
+        },
+        modelText: `Matched ${artifact.artifact?.title ?? artifactId}, but readable text is missing.`,
+        uiText: `Matched ${artifact.artifact?.title ?? artifactId}, but readable text is missing.`,
+      };
+    case "empty_query":
+    case "not_found":
+    default:
+      return {
+        observation: {
+          tool: "read_file",
+          status: "not_found",
+          summary: `Could not read artifact "${artifactId}" from the workspace knowledge store.`,
+          artifacts: [],
+          errorCode: "not_found",
+        },
+        modelText: `Could not read artifact "${artifactId}" from the workspace knowledge store.`,
+        uiText: `Could not read artifact "${artifactId}" from the workspace knowledge store.`,
+      };
+  }
+}
+
+async function answerWithoutTools(
+  ctx: ChatAgentContext,
+  systemPrompt: string,
+  question: string,
+  observations: Observation[],
+  onTextDelta?: (delta: string) => void
+): Promise<string> {
+  const userMessage = buildEvidenceBackedQuestion(question, observations);
+  const answer = await callModel(
+    ctx.aiConfig,
+    `${systemPrompt}\n\nNo tools are available for this turn. Answer only from the pre-loaded assignment context and any supplemental evidence provided in the user message.`,
+    buildConversationPrompt(ctx.conversationHistory, userMessage)
+  );
+  if (answer && onTextDelta) {
+    onTextDelta(answer);
+  }
+  return answer;
+}
+
+function buildConversationPrompt(
+  history: ChatAgentConversationEntry[],
+  userMessage: string
+): string {
+  const sections: string[] = [];
+  if (history.length > 0) {
+    sections.push("Conversation so far:");
+    for (const entry of history.slice(-6)) {
+      sections.push(`${entry.role.toUpperCase()}: ${entry.content}`);
+    }
+    sections.push("");
+  }
+  sections.push(userMessage);
+  return sections.join("\n");
+}
+
+function buildEvidenceBackedQuestion(
+  question: string,
+  observations: Observation[]
+): string {
+  if (observations.length === 0) {
+    return question;
+  }
+
+  const sections: string[] = [question, "", "Supplemental evidence already gathered in this chat:"];
+  for (const observation of observations.slice(-3)) {
+    sections.push(`- Tool: ${observation.tool}`);
+    sections.push(`  Summary: ${observation.summary}`);
+    for (const artifact of observation.artifacts) {
+      sections.push(`  Source: [${artifact.kind}] ${artifact.title}`);
+    }
+    if (observation.content) {
+      sections.push(observation.content);
+    }
+    sections.push("");
+  }
+  return sections.join("\n");
+}
+
+function findObservationsForArtifacts(
+  observations: Observation[],
+  artifactIds: string[]
+): Observation[] {
+  const ids = new Set(artifactIds);
+  return observations.filter((observation) =>
+    observation.artifacts.some((artifact) => ids.has(artifact.artifactId))
+  );
+}
+
+function finalizeAnswerText(answer: string, missing: string[]): string {
+  const trimmed = answer.trim();
+  if (!trimmed) {
+    return "I wasn't able to find a clear answer.";
+  }
+  if (missing.includes("source")) {
+    return `${trimmed}\n\nI may be missing an exact source for part of this answer, so treat it as tentative.`;
+  }
+  return trimmed;
+}
+
+function toArtifactRef(artifact: {
+  id: string;
+  title: string;
+  kind: string;
+  excerpt: string;
+}): ArtifactRef {
+  return {
+    artifactId: artifact.id,
+    title: artifact.title,
+    kind: artifact.kind,
+    excerpt: artifact.excerpt,
+  };
 }
 
 function renderWorkspaceArtifactLookupFailure(

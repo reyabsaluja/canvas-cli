@@ -38,6 +38,8 @@ import type {
   ChatAgentContext,
   ChatAgentExtraContext,
 } from "./chat-agent.js";
+import type { Observation } from "../agent/observation.js";
+import { createEmptyRunState, hydrateRunState } from "../agent/run-state.js";
 import fs from "node:fs/promises";
 
 /**
@@ -541,12 +543,13 @@ export function createChatContext(
     config: extraContext?.config ?? null,
     courseId: extraContext?.courseId ?? null,
     conversationHistory: [],
+    runState: createEmptyRunState(),
   };
 }
 
 export function hydrateConversationHistory(
   chatContext: ChatAgentContext,
-  messages: Array<{ role: string; content: string }>
+  messages: Array<{ role: string; content: string; observation?: Observation }>
 ): void {
   chatContext.conversationHistory = messages
     .filter((message) => message.role === "user" || message.role === "assistant")
@@ -554,6 +557,7 @@ export function hydrateConversationHistory(
       role: message.role,
       content: message.content,
     }));
+  chatContext.runState = hydrateRunState(messages);
 }
 
 /**

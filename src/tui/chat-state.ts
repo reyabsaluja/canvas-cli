@@ -1,3 +1,5 @@
+import type { Observation } from "../agent/observation.js";
+
 export type ScopeType = "global" | "course" | "workspace";
 
 export interface GlobalScope {
@@ -36,6 +38,7 @@ export interface ChatMessage {
   toolAction?: string;
   toolTarget?: string;
   toolColor?: "green" | "red";
+  observation?: Observation;
 }
 
 export interface ChatSessionMetadata {

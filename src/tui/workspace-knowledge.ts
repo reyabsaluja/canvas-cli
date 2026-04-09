@@ -136,6 +136,37 @@ export async function readWorkspaceKnowledgeArtifact(
   };
 }
 
+export async function readWorkspaceKnowledgeArtifactById(
+  workspace: LoadedWorkspace,
+  cache: CourseCache | null,
+  artifactId: string,
+  maxLength: number
+): Promise<WorkspaceChatReadResult> {
+  const trimmed = artifactId.trim();
+  if (!trimmed) {
+    return { status: "empty_query" };
+  }
+
+  const index = await loadArtifactIndex({ workspace, cache });
+  const artifact = index.artifactsById.get(trimmed);
+  if (!artifact || !CHAT_READABLE_KINDS.includes(artifact.kind)) {
+    return { status: "not_found" };
+  }
+
+  const content = await readArtifactContent(index, artifact.id);
+  if (!content) {
+    return { status: "missing_text", artifact };
+  }
+
+  const truncated = content.length > maxLength;
+  return {
+    status: "ok",
+    artifact,
+    content: truncated ? content.slice(0, maxLength) + "\n[...truncated]" : content,
+    truncated,
+  };
+}
+
 export async function listWorkspaceKnowledgeArtifacts(
   workspace: LoadedWorkspace,
   cache: CourseCache | null
