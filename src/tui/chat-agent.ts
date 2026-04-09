@@ -647,16 +647,23 @@ function selectToolMemoryObservations(
   observations: Observation[]
 ): Observation[] {
   const selected = selectSupplementalEvidenceObservations(observations, question);
-  if (selected.length === 0) {
+  const coveredArtifactIds = collectObservationArtifactIds(selected);
+  const searchBreadcrumbs = selectRelevantSearchBreadcrumbObservations(
+    question,
+    observations,
+    coveredArtifactIds
+  );
+  if (selected.length === 0 && searchBreadcrumbs.length === 0) {
     return [];
   }
 
   const recentFailures = selectRecentFailedToolObservations(question, observations);
-  if (recentFailures.length === 0) {
-    return selected;
-  }
-
   const combined = [...selected];
+  for (const observation of searchBreadcrumbs) {
+    if (!combined.includes(observation)) {
+      combined.push(observation);
+    }
+  }
   for (const observation of recentFailures) {
     if (!combined.includes(observation)) {
       combined.push(observation);
@@ -768,26 +775,21 @@ function buildSemanticTurnToolAliasKeys(
   name: string,
   input: Record<string, unknown>
 ): string[] {
-  return [...buildToolSemanticAliases(name, input)].map(
-    (alias) => `semantic:${name}:${alias}`
-  );
-}
-
-function buildToolSemanticAliases(
-  name: string,
-  input: Record<string, unknown>
-): Set<string> {
   if (name === "search_workspace" || name === "search_course") {
     const query = typeof input.query === "string" ? input.query.trim() : "";
-    return buildSemanticSearchAliases(query);
+    return [...buildSemanticSearchAliases(query)].map(
+      (alias) => `semantic:${name}:${alias}`
+    );
   }
 
   const target = getSemanticReuseTarget(name, input);
   if (!target) {
-    return new Set();
+    return [];
   }
 
-  return buildSemanticLookupAliases(target);
+  return [...buildSemanticLookupAliases(target)].map(
+    (alias) => `semantic:${name}:${alias}`
+  );
 }
 
 function findSemanticTurnToolCacheHit(
@@ -1468,6 +1470,48 @@ function selectRelevantObservations(
     .slice(0, limit)
     .sort((left, right) => left.index - right.index)
     .map((entry) => entry.observation);
+}
+
+function selectRelevantSearchBreadcrumbObservations(
+  question: string,
+  observations: Observation[],
+  coveredArtifactIds: Set<string>
+): Observation[] {
+  const candidates = observations.filter(
+    (observation) =>
+      isSuccessfulSearchBreadcrumbObservation(observation) &&
+      observation.artifacts.some(
+        (artifact) => !coveredArtifactIds.has(artifact.artifactId)
+      )
+  );
+  if (candidates.length === 0) {
+    return [];
+  }
+  return selectRelevantObservations(candidates, question, 2);
+}
+
+function isSuccessfulSearchBreadcrumbObservation(
+  observation: Observation
+): boolean {
+  return (
+    observation.status === "ok" &&
+    observation.artifacts.length > 0 &&
+    !observation.content &&
+    (observation.tool === "search_workspace" ||
+      observation.tool === "search_course")
+  );
+}
+
+function collectObservationArtifactIds(
+  observations: Observation[]
+): Set<string> {
+  const artifactIds = new Set<string>();
+  for (const observation of observations) {
+    for (const artifact of observation.artifacts) {
+      artifactIds.add(artifact.artifactId);
+    }
+  }
+  return artifactIds;
 }
 
 export function resolveToolTurnVerificationObservations(
