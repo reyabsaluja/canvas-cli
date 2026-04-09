@@ -7,8 +7,10 @@ import {
   leaveAlternateScreen,
   showCursor,
 } from "./screen.js";
+import { resetChatShellRenderCache } from "./chat-shell-render.js";
 
 export function enterChatShell(render: () => void): NodeJS.ReadStream {
+  resetChatShellRenderCache();
   enterAlternateScreen();
   enableMouseTracking();
   clearScreen();
@@ -38,6 +40,7 @@ export async function leaveChatShell(
     persistError =
       error instanceof Error ? error.message : "unknown persistence error";
   } finally {
+    resetChatShellRenderCache();
     stdin.removeListener("data", onData);
     try {
       if (stdin.isTTY) stdin.setRawMode(false);
