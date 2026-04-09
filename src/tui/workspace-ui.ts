@@ -392,7 +392,11 @@ export async function runWorkspaceUI(
     while (frame.length < rows) {
       frame.push(" ".repeat(cols));
     }
-    process.stdout.write("\x1B[H" + frame.join("\n"));
+    const buf = createBuffer();
+    for (const line of frame) {
+      buf.push(line);
+    }
+    buf.flush();
   }
 
   function buildHeaderLines(showScrollHint: boolean): string[] {
@@ -618,10 +622,10 @@ export async function runWorkspaceUI(
         const btn = parseInt(mouseMatch[1], 10);
         if (btn === 64) {
           chatScrollOffset += 3;
-          scheduleRender(true);
+          scheduleRender();
         } else if (btn === 65) {
           chatScrollOffset = Math.max(0, chatScrollOffset - 3);
-          scheduleRender(true);
+          scheduleRender();
         }
         return;
       }
@@ -636,35 +640,35 @@ export async function runWorkspaceUI(
       if (key === "\x0F") {
         toolOutputExpanded = !toolOutputExpanded;
         chatScrollOffset = 0;
-        scheduleRender(true);
+        scheduleRender();
         return;
       }
 
       if (key === "\x1b[5~" || key === "\x1B[5~" || key === "\x10") {
         chatScrollOffset += scrollPageStep();
-        scheduleRender(true);
+        scheduleRender();
         return;
       }
       if (key === "\x1b[6~" || key === "\x1B[6~" || key === "\x0e") {
         chatScrollOffset = Math.max(0, chatScrollOffset - scrollPageStep());
-        scheduleRender(true);
+        scheduleRender();
         return;
       }
       if (key === "\x1b[4~" || key === "\x1B[4~") {
         chatScrollOffset = 0;
-        scheduleRender(true);
+        scheduleRender();
         return;
       }
       if (key === "\x1b[1~" || key === "\x1B[1~") {
         chatScrollOffset = Number.MAX_SAFE_INTEGER;
-        scheduleRender(true);
+        scheduleRender();
         return;
       }
 
       if (key === "\x1B") {
         if (showSlashMenu) {
           showSlashMenu = false;
-          scheduleRender(true);
+          scheduleRender();
         }
         return;
       }
@@ -680,7 +684,7 @@ export async function runWorkspaceUI(
             const selected = pinMatches[pinSelected];
             inputBuffer = inputBuffer.replace(/\/pin(\s+\S*)?$/, `/pin ${selected.label}`);
             pinSelected = 0;
-            scheduleRender(true);
+            scheduleRender();
             return;
           }
         }
@@ -697,7 +701,7 @@ export async function runWorkspaceUI(
         showSlashMenu = false;
 
         if (!input) {
-          scheduleRender(true);
+          scheduleRender();
           return;
         }
 
@@ -822,34 +826,34 @@ export async function runWorkspaceUI(
 
       if (key === "\x1B[A" && getActivePinPartial(inputBuffer) !== null && getPinMatches().length > 0) {
         pinSelected = Math.max(0, pinSelected - 1);
-        scheduleRender(true);
+        scheduleRender();
         return;
       }
       if (key === "\x1B[B" && getActivePinPartial(inputBuffer) !== null && getPinMatches().length > 0) {
         pinSelected = Math.min(getPinMatches().length - 1, pinSelected + 1);
-        scheduleRender(true);
+        scheduleRender();
         return;
       }
       if (key === "\x1B[A" && showSlashMenu) {
         slashSelected = Math.max(0, slashSelected - 1);
-        scheduleRender(true);
+        scheduleRender();
         return;
       }
       if (key === "\x1B[B" && showSlashMenu) {
         const matches = getSlashMatches();
         slashSelected = Math.min(matches.length - 1, slashSelected + 1);
-        scheduleRender(true);
+        scheduleRender();
         return;
       }
 
       if (key === "\x1B[A") {
         chatScrollOffset += 3;
-        scheduleRender(true);
+        scheduleRender();
         return;
       }
       if (key === "\x1B[B") {
         chatScrollOffset = Math.max(0, chatScrollOffset - 3);
-        scheduleRender(true);
+        scheduleRender();
         return;
       }
 
@@ -858,7 +862,7 @@ export async function runWorkspaceUI(
           inputBuffer = inputBuffer.slice(0, -1);
           showSlashMenu = inputBuffer.startsWith("/");
           slashSelected = 0;
-          scheduleRender(true);
+          scheduleRender();
         }
         return;
       }
@@ -868,7 +872,7 @@ export async function runWorkspaceUI(
         if (matches.length > 0) {
           inputBuffer = matches[slashSelected].cmd;
           showSlashMenu = true;
-          scheduleRender(true);
+          scheduleRender();
         }
         return;
       }
@@ -881,7 +885,7 @@ export async function runWorkspaceUI(
         } else if (showSlashMenu) {
           slashSelected = 0;
         }
-        scheduleRender(true);
+        scheduleRender();
       }
     }
 
