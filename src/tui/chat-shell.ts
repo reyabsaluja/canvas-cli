@@ -22,6 +22,7 @@ import {
   mergePinOptions,
   resolvePinReferences,
 } from "./pins.js";
+import type { OpenableResource } from "./open-resources.js";
 import { searchOpenableResources } from "./open-resources.js";
 import {
   MAIN_VIEW_BOTTOM_RESERVE,
@@ -143,6 +144,8 @@ export async function runChatShell<TExit>(
   let currentVerb = "";
   let bannerLinesCache: string[] | null = null;
   let bannerCacheCols = -1;
+  let openSearchOptionsRef: ShellOpenOption[] | null = null;
+  let openSearchResources: OpenableResource[] = [];
   const transcriptIndexes = {
     normal: createTranscriptIndexState(),
     expanded: createTranscriptIndexState(),
@@ -318,6 +321,27 @@ export async function runChatShell<TExit>(
     return options.getOpenOptions?.() ?? [];
   }
 
+  function getOpenSearchResources(
+    openOptions: ShellOpenOption[]
+  ): OpenableResource[] {
+    if (openSearchOptionsRef === openOptions) {
+      return openSearchResources;
+    }
+
+    openSearchOptionsRef = openOptions;
+    openSearchResources = openOptions.map((option, index) => ({
+      id: String(index),
+      title: option.title,
+      kind: option.detail ?? "resource",
+      targetType: "file",
+      target: option.query,
+      detail: option.detail,
+      searchTerms:
+        option.searchTerms ?? [option.title, option.query, option.detail ?? ""],
+    }));
+    return openSearchResources;
+  }
+
   function getActiveOpenPartial(value: string): string | null {
     if (options.runtime.scope.type === "global") return null;
     const match = value.match(/\/open(?:\s+(.*))?$/i);
@@ -341,18 +365,10 @@ export async function runChatShell<TExit>(
       if (!activeOpenPartial) {
         openMatches = openOptions;
       } else {
+        const searchableResources = getOpenSearchResources(openOptions);
         const ranked = searchOpenableResources(
           activeOpenPartial,
-          openOptions.map((option, index) => ({
-            id: String(index),
-            title: option.title,
-            kind: option.detail ?? "resource",
-            targetType: "file" as const,
-            target: option.query,
-            detail: option.detail,
-            searchTerms:
-              option.searchTerms ?? [option.title, option.query, option.detail ?? ""],
-          })),
+          searchableResources,
           openOptions.length
         );
         openMatches = ranked
