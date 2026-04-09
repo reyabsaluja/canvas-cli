@@ -247,6 +247,12 @@ export interface TurnToolExecutionResult {
   deduped: boolean;
 }
 
+interface ToolLoopRunResult {
+  fullText: string;
+  supportingObservations: Observation[];
+  verificationObservations: Observation[];
+}
+
 function mapToolCall(
   name: string,
   input: Record<string, unknown>
@@ -321,8 +327,10 @@ export async function runChatAgent(
     appendObservation(ctx.runState, toolResult.observation);
     supportingObservations = [toolResult.observation];
     verificationObservations = supportingObservations;
+    const gateReadFilename =
+      toolResult.observation.artifacts[0]?.title ?? retrievalDecision.artifactId;
     const { action, target } = mapToolCall("read_file", {
-      filename: toolResult.observation.artifacts[0]?.title ?? retrievalDecision.artifactId,
+      filename: gateReadFilename,
     });
     onToolCall({
       action,
@@ -331,77 +339,48 @@ export async function runChatAgent(
       color: toolResult.observation.status === "ok" ? "green" : "red",
       observation: toolResult.observation,
     });
-    fullText = await answerWithoutTools(
-      ctx,
-      systemPrompt,
-      question,
-      supportingObservations,
-      onTextDelta
-    );
-  } else {
-    const pendingToolResults: ToolExecutionResult[] = [];
-    const turnToolCache: TurnToolCache = new Map();
-    const promptMessages = buildToolPromptMessages(
-      ctx.conversationHistory,
-      question,
-      ctx.runState
-    );
-    let toolLoopError: unknown = null;
-    try {
-      fullText = await streamWithTools(
-        ctx.aiConfig,
+    if (shouldContinueToolLoopAfterGateRead(toolResult.observation)) {
+      ({
+        fullText,
+        supportingObservations,
+        verificationObservations,
+      } = await runToolLoopTurn(
+        ctx,
         systemPrompt,
-        promptMessages,
-        CHAT_TOOLS,
-        async (name, input) => {
-          const execution = await executeToolCallForTurn(
-            turnToolCache,
-            name,
-            input,
-            ctx
-          );
-          pendingToolResults.push(execution.result);
-          if (!execution.deduped) {
-            appendObservation(ctx.runState, execution.result.observation);
-          }
-          return execution.result.modelText;
-        },
-        {
-          onToolCall: (name, input, toolResult) => {
-            const { action, target, color } = mapToolCall(name, input);
-            const detailed = pendingToolResults.shift();
-            const observation = detailed?.observation;
-            onToolCall({
-              action,
-              target,
-              result: detailed?.uiText ?? toolResult,
-              color: observation?.status === "ok" ? color : "red",
-              observation,
-            });
+        question,
+        onToolCall,
+        onTextDelta,
+        observationStart,
+        [
+          {
+            name: "read_file",
+            input: { filename: gateReadFilename },
+            result: toolResult,
           },
-          onTextDelta,
-        },
-        10
-      );
-    } catch (error) {
-      toolLoopError = error;
-    }
-    supportingObservations = ctx.runState.observations.slice(observationStart);
-    verificationObservations = resolveToolTurnVerificationObservations(
-      ctx.runState.observations,
-      observationStart
-    );
-    if (shouldRecoverFromToolLoop(fullText, verificationObservations)) {
+        ]
+      ));
+    } else {
       fullText = await answerWithoutTools(
         ctx,
         systemPrompt,
         question,
-        verificationObservations,
+        supportingObservations,
         onTextDelta
       );
-    } else if (toolLoopError) {
-      throw toolLoopError;
     }
+  } else {
+    ({
+      fullText,
+      supportingObservations,
+      verificationObservations,
+    } = await runToolLoopTurn(
+      ctx,
+      systemPrompt,
+      question,
+      onToolCall,
+      onTextDelta,
+      observationStart
+    ));
   }
 
   const verification = verifyWorkspaceAnswer({
@@ -423,6 +402,98 @@ export async function runChatAgent(
     bulletPoints: [],
     sources: verification.sources,
     confidence: verification.confidence,
+  };
+}
+
+async function runToolLoopTurn(
+  ctx: ChatAgentContext,
+  systemPrompt: string,
+  question: string,
+  onToolCall: (event: ToolCallEvent) => void,
+  onTextDelta: ((delta: string) => void) | undefined,
+  observationStart: number,
+  initialToolCacheEntries: Array<{
+    name: string;
+    input: Record<string, unknown>;
+    result: ToolExecutionResult;
+  }> = []
+): Promise<ToolLoopRunResult> {
+  const pendingToolResults: ToolExecutionResult[] = [];
+  const turnToolCache: TurnToolCache = new Map(
+    initialToolCacheEntries.map((entry) => [
+      buildTurnToolCacheKey(entry.name, entry.input),
+      entry.result,
+    ])
+  );
+  const promptMessages = buildToolPromptMessages(
+    ctx.conversationHistory,
+    question,
+    ctx.runState
+  );
+  let fullText = "";
+  let toolLoopError: unknown = null;
+
+  try {
+    fullText = await streamWithTools(
+      ctx.aiConfig,
+      systemPrompt,
+      promptMessages,
+      CHAT_TOOLS,
+      async (name, input) => {
+        const execution = await executeToolCallForTurn(
+          turnToolCache,
+          name,
+          input,
+          ctx
+        );
+        pendingToolResults.push(execution.result);
+        if (!execution.deduped) {
+          appendObservation(ctx.runState, execution.result.observation);
+        }
+        return execution.result.modelText;
+      },
+      {
+        onToolCall: (name, input, toolResult) => {
+          const { action, target, color } = mapToolCall(name, input);
+          const detailed = pendingToolResults.shift();
+          const observation = detailed?.observation;
+          onToolCall({
+            action,
+            target,
+            result: detailed?.uiText ?? toolResult,
+            color: observation?.status === "ok" ? color : "red",
+            observation,
+          });
+        },
+        onTextDelta,
+      },
+      10
+    );
+  } catch (error) {
+    toolLoopError = error;
+  }
+
+  const supportingObservations = ctx.runState.observations.slice(observationStart);
+  const verificationObservations = resolveToolTurnVerificationObservations(
+    ctx.runState.observations,
+    observationStart
+  );
+  if (shouldRecoverFromToolLoop(fullText, verificationObservations)) {
+    fullText = await answerWithoutTools(
+      ctx,
+      systemPrompt,
+      question,
+      verificationObservations,
+      onTextDelta
+    );
+  } else if (toolLoopError) {
+    throw toolLoopError;
+  }
+
+  return {
+    fullText,
+    supportingObservations,
+    verificationObservations,
   };
 }
 
@@ -1385,6 +1456,12 @@ export function shouldRecoverFromToolLoop(
       (typeof observation.content === "string" &&
         observation.content.trim().length > 0)
   );
+}
+
+export function shouldContinueToolLoopAfterGateRead(
+  observation: Observation
+): boolean {
+  return !isGroundedContentObservation(observation);
 }
 
 export function selectArtifactSupportObservations(
