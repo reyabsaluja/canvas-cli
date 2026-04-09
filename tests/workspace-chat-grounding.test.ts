@@ -14,6 +14,8 @@ import {
   buildEvidenceBackedQuestion,
   executeToolCallForTurn,
   resolveToolTurnVerificationObservations,
+  selectArtifactSupportObservations,
+  shouldRecoverFromToolLoop,
 } from "../src/tui/chat-agent.js";
 import { createChatContext, hydrateConversationHistory } from "../src/tui/services.js";
 import {
@@ -257,6 +259,180 @@ test("workspace retrieval gate prefers workup, then direct reads, then prior mem
   });
 });
 
+test("workspace retrieval gate prefers an already-read strong match over a higher-ranked unread one", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+
+    await fs.writeFile(
+      path.join(loaded.path, "extracted", "docs", "branch-hazard-spec.txt"),
+      [
+        "Branch hazard requirement specification.",
+        "Branch hazard requirement specification.",
+        "Branch hazard requirement specification.",
+      ].join("\n"),
+      "utf-8"
+    );
+    loaded.extractedFiles.push({
+      name: "docs/branch-hazard-spec.txt",
+      relativePath: path.join("extracted", "docs", "branch-hazard-spec.txt"),
+    });
+    clearArtifactIndexCache();
+
+    const matches = await searchWorkspaceKnowledge(
+      loaded,
+      cache,
+      "branch hazard requirement",
+      3
+    );
+    assert.equal(matches[0]?.artifact.title, "docs/branch-hazard-spec.txt");
+
+    const decision = await decideWorkspaceRetrieval({
+      question: "Explain the branch hazard requirement in detail.",
+      runState: {
+        observations: [
+          {
+            tool: "read_file",
+            status: "ok",
+            summary: "Read docs/reference.txt.",
+            artifacts: [
+              {
+                artifactId: "workspace:extracted:docs/reference.txt",
+                title: "docs/reference.txt",
+                kind: "extracted",
+                excerpt: "The waveform must show stall cycles around the branch hazard.",
+              },
+            ],
+            content: "The waveform must show stall cycles around the branch hazard.",
+          },
+        ],
+        readArtifactIds: ["workspace:extracted:docs/reference.txt"],
+        stepCount: 1,
+      },
+      loaded,
+      cache,
+    });
+
+    assert.deepEqual(decision, {
+      action: "answer_from_memory",
+      reason: "already_read_relevant_artifact",
+      sourceArtifactIds: ["workspace:extracted:docs/reference.txt"],
+    });
+  });
+});
+
+test("workspace retrieval gate reuses multiple already-read strong matches before rereading", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+
+    const addedFiles = [
+      {
+        name: "docs/branch-hazard-spec.txt",
+        body: [
+          "Branch hazard requirement specification.",
+          "Branch hazard requirement specification.",
+          "Branch hazard requirement specification.",
+        ].join("\n"),
+      },
+      {
+        name: "docs/branch-hazard-walkthrough.txt",
+        body: [
+          "Branch hazard requirement walkthrough.",
+          "Branch hazard requirement walkthrough.",
+        ].join("\n"),
+      },
+      {
+        name: "docs/branch-hazard-summary.txt",
+        body: [
+          "Branch hazard requirement summary.",
+          "Branch hazard requirement summary.",
+        ].join("\n"),
+      },
+    ];
+
+    for (const file of addedFiles) {
+      const relativePath = path.join("extracted", file.name);
+      await fs.writeFile(path.join(loaded.path, relativePath), file.body, "utf-8");
+      loaded.extractedFiles.push({ name: file.name, relativePath });
+    }
+    clearArtifactIndexCache();
+
+    const matches = await searchWorkspaceKnowledge(
+      loaded,
+      cache,
+      "branch hazard requirement",
+      3
+    );
+    assert.ok(
+      matches.some(
+        (match) => match.artifact.id === "workspace:extracted:docs/branch-hazard-spec.txt"
+      )
+    );
+
+    const reusableArtifactIds = [
+      "workspace:extracted:docs/branch-hazard-walkthrough.txt",
+      "workspace:extracted:docs/branch-hazard-summary.txt",
+    ];
+    const expectedReusableIds = matches
+      .filter((match) => reusableArtifactIds.includes(match.artifact.id))
+      .map((match) => match.artifact.id);
+    assert.equal(expectedReusableIds.length, 2);
+    assert.deepEqual(
+      [...expectedReusableIds].sort(),
+      [...reusableArtifactIds].sort()
+    );
+
+    const decision = await decideWorkspaceRetrieval({
+      question: "Explain the branch hazard requirement in detail.",
+      runState: {
+        observations: [
+          {
+            tool: "read_file",
+            status: "ok",
+            summary: "Read docs/branch-hazard-walkthrough.txt.",
+            artifacts: [
+              {
+                artifactId: "workspace:extracted:docs/branch-hazard-walkthrough.txt",
+                title: "docs/branch-hazard-walkthrough.txt",
+                kind: "extracted",
+                excerpt: "Branch hazard requirement walkthrough.",
+              },
+            ],
+            content: "Branch hazard requirement walkthrough.",
+          },
+          {
+            tool: "read_file",
+            status: "ok",
+            summary: "Read docs/branch-hazard-summary.txt.",
+            artifacts: [
+              {
+                artifactId: "workspace:extracted:docs/branch-hazard-summary.txt",
+                title: "docs/branch-hazard-summary.txt",
+                kind: "extracted",
+                excerpt: "Branch hazard requirement summary.",
+              },
+            ],
+            content: "Branch hazard requirement summary.",
+          },
+        ],
+        readArtifactIds: reusableArtifactIds,
+        stepCount: 2,
+      },
+      loaded,
+      cache,
+    });
+
+    assert.deepEqual(decision, {
+      action: "answer_from_memory",
+      reason: "already_read_relevant_artifact",
+      sourceArtifactIds: expectedReusableIds,
+    });
+  });
+});
+
 test("workspace retrieval gate only trusts explicit workup fields, not generic overlap", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
@@ -449,6 +625,50 @@ test("workspace answer verification derives sources and confidence deterministic
     });
     assert.equal(verifiedFromSearchOnly.confidence, "medium");
 
+    const verifiedFromMixedEvidence = verifyWorkspaceAnswer({
+      question: "Explain the branch hazard requirement in detail.",
+      answer: "You need to show the stall cycles around the branch hazard.",
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read docs/reference.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-1",
+              title: "docs/reference.txt",
+              kind: "extracted",
+              excerpt: "The waveform must show stall cycles around the branch hazard.",
+            },
+          ],
+          content: "The waveform must show stall cycles around the branch hazard.",
+        },
+        {
+          tool: "search_workspace",
+          status: "ok",
+          summary: "Found another workspace match for branch behavior.",
+          artifacts: [
+            {
+              artifactId: "artifact-2",
+              title: "plan.md",
+              kind: "plan",
+              excerpt: "Capture the waveform before writing the analysis.",
+            },
+          ],
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedFromMixedEvidence.confidence, "high");
+    assert.deepEqual(verifiedFromMixedEvidence.sources, [
+      {
+        title: "docs/reference.txt",
+        kind: "extracted",
+        excerpt: "The waveform must show stall cycles around the branch hazard.",
+      },
+    ]);
+
     const verifiedFromUnsupportedWorkup = verifyWorkspaceAnswer({
       question: "Explain the branch hazard requirement in detail.",
       answer: "The workup says to explain branch behavior.",
@@ -562,9 +782,150 @@ test("tool-turn verification falls back to prior grounded evidence when no new t
   assert.equal(fallback.length, 2);
   assert.equal(fallback[0]?.tool, "download_course_file");
 
+  const mixedTurn = resolveToolTurnVerificationObservations(observations, 1);
+  assert.equal(mixedTurn.length, 2);
+  assert.equal(mixedTurn[0]?.tool, "download_course_file");
+  assert.equal(mixedTurn[1]?.tool, "search_workspace");
+});
+
+test("tool-turn verification keeps current-turn evidence only when the turn already read grounded content", () => {
+  const observations: Observation[] = [
+    {
+      tool: "read_file",
+      status: "ok",
+      summary: "Read docs/reference.txt.",
+      artifacts: [
+        {
+          artifactId: "artifact-1",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          excerpt: "Older grounded detail.",
+        },
+      ],
+      content: "Older grounded detail.",
+    },
+    {
+      tool: "download_course_file",
+      status: "ok",
+      summary: "Downloaded and extracted lab4-brief.txt.",
+      artifacts: [
+        {
+          artifactId: "artifact-2",
+          title: "lab4-brief.txt",
+          kind: "attachment",
+          excerpt: "Fresh grounded detail.",
+        },
+      ],
+      content: "Fresh grounded detail.",
+    },
+  ];
+
   const currentTurn = resolveToolTurnVerificationObservations(observations, 1);
   assert.equal(currentTurn.length, 1);
-  assert.equal(currentTurn[0]?.tool, "search_workspace");
+  assert.equal(currentTurn[0]?.tool, "download_course_file");
+});
+
+test("tool-loop recovery only triggers when the loop produced no answer but gathered usable evidence", () => {
+  assert.equal(
+    shouldRecoverFromToolLoop("", [
+      {
+        tool: "search_workspace",
+        status: "ok",
+        summary: "Found a workspace match.",
+        artifacts: [
+          {
+            artifactId: "artifact-1",
+            title: "docs/reference.txt",
+            kind: "extracted",
+            excerpt: "Grounded detail.",
+          },
+        ],
+      },
+    ]),
+    true
+  );
+
+  assert.equal(
+    shouldRecoverFromToolLoop("Here is the answer.", [
+      {
+        tool: "read_file",
+        status: "ok",
+        summary: "Read docs/reference.txt.",
+        artifacts: [
+          {
+            artifactId: "artifact-1",
+            title: "docs/reference.txt",
+            kind: "extracted",
+            excerpt: "Grounded detail.",
+          },
+        ],
+        content: "Grounded detail.",
+      },
+    ]),
+    false
+  );
+
+  assert.equal(
+    shouldRecoverFromToolLoop("", [
+      {
+        tool: "list_files",
+        status: "ok",
+        summary: "Listed workspace and course files available to chat.",
+        artifacts: [],
+      },
+    ]),
+    false
+  );
+});
+
+test("memory evidence selection prefers grounded reads over later search echoes for the same artifact", () => {
+  const observations: Observation[] = [
+    {
+      tool: "read_file",
+      status: "ok",
+      summary: "Read docs/reference.txt.",
+      artifacts: [
+        {
+          artifactId: "artifact-1",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          excerpt: "Grounded detail.",
+        },
+      ],
+      content: "Grounded detail.",
+    },
+    {
+      tool: "search_workspace",
+      status: "ok",
+      summary: "Found a workspace match for branch hazard.",
+      artifacts: [
+        {
+          artifactId: "artifact-1",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          excerpt: "Grounded detail.",
+        },
+      ],
+    },
+    {
+      tool: "search_workspace",
+      status: "ok",
+      summary: "Found another workspace match for branch hazard.",
+      artifacts: [
+        {
+          artifactId: "artifact-1",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          excerpt: "Grounded detail.",
+        },
+      ],
+    },
+  ];
+
+  const selected = selectArtifactSupportObservations(observations, ["artifact-1"]);
+  assert.equal(selected.length, 1);
+  assert.equal(selected[0]?.tool, "read_file");
+  assert.match(selected[0]?.content ?? "", /Grounded detail/);
 });
 
 test("workspace chat dedupes repeated tool calls within a single turn", async () => {
@@ -617,6 +978,307 @@ test("workspace chat dedupes repeated tool calls within a single turn", async ()
       secondRead.result.modelText,
       /stall cycles around the branch hazard/i
     );
+
+    const aliasRead = await executeToolCallForTurn(
+      turnToolCache,
+      "read_file",
+      { filename: "reference.txt" },
+      ctx
+    );
+
+    assert.equal(aliasRead.deduped, true);
+    assert.match(
+      aliasRead.result.observation.summary,
+      /Reused docs\/reference\.txt from an earlier tool call in this turn/i
+    );
+  });
+});
+
+test("workspace chat reuses downloaded attachment content across tools within a single turn", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "attachments", "modules"), {
+      recursive: true,
+    });
+
+    const cache = createCourseCache(coursePath);
+    cache.modules = [
+      {
+        id: 8,
+        name: "Lab 4 Module",
+        position: 1,
+        itemCount: 1,
+        items: [
+          {
+            id: 10,
+            title: "lab4-brief.txt",
+            type: "File",
+            position: 1,
+            contentId: 99,
+            pageUrl: null,
+            htmlUrl: null,
+            externalUrl: null,
+          },
+        ],
+      },
+    ];
+    cache.attachments = [
+      {
+        sourceType: "module_linked",
+        canvasFileId: 99,
+        originalFilename: "lab4-brief.txt",
+        localPath: "attachments/modules/lab4-brief.txt",
+        contentType: "text/plain",
+        size: 256,
+        downloadUrl: "https://canvas.example/files/99/download",
+        reason: "downloaded on demand from module item \"lab4-brief.txt\"",
+        status: "downloaded",
+      },
+    ];
+
+    await fs.writeFile(
+      path.join(coursePath, "attachments", "modules", "lab4-brief.txt"),
+      "The downloaded brief explains the branch hazard waveform in detail.\n",
+      "utf-8"
+    );
+
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      { cache, client: null, config: null, courseId: 17 }
+    );
+    const turnToolCache = new Map();
+
+    const downloaded = await executeToolCallForTurn(
+      turnToolCache,
+      "download_course_file",
+      { title: "lab4 brief" },
+      ctx
+    );
+    const reread = await executeToolCallForTurn(
+      turnToolCache,
+      "read_file",
+      { filename: "lab4-brief.txt" },
+      ctx
+    );
+
+    assert.equal(downloaded.deduped, false);
+    assert.equal(reread.deduped, true);
+    assert.match(
+      reread.result.observation.summary,
+      /Reused lab4-brief\.txt from an earlier tool call in this turn/i
+    );
+    assert.equal(reread.result.modelText, downloaded.result.modelText);
+  });
+});
+
+test("run-state compaction keeps grounded reads while trimming stale transient observations", () => {
+  const runState = createEmptyRunState();
+
+  appendObservation(runState, {
+    tool: "read_file",
+    status: "ok",
+    summary: "Read docs/reference-a.txt.",
+    artifacts: [
+      {
+        artifactId: "artifact-a",
+        title: "docs/reference-a.txt",
+        kind: "extracted",
+        excerpt: "Grounded detail A.",
+      },
+    ],
+    content: "Grounded detail A.",
+  });
+
+  for (let index = 0; index < 30; index += 1) {
+    appendObservation(runState, {
+      tool: "search_workspace",
+      status: "not_found",
+      summary: `No relevant workspace content found for "miss ${index}".`,
+      artifacts: [],
+    });
+  }
+
+  appendObservation(runState, {
+    tool: "download_course_file",
+    status: "ok",
+    summary: "Downloaded and extracted lab4-brief.txt.",
+    artifacts: [
+      {
+        artifactId: "artifact-b",
+        title: "lab4-brief.txt",
+        kind: "attachment",
+        excerpt: "Grounded detail B.",
+      },
+    ],
+    content: "Grounded detail B.",
+  });
+
+  assert.ok(runState.observations.length <= 24);
+  assert.deepEqual(runState.readArtifactIds, ["artifact-a", "artifact-b"]);
+  assert.ok(
+    runState.observations.some(
+      (observation) => observation.summary === "Read docs/reference-a.txt."
+    )
+  );
+  assert.ok(
+    runState.observations.some(
+      (observation) => observation.summary === "Downloaded and extracted lab4-brief.txt."
+    )
+  );
+  assert.ok(
+    runState.observations.every(
+      (observation) =>
+        observation.summary !== 'No relevant workspace content found for "miss 0".'
+    )
+  );
+});
+
+test("run-state does not store duplicate grounded observations for the same evidence", () => {
+  const runState = createEmptyRunState();
+
+  appendObservation(runState, {
+    tool: "read_file",
+    status: "ok",
+    summary: "Read docs/reference.txt.",
+    artifacts: [
+      {
+        artifactId: "artifact-a",
+        title: "docs/reference.txt",
+        kind: "extracted",
+        excerpt: "Grounded detail A.",
+      },
+    ],
+    content: "Grounded detail A.",
+  });
+
+  appendObservation(runState, {
+    tool: "download_course_file",
+    status: "ok",
+    summary: "Reused docs/reference.txt from an earlier tool call in this turn.",
+    artifacts: [
+      {
+        artifactId: "artifact-a",
+        title: "docs/reference.txt",
+        kind: "extracted",
+        excerpt: "Grounded detail A.",
+      },
+    ],
+    content: "Grounded detail A.",
+  });
+
+  assert.equal(runState.stepCount, 2);
+  assert.equal(runState.observations.length, 1);
+  assert.deepEqual(runState.readArtifactIds, ["artifact-a"]);
+  assert.equal(runState.observations[0]?.tool, "read_file");
+});
+
+test("read_file reuses previously read content across turns", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      { cache, client: null, config: null, courseId: 17 }
+    );
+
+    appendObservation(ctx.runState, {
+      tool: "read_file",
+      status: "ok",
+      summary: "Read docs/reference.txt.",
+      artifacts: [
+        {
+          artifactId: "workspace:extracted:docs/reference.txt",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          excerpt: "The waveform must show stall cycles around the branch hazard.",
+        },
+      ],
+      content: "The waveform must show stall cycles around the branch hazard.",
+    });
+
+    await fs.rm(
+      path.join(loaded.path, "extracted", "docs", "reference.txt"),
+      { force: true }
+    );
+    clearArtifactIndexCache();
+
+    const result = await executeToolCallForTurn(
+      new Map(),
+      "read_file",
+      { filename: "reference.txt" },
+      ctx
+    );
+
+    assert.equal(result.deduped, false);
+    assert.equal(result.result.observation.status, "ok");
+    assert.match(result.result.observation.summary, /Reused previously read/i);
+    assert.match(result.result.modelText, /stall cycles around the branch hazard/i);
+  });
+});
+
+test("read_file recovers text from a local course attachment when extracted text is missing", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "attachments", "modules"), {
+      recursive: true,
+    });
+
+    const cache = createCourseCache(coursePath);
+    cache.attachments = [
+      {
+        sourceType: "module_linked",
+        canvasFileId: 99,
+        originalFilename: "lab4-brief.txt",
+        localPath: "attachments/modules/lab4-brief.txt",
+        contentType: "text/plain",
+        size: 256,
+        downloadUrl: "https://canvas.example/files/99/download",
+        reason: "downloaded on demand from module item \"lab4-brief.txt\"",
+        status: "downloaded",
+      },
+    ];
+
+    await fs.writeFile(
+      path.join(coursePath, "attachments", "modules", "lab4-brief.txt"),
+      "The local attachment explains the branch hazard waveform in detail.\n",
+      "utf-8"
+    );
+
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      { cache, client: null, config: null, courseId: 17 }
+    );
+
+    const result = await executeToolCallForTurn(
+      new Map(),
+      "read_file",
+      { filename: "lab4-brief.txt" },
+      ctx
+    );
+
+    assert.equal(result.result.observation.status, "ok");
+    assert.match(result.result.observation.summary, /Recovered text from local attachment/i);
+    assert.match(result.result.modelText, /branch hazard waveform in detail/i);
+
+    const reread = await readWorkspaceKnowledgeArtifactById(
+      loaded,
+      cache,
+      "course:attachment:attachments/modules/lab4-brief.txt:lab4-brief.txt",
+      30000
+    );
+    assert.equal(reread.status, "ok");
+    if (reread.status !== "ok") {
+      return;
+    }
+    assert.match(reread.content, /branch hazard waveform in detail/i);
   });
 });
 
@@ -676,44 +1338,95 @@ test("download_course_file reuses cached extracted attachments instead of redown
       "utf-8"
     );
 
-    let getFileCalls = 0;
-    let downloadCalls = 0;
     const ctx = createChatContext(
       { provider: "anthropic", model: "test-model" },
       loaded,
-      {
-        cache,
-        client: {
-          getFileSafe: async () => {
-            getFileCalls += 1;
-            return null;
-          },
-          downloadFile: async () => {
-            downloadCalls += 1;
-            return null;
-          },
-        } as any,
-        config: null,
-        courseId: 17,
-      }
+      { cache, client: null, config: null, courseId: 17 }
     );
 
     const result = await executeToolCallForTurn(
       new Map(),
       "download_course_file",
-      { title: "lab4-brief" },
+      { title: "lab4 brief" },
       ctx
     );
 
     assert.equal(result.deduped, false);
     assert.equal(result.result.observation.status, "ok");
-    assert.equal(getFileCalls, 0);
-    assert.equal(downloadCalls, 0);
     assert.equal(
       result.result.observation.artifacts[0]?.artifactId,
       "course:attachment:attachments/modules/lab4-brief.txt:lab4-brief.txt"
     );
     assert.match(result.result.modelText, /waveform/i);
+  });
+});
+
+test("download_course_file recovers text from a previously downloaded local file before retrying Canvas", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "attachments", "modules"), {
+      recursive: true,
+    });
+
+    const cache = createCourseCache(coursePath);
+    cache.modules = [
+      {
+        id: 8,
+        name: "Lab 4 Module",
+        position: 1,
+        itemCount: 1,
+        items: [
+          {
+            id: 10,
+            title: "lab4-brief.txt",
+            type: "File",
+            position: 1,
+            contentId: 99,
+            pageUrl: null,
+            htmlUrl: null,
+            externalUrl: null,
+          },
+        ],
+      },
+    ];
+    cache.attachments = [
+      {
+        sourceType: "module_linked",
+        canvasFileId: 99,
+        originalFilename: "lab4-brief.txt",
+        localPath: "attachments/modules/lab4-brief.txt",
+        contentType: "text/plain",
+        size: 256,
+        downloadUrl: "https://canvas.example/files/99/download",
+        reason: "downloaded on demand from module item \"lab4-brief.txt\"",
+        status: "downloaded",
+      },
+    ];
+
+    await fs.writeFile(
+      path.join(coursePath, "attachments", "modules", "lab4-brief.txt"),
+      "The recovered local file still explains the branch hazard waveform.\n",
+      "utf-8"
+    );
+
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      { cache, client: null, config: null, courseId: 17 }
+    );
+
+    const result = await executeToolCallForTurn(
+      new Map(),
+      "download_course_file",
+      { title: "lab4 brief" },
+      ctx
+    );
+
+    assert.equal(result.result.observation.status, "ok");
+    assert.match(result.result.observation.summary, /Recovered text from previously downloaded/i);
+    assert.match(result.result.modelText, /branch hazard waveform/i);
   });
 });
 

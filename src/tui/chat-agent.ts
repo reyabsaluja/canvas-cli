@@ -30,6 +30,10 @@ import {
   searchCourseKnowledge,
 } from "./course-retrieval.js";
 import {
+  clearArtifactIndexCache,
+  type ArtifactRecord,
+} from "../knowledge/artifact-index.js";
+import {
   listWorkspaceKnowledgeArtifacts,
   readWorkspaceKnowledgeArtifact,
   readWorkspaceKnowledgeArtifactById,
@@ -294,7 +298,7 @@ export async function runChatAgent(
     usedWorkup = true;
     fullText = await answerWithoutTools(ctx, systemPrompt, question, [], onTextDelta);
   } else if (retrievalDecision.action === "answer_from_memory") {
-    supportingObservations = findObservationsForArtifacts(
+    supportingObservations = selectArtifactSupportObservations(
       ctx.runState.observations,
       retrievalDecision.sourceArtifactIds
     );
@@ -338,46 +342,62 @@ export async function runChatAgent(
       question,
       ctx.runState
     );
-    fullText = await streamWithTools(
-      ctx.aiConfig,
-      systemPrompt,
-      promptMessages,
-      CHAT_TOOLS,
-      async (name, input) => {
-        const execution = await executeToolCallForTurn(
-          turnToolCache,
-          name,
-          input,
-          ctx
-        );
-        pendingToolResults.push(execution.result);
-        if (!execution.deduped) {
-          appendObservation(ctx.runState, execution.result.observation);
-        }
-        return execution.result.modelText;
-      },
-      {
-        onToolCall: (name, input, toolResult) => {
-          const { action, target, color } = mapToolCall(name, input);
-          const detailed = pendingToolResults.shift();
-          const observation = detailed?.observation;
-          onToolCall({
-            action,
-            target,
-            result: detailed?.uiText ?? toolResult,
-            color: observation?.status === "ok" ? color : "red",
-            observation,
-          });
+    let toolLoopError: unknown = null;
+    try {
+      fullText = await streamWithTools(
+        ctx.aiConfig,
+        systemPrompt,
+        promptMessages,
+        CHAT_TOOLS,
+        async (name, input) => {
+          const execution = await executeToolCallForTurn(
+            turnToolCache,
+            name,
+            input,
+            ctx
+          );
+          pendingToolResults.push(execution.result);
+          if (!execution.deduped) {
+            appendObservation(ctx.runState, execution.result.observation);
+          }
+          return execution.result.modelText;
         },
-        onTextDelta,
-      },
-      10
-    );
+        {
+          onToolCall: (name, input, toolResult) => {
+            const { action, target, color } = mapToolCall(name, input);
+            const detailed = pendingToolResults.shift();
+            const observation = detailed?.observation;
+            onToolCall({
+              action,
+              target,
+              result: detailed?.uiText ?? toolResult,
+              color: observation?.status === "ok" ? color : "red",
+              observation,
+            });
+          },
+          onTextDelta,
+        },
+        10
+      );
+    } catch (error) {
+      toolLoopError = error;
+    }
     supportingObservations = ctx.runState.observations.slice(observationStart);
     verificationObservations = resolveToolTurnVerificationObservations(
       ctx.runState.observations,
       observationStart
     );
+    if (shouldRecoverFromToolLoop(fullText, verificationObservations)) {
+      fullText = await answerWithoutTools(
+        ctx,
+        systemPrompt,
+        question,
+        verificationObservations,
+        onTextDelta
+      );
+    } else if (toolLoopError) {
+      throw toolLoopError;
+    }
   }
 
   const verification = verifyWorkspaceAnswer({
@@ -594,6 +614,11 @@ export async function executeToolCallForTurn(
     return { result: cached, deduped: true };
   }
 
+  const semanticCached = findSemanticTurnToolCacheHit(turnToolCache, name, input);
+  if (semanticCached) {
+    return { result: semanticCached, deduped: true };
+  }
+
   // Keep dedupe scoped to a single chat turn so we avoid repeated local reads
   // and searches without changing any cross-turn grounding behavior.
   const result = await executeToolCallDetailed(name, input, ctx);
@@ -606,6 +631,88 @@ export function buildTurnToolCacheKey(
   input: Record<string, unknown>
 ): string {
   return `${name}:${normalizeToolInput(input)}`;
+}
+
+function findSemanticTurnToolCacheHit(
+  turnToolCache: TurnToolCache,
+  name: string,
+  input: Record<string, unknown>
+): ToolExecutionResult | null {
+  const requestedTarget = getSemanticReuseTarget(name, input);
+  if (!requestedTarget) {
+    return null;
+  }
+
+  const candidates = [...turnToolCache.values()].reverse();
+  for (const candidate of candidates) {
+    if (!isSemanticReuseCandidate(name, candidate)) {
+      continue;
+    }
+
+    const matches = candidate.observation.artifacts.some(
+      (artifact) => scoreFileLookupMatch(requestedTarget, artifact.title) > 0
+    );
+    if (!matches) {
+      continue;
+    }
+
+    const resolvedTitle = candidate.observation.artifacts[0]?.title ?? requestedTarget;
+    return {
+      observation: {
+        tool: name,
+        status: "ok",
+        summary: `Reused ${resolvedTitle} from an earlier tool call in this turn.`,
+        artifacts: candidate.observation.artifacts,
+        content: candidate.observation.content,
+      },
+      modelText: candidate.modelText,
+      uiText: candidate.uiText,
+    };
+  }
+
+  return null;
+}
+
+function getSemanticReuseTarget(
+  name: string,
+  input: Record<string, unknown>
+): string | null {
+  switch (name) {
+    case "read_file":
+      return typeof input.filename === "string" ? input.filename.trim() : null;
+    case "download_course_file":
+      return typeof input.title === "string" ? input.title.trim() : null;
+    default:
+      return null;
+  }
+}
+
+function isSemanticReuseCandidate(
+  requestedTool: string,
+  candidate: ToolExecutionResult
+): boolean {
+  if (!isGroundedContentObservation(candidate.observation)) {
+    return false;
+  }
+
+  if (requestedTool === "read_file") {
+    return (
+      candidate.observation.tool === "read_file" ||
+      candidate.observation.tool === "download_course_file"
+    );
+  }
+
+  if (requestedTool === "download_course_file") {
+    return (
+      candidate.observation.tool === "download_course_file" ||
+      (candidate.observation.tool === "read_file" &&
+        candidate.observation.artifacts.some(
+          (artifact) => artifact.kind === "attachment"
+        ))
+    );
+  }
+
+  return false;
 }
 
 async function searchWorkspace(
@@ -754,17 +861,27 @@ async function readFile(
         modelText: "Provide a file name to read from the workspace or course cache.",
         uiText: "Provide a file name to read from the workspace or course cache.",
       };
-    case "missing_text":
+    case "missing_text": {
+      const recovered = await recoverMissingAttachmentRead(
+        artifact.artifact,
+        ctx,
+        "read_file"
+      );
+      if (recovered) {
+        return recovered;
+      }
+      const message = renderWorkspaceArtifactLookupFailure(trimmedFilename, artifact);
       return {
         observation: {
           tool: "read_file",
           status: "missing_text",
-          summary: renderWorkspaceArtifactLookupFailure(trimmedFilename, artifact),
+          summary: message,
           artifacts: artifact.artifact ? [toArtifactRef(artifact.artifact)] : [],
         },
-        modelText: renderWorkspaceArtifactLookupFailure(trimmedFilename, artifact),
-        uiText: renderWorkspaceArtifactLookupFailure(trimmedFilename, artifact),
+        modelText: message,
+        uiText: message,
       };
+    }
     case "not_found":
     default:
       return {
@@ -823,27 +940,39 @@ async function downloadCourseFile(
   title: string,
   ctx: ChatAgentContext
 ): Promise<ToolExecutionResult> {
-  if (!ctx.cache || !ctx.client) {
+  if (!ctx.cache) {
     return {
       observation: {
         tool: "download_course_file",
         status: "error",
-        summary: "Cannot download files — no course cache or Canvas client available.",
+        summary: "Cannot download files — no course cache available.",
         artifacts: [],
       },
-      modelText: "Cannot download files — no course cache or Canvas client available.",
-      uiText: "Cannot download files — no course cache or Canvas client available.",
+      modelText: "Cannot download files — no course cache available.",
+      uiText: "Cannot download files — no course cache available.",
     };
   }
-  const q = title.toLowerCase();
   let foundItem = null;
+  let bestMatchScore = 0;
   for (const mod of ctx.cache.modules) {
     for (const item of mod.items) {
-      if (item.type === "File" && item.title.toLowerCase().includes(q)) { foundItem = item; break; }
+      if (item.type !== "File") {
+        continue;
+      }
+      const matchScore = scoreFileLookupMatch(title, item.title);
+      if (matchScore > bestMatchScore) {
+        bestMatchScore = matchScore;
+        foundItem = item;
+      }
+      if (matchScore >= 100) {
+        break;
+      }
     }
-    if (foundItem) break;
+    if (bestMatchScore >= 100) {
+      break;
+    }
   }
-  if (!foundItem || !foundItem.contentId) {
+  if (!foundItem || !foundItem.contentId || bestMatchScore <= 0) {
     return {
       observation: {
         tool: "download_course_file",
@@ -860,29 +989,36 @@ async function downloadCourseFile(
     (attachment) => attachment.canvasFileId === foundItem!.contentId
   );
   if (cachedAttachment) {
-    const cachedArtifactId = buildCourseAttachmentArtifactId(
+    const reused = await reuseCachedAttachmentContent(
+      ctx.cache.coursePath,
+      ctx.loaded,
+      ctx.cache,
       cachedAttachment.localPath,
       cachedAttachment.originalFilename
     );
-    const cachedRead = await readWorkspaceKnowledgeArtifactById(
-      ctx.loaded,
-      ctx.cache,
-      cachedArtifactId,
-      MAX_DOC_TEXT
-    );
-    if (cachedRead.status === "ok") {
-      return {
-        observation: {
-          tool: "download_course_file",
-          status: "ok",
-          summary: `Reused cached text for ${cachedRead.artifact.title}.`,
-          artifacts: [toArtifactRef(cachedRead.artifact)],
-          content: cachedRead.content,
-        },
-        modelText: cachedRead.content,
-        uiText: cachedRead.content,
-      };
+    if (reused) {
+      return reused;
     }
+  }
+
+  if (!ctx.client) {
+    return {
+      observation: {
+        tool: "download_course_file",
+        status: "error",
+        summary: `Cannot fetch "${foundItem.title}" from Canvas because no client is available, and no reusable local text was found.`,
+        artifacts: cachedAttachment
+          ? [
+              createCourseAttachmentArtifactRef(
+                cachedAttachment.localPath,
+                cachedAttachment.originalFilename
+              ),
+            ]
+          : [],
+      },
+      modelText: `Cannot fetch "${foundItem.title}" from Canvas because no client is available, and no reusable local text was found.`,
+      uiText: `Cannot fetch "${foundItem.title}" from Canvas because no client is available, and no reusable local text was found.`,
+    };
   }
 
   const fileMeta = await ctx.client.getFileSafe(foundItem.contentId);
@@ -926,38 +1062,28 @@ async function downloadCourseFile(
     reason: `downloaded on demand from module item "${foundItem.title}"`,
     sourceType: "module_linked",
   });
-  try {
-    const extracted = await extractFileText(localPath, fileMeta.display_name);
-    if (extracted && !extracted.startsWith("[") && extracted.trim().length > 0) {
-      const extractedPath = getExtractedAttachmentPath(
-        ctx.cache.coursePath,
-        relativeLocalPath
-      );
-      await fs.mkdir(path.dirname(extractedPath), { recursive: true });
-      await fs.writeFile(
-        extractedPath,
-        extracted.endsWith("\n") ? extracted : extracted + "\n",
-        "utf-8"
-      );
-      const artifactRef = createCourseAttachmentArtifactRef(
-        relativeLocalPath,
-        fileMeta.display_name,
-        extracted
-      );
-      return {
-        observation: {
-          tool: "download_course_file",
-          status: "ok",
-          summary: `Downloaded and extracted ${fileMeta.display_name}.`,
-          artifacts: [artifactRef],
-          content: extracted,
-        },
-        modelText: extracted,
-        uiText: extracted,
-      };
-    }
-  } catch {
-    // Fall through to a guidance message below.
+  const extracted = await extractAndPersistAttachmentText(
+    ctx.cache.coursePath,
+    relativeLocalPath,
+    fileMeta.display_name
+  );
+  if (extracted) {
+    const artifactRef = createCourseAttachmentArtifactRef(
+      relativeLocalPath,
+      fileMeta.display_name,
+      extracted
+    );
+    return {
+      observation: {
+        tool: "download_course_file",
+        status: "ok",
+        summary: `Downloaded and extracted ${fileMeta.display_name}.`,
+        artifacts: [artifactRef],
+        content: extracted,
+      },
+      modelText: extracted,
+      uiText: extracted,
+    };
   }
   const message = `Downloaded "${fileMeta.display_name}", but extracted text is not available yet. Refresh the course cache to rebuild it.`;
   return {
@@ -1023,17 +1149,27 @@ async function readArtifactForGate(
         modelText: artifact.content,
         uiText: artifact.content,
       };
-    case "missing_text":
+    case "missing_text": {
+      const recovered = await recoverMissingAttachmentRead(
+        artifact.artifact,
+        ctx,
+        "read_file"
+      );
+      if (recovered) {
+        return recovered;
+      }
+      const message = `Matched ${artifact.artifact?.title ?? artifactId}, but readable text is missing.`;
       return {
         observation: {
           tool: "read_file",
           status: "missing_text",
-          summary: `Matched ${artifact.artifact?.title ?? artifactId}, but readable text is missing.`,
+          summary: message,
           artifacts: artifact.artifact ? [toArtifactRef(artifact.artifact)] : [],
         },
-        modelText: `Matched ${artifact.artifact?.title ?? artifactId}, but readable text is missing.`,
-        uiText: `Matched ${artifact.artifact?.title ?? artifactId}, but readable text is missing.`,
+        modelText: message,
+        uiText: message,
       };
+    }
     case "empty_query":
     case "not_found":
     default:
@@ -1156,20 +1292,56 @@ export function resolveToolTurnVerificationObservations(
   observationStart: number
 ): Observation[] {
   const currentTurn = observations.slice(observationStart);
-  if (currentTurn.length > 0) {
+  if (currentTurn.length === 0) {
+    return selectSupplementalEvidenceObservations(observations);
+  }
+
+  if (currentTurn.some((observation) => isGroundedContentObservation(observation))) {
     return currentTurn;
   }
-  return selectSupplementalEvidenceObservations(observations);
+
+  const priorSupport = selectSupplementalEvidenceObservations(
+    observations.slice(0, observationStart)
+  );
+  if (priorSupport.length === 0) {
+    return currentTurn;
+  }
+
+  return [...priorSupport, ...currentTurn];
 }
 
-function findObservationsForArtifacts(
+export function shouldRecoverFromToolLoop(
+  answer: string,
+  observations: Observation[]
+): boolean {
+  if (answer.trim().length > 0) {
+    return false;
+  }
+
+  return observations.some(
+    (observation) =>
+      isGroundedContentObservation(observation) ||
+      observation.artifacts.length > 0 ||
+      (typeof observation.content === "string" &&
+        observation.content.trim().length > 0)
+  );
+}
+
+export function selectArtifactSupportObservations(
   observations: Observation[],
   artifactIds: string[]
 ): Observation[] {
-  const ids = new Set(artifactIds);
-  return observations.filter((observation) =>
-    observation.artifacts.some((artifact) => ids.has(artifact.artifactId))
-  );
+  const uniqueArtifactIds = [...new Set(artifactIds)];
+  const selected: Observation[] = [];
+
+  for (const artifactId of uniqueArtifactIds) {
+    const best = findBestObservationForArtifact(observations, artifactId);
+    if (best) {
+      selected.push(best);
+    }
+  }
+
+  return selected;
 }
 
 function finalizeAnswerText(answer: string, missing: string[]): string {
@@ -1258,6 +1430,124 @@ function buildCourseAttachmentArtifactId(
   return `course:attachment:${localPath}:${originalFilename}`;
 }
 
+async function recoverMissingAttachmentRead(
+  artifact: ArtifactRecord | undefined,
+  ctx: ChatAgentContext,
+  tool: "read_file" | "download_course_file"
+): Promise<ToolExecutionResult | null> {
+  if (!artifact || artifact.kind !== "attachment" || !ctx.cache) {
+    return null;
+  }
+
+  const localPath = artifact.metadata.localPath;
+  if (typeof localPath !== "string" || localPath.trim().length === 0) {
+    return null;
+  }
+
+  const extracted = await extractAndPersistAttachmentText(
+    ctx.cache.coursePath,
+    localPath,
+    artifact.title
+  );
+  if (!extracted) {
+    return null;
+  }
+
+  return {
+    observation: {
+      tool,
+      status: "ok",
+      summary: `Recovered text from local attachment ${artifact.title}.`,
+      artifacts: [
+        createCourseAttachmentArtifactRef(localPath, artifact.title, extracted),
+      ],
+      content: extracted,
+    },
+    modelText: extracted,
+    uiText: extracted,
+  };
+}
+
+async function reuseCachedAttachmentContent(
+  coursePath: string,
+  loaded: LoadedWorkspace,
+  cache: CourseCache,
+  localPath: string,
+  originalFilename: string
+): Promise<ToolExecutionResult | null> {
+  const cachedArtifactId = buildCourseAttachmentArtifactId(
+    localPath,
+    originalFilename
+  );
+  const cachedRead = await readWorkspaceKnowledgeArtifactById(
+    loaded,
+    cache,
+    cachedArtifactId,
+    MAX_DOC_TEXT
+  );
+  if (cachedRead.status === "ok") {
+    return {
+      observation: {
+        tool: "download_course_file",
+        status: "ok",
+        summary: `Reused cached text for ${cachedRead.artifact.title}.`,
+        artifacts: [toArtifactRef(cachedRead.artifact)],
+        content: cachedRead.content,
+      },
+      modelText: cachedRead.content,
+      uiText: cachedRead.content,
+    };
+  }
+
+  const extracted = await extractAndPersistAttachmentText(
+    coursePath,
+    localPath,
+    originalFilename
+  );
+  if (!extracted) {
+    return null;
+  }
+
+  return {
+    observation: {
+      tool: "download_course_file",
+      status: "ok",
+      summary: `Recovered text from previously downloaded ${originalFilename}.`,
+      artifacts: [
+        createCourseAttachmentArtifactRef(localPath, originalFilename, extracted),
+      ],
+      content: extracted,
+    },
+    modelText: extracted,
+    uiText: extracted,
+  };
+}
+
+async function extractAndPersistAttachmentText(
+  coursePath: string,
+  localPath: string,
+  originalFilename: string
+): Promise<string | null> {
+  const absolutePath = path.join(coursePath, localPath);
+  try {
+    const extracted = await extractFileText(absolutePath, originalFilename);
+    if (!isReadableExtractedText(extracted)) {
+      return null;
+    }
+    const extractedPath = getExtractedAttachmentPath(coursePath, localPath);
+    await fs.mkdir(path.dirname(extractedPath), { recursive: true });
+    await fs.writeFile(
+      extractedPath,
+      extracted.endsWith("\n") ? extracted : extracted + "\n",
+      "utf-8"
+    );
+    clearArtifactIndexCache();
+    return extracted;
+  } catch {
+    return null;
+  }
+}
+
 function renderWorkspaceArtifactLookupFailure(
   filename: string,
   result: Awaited<ReturnType<typeof readWorkspaceKnowledgeArtifact>>
@@ -1299,6 +1589,10 @@ function isGroundedContentObservation(observation: Observation): boolean {
   );
 }
 
+function isReadableExtractedText(value: string | null | undefined): value is string {
+  return Boolean(value && !value.startsWith("[") && value.trim().length > 0);
+}
+
 function findReusableReadObservation(
   filename: string,
   observations: Observation[]
@@ -1330,6 +1624,32 @@ function findReusableReadObservation(
   }
 
   return null;
+}
+
+function findBestObservationForArtifact(
+  observations: Observation[],
+  artifactId: string
+): Observation | null {
+  let fallback: Observation | null = null;
+
+  for (let index = observations.length - 1; index >= 0; index -= 1) {
+    const observation = observations[index]!;
+    if (
+      !observation.artifacts.some((artifact) => artifact.artifactId === artifactId)
+    ) {
+      continue;
+    }
+
+    if (!fallback) {
+      fallback = observation;
+    }
+
+    if (isGroundedContentObservation(observation)) {
+      return observation;
+    }
+  }
+
+  return fallback;
 }
 
 function buildFileLookupAliases(value: string): Set<string> {
@@ -1367,4 +1687,39 @@ function addTrimmedExtensionAlias(target: Set<string>, value: string): void {
 
 function normalizeLookupAlias(value: string): string {
   return value.trim().replace(/\\/g, "/").replace(/\s+/g, " ").toLowerCase();
+}
+
+function scoreFileLookupMatch(query: string, candidateTitle: string): number {
+  const queryAliases = buildFileLookupAliases(query);
+  const candidateAliases = buildFileLookupAliases(candidateTitle);
+
+  let score = 0;
+  for (const alias of queryAliases) {
+    if (candidateAliases.has(alias)) {
+      score = Math.max(score, alias.includes("/") ? 100 : 80 + alias.length);
+    }
+  }
+
+  const normalizedQuery = normalizeFuzzyLookupAlias(query);
+  const normalizedCandidate = normalizeFuzzyLookupAlias(candidateTitle);
+  if (
+    normalizedQuery &&
+    normalizedCandidate &&
+    (normalizedCandidate.includes(normalizedQuery) ||
+      normalizedQuery.includes(normalizedCandidate))
+  ) {
+    score = Math.max(score, 40 + Math.min(normalizedQuery.length, normalizedCandidate.length));
+  }
+
+  return score;
+}
+
+function normalizeFuzzyLookupAlias(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\\/g, "/")
+    .replace(/[/._-]+/g, " ")
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .replace(/\s+/g, " ");
 }
