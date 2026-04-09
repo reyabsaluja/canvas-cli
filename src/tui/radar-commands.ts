@@ -47,7 +47,8 @@ export function formatRadarItems(
     const tag = item.kind === "announcement" ? "[A]" : "[D]";
     const author = item.authorName ? ` — ${item.authorName}` : "";
     const course = ` — ${item.courseName}`;
-    const age = item.postedAt ? ` — ${formatAge(item.postedAt)}` : "";
+    const ageDate = item.lastReplyAt ?? item.postedAt;
+    const age = ageDate ? ` — ${formatAge(ageDate)}` : "";
     const unread =
       item.unreadCount > 0 ? ` — ${item.unreadCount} unread` : "";
     lines.push(`${tag} ${item.title}${author}${course}${age}${unread}`);
@@ -138,6 +139,19 @@ export async function resolveAndRenderThread(
       found: false,
       content: `No discussion thread matching "${query}" found.`,
     };
+  }
+
+  if (match.status === "ambiguous") {
+    const lines = [
+      `Multiple threads matched "${query}". Be more specific or use /thread <id>:`,
+      ...match.matches.slice(0, 8).map(
+        (item) => `• [${item.topicId}] ${item.title} — ${item.courseName}`
+      ),
+    ];
+    if (match.matches.length > 8) {
+      lines.push(`... and ${match.matches.length - 8} more`);
+    }
+    return { found: false, content: lines.join("\n") };
   }
 
   const thread = await services.radar.getThread(
