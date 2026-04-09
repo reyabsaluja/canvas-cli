@@ -200,6 +200,72 @@ test("buildToolPromptMessages keeps relevant search breadcrumbs alongside ground
   assert.doesNotMatch(latestMessage, /docs\/resistor-table\.txt/);
 });
 
+test("buildToolPromptMessages prefers viable breadcrumbs over already-failed artifacts", () => {
+  const promptMessages = buildToolPromptMessages(
+    [],
+    "Compare the branch hazard walkthrough to the reference.",
+    {
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read docs/reference.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-1",
+              title: "docs/reference.txt",
+              kind: "extracted",
+              excerpt: "The waveform must show stall cycles around the branch hazard.",
+            },
+          ],
+          content: "The waveform must show stall cycles around the branch hazard.",
+        },
+        {
+          tool: "search_workspace",
+          status: "ok",
+          summary: 'Found 2 relevant workspace matches for "branch hazard walkthrough".',
+          artifacts: [
+            {
+              artifactId: "artifact-2",
+              title: "docs/walkthrough.txt",
+              kind: "extracted",
+              excerpt: "The walkthrough explains each branch hazard stall step-by-step.",
+            },
+            {
+              artifactId: "artifact-3",
+              title: "docs/notes.txt",
+              kind: "extracted",
+              excerpt: "The notes summarize the branch hazard walkthrough.",
+            },
+          ],
+        },
+        {
+          tool: "read_file",
+          status: "missing_text",
+          summary: "Matched docs/walkthrough.txt, but readable text is missing.",
+          artifacts: [
+            {
+              artifactId: "artifact-2",
+              title: "docs/walkthrough.txt",
+              kind: "extracted",
+            },
+          ],
+        },
+      ],
+      readArtifactIds: ["artifact-1"],
+      stepCount: 3,
+    }
+  );
+
+  const latestMessage = promptMessages.at(-1)?.content ?? "";
+  assert.match(latestMessage, /docs\/reference\.txt/);
+  assert.match(latestMessage, /docs\/notes\.txt/);
+  assert.match(
+    latestMessage,
+    /search_workspace \[ok\][^\n]*Sources: docs\/notes\.txt/i
+  );
+});
+
 test("buildToolPromptMessages prefers question-relevant failed searches over newer unrelated failures", () => {
   const promptMessages = buildToolPromptMessages(
     [],
