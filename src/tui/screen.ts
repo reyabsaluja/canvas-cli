@@ -104,13 +104,13 @@ class ScreenBuffer {
       rendered = rendered.slice(start, end);
     }
 
-    // Fill remaining rows with blank lines to clear old content
-    while (rendered.length < rows) {
+    // Fill remaining content rows with blank lines (reserved rows are managed separately)
+    while (rendered.length < maxContentLines) {
       rendered.push("");
     }
 
     const writes: string[] = [];
-    for (let row = 0; row < rows; row++) {
+    for (let row = 0; row < maxContentLines; row++) {
       if (lastFlushedRows?.[row] === rendered[row]) {
         continue;
       }
@@ -125,8 +125,8 @@ class ScreenBuffer {
       process.stdout.write(writes.join(""));
     }
 
-    lastFlushedRows = rendered.map((line, index) =>
-      index >= rows - reserve ? null : line
+    lastFlushedRows = Array.from({ length: rows }, (_, i) =>
+      i < rendered.length ? rendered[i]! : null
     );
 
     this.lines = [];
