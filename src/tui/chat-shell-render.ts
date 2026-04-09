@@ -20,6 +20,8 @@ const toolActionColor = chalk.hex("#e0af68").bold;
 const toolTargetGreen = chalk.hex("#9ece6a");
 const toolTargetRed = chalk.hex("#f7768e");
 const statusBarGrey = chalk.hex("#9ca3af");
+let lastStickyBottomRows: string[] | null = null;
+let lastStickyBottomScreenSize = "";
 
 export const STICKY_BOTTOM_ROWS = 4;
 const CHAT_GAP_ROWS = 2;
@@ -46,6 +48,11 @@ export interface RenderChatFrameOptions {
 }
 
 const messageRenderCache = new WeakMap<ChatMessage, Map<string, string[]>>();
+
+export function resetChatShellRenderCache(): void {
+  lastStickyBottomRows = null;
+  lastStickyBottomScreenSize = "";
+}
 
 export function buildBannerLines(options: {
   runtime: ScopeRuntime;
@@ -131,24 +138,27 @@ export function renderChatFrame(
   );
 
   buf.flush(MAIN_VIEW_BOTTOM_RESERVE, chatScrollOffset);
-  process.stdout.write(
-    renderStickyBottom(
+  writeStickyBottom(
+    buildStickyBottomRows(
       options.placeholder,
       options.inputBuffer,
       options.runtime.scopeLabel,
       options.runtime.statusLabel,
       options.modelLabel
-    ) +
-      renderAutocompleteOverlay(
-        options.slashMatches,
-        options.openMatches,
-        options.pinMatches,
-        options.slashSelected,
-        options.openSelected,
-        options.pinSelected,
-        options.inputBuffer
-      )
+    )
   );
+  const overlay = renderAutocompleteOverlay(
+    options.slashMatches,
+    options.openMatches,
+    options.pinMatches,
+    options.slashSelected,
+    options.openSelected,
+    options.pinSelected,
+    options.inputBuffer
+  );
+  if (overlay) {
+    process.stdout.write(overlay);
+  }
 
   return { chatScrollOffset, maxScroll };
 }
@@ -166,24 +176,27 @@ export function renderInputFooter(options: {
   openSelected: number;
   pinSelected: number;
 }): void {
-  process.stdout.write(
-    renderStickyBottom(
+  writeStickyBottom(
+    buildStickyBottomRows(
       options.placeholder,
       options.inputBuffer,
       options.scopeLabel,
       options.statusLabel,
       options.modelLabel
-    ) +
-      renderAutocompleteOverlay(
-        options.slashMatches,
-        options.openMatches,
-        options.pinMatches,
-        options.slashSelected,
-        options.openSelected,
-        options.pinSelected,
-        options.inputBuffer
-      )
+    )
   );
+  const overlay = renderAutocompleteOverlay(
+    options.slashMatches,
+    options.openMatches,
+    options.pinMatches,
+    options.slashSelected,
+    options.openSelected,
+    options.pinSelected,
+    options.inputBuffer
+  );
+  if (overlay) {
+    process.stdout.write(overlay);
+  }
 }
 
 function renderAutocompleteOverlay(
@@ -288,14 +301,14 @@ function renderAutocompleteOverlay(
   return writes.join("");
 }
 
-function renderStickyBottom(
+function buildStickyBottomRows(
   placeholder: string,
   inputBuffer: string,
   leftStatus: string,
   runtimeStatus: string | undefined,
   modelLabel: string
-): string {
-  const { cols, rows } = getTermSize();
+): string[] {
+  const { cols } = getTermSize();
   const footerIndent = "  ";
   const contentWidth = Math.min(cols - 4, 100);
   const footerWidth = Math.max(
@@ -351,20 +364,43 @@ function renderStickyBottom(
     leftStyled +
     " ".repeat(gap) +
     statusBarGrey(right);
-  const startRow = rows - 3;
 
-  return (
-    "\x1B[0m" +
-    `\x1B[${startRow};1H\x1B[0m\x1B[2K` +
-    fitToRow(`${footerIndent}${inputBg(emptyLine)}`) +
-    `\x1B[${startRow + 1};1H\x1B[0m\x1B[2K` +
-    fitToRow(`${footerIndent}${inputBg(` ${displayText} `)}`) +
-    `\x1B[${startRow + 2};1H\x1B[0m\x1B[2K` +
-    fitToRow(`${footerIndent}${inputBg(emptyLine)}`) +
-    `\x1B[${startRow + 3};1H\x1B[0m\x1B[2K` +
-    fitToRow(statusLine) +
-    "\x1B[0m"
-  );
+  return [
+    fitToRow(`${footerIndent}${inputBg(emptyLine)}`),
+    fitToRow(`${footerIndent}${inputBg(` ${displayText} `)}`),
+    fitToRow(`${footerIndent}${inputBg(emptyLine)}`),
+    fitToRow(statusLine),
+  ];
+}
+
+function writeStickyBottom(rows: string[]): void {
+  const { rows: totalRows, cols } = getTermSize();
+  const screenSizeKey = `${totalRows}:${cols}`;
+  if (
+    lastStickyBottomScreenSize !== screenSizeKey ||
+    !lastStickyBottomRows ||
+    lastStickyBottomRows.length !== rows.length
+  ) {
+    lastStickyBottomRows = null;
+    lastStickyBottomScreenSize = screenSizeKey;
+  }
+
+  const startRow = totalRows - STICKY_BOTTOM_ROWS + 1;
+  const writes: string[] = [];
+  for (let index = 0; index < rows.length; index++) {
+    if (lastStickyBottomRows?.[index] === rows[index]) {
+      continue;
+    }
+    if (writes.length === 0) {
+      writes.push("\x1B[0m");
+    }
+    writes.push(`\x1B[${startRow + index};1H\x1B[0m\x1B[2K${rows[index]!}`);
+  }
+  if (writes.length > 0) {
+    writes.push("\x1B[0m");
+    process.stdout.write(writes.join(""));
+  }
+  lastStickyBottomRows = rows.slice();
 }
 
 export function getRenderedMessageLines(
