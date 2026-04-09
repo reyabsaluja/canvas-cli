@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import type { LoadedWorkspace } from "../src/ask/types.js";
 import type { CourseCache } from "../src/enrich/cache-loader.js";
-import type { Observation } from "../src/agent/observation.js";
+import type { Observation, ToolExecutionResult } from "../src/agent/observation.js";
 import { clearArtifactIndexCache } from "../src/knowledge/artifact-index.js";
 import { decideWorkspaceRetrieval } from "../src/agent/retrieval-gate.js";
 import { appendObservation, createEmptyRunState } from "../src/agent/run-state.js";
@@ -14,6 +14,7 @@ import {
   buildEvidenceBackedQuestion,
   executeToolCallForTurn,
   resolveToolTurnVerificationObservations,
+  seedTurnToolCacheEntry,
   selectArtifactSupportObservations,
   shouldContinueToolLoopAfterGateRead,
   shouldRecoverFromToolLoop,
@@ -1417,6 +1418,55 @@ test("workspace chat dedupes repeated missing read lookups within a single turn"
     assert.equal(secondAttempt.deduped, true);
     assert.equal(secondAttempt.result.observation.status, "missing_text");
     assert.equal(secondAttempt.result.modelText, firstAttempt.result.modelText);
+  });
+});
+
+test("seeded failed gate reads dedupe alias retries in the next tool loop", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      { cache, client: null, config: null, courseId: 17 }
+    );
+    const turnToolCache = new Map();
+    const failedGateRead: ToolExecutionResult = {
+      observation: {
+        tool: "read_file",
+        status: "missing_text",
+        summary: "Matched lab4-brief.txt, but readable text is missing.",
+        artifacts: [
+          {
+            artifactId:
+              "course:attachment:attachments/modules/lab4-brief.txt:lab4-brief.txt",
+            title: "lab4-brief.txt",
+            kind: "attachment",
+          },
+        ],
+      },
+      modelText: "Matched lab4-brief.txt, but readable text is missing.",
+      uiText: "Matched lab4-brief.txt, but readable text is missing.",
+    };
+
+    seedTurnToolCacheEntry(
+      turnToolCache,
+      "read_file",
+      { filename: "lab4-brief.txt" },
+      failedGateRead
+    );
+
+    const retried = await executeToolCallForTurn(
+      turnToolCache,
+      "read_file",
+      { filename: "lab4 brief" },
+      ctx
+    );
+
+    assert.equal(retried.deduped, true);
+    assert.equal(retried.result.observation.status, "missing_text");
+    assert.equal(retried.result.modelText, failedGateRead.modelText);
   });
 });
 
