@@ -538,7 +538,7 @@ export async function runChatShell<TExit>(
           });
           markTranscriptDirty();
         }
-        await persistence.flush();
+        persistence.schedule(0);
         pendingPins = [];
       } catch (error) {
         stopSpinner();
