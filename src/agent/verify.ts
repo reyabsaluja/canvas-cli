@@ -1,6 +1,7 @@
 import type { AnswerSource } from "../ask/types.js";
 import type { LoadedWorkspace } from "../ask/types.js";
 import type { Observation } from "./observation.js";
+import { isGroundedContentObservation } from "./observation-relevance.js";
 
 export interface VerificationResult {
   ok: boolean;
@@ -114,15 +115,6 @@ function selectCitationObservations(
 
 function canObservationProduceCitation(observation: Observation): boolean {
   return observation.artifacts.length > 0;
-}
-
-function isGroundedContentObservation(observation: Observation): boolean {
-  return (
-    observation.status === "ok" &&
-    observation.artifacts.length > 0 &&
-    typeof observation.content === "string" &&
-    observation.content.trim().length > 0
-  );
 }
 
 function buildExcerpt(value: string | undefined): string | null {

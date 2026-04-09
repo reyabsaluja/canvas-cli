@@ -18,6 +18,10 @@ import type {
   ArtifactRef,
 } from "../agent/observation.js";
 import {
+  isGroundedContentObservation,
+  scoreObservationRelevance,
+} from "../agent/observation-relevance.js";
+import {
   appendObservation,
   type RunState,
 } from "../agent/run-state.js";
@@ -514,7 +518,7 @@ function buildToolPromptQuestion(
   question: string,
   runState?: RunState
 ): string {
-  const memory = buildToolRuntimeMemory(runState?.observations ?? []);
+  const memory = buildToolRuntimeMemory(question, runState?.observations ?? []);
   if (!memory) {
     return question;
   }
@@ -522,13 +526,14 @@ function buildToolPromptQuestion(
 }
 
 function buildToolRuntimeMemory(
+  question: string,
   observations: Observation[]
 ): string {
   if (observations.length === 0) {
     return "";
   }
 
-  const selected = selectToolMemoryObservations(observations);
+  const selected = selectToolMemoryObservations(question, observations);
   if (selected.length === 0) {
     return "";
   }
@@ -569,14 +574,15 @@ function buildToolRuntimeMemory(
 }
 
 function selectToolMemoryObservations(
+  question: string,
   observations: Observation[]
 ): Observation[] {
-  const selected = selectSupplementalEvidenceObservations(observations);
+  const selected = selectSupplementalEvidenceObservations(observations, question);
   if (selected.length === 0) {
     return [];
   }
 
-  const recentFailures = selectRecentFailedToolObservations(observations);
+  const recentFailures = selectRecentFailedToolObservations(question, observations);
   if (recentFailures.length === 0) {
     return selected;
   }
@@ -591,9 +597,15 @@ function selectToolMemoryObservations(
 }
 
 function selectRecentFailedToolObservations(
+  question: string,
   observations: Observation[]
 ): Observation[] {
-  return observations.filter((observation) => observation.status !== "ok").slice(-2);
+  const failures = observations.filter((observation) => observation.status !== "ok");
+  const relevantFailures = selectRelevantObservations(failures, question, 2);
+  if (relevantFailures.length > 0) {
+    return relevantFailures;
+  }
+  return failures.slice(-2);
 }
 
 // --- Tool execution ---
@@ -1257,7 +1269,10 @@ export function buildEvidenceBackedQuestion(
     return question;
   }
 
-  const supplementalObservations = selectSupplementalEvidenceObservations(observations);
+  const supplementalObservations = selectSupplementalEvidenceObservations(
+    observations,
+    question
+  );
   const sections: string[] = [question, "", "Supplemental evidence already gathered in this chat:"];
   for (const observation of supplementalObservations) {
     sections.push(`- Tool: ${observation.tool}`);
@@ -1274,18 +1289,62 @@ export function buildEvidenceBackedQuestion(
 }
 
 function selectSupplementalEvidenceObservations(
-  observations: Observation[]
+  observations: Observation[],
+  question?: string
 ): Observation[] {
   const grounded = observations.filter((observation) =>
     isGroundedContentObservation(observation)
   );
   const candidates = grounded.length > 0 ? grounded : observations;
 
+  if (candidates.length === 0) {
+    return [];
+  }
+
+  const relevant = selectRelevantObservations(candidates, question, 3);
+  if (relevant.length > 0) {
+    return relevant;
+  }
+
   if (candidates.length <= 3) {
     return candidates;
   }
 
   return candidates.slice(-3);
+}
+
+function selectRelevantObservations(
+  observations: Observation[],
+  question: string | undefined,
+  limit: number
+): Observation[] {
+  const trimmedQuestion = question?.trim();
+  if (!trimmedQuestion) {
+    return [];
+  }
+
+  const ranked = observations
+    .map((observation, index) => ({
+      observation,
+      index,
+      score: scoreObservationRelevance(trimmedQuestion, observation),
+    }))
+    .filter((entry) => entry.score > 0);
+
+  if (ranked.length === 0) {
+    return [];
+  }
+
+  return ranked
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+      return right.index - left.index;
+    })
+    .slice(0, limit)
+    .sort((left, right) => left.index - right.index)
+    .map((entry) => entry.observation);
 }
 
 export function resolveToolTurnVerificationObservations(
@@ -1579,15 +1638,6 @@ function buildArtifactExcerpt(value?: string | null): string | null {
     return cleaned;
   }
   return `${cleaned.slice(0, 177).trimEnd()}...`;
-}
-
-function isGroundedContentObservation(observation: Observation): boolean {
-  return (
-    observation.status === "ok" &&
-    observation.artifacts.length > 0 &&
-    typeof observation.content === "string" &&
-    observation.content.trim().length > 0
-  );
 }
 
 function isReadableExtractedText(value: string | null | undefined): value is string {
