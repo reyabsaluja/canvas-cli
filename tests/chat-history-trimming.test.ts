@@ -25,3 +25,46 @@ test("buildToolPromptMessages trims the active tool prompt before the model call
     "expected oldest turns to be trimmed first"
   );
 });
+
+test("buildToolPromptMessages carries forward compact tool memory for the next turn", () => {
+  const promptMessages = buildToolPromptMessages(
+    [
+      { role: "user", content: "What does the branch hazard section require?" },
+      { role: "assistant", content: "It wants the waveform details." },
+    ],
+    "Explain it again without rereading the file.",
+    {
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read docs/reference.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-1",
+              title: "docs/reference.txt",
+              kind: "extracted",
+              excerpt: "The waveform must show stall cycles around the branch hazard.",
+            },
+          ],
+          content: "The waveform must show stall cycles around the branch hazard.",
+        },
+        {
+          tool: "read_file",
+          status: "not_found",
+          summary: 'File "missing.pdf" not found. Use list_files to see available files.',
+          artifacts: [],
+        },
+      ],
+      readArtifactIds: ["artifact-1"],
+      stepCount: 2,
+    }
+  );
+
+  const latestMessage = promptMessages.at(-1)?.content ?? "";
+  assert.match(latestMessage, /Previously gathered tool memory/);
+  assert.match(latestMessage, /docs\/reference\.txt/);
+  assert.match(latestMessage, /stall cycles around the branch hazard/i);
+  assert.match(latestMessage, /missing\.pdf/);
+  assert.match(latestMessage, /Only call a tool if you still need new evidence/i);
+});

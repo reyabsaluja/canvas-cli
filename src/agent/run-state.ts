@@ -22,7 +22,7 @@ export function appendObservation(
   runState.observations.push(observation);
   runState.stepCount += 1;
 
-  if (observation.tool !== "read_file" || observation.status !== "ok") {
+  if (!shouldRememberReadArtifact(observation)) {
     return;
   }
 
@@ -51,4 +51,13 @@ export function hydrateRunState(
     appendObservation(runState, message.observation);
   }
   return runState;
+}
+
+function shouldRememberReadArtifact(observation: Observation): boolean {
+  return (
+    observation.status === "ok" &&
+    observation.artifacts.length > 0 &&
+    typeof observation.content === "string" &&
+    observation.content.trim().length > 0
+  );
 }
