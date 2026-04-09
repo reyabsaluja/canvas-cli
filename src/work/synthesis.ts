@@ -114,6 +114,7 @@ export function applyInvestigationVerification(
   verification: WorkVerificationResult
 ): AssignmentWorkup {
   const uncertainties = [...workup.uncertainties];
+  let dueDate = workup.dueDate;
 
   if (verification.missing.includes("primary_instruction")) {
     pushUniqueUncertainty(
@@ -127,11 +128,31 @@ export function applyInvestigationVerification(
       uncertainties,
       "The investigation did not confirm a due-date source, so schedule details may be incomplete."
     );
+    if (dueDate) {
+      dueDate = null;
+      pushUniqueUncertainty(
+        uncertainties,
+        "The synthesized due date was dropped because the investigation did not verify any due-date evidence."
+      );
+    }
   }
+
+  if (workup.deliverables.length > 0 && workup.sourceTrace.length === 0) {
+    pushUniqueUncertainty(
+      uncertainties,
+      "The workup identified deliverables but did not include any source trace, so specific requirements may still need verification."
+    );
+  }
+
+  const confidenceCap =
+    workup.sourceTrace.length > 0
+      ? verification.confidence
+      : capConfidence(verification.confidence, "medium");
 
   return {
     ...workup,
-    confidence: capConfidence(workup.confidence, verification.confidence),
+    dueDate,
+    confidence: capConfidence(workup.confidence, confidenceCap),
     uncertainties,
   };
 }

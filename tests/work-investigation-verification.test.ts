@@ -128,6 +128,67 @@ test("applyInvestigationVerification lowers confidence and adds explicit uncerta
   );
 });
 
+test("applyInvestigationVerification adds uncertainty and caps confidence when deliverables lack source trace", () => {
+  const verified = applyInvestigationVerification(createWorkup(), {
+    ok: true,
+    missing: [],
+    confidence: "high",
+  });
+
+  assert.equal(verified.confidence, "medium");
+  assert.match(
+    verified.uncertainties.join("\n"),
+    /deliverables but did not include any source trace/i
+  );
+});
+
+test("applyInvestigationVerification clears synthesized due dates without verified due-date evidence", () => {
+  const verified = applyInvestigationVerification(
+    {
+      ...createWorkup(),
+      dueDate: "2026-04-10",
+      sourceTrace: [{ conclusion: "Due date found", source: "syllabus" }],
+      confidence: "medium",
+    },
+    {
+      ok: false,
+      missing: ["due_date_source"],
+      confidence: "medium",
+    }
+  );
+
+  assert.equal(verified.dueDate, null);
+  assert.match(
+    verified.uncertainties.join("\n"),
+    /synthesized due date was dropped/i
+  );
+});
+
+test("applyInvestigationVerification preserves traced deliverables and verified due dates", () => {
+  const verified = applyInvestigationVerification(
+    {
+      ...createWorkup(),
+      dueDate: "2026-04-10",
+      sourceTrace: [{ conclusion: "Read lab handout", source: "lab4.pdf" }],
+      confidence: "high",
+    },
+    {
+      ok: true,
+      missing: [],
+      confidence: "high",
+    }
+  );
+
+  assert.equal(verified.dueDate, "2026-04-10");
+  assert.equal(verified.confidence, "high");
+  assert.equal(
+    verified.uncertainties.some((entry) =>
+      /source trace|due date was dropped/i.test(entry)
+    ),
+    false
+  );
+});
+
 test("reading a real document is not enough to complete without syllabus evidence", async () => {
   await withTempDir(async (tempDir) => {
     const coursePath = path.join(tempDir, "course");
