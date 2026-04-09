@@ -4,6 +4,35 @@ import type { RunState } from "./run-state.js";
 import { hasReadArtifact } from "./run-state.js";
 import { searchWorkspaceKnowledge } from "../tui/workspace-knowledge.js";
 
+const MAX_MEMORY_REUSE_ARTIFACTS = 3;
+const MIN_MEMORY_REUSE_SCORE = 12;
+const MEMORY_STOP_WORDS = new Set([
+  "about",
+  "after",
+  "again",
+  "also",
+  "and",
+  "are",
+  "does",
+  "explain",
+  "from",
+  "give",
+  "into",
+  "need",
+  "read",
+  "that",
+  "the",
+  "their",
+  "there",
+  "these",
+  "this",
+  "what",
+  "when",
+  "where",
+  "which",
+  "with",
+]);
+
 export type RetrievalDecision =
   | { action: "answer_from_workup"; reason: string }
   | { action: "answer_from_memory"; reason: string; sourceArtifactIds: string[] }
@@ -43,6 +72,17 @@ export async function decideWorkspaceRetrieval(
     shouldPromoteTopMatch(question, match.score)
   );
   if (promotedMatches.length === 0) {
+    const reusableMemoryArtifactIds = selectReusableMemoryArtifactIds(
+      question,
+      input.runState
+    );
+    if (reusableMemoryArtifactIds.length > 0) {
+      return {
+        action: "answer_from_memory",
+        reason: "already_read_relevant_artifact",
+        sourceArtifactIds: reusableMemoryArtifactIds,
+      };
+    }
     return { action: "let_model_decide", reason: "weak_workspace_match" };
   }
 
@@ -227,5 +267,141 @@ function selectReusableReadArtifactIds<
       ]
     : reusableMatches;
 
-  return ordered.slice(0, 3).map((match) => match.artifact.id);
+  return ordered.slice(0, MAX_MEMORY_REUSE_ARTIFACTS).map((match) => match.artifact.id);
+}
+
+function selectReusableMemoryArtifactIds(
+  question: string,
+  runState: RunState
+): string[] {
+  const normalizedQuestion = normalizeMemoryText(question);
+  if (!normalizedQuestion) {
+    return [];
+  }
+
+  const questionTokens = tokenizeMemoryText(normalizedQuestion);
+  const scoredArtifacts = new Map<string, { score: number; observationIndex: number }>();
+
+  for (let index = runState.observations.length - 1; index >= 0; index -= 1) {
+    const observation = runState.observations[index]!;
+    if (!isGroundedContentObservation(observation)) {
+      continue;
+    }
+
+    const score = scoreObservationForMemoryReuse(
+      normalizedQuestion,
+      questionTokens,
+      observation
+    );
+    if (score < MIN_MEMORY_REUSE_SCORE) {
+      continue;
+    }
+
+    for (const artifact of observation.artifacts) {
+      const previous = scoredArtifacts.get(artifact.artifactId);
+      if (
+        !previous ||
+        score > previous.score ||
+        (score === previous.score && index > previous.observationIndex)
+      ) {
+        scoredArtifacts.set(artifact.artifactId, {
+          score,
+          observationIndex: index,
+        });
+      }
+    }
+  }
+
+  return [...scoredArtifacts.entries()]
+    .sort((left, right) => {
+      if (right[1].score !== left[1].score) {
+        return right[1].score - left[1].score;
+      }
+      return right[1].observationIndex - left[1].observationIndex;
+    })
+    .slice(0, MAX_MEMORY_REUSE_ARTIFACTS)
+    .map(([artifactId]) => artifactId);
+}
+
+function scoreObservationForMemoryReuse(
+  normalizedQuestion: string,
+  questionTokens: string[],
+  observation: RunState["observations"][number]
+): number {
+  const titleText = normalizeMemoryText(
+    observation.artifacts.map((artifact) => artifact.title).join(" ")
+  );
+  const excerptText = normalizeMemoryText(
+    observation.artifacts
+      .map((artifact) => artifact.excerpt ?? "")
+      .join(" ")
+  );
+  const contentText = normalizeMemoryText(observation.content ?? "");
+  const haystack = `${titleText} ${excerptText} ${contentText}`.trim();
+  if (!haystack) {
+    return 0;
+  }
+
+  const fullPhraseMatch =
+    haystack.includes(normalizedQuestion) || titleText.includes(normalizedQuestion);
+  let score = fullPhraseMatch ? 14 : 0;
+  let matchedTokens = 0;
+
+  for (const token of questionTokens) {
+    if (titleText.includes(token)) {
+      score += 8;
+      matchedTokens += 1;
+      continue;
+    }
+    if (excerptText.includes(token)) {
+      score += 4;
+      matchedTokens += 1;
+      continue;
+    }
+    if (contentText.includes(token)) {
+      score += 2;
+      matchedTokens += 1;
+    }
+  }
+
+  if (matchedTokens === questionTokens.length && matchedTokens > 0) {
+    score += 6;
+  }
+
+  if (!fullPhraseMatch && matchedTokens < 2) {
+    return 0;
+  }
+
+  return score;
+}
+
+function isGroundedContentObservation(
+  observation: RunState["observations"][number]
+): boolean {
+  return (
+    observation.status === "ok" &&
+    observation.artifacts.length > 0 &&
+    typeof observation.content === "string" &&
+    observation.content.trim().length > 0
+  );
+}
+
+function normalizeMemoryText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\\/g, "/")
+    .replace(/[^a-z0-9/ ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenizeMemoryText(value: string): string[] {
+  return [...new Set(
+    value
+      .split(/[^a-z0-9/]+/)
+      .map((token) => token.trim())
+      .filter(
+        (token) => token.length > 2 && !MEMORY_STOP_WORDS.has(token)
+      )
+  )];
 }

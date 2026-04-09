@@ -528,7 +528,7 @@ function buildToolRuntimeMemory(
     return "";
   }
 
-  const selected = selectSupplementalEvidenceObservations(observations);
+  const selected = selectToolMemoryObservations(observations);
   if (selected.length === 0) {
     return "";
   }
@@ -566,6 +566,34 @@ function buildToolRuntimeMemory(
   }
 
   return `${rendered.slice(0, MAX_TOOL_MEMORY_CHARS - 3).trimEnd()}...`;
+}
+
+function selectToolMemoryObservations(
+  observations: Observation[]
+): Observation[] {
+  const selected = selectSupplementalEvidenceObservations(observations);
+  if (selected.length === 0) {
+    return [];
+  }
+
+  const recentFailures = selectRecentFailedToolObservations(observations);
+  if (recentFailures.length === 0) {
+    return selected;
+  }
+
+  const combined = [...selected];
+  for (const observation of recentFailures) {
+    if (!combined.includes(observation)) {
+      combined.push(observation);
+    }
+  }
+  return combined;
+}
+
+function selectRecentFailedToolObservations(
+  observations: Observation[]
+): Observation[] {
+  return observations.filter((observation) => observation.status !== "ok").slice(-2);
 }
 
 // --- Tool execution ---

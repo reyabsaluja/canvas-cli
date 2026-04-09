@@ -489,6 +489,95 @@ test("workspace retrieval gate does not trust token overlap for due-date questio
   });
 });
 
+test("workspace retrieval gate reuses grounded course-file memory when workspace search has no strong match", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+
+    const decision = await decideWorkspaceRetrieval({
+      question: "What does the lab brief say about saturating add mode?",
+      runState: {
+        observations: [
+          {
+            tool: "download_course_file",
+            status: "ok",
+            summary: "Downloaded and extracted lab4-brief.txt.",
+            artifacts: [
+              {
+                artifactId:
+                  "course:attachment:attachments/modules/lab4-brief.txt:lab4-brief.txt",
+                title: "lab4-brief.txt",
+                kind: "attachment",
+                excerpt: "The ALU must support saturating add mode and signed overflow detection.",
+              },
+            ],
+            content:
+              "The ALU must support saturating add mode and signed overflow detection.",
+          },
+        ],
+        readArtifactIds: [
+          "course:attachment:attachments/modules/lab4-brief.txt:lab4-brief.txt",
+        ],
+        stepCount: 1,
+      },
+      loaded,
+      cache,
+    });
+
+    assert.deepEqual(decision, {
+      action: "answer_from_memory",
+      reason: "already_read_relevant_artifact",
+      sourceArtifactIds: [
+        "course:attachment:attachments/modules/lab4-brief.txt:lab4-brief.txt",
+      ],
+    });
+  });
+});
+
+test("workspace retrieval gate ignores weak remembered course evidence when the question is unrelated", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+
+    const decision = await decideWorkspaceRetrieval({
+      question: "What resistor values should I use?",
+      runState: {
+        observations: [
+          {
+            tool: "download_course_file",
+            status: "ok",
+            summary: "Downloaded and extracted lab4-brief.txt.",
+            artifacts: [
+              {
+                artifactId:
+                  "course:attachment:attachments/modules/lab4-brief.txt:lab4-brief.txt",
+                title: "lab4-brief.txt",
+                kind: "attachment",
+                excerpt: "The ALU must support saturating add mode and signed overflow detection.",
+              },
+            ],
+            content:
+              "The ALU must support saturating add mode and signed overflow detection.",
+          },
+        ],
+        readArtifactIds: [
+          "course:attachment:attachments/modules/lab4-brief.txt:lab4-brief.txt",
+        ],
+        stepCount: 1,
+      },
+      loaded,
+      cache,
+    });
+
+    assert.deepEqual(decision, {
+      action: "let_model_decide",
+      reason: "weak_workspace_match",
+    });
+  });
+});
+
 test("workspace answer verification derives sources and confidence deterministically", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
