@@ -726,7 +726,9 @@ export async function runWorkspaceUI(
     );
     const transcript = getVisibleTranscriptLines(contentWidth, transcriptRows, chatScrollOffset, false);
     const footerLines = buildNormalFooterLines(cols);
-    writeFrame([...headerLines, ...transcript.lines, ...overlayLines, ...footerLines]);
+    writeFrame([...headerLines, ...transcript.lines]);
+    writeOverlayRows(overlayLines);
+    writeFooterRows(footerLines);
   }
 
   function getVisibleTranscriptLines(
