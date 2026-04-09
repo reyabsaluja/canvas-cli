@@ -37,11 +37,8 @@ export function verifyWorkspaceAnswer(
     missing.push("source");
   }
 
-  const hasDirectReadInEvidence = input.observations.some(
-    (observation) =>
-      observation.tool === "read_file" &&
-      observation.status === "ok" &&
-      observation.content?.trim()
+  const hasDirectReadInEvidence = input.observations.some((observation) =>
+    isGroundedContentObservation(observation)
   );
   const workupSupportsQuestion = !input.usedWorkup
     ? false
@@ -104,6 +101,15 @@ function collectSources(
 
 function canObservationProduceCitation(observation: Observation): boolean {
   return observation.artifacts.length > 0;
+}
+
+function isGroundedContentObservation(observation: Observation): boolean {
+  return (
+    observation.status === "ok" &&
+    observation.artifacts.length > 0 &&
+    typeof observation.content === "string" &&
+    observation.content.trim().length > 0
+  );
 }
 
 function buildExcerpt(value: string | undefined): string | null {
