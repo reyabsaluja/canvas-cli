@@ -95,8 +95,19 @@ export class RadarService {
       this.client.getDiscussionTopicViewSafe(courseId, topicId),
     ]);
     const allTopics = [...catalog.announcements, ...catalog.discussions];
-    const rawTopic = allTopics.find((t) => t.id === topicId);
+    let rawTopic = allTopics.find((t) => t.id === topicId);
+
+    // Topic may not be in the recent-activity catalog (e.g. old thread found
+    // via API search). Fall back to a targeted search to get its metadata.
+    if (!rawTopic) {
+      const searchResults = await this.client.searchDiscussionTopicsSafe(
+        courseId,
+        String(topicId)
+      );
+      rawTopic = searchResults.find((t) => t.id === topicId);
+    }
     if (!rawTopic) return null;
+
     const view =
       initialView ?? (await this.client.getDiscussionTopicViewSafe(courseId, topicId));
     if (!view) return null;
@@ -105,6 +116,23 @@ export class RadarService {
   }
 
   async resolveTopicByPartialTitle(
+    courses: Array<{ id: number; name: string }>,
+    query: string
+  ): Promise<
+    | { status: "found"; item: RadarItem; courseId: number }
+    | { status: "ambiguous"; matches: RadarItem[] }
+    | null
+  > {
+    // Step 1: Search the cached topic catalog (no network if warm).
+    const catalogResult = await this.searchCatalog(courses, query);
+    if (catalogResult) return catalogResult;
+
+    // Step 2: Fall back to Canvas search_term API for matches beyond the
+    // recent-activity window that the catalog covers.
+    return this.searchApi(courses, query);
+  }
+
+  private async searchCatalog(
     courses: Array<{ id: number; name: string }>,
     query: string
   ): Promise<
@@ -130,20 +158,34 @@ export class RadarService {
       })
     );
     const allItems = sortRadarItems(results.flat());
-    const normalized = query.toLowerCase();
+    return matchItems(allItems, query);
+  }
 
-    const exact = allItems.find(
-      (item) => item.title.toLowerCase() === normalized
+  private async searchApi(
+    courses: Array<{ id: number; name: string }>,
+    query: string
+  ): Promise<
+    | { status: "found"; item: RadarItem; courseId: number }
+    | { status: "ambiguous"; matches: RadarItem[] }
+    | null
+  > {
+    const results = await Promise.all(
+      courses.map(async (course) => {
+        try {
+          const topics = await this.client.searchDiscussionTopicsSafe(
+            course.id,
+            query
+          );
+          return topics.map((topic) =>
+            normalizeTopicToRadarItem(topic, course.id, course.name)
+          );
+        } catch {
+          return [];
+        }
+      })
     );
-    if (exact) return { status: "found", item: exact, courseId: exact.courseId };
-
-    const partial = allItems.filter((item) =>
-      item.title.toLowerCase().includes(normalized)
-    );
-    if (partial.length === 1) return { status: "found", item: partial[0]!, courseId: partial[0]!.courseId };
-    if (partial.length > 1) return { status: "ambiguous", matches: partial };
-
-    return null;
+    const allItems = sortRadarItems(results.flat());
+    return matchItems(allItems, query);
   }
 
   private buildThread(
@@ -300,6 +342,31 @@ function mostRecentTime(item: RadarItem): number {
     item.lastReplyAt?.getTime() ?? 0,
     item.postedAt?.getTime() ?? 0
   );
+}
+
+function matchItems(
+  allItems: RadarItem[],
+  query: string
+): { status: "found"; item: RadarItem; courseId: number } | { status: "ambiguous"; matches: RadarItem[] } | null {
+  const normalized = query.toLowerCase();
+
+  const exact = allItems.find(
+    (item) => item.title.toLowerCase() === normalized
+  );
+  if (exact) return { status: "found", item: exact, courseId: exact.courseId };
+
+  const partial = allItems.filter((item) =>
+    item.title.toLowerCase().includes(normalized)
+  );
+  if (partial.length === 1) return { status: "found", item: partial[0]!, courseId: partial[0]!.courseId };
+  if (partial.length > 1) return { status: "ambiguous", matches: partial };
+
+  // API search may return results that don't contain the query as a substring
+  // (Canvas does fuzzy matching). Treat a single API result as found.
+  if (allItems.length === 1) return { status: "found", item: allItems[0]!, courseId: allItems[0]!.courseId };
+  if (allItems.length > 1) return { status: "ambiguous", matches: allItems };
+
+  return null;
 }
 
 function filterByQuery(items: RadarItem[], query: string): RadarItem[] {
