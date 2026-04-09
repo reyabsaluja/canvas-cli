@@ -763,6 +763,46 @@ test("workspace retrieval gate reuses remembered search breadcrumbs when no stro
   });
 });
 
+test("workspace retrieval gate reuses remembered workspace discoveries before re-searching", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+
+    const decision = await decideWorkspaceRetrieval({
+      question: "Explain the branch hazard requirement in detail.",
+      runState: {
+        observations: [
+          {
+            tool: "search_workspace",
+            status: "ok",
+            summary: 'Found 1 relevant workspace match for "branch hazard".',
+            artifacts: [
+              {
+                artifactId: "workspace:extracted:docs/reference.txt",
+                title: "docs/reference.txt",
+                kind: "extracted",
+                excerpt:
+                  "The branch hazard requirement is to show the stall cycles clearly in the waveform.",
+              },
+            ],
+          },
+        ],
+        readArtifactIds: [],
+        stepCount: 1,
+      },
+      loaded,
+      cache,
+    });
+
+    assert.deepEqual(decision, {
+      action: "read_artifact",
+      reason: "already_discovered_relevant_artifact",
+      artifactId: "workspace:extracted:docs/reference.txt",
+    });
+  });
+});
+
 test("workspace retrieval gate ignores weak remembered course evidence when the question is unrelated", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();

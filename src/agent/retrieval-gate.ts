@@ -63,6 +63,15 @@ export async function decideWorkspaceRetrieval(
     return { action: "answer_from_workup", reason: "covered_by_workup" };
   }
 
+  const eagerDiscoveredArtifactId = getReusableDiscoveredArtifactId();
+  if (eagerDiscoveredArtifactId) {
+    return {
+      action: "read_artifact",
+      reason: "already_discovered_relevant_artifact",
+      artifactId: eagerDiscoveredArtifactId,
+    };
+  }
+
   const matches = await searchWorkspaceKnowledge(
     input.loaded,
     input.cache,
@@ -79,14 +88,6 @@ export async function decideWorkspaceRetrieval(
         action: "answer_from_memory",
         reason: "already_read_relevant_artifact",
         sourceArtifactIds: fallbackMemoryArtifactIds,
-      };
-    }
-    const fallbackDiscoveredArtifactId = getReusableDiscoveredArtifactId();
-    if (fallbackDiscoveredArtifactId) {
-      return {
-        action: "read_artifact",
-        reason: "already_discovered_relevant_artifact",
-        artifactId: fallbackDiscoveredArtifactId,
       };
     }
     return { action: "let_model_decide", reason: "weak_workspace_match" };
@@ -118,14 +119,6 @@ export async function decideWorkspaceRetrieval(
         action: "answer_from_memory",
         reason: "already_read_relevant_artifact",
         sourceArtifactIds: fallbackMemoryArtifactIds,
-      };
-    }
-    const fallbackDiscoveredArtifactId = getReusableDiscoveredArtifactId();
-    if (fallbackDiscoveredArtifactId) {
-      return {
-        action: "read_artifact",
-        reason: "already_discovered_relevant_artifact",
-        artifactId: fallbackDiscoveredArtifactId,
       };
     }
     return { action: "let_model_decide", reason: "recent_artifact_read_failed" };
