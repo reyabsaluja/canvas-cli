@@ -88,6 +88,11 @@ type TranscriptIndexState = {
   totalLines: number;
   dirtyFrom: number;
 };
+type InputState = {
+  activePinPartial: string | null;
+  pinMatches: Array<{ name: string; label: string }>;
+  slashMatches: Array<{ cmd: string; desc: string }>;
+};
 
 export async function runWorkspaceUI(
   ctx: WorkspaceContext
@@ -116,6 +121,8 @@ export async function runWorkspaceUI(
   let archivedMessageCount = 0;
   let archivedMessageChars = 0;
   let archiveNoticeMessage: ChatMessage | null = null;
+  let inputStateCacheKey = "";
+  let inputStateCache: InputState | null = null;
 
   let renderCache = new WeakMap<ChatMessage, RenderCacheEntry>();
   const transcriptIndexes = {
@@ -156,18 +163,34 @@ export async function runWorkspaceUI(
           `\n\n[truncated ${content.length - MAX_TOOL_CONTENT_CHARS} chars for UI performance]`;
   }
 
-  function getPinMatches(): typeof pinOptions {
-    const partial = getActivePinPartial(inputBuffer);
-    if (partial === null) return [];
-    if (!partial) return pinOptions;
-    return pinOptions.filter((p) => p.label.includes(partial.toLowerCase()));
-  }
+  function getInputState(): InputState {
+    const cacheKey = `${showSlashMenu ? "1" : "0"}\n${inputBuffer}`;
+    if (inputStateCache && inputStateCacheKey === cacheKey) {
+      return inputStateCache;
+    }
 
-  function getSlashMatches(): typeof SLASH_COMMANDS {
-    if (!inputBuffer.startsWith("/")) return [];
-    if (getActivePinPartial(inputBuffer) !== null && !inputBuffer.startsWith("/pin")) return [];
-    const partial = inputBuffer.toLowerCase();
-    return SLASH_COMMANDS.filter((c) => c.cmd.startsWith(partial));
+    const activePinPartial = getActivePinPartial(inputBuffer);
+    const pinMatches =
+      activePinPartial === null
+        ? []
+        : !activePinPartial
+          ? pinOptions
+          : pinOptions.filter((p) => p.label.includes(activePinPartial.toLowerCase()));
+
+    const slashMatches =
+      showSlashMenu &&
+      inputBuffer.startsWith("/") &&
+      (activePinPartial === null || inputBuffer.startsWith("/pin"))
+        ? SLASH_COMMANDS.filter((c) => c.cmd.startsWith(inputBuffer.toLowerCase()))
+        : [];
+
+    inputStateCache = {
+      activePinPartial,
+      pinMatches,
+      slashMatches,
+    };
+    inputStateCacheKey = cacheKey;
+    return inputStateCache;
   }
 
   function createTranscriptIndexState(): TranscriptIndexState {
@@ -470,11 +493,11 @@ export async function runWorkspaceUI(
     ];
   }
 
-  function buildOverlayLines(cols: number, maxRows: number): string[] {
+  function buildOverlayLines(cols: number, maxRows: number, inputState: InputState): string[] {
     if (isProcessing || toolOutputExpanded || maxRows <= 0) return [];
 
     const padFull = (line: string): string => padAnsiToWidth(line, cols);
-    const pinMatches = getPinMatches();
+    const pinMatches = inputState.pinMatches;
 
     if (pinMatches.length > 0) {
       const maxShow = Math.min(pinMatches.length, Math.min(MAX_OVERLAY_ROWS, maxRows));
@@ -497,7 +520,7 @@ export async function runWorkspaceUI(
       return lines;
     }
 
-    const matches = showSlashMenu ? getSlashMatches() : [];
+    const matches = inputState.slashMatches;
     if (matches.length === 0) return [];
 
     const maxShow = Math.min(matches.length, Math.min(MAX_OVERLAY_ROWS, maxRows));
@@ -533,7 +556,7 @@ export async function runWorkspaceUI(
     }
 
     const overlayBudget = Math.max(0, rows - headerLines.length - NORMAL_FOOTER_ROWS - 1);
-    const overlayLines = buildOverlayLines(cols, overlayBudget);
+    const overlayLines = buildOverlayLines(cols, overlayBudget, getInputState());
     const transcriptRows = Math.max(
       1,
       rows - headerLines.length - overlayLines.length - NORMAL_FOOTER_ROWS
@@ -676,9 +699,10 @@ export async function runWorkspaceUI(
       if (key === "\r" || key === "\n") {
         chatScrollOffset = 0;
 
-        const pinPartial = getActivePinPartial(inputBuffer);
+        const inputState = getInputState();
+        const pinPartial = inputState.activePinPartial;
         if (pinPartial !== null) {
-          const pinMatches = getPinMatches();
+          const pinMatches = inputState.pinMatches;
           const isComplete = pinOptions.some((p) => p.label === pinPartial);
           if (!isComplete && pinMatches.length > 0) {
             const selected = pinMatches[pinSelected];
@@ -689,8 +713,8 @@ export async function runWorkspaceUI(
           }
         }
 
-        if (showSlashMenu && getSlashMatches().length > 0) {
-          const matches = getSlashMatches();
+        if (inputState.slashMatches.length > 0) {
+          const matches = inputState.slashMatches;
           inputBuffer = matches[slashSelected].cmd;
           showSlashMenu = false;
         }
@@ -824,24 +848,25 @@ export async function runWorkspaceUI(
         return;
       }
 
-      if (key === "\x1B[A" && getActivePinPartial(inputBuffer) !== null && getPinMatches().length > 0) {
+      const inputState = getInputState();
+
+      if (key === "\x1B[A" && inputState.activePinPartial !== null && inputState.pinMatches.length > 0) {
         pinSelected = Math.max(0, pinSelected - 1);
         scheduleRender();
         return;
       }
-      if (key === "\x1B[B" && getActivePinPartial(inputBuffer) !== null && getPinMatches().length > 0) {
-        pinSelected = Math.min(getPinMatches().length - 1, pinSelected + 1);
+      if (key === "\x1B[B" && inputState.activePinPartial !== null && inputState.pinMatches.length > 0) {
+        pinSelected = Math.min(inputState.pinMatches.length - 1, pinSelected + 1);
         scheduleRender();
         return;
       }
-      if (key === "\x1B[A" && showSlashMenu) {
+      if (key === "\x1B[A" && inputState.slashMatches.length > 0) {
         slashSelected = Math.max(0, slashSelected - 1);
         scheduleRender();
         return;
       }
-      if (key === "\x1B[B" && showSlashMenu) {
-        const matches = getSlashMatches();
-        slashSelected = Math.min(matches.length - 1, slashSelected + 1);
+      if (key === "\x1B[B" && inputState.slashMatches.length > 0) {
+        slashSelected = Math.min(inputState.slashMatches.length - 1, slashSelected + 1);
         scheduleRender();
         return;
       }
@@ -867,20 +892,17 @@ export async function runWorkspaceUI(
         return;
       }
 
-      if (key === "\t" && showSlashMenu) {
-        const matches = getSlashMatches();
-        if (matches.length > 0) {
-          inputBuffer = matches[slashSelected].cmd;
-          showSlashMenu = true;
-          scheduleRender();
-        }
+      if (key === "\t" && inputState.slashMatches.length > 0) {
+        inputBuffer = inputState.slashMatches[slashSelected].cmd;
+        showSlashMenu = true;
+        scheduleRender();
         return;
       }
 
       if (key.length === 1 && key >= " ") {
         inputBuffer += key;
         showSlashMenu = inputBuffer.startsWith("/");
-        if (getActivePinPartial(inputBuffer) !== null) {
+        if (getInputState().activePinPartial !== null) {
           pinSelected = 0;
         } else if (showSlashMenu) {
           slashSelected = 0;
