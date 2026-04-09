@@ -662,17 +662,66 @@ export async function runChatShell<TExit>(
 
       let streamingStarted = false;
       let streamedText = "";
+      let pendingStreamDelta = "";
+      let streamCommitTimer: ReturnType<typeof setTimeout> | null = null;
+
+      function commitPendingStreamDelta(): void {
+        if (!pendingStreamDelta) {
+          return;
+        }
+
+        if (!streamingStarted) {
+          streamingStarted = true;
+          stopSpinner();
+          currentSpinnerLine = "";
+          messages.push({ role: "assistant", content: "" });
+          markTranscriptDirty(messages.length - 1);
+        }
+
+        streamedText += pendingStreamDelta;
+        pendingStreamDelta = "";
+        messages[messages.length - 1] = {
+          role: "assistant",
+          content: streamedText,
+        };
+        markTranscriptDirty(messages.length - 1);
+        scheduleRender();
+      }
+
+      function flushPendingStreamDelta(): void {
+        if (streamCommitTimer) {
+          clearTimeout(streamCommitTimer);
+          streamCommitTimer = null;
+        }
+        commitPendingStreamDelta();
+      }
+
+      function schedulePendingStreamDelta(): void {
+        if (streamCommitTimer) {
+          return;
+        }
+        streamCommitTimer = setTimeout(() => {
+          streamCommitTimer = null;
+          commitPendingStreamDelta();
+        }, FULL_RENDER_BATCH_MS);
+      }
 
       try {
         const final = await options.onAsk(fullInput, {
           onToolCall: async (event) => {
-            if (streamingStarted && streamedText.trim()) {
-              messages[messages.length - 1] = {
-                role: "assistant",
-                content: streamedText.trim(),
-              };
-              markTranscriptDirty(messages.length - 1);
-              persistence.schedule();
+            flushPendingStreamDelta();
+            if (streamingStarted) {
+              if (streamedText.trim()) {
+                messages[messages.length - 1] = {
+                  role: "assistant",
+                  content: streamedText.trim(),
+                };
+                markTranscriptDirty(messages.length - 1);
+                persistence.schedule();
+              } else {
+                messages.pop();
+                markTranscriptDirty(messages.length);
+              }
               streamingStarted = false;
               streamedText = "";
             }
@@ -694,23 +743,12 @@ export async function runChatShell<TExit>(
             startSpinner();
           },
           onTextDelta: (delta) => {
-            if (!streamingStarted) {
-              streamingStarted = true;
-              stopSpinner();
-              currentSpinnerLine = "";
-              messages.push({ role: "assistant", content: "" });
-              markTranscriptDirty(messages.length - 1);
-            }
-            streamedText += delta;
-            messages[messages.length - 1] = {
-              role: "assistant",
-              content: streamedText,
-            };
-            markTranscriptDirty(messages.length - 1);
-            scheduleRender();
+            pendingStreamDelta += delta;
+            schedulePendingStreamDelta();
           },
         });
 
+        flushPendingStreamDelta();
         stopSpinner();
         if (streamingStarted) {
           messages[messages.length - 1] = {
@@ -734,6 +772,7 @@ export async function runChatShell<TExit>(
         persistence.schedule(0);
         pendingPins = [];
       } catch (error) {
+        flushPendingStreamDelta();
         stopSpinner();
         await appendPersistedMessage({
           role: "system",
