@@ -13,6 +13,7 @@ import { verifyWorkspaceAnswer } from "../src/agent/verify.js";
 import {
   buildEvidenceBackedQuestion,
   executeToolCallForTurn,
+  resolveToolTurnVerificationObservations,
 } from "../src/tui/chat-agent.js";
 import { createChatContext, hydrateConversationHistory } from "../src/tui/services.js";
 import {
@@ -343,6 +344,32 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.equal(verifiedFromRead.confidence, "high");
     assert.equal(verifiedFromRead.sources[0]?.title, "docs/reference.txt");
 
+    const verifiedFromDownload = verifyWorkspaceAnswer({
+      question: "What does the downloaded brief say about the waveform?",
+      answer: "It says to show the stall cycles around the branch hazard.",
+      observations: [
+        {
+          tool: "download_course_file",
+          status: "ok",
+          summary: "Downloaded and extracted lab4-brief.txt.",
+          artifacts: [
+            {
+              artifactId: "course:attachment:attachments/modules/lab4-brief.txt:lab4-brief.txt",
+              title: "lab4-brief.txt",
+              kind: "attachment",
+              excerpt: "The waveform must show stall cycles around the branch hazard.",
+            },
+          ],
+          content: "The waveform must show stall cycles around the branch hazard.",
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedFromDownload.ok, true);
+    assert.equal(verifiedFromDownload.confidence, "high");
+    assert.equal(verifiedFromDownload.sources[0]?.title, "lab4-brief.txt");
+
     const verifiedFromWorkup = verifyWorkspaceAnswer({
       question: "What do I need to submit?",
       answer: "You need to submit a waveform screenshot and short analysis.",
@@ -495,6 +522,49 @@ test("memory prompts preserve the latest successful direct read evidence", () =>
     /The waveform must show stall cycles around the branch hazard\./
   );
   assert.equal((prompt.match(/- Tool:/g) ?? []).length, 3);
+});
+
+test("tool-turn verification falls back to prior grounded evidence when no new tools run", () => {
+  const observations: Observation[] = [
+    {
+      tool: "download_course_file",
+      status: "ok",
+      summary: "Downloaded and extracted lab4-brief.txt.",
+      artifacts: [
+        {
+          artifactId: "course:attachment:attachments/modules/lab4-brief.txt:lab4-brief.txt",
+          title: "lab4-brief.txt",
+          kind: "attachment",
+          excerpt: "The waveform must show stall cycles around the branch hazard.",
+        },
+      ],
+      content: "The waveform must show stall cycles around the branch hazard.",
+    },
+    {
+      tool: "search_workspace",
+      status: "ok",
+      summary: "Found a workspace match for branch hazard.",
+      artifacts: [
+        {
+          artifactId: "artifact-1",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          excerpt: "The waveform must show stall cycles around the branch hazard.",
+        },
+      ],
+    },
+  ];
+
+  const fallback = resolveToolTurnVerificationObservations(
+    observations,
+    observations.length
+  );
+  assert.equal(fallback.length, 2);
+  assert.equal(fallback[0]?.tool, "download_course_file");
+
+  const currentTurn = resolveToolTurnVerificationObservations(observations, 1);
+  assert.equal(currentTurn.length, 1);
+  assert.equal(currentTurn[0]?.tool, "search_workspace");
 });
 
 test("workspace chat dedupes repeated tool calls within a single turn", async () => {

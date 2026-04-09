@@ -374,7 +374,10 @@ export async function runChatAgent(
       10
     );
     supportingObservations = ctx.runState.observations.slice(observationStart);
-    verificationObservations = supportingObservations;
+    verificationObservations = resolveToolTurnVerificationObservations(
+      ctx.runState.observations,
+      observationStart
+    );
   }
 
   const verification = verifyWorkspaceAnswer({
@@ -688,10 +691,43 @@ async function readFile(
   filename: string,
   ctx: ChatAgentContext
 ): Promise<ToolExecutionResult> {
+  const trimmedFilename = filename.trim();
+  if (!trimmedFilename) {
+    return {
+      observation: {
+        tool: "read_file",
+        status: "not_found",
+        summary: "Provide a file name to read from the workspace or course cache.",
+        artifacts: [],
+      },
+      modelText: "Provide a file name to read from the workspace or course cache.",
+      uiText: "Provide a file name to read from the workspace or course cache.",
+    };
+  }
+
+  const reusedObservation = findReusableReadObservation(
+    trimmedFilename,
+    ctx.runState.observations
+  );
+  if (reusedObservation) {
+    const title = reusedObservation.artifacts[0]?.title ?? trimmedFilename;
+    return {
+      observation: {
+        tool: "read_file",
+        status: "ok",
+        summary: `Reused previously read ${title}.`,
+        artifacts: reusedObservation.artifacts,
+        content: reusedObservation.content,
+      },
+      modelText: reusedObservation.content ?? "",
+      uiText: reusedObservation.content ?? "",
+    };
+  }
+
   const artifact = await readWorkspaceKnowledgeArtifact(
     ctx.loaded,
     ctx.cache,
-    filename,
+    trimmedFilename,
     MAX_DOC_TEXT
   );
   switch (artifact.status) {
@@ -723,11 +759,11 @@ async function readFile(
         observation: {
           tool: "read_file",
           status: "missing_text",
-          summary: renderWorkspaceArtifactLookupFailure(filename, artifact),
+          summary: renderWorkspaceArtifactLookupFailure(trimmedFilename, artifact),
           artifacts: artifact.artifact ? [toArtifactRef(artifact.artifact)] : [],
         },
-        modelText: renderWorkspaceArtifactLookupFailure(filename, artifact),
-        uiText: renderWorkspaceArtifactLookupFailure(filename, artifact),
+        modelText: renderWorkspaceArtifactLookupFailure(trimmedFilename, artifact),
+        uiText: renderWorkspaceArtifactLookupFailure(trimmedFilename, artifact),
       };
     case "not_found":
     default:
@@ -735,11 +771,11 @@ async function readFile(
         observation: {
           tool: "read_file",
           status: "not_found",
-          summary: `File "${filename}" not found. Use list_files to see available files.`,
+          summary: `File "${trimmedFilename}" not found. Use list_files to see available files.`,
           artifacts: [],
         },
-        modelText: `File "${filename}" not found. Use list_files to see available files.`,
-        uiText: `File "${filename}" not found. Use list_files to see available files.`,
+        modelText: `File "${trimmedFilename}" not found. Use list_files to see available files.`,
+        uiText: `File "${trimmedFilename}" not found. Use list_files to see available files.`,
       };
   }
 }
@@ -1081,9 +1117,9 @@ function selectSupplementalEvidenceObservations(
   }
 
   const selected = new Set<number>();
-  // Keep the latest successful direct read in prompt context so memory answers
+  // Keep the latest grounded content read in prompt context so memory answers
   // still include the underlying text instead of only later search summaries.
-  const latestSuccessfulReadIndex = findLatestSuccessfulReadObservationIndex(
+  const latestSuccessfulReadIndex = findLatestSuccessfulGroundedContentObservationIndex(
     observations
   );
 
@@ -1103,20 +1139,27 @@ function selectSupplementalEvidenceObservations(
     .map((index) => observations[index]!);
 }
 
-function findLatestSuccessfulReadObservationIndex(
+function findLatestSuccessfulGroundedContentObservationIndex(
   observations: Observation[]
 ): number {
   for (let index = observations.length - 1; index >= 0; index -= 1) {
     const observation = observations[index]!;
-    if (
-      observation.tool === "read_file" &&
-      observation.status === "ok" &&
-      observation.content?.trim()
-    ) {
+    if (isGroundedContentObservation(observation)) {
       return index;
     }
   }
   return -1;
+}
+
+export function resolveToolTurnVerificationObservations(
+  observations: Observation[],
+  observationStart: number
+): Observation[] {
+  const currentTurn = observations.slice(observationStart);
+  if (currentTurn.length > 0) {
+    return currentTurn;
+  }
+  return selectSupplementalEvidenceObservations(observations);
 }
 
 function findObservationsForArtifacts(
@@ -1245,4 +1288,83 @@ function buildArtifactExcerpt(value?: string | null): string | null {
     return cleaned;
   }
   return `${cleaned.slice(0, 177).trimEnd()}...`;
+}
+
+function isGroundedContentObservation(observation: Observation): boolean {
+  return (
+    observation.status === "ok" &&
+    observation.artifacts.length > 0 &&
+    typeof observation.content === "string" &&
+    observation.content.trim().length > 0
+  );
+}
+
+function findReusableReadObservation(
+  filename: string,
+  observations: Observation[]
+): Observation | null {
+  const lookupAliases = buildFileLookupAliases(filename);
+  if (lookupAliases.size === 0) {
+    return null;
+  }
+
+  for (let index = observations.length - 1; index >= 0; index -= 1) {
+    const observation = observations[index]!;
+    if (!isGroundedContentObservation(observation)) {
+      continue;
+    }
+
+    const matches = observation.artifacts.some((artifact) => {
+      const artifactAliases = buildFileLookupAliases(artifact.title);
+      for (const alias of artifactAliases) {
+        if (lookupAliases.has(alias)) {
+          return true;
+        }
+      }
+      return false;
+    });
+
+    if (matches) {
+      return observation;
+    }
+  }
+
+  return null;
+}
+
+function buildFileLookupAliases(value: string): Set<string> {
+  const candidates = new Set<string>();
+  const cleaned = value.trim();
+  if (!cleaned) {
+    return candidates;
+  }
+
+  const normalized = normalizeLookupAlias(cleaned);
+  if (normalized) {
+    candidates.add(normalized);
+    addTrimmedExtensionAlias(candidates, normalized);
+  }
+
+  const basename = path.basename(cleaned);
+  const normalizedBasename = normalizeLookupAlias(basename);
+  if (normalizedBasename) {
+    candidates.add(normalizedBasename);
+    addTrimmedExtensionAlias(candidates, normalizedBasename);
+  }
+
+  return candidates;
+}
+
+function addTrimmedExtensionAlias(target: Set<string>, value: string): void {
+  const stripped = value.replace(
+    /\.(txt|md|pdf|html|htm|zip|csv|json)$/i,
+    ""
+  );
+  if (stripped && stripped !== value) {
+    target.add(stripped);
+  }
+}
+
+function normalizeLookupAlias(value: string): string {
+  return value.trim().replace(/\\/g, "/").replace(/\s+/g, " ").toLowerCase();
 }
