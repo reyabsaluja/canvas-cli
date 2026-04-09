@@ -9,7 +9,10 @@ import type { Observation } from "../src/agent/observation.js";
 import { clearArtifactIndexCache } from "../src/knowledge/artifact-index.js";
 import { decideWorkspaceRetrieval } from "../src/agent/retrieval-gate.js";
 import { verifyWorkspaceAnswer } from "../src/agent/verify.js";
-import { buildEvidenceBackedQuestion } from "../src/tui/chat-agent.js";
+import {
+  buildEvidenceBackedQuestion,
+  executeToolCallForTurn,
+} from "../src/tui/chat-agent.js";
 import { createChatContext, hydrateConversationHistory } from "../src/tui/services.js";
 import {
   readWorkspaceKnowledgeArtifactById,
@@ -185,10 +188,16 @@ test("workspace retrieval gate prefers workup, then direct reads, then prior mem
     });
     assert.equal(fromWorkup.action, "answer_from_workup");
 
-    const topMatch = (
-      await searchWorkspaceKnowledge(loaded, cache, "branch hazard", 1)
-    )[0];
-    assert.ok(topMatch);
+    const matches = await searchWorkspaceKnowledge(
+      loaded,
+      cache,
+      "branch hazard",
+      3
+    );
+    const directDocumentMatch = matches.find(
+      (match) => match.artifact.kind !== "workup"
+    );
+    assert.ok(directDocumentMatch);
 
     const fromSearch = await decideWorkspaceRetrieval({
       question: "Explain the branch hazard requirement in detail.",
@@ -199,13 +208,13 @@ test("workspace retrieval gate prefers workup, then direct reads, then prior mem
     assert.deepEqual(fromSearch, {
       action: "read_artifact",
       reason: "top_workspace_match_needs_read",
-      artifactId: topMatch!.artifact.id,
+      artifactId: directDocumentMatch!.artifact.id,
     });
 
     const readResult = await readWorkspaceKnowledgeArtifactById(
       loaded,
       cache,
-      topMatch!.artifact.id,
+      directDocumentMatch!.artifact.id,
       30000
     );
     assert.equal(readResult.status, "ok");
@@ -246,6 +255,35 @@ test("workspace retrieval gate prefers workup, then direct reads, then prior mem
   });
 });
 
+test("workspace retrieval gate only trusts explicit workup fields, not generic overlap", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+    const emptyRunState = {
+      observations: [],
+      readArtifactIds: [],
+      stepCount: 0,
+    };
+
+    const fromOverview = await decideWorkspaceRetrieval({
+      question: "Give me a summary of what this assignment is about.",
+      runState: emptyRunState,
+      loaded,
+      cache,
+    });
+    assert.equal(fromOverview.action, "answer_from_workup");
+
+    const fromGenericOverlap = await decideWorkspaceRetrieval({
+      question: "Explain branch behavior in detail.",
+      runState: emptyRunState,
+      loaded,
+      cache,
+    });
+    assert.notEqual(fromGenericOverlap.action, "answer_from_workup");
+  });
+});
+
 test("workspace retrieval gate does not trust token overlap for due-date questions when workup has no due date", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
@@ -279,6 +317,7 @@ test("workspace answer verification derives sources and confidence deterministic
     const loaded = await createWorkspace(tempDir);
 
     const verifiedFromRead = verifyWorkspaceAnswer({
+      question: "Explain the branch hazard requirement in detail.",
       answer: "You need to show the stall cycles around the branch hazard.",
       observations: [
         {
@@ -304,6 +343,7 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.equal(verifiedFromRead.sources[0]?.title, "docs/reference.txt");
 
     const verifiedFromWorkup = verifyWorkspaceAnswer({
+      question: "What do I need to submit?",
       answer: "You need to submit a waveform screenshot and short analysis.",
       observations: [],
       usedWorkup: true,
@@ -314,6 +354,7 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.equal(verifiedFromWorkup.sources[0]?.title, "workup.json");
 
     const verifiedFromMissingText = verifyWorkspaceAnswer({
+      question: "What does the spec say about the waveform screenshot?",
       answer: "I think the spec might mention a waveform screenshot.",
       observations: [
         {
@@ -339,6 +380,7 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.deepEqual(verifiedFromMissingText.missing, ["source"]);
 
     const verifiedFromActionOnlyTool = verifyWorkspaceAnswer({
+      question: "List the files I have available.",
       answer: "I listed the available files for you.",
       observations: [
         {
@@ -355,6 +397,38 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.equal(verifiedFromActionOnlyTool.confidence, "low");
     assert.deepEqual(verifiedFromActionOnlyTool.sources, []);
     assert.deepEqual(verifiedFromActionOnlyTool.missing, []);
+
+    const verifiedFromSearchOnly = verifyWorkspaceAnswer({
+      question: "What does the branch hazard section mention?",
+      answer: "It mentions the branch hazard section.",
+      observations: [
+        {
+          tool: "search_workspace",
+          status: "ok",
+          summary: "Found a workspace match for branch hazard.",
+          artifacts: [
+            {
+              artifactId: "artifact-1",
+              title: "docs/reference.txt",
+              kind: "extracted",
+              excerpt: "The waveform must show stall cycles around the branch hazard.",
+            },
+          ],
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedFromSearchOnly.confidence, "medium");
+
+    const verifiedFromUnsupportedWorkup = verifyWorkspaceAnswer({
+      question: "Explain the branch hazard requirement in detail.",
+      answer: "The workup says to explain branch behavior.",
+      observations: [],
+      usedWorkup: true,
+      loaded,
+    });
+    assert.equal(verifiedFromUnsupportedWorkup.confidence, "low");
   });
 });
 
@@ -420,4 +494,57 @@ test("memory prompts preserve the latest successful direct read evidence", () =>
     /The waveform must show stall cycles around the branch hazard\./
   );
   assert.equal((prompt.match(/- Tool:/g) ?? []).length, 3);
+});
+
+test("workspace chat dedupes repeated tool calls within a single turn", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      { cache, client: null, config: null, courseId: 17 }
+    );
+    const turnToolCache = new Map();
+
+    const firstSearch = await executeToolCallForTurn(
+      turnToolCache,
+      "search_workspace",
+      { query: "branch hazard" },
+      ctx
+    );
+    const secondSearch = await executeToolCallForTurn(
+      turnToolCache,
+      "search_workspace",
+      { query: "  BRANCH   HAZARD " },
+      ctx
+    );
+
+    assert.equal(firstSearch.deduped, false);
+    assert.equal(secondSearch.deduped, true);
+    assert.equal(secondSearch.result.modelText, firstSearch.result.modelText);
+
+    const firstRead = await executeToolCallForTurn(
+      turnToolCache,
+      "read_file",
+      { filename: "docs/reference.txt" },
+      ctx
+    );
+    const secondRead = await executeToolCallForTurn(
+      turnToolCache,
+      "read_file",
+      { filename: " docs/reference.txt " },
+      ctx
+    );
+
+    assert.equal(firstRead.deduped, false);
+    assert.equal(secondRead.deduped, true);
+    assert.equal(firstRead.result.observation.status, "ok");
+    assert.equal(secondRead.result.modelText, firstRead.result.modelText);
+    assert.match(
+      secondRead.result.modelText,
+      /stall cycles around the branch hazard/i
+    );
+  });
 });

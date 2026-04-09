@@ -17,34 +17,6 @@ export interface RetrievalGateInput {
   cache: CourseCache | null;
 }
 
-const WORKUP_STOP_WORDS = new Set([
-  "about",
-  "after",
-  "again",
-  "also",
-  "assignment",
-  "been",
-  "does",
-  "from",
-  "have",
-  "into",
-  "just",
-  "need",
-  "part",
-  "that",
-  "their",
-  "there",
-  "these",
-  "this",
-  "what",
-  "when",
-  "where",
-  "which",
-  "with",
-  "would",
-  "your",
-]);
-
 export async function decideWorkspaceRetrieval(
   input: RetrievalGateInput
 ): Promise<RetrievalDecision> {
@@ -61,12 +33,13 @@ export async function decideWorkspaceRetrieval(
     return { action: "answer_from_workup", reason: "covered_by_workup" };
   }
 
-  const topMatch = (await searchWorkspaceKnowledge(
+  const matches = await searchWorkspaceKnowledge(
     input.loaded,
     input.cache,
     question,
-    1
-  ))[0];
+    3
+  );
+  const topMatch = selectPreferredWorkspaceMatch(question, matches);
 
   if (!topMatch) {
     return { action: "let_model_decide", reason: "no_workspace_match" };
@@ -108,36 +81,64 @@ function workupLikelyCoversQuestion(
     return false;
   }
 
-  // Deadline questions are higher-risk: if the workup does not have an explicit
-  // due-date field, do not let generic token overlap short-circuit retrieval.
-  if (isDueDateQuestion(question)) {
+  const coverage = classifyWorkupCoverage(question);
+
+  if (coverage === "due_date") {
     return Boolean(getWorkupDueDate(workup));
   }
 
-  const questionTokens = tokenize(question).filter(
-    (token) => !WORKUP_STOP_WORDS.has(token)
-  );
-  if (questionTokens.length === 0) {
-    return true;
+  if (coverage === "deliverables") {
+    return hasNonEmptyStringArray(workup.deliverables);
   }
 
-  const workupText = JSON.stringify(workup).toLowerCase();
-  const overlap = questionTokens.filter((token) => workupText.includes(token));
-  if (overlap.length >= Math.min(2, questionTokens.length)) {
-    return true;
+  if (coverage === "constraints") {
+    return hasNonEmptyStringArray(workup.constraints);
   }
 
-  if (/\b(deliverable|submit|submission|turn in)\b/i.test(question)) {
-    const deliverables = (workup as Record<string, unknown>).deliverables;
-    return Array.isArray(deliverables) && deliverables.length > 0;
+  if (coverage === "overview") {
+    return typeof workup.overview === "string" && workup.overview.trim().length > 0;
   }
 
-  if (/\b(constraint|restriction|format|rubric)\b/i.test(question)) {
-    const constraints = (workup as Record<string, unknown>).constraints;
-    return Array.isArray(constraints) && constraints.length > 0;
+  if (coverage === "plan") {
+    return (
+      hasNonEmptyStringArray(
+        (workup as Record<string, unknown>).recommendedReadOrder ??
+          (workup as Record<string, unknown>).recommended_read_order
+      ) ||
+      hasNonEmptyArray(
+        (workup as Record<string, unknown>).actionPlan ??
+          (workup as Record<string, unknown>).action_plan
+      )
+    );
   }
 
   return false;
+}
+
+function classifyWorkupCoverage(
+  question: string
+): "due_date" | "deliverables" | "constraints" | "overview" | "plan" | null {
+  if (isDueDateQuestion(question)) {
+    return "due_date";
+  }
+
+  if (/\b(deliverable|submit|submission|turn in|hand in)\b/i.test(question)) {
+    return "deliverables";
+  }
+
+  if (/\b(constraint|restriction|format|rubric|grading|policy|policies)\b/i.test(question)) {
+    return "constraints";
+  }
+
+  if (/\b(start|first|approach|read order|plan)\b/i.test(question)) {
+    return "plan";
+  }
+
+  if (/\b(overvi?ew|summary|goal|purpose|expected|what is this assignment about|what is this about)\b/i.test(question)) {
+    return "overview";
+  }
+
+  return null;
 }
 
 function isDueDateQuestion(question: string): boolean {
@@ -157,7 +158,7 @@ function shouldPromoteTopMatch(question: string, score: number): boolean {
   if (asksForDirectDocumentReading(question)) {
     return score > 0;
   }
-  return score >= 12;
+  return score >= 8;
 }
 
 function asksForDirectDocumentReading(question: string): boolean {
@@ -166,9 +167,30 @@ function asksForDirectDocumentReading(question: string): boolean {
   );
 }
 
-function tokenize(value: string): string[] {
-  return value
-    .toLowerCase()
-    .split(/[^a-z0-9]+/g)
-    .filter((token) => token.length >= 3);
+function hasNonEmptyStringArray(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.some((entry) => typeof entry === "string" && entry.trim().length > 0)
+  );
+}
+
+function hasNonEmptyArray(value: unknown): boolean {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function selectPreferredWorkspaceMatch<
+  T extends { artifact: { kind: string }; score: number }
+>(question: string, matches: T[]): T | null {
+  if (matches.length === 0) {
+    return null;
+  }
+
+  if (asksForDirectDocumentReading(question)) {
+    const nonWorkup = matches.find((match) => match.artifact.kind !== "workup");
+    if (nonWorkup) {
+      return nonWorkup;
+    }
+  }
+
+  return matches[0] ?? null;
 }
