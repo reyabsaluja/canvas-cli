@@ -533,7 +533,7 @@ export async function runWorkspaceUI(
     writeCachedRows(overlayRenderCache, startRow, rows);
   }
 
-  function writeFrame(lines: string[]): void {
+  function writeFrame(lines: string[], bottomReserveRows: number = 0): void {
     const { cols, rows } = getTermSize();
     const frame = lines.slice(0, rows).map((line) => padAnsiToWidth(line, cols));
     while (frame.length < rows) {
@@ -543,7 +543,7 @@ export async function runWorkspaceUI(
     for (const line of frame) {
       buf.push(line);
     }
-    buf.flush();
+    buf.flush(bottomReserveRows);
   }
 
   function buildHeaderLines(showScrollHint: boolean): string[] {
@@ -727,7 +727,10 @@ export async function runWorkspaceUI(
     );
     const transcript = getVisibleTranscriptLines(contentWidth, transcriptRows, chatScrollOffset, false);
     const footerLines = buildNormalFooterLines(cols);
-    writeFrame([...headerLines, ...transcript.lines]);
+    writeFrame(
+      [...headerLines, ...transcript.lines],
+      overlayLines.length + NORMAL_FOOTER_ROWS
+    );
     writeOverlayRows(overlayLines);
     writeFooterRows(footerLines);
   }
