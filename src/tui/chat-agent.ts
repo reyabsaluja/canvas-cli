@@ -1483,12 +1483,24 @@ export function shouldRecoverFromToolLoop(
     return false;
   }
 
-  return observations.some(
-    (observation) =>
-      isGroundedContentObservation(observation) ||
-      observation.artifacts.length > 0 ||
-      (typeof observation.content === "string" &&
-        observation.content.trim().length > 0)
+  return observations.some(canObservationSupportAnswerRecovery);
+}
+
+function canObservationSupportAnswerRecovery(
+  observation: Observation
+): boolean {
+  if (isGroundedContentObservation(observation)) {
+    return true;
+  }
+
+  if (observation.status !== "ok") {
+    return false;
+  }
+
+  return (
+    observation.artifacts.length > 0 ||
+    (typeof observation.content === "string" &&
+      observation.content.trim().length > 0)
   );
 }
 
