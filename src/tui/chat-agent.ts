@@ -320,10 +320,14 @@ export async function runChatAgent(
     );
   } else {
     const pendingToolResults: ToolExecutionResult[] = [];
+    const promptMessages = buildToolPromptMessages(
+      ctx.conversationHistory,
+      question
+    );
     fullText = await streamWithTools(
       ctx.aiConfig,
       systemPrompt,
-      [...ctx.conversationHistory, { role: "user", content: question }],
+      promptMessages,
       CHAT_TOOLS,
       async (name, input) => {
         const result = await executeToolCallDetailed(name, input, ctx);
@@ -373,7 +377,20 @@ export async function runChatAgent(
 }
 
 function trimConversationHistory(ctx: ChatAgentContext): void {
-  const { turns, pendingUser } = normalizeConversationHistory(ctx.conversationHistory);
+  ctx.conversationHistory = trimConversationEntries(ctx.conversationHistory);
+}
+
+export function buildToolPromptMessages(
+  history: ChatAgentConversationEntry[],
+  question: string
+): ChatAgentConversationEntry[] {
+  return trimConversationEntries([...history, { role: "user", content: question }]);
+}
+
+function trimConversationEntries(
+  history: ConversationEntry[]
+): ConversationEntry[] {
+  const { turns, pendingUser } = normalizeConversationHistory(history);
 
   while (conversationMessageCount(turns, pendingUser) > MAX_CONVERSATION_MESSAGES) {
     turns.shift();
@@ -388,11 +405,7 @@ function trimConversationHistory(ctx: ChatAgentContext): void {
     totalChars -= removedTurn[0].content.length + removedTurn[1].content.length;
   }
 
-  ctx.conversationHistory.splice(
-    0,
-    ctx.conversationHistory.length,
-    ...flattenConversationHistory(turns, pendingUser)
-  );
+  return flattenConversationHistory(turns, pendingUser);
 }
 
 function normalizeConversationHistory(
