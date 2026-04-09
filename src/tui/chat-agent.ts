@@ -471,11 +471,39 @@ async function runToolLoopTurn(
     toolLoopError = error;
   }
 
-  const supportingObservations = ctx.runState.observations.slice(observationStart);
-  const verificationObservations = resolveToolTurnVerificationObservations(
+  let supportingObservations = ctx.runState.observations.slice(observationStart);
+  let verificationObservations = resolveToolTurnVerificationObservations(
     ctx.runState.observations,
     observationStart
   );
+  if (fullText.trim().length === 0) {
+    const recoveryArtifactId = selectRecoveryReadArtifactId(
+      question,
+      supportingObservations,
+      ctx.runState.observations
+    );
+    if (recoveryArtifactId) {
+      const recoveryResult = await readArtifactForGate(recoveryArtifactId, ctx);
+      appendObservation(ctx.runState, recoveryResult.observation);
+      const recoveryFilename =
+        recoveryResult.observation.artifacts[0]?.title ?? recoveryArtifactId;
+      const { action, target } = mapToolCall("read_file", {
+        filename: recoveryFilename,
+      });
+      onToolCall({
+        action,
+        target,
+        result: recoveryResult.uiText,
+        color: recoveryResult.observation.status === "ok" ? "green" : "red",
+        observation: recoveryResult.observation,
+      });
+      supportingObservations = ctx.runState.observations.slice(observationStart);
+      verificationObservations = resolveToolTurnVerificationObservations(
+        ctx.runState.observations,
+        observationStart
+      );
+    }
+  }
   if (shouldRecoverFromToolLoop(fullText, verificationObservations)) {
     fullText = await answerWithoutTools(
       ctx,
@@ -1488,6 +1516,46 @@ function selectRelevantSearchBreadcrumbObservations(
     return [];
   }
   return selectRelevantObservations(candidates, question, 2);
+}
+
+export function selectRecoveryReadArtifactId(
+  question: string,
+  currentTurnObservations: Observation[],
+  allObservations: Observation[] = currentTurnObservations
+): string | null {
+  const failedArtifactIds = collectFailedReadArtifactIds(allObservations);
+  const breadcrumbs = selectRelevantSearchBreadcrumbObservations(
+    question,
+    currentTurnObservations,
+    new Set()
+  );
+
+  for (const observation of breadcrumbs) {
+    for (const artifact of observation.artifacts) {
+      if (!failedArtifactIds.has(artifact.artifactId)) {
+        return artifact.artifactId;
+      }
+    }
+  }
+
+  return null;
+}
+
+function collectFailedReadArtifactIds(observations: Observation[]): Set<string> {
+  const artifactIds = new Set<string>();
+  for (const observation of observations) {
+    if (
+      observation.status === "ok" ||
+      (observation.tool !== "read_file" &&
+        observation.tool !== "download_course_file")
+    ) {
+      continue;
+    }
+    for (const artifact of observation.artifacts) {
+      artifactIds.add(artifact.artifactId);
+    }
+  }
+  return artifactIds;
 }
 
 function isSuccessfulSearchBreadcrumbObservation(

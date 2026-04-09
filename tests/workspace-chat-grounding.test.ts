@@ -16,6 +16,7 @@ import {
   resolveToolTurnVerificationObservations,
   seedTurnToolCacheEntry,
   selectArtifactSupportObservations,
+  selectRecoveryReadArtifactId,
   shouldContinueToolLoopAfterGateRead,
   shouldRecoverFromToolLoop,
 } from "../src/tui/chat-agent.js";
@@ -1364,6 +1365,67 @@ test("tool-loop recovery only triggers when the loop produced no answer but gath
       },
     ]),
     true
+  );
+});
+
+test("tool-loop recovery prefers reading a discovered artifact and skips prior failed reads", () => {
+  const briefBreadcrumb: Observation = {
+    tool: "search_course",
+    status: "ok",
+    summary: 'Found 1 relevant course match for "saturating add mode".',
+    artifacts: [
+      {
+        artifactId: "artifact-brief",
+        title: "lab4-brief.txt",
+        kind: "attachment",
+        excerpt: "The ALU must support saturating add mode and signed overflow detection.",
+      },
+    ],
+  };
+  const notesBreadcrumb: Observation = {
+    tool: "search_workspace",
+    status: "ok",
+    summary: 'Found 1 relevant workspace match for "saturating add mode".',
+    artifacts: [
+      {
+        artifactId: "artifact-notes",
+        title: "docs/saturating-add-notes.txt",
+        kind: "extracted",
+        excerpt: "Saturating add mode notes and signed overflow detection details.",
+      },
+    ],
+  };
+
+  assert.equal(
+    selectRecoveryReadArtifactId(
+      "What does the lab brief say about saturating add mode?",
+      [briefBreadcrumb]
+    ),
+    "artifact-brief"
+  );
+
+  assert.equal(
+    selectRecoveryReadArtifactId(
+      "What does the lab brief say about saturating add mode?",
+      [briefBreadcrumb, notesBreadcrumb],
+      [
+        briefBreadcrumb,
+        notesBreadcrumb,
+        {
+          tool: "read_file",
+          status: "missing_text",
+          summary: "Matched lab4-brief.txt, but readable text is missing.",
+          artifacts: [
+            {
+              artifactId: "artifact-brief",
+              title: "lab4-brief.txt",
+              kind: "attachment",
+            },
+          ],
+        },
+      ]
+    ),
+    "artifact-notes"
   );
 });
 
