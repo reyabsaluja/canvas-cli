@@ -105,6 +105,15 @@ type TranscriptIndexState = {
   dirtyFrom: number;
 };
 
+type InputState = {
+  activeOpenPartial: string | null;
+  activePinPartial: string | null;
+  openMatches: ShellOpenOption[];
+  pinMatches: ShellPinOption[];
+  slashMatches: CommandDefinition[];
+  hasVisibleOverlay: boolean;
+};
+
 export async function runChatShell<TExit>(
   options: ChatShellOptions<TExit>
 ): Promise<TExit | null> {
@@ -134,6 +143,8 @@ export async function runChatShell<TExit>(
   let currentVerb = "";
   let bannerLinesCache: string[] | null = null;
   let bannerCacheCols = -1;
+  let inputStateCache: InputState | null = null;
+  let inputStateCacheKey = "";
   const transcriptIndexes = {
     normal: createTranscriptIndexState(),
     expanded: createTranscriptIndexState(),
@@ -305,76 +316,102 @@ export async function runChatShell<TExit>(
     await persistence.addMessages(nextMessages);
   }
 
-  function getSlashMatches(): CommandDefinition[] {
-    if (!inputBuffer.startsWith("/")) return [];
-    if (getActiveOpenPartial() !== null && getOpenMatches().length > 0) {
-      return [];
-    }
-    const partial = inputBuffer.toLowerCase();
-    return availableCommands.filter((command) =>
-      [command.name, ...(command.aliases ?? [])].some((alias) =>
-        alias.startsWith(partial)
-      )
-    );
-  }
-
   function getOpenOptions(): ShellOpenOption[] {
     return options.getOpenOptions?.() ?? [];
   }
 
-  function getActiveOpenPartial(): string | null {
+  function getActiveOpenPartial(value: string): string | null {
     if (options.runtime.scope.type === "global") return null;
-    const match = inputBuffer.match(/\/open(?:\s+(.*))?$/i);
+    const match = value.match(/\/open(?:\s+(.*))?$/i);
     if (!match) return null;
     return (match[1] ?? "").trim();
   }
 
-  function getOpenMatches(): ShellOpenOption[] {
-    const partial = getActiveOpenPartial();
-    if (partial === null) return [];
-    const openOptions = getOpenOptions();
-    if (!partial) return openOptions;
-    const ranked = searchOpenableResources(
-      partial,
-      openOptions.map((option, index) => ({
-        id: String(index),
-        title: option.title,
-        kind: option.detail ?? "resource",
-        targetType: "file" as const,
-        target: option.query,
-        detail: option.detail,
-        searchTerms:
-          option.searchTerms ?? [option.title, option.query, option.detail ?? ""],
-      })),
-      openOptions.length
-    );
-    return ranked
-      .map((resource) =>
-        openOptions.find(
-          (option) =>
-            option.title === resource.title && option.query === resource.target
-        )
-      )
-      .filter((option): option is ShellOpenOption => option !== undefined);
-  }
-
-  function getActivePinPartial(): string | null {
-    const match = inputBuffer.match(/\/pin(\s+(\S*))?$/);
+  function getActivePinPartial(value: string): string | null {
+    const match = value.match(/\/pin(\s+(\S*))?$/);
     if (!match) return null;
     return match[2] ?? "";
   }
 
-  function getPinMatches(): ShellPinOption[] {
-    const partial = getActivePinPartial();
-    if (partial === null) return [];
-    if (!partial) return options.pinOptions ?? [];
-    return (options.pinOptions ?? []).filter((pin) =>
-      pin.label.includes(partial.toLowerCase())
-    );
+  function getInputState(): InputState {
+    const cacheKey = `${showSlashMenu ? 1 : 0}\n${inputBuffer}`;
+    if (inputStateCache && inputStateCacheKey === cacheKey) {
+      return inputStateCache;
+    }
+
+    const activeOpenPartial = getActiveOpenPartial(inputBuffer);
+    const activePinPartial = getActivePinPartial(inputBuffer);
+
+    let openMatches: ShellOpenOption[] = [];
+    if (activeOpenPartial !== null) {
+      const openOptions = getOpenOptions();
+      if (!activeOpenPartial) {
+        openMatches = openOptions;
+      } else {
+        const ranked = searchOpenableResources(
+          activeOpenPartial,
+          openOptions.map((option, index) => ({
+            id: String(index),
+            title: option.title,
+            kind: option.detail ?? "resource",
+            targetType: "file" as const,
+            target: option.query,
+            detail: option.detail,
+            searchTerms:
+              option.searchTerms ?? [option.title, option.query, option.detail ?? ""],
+          })),
+          openOptions.length
+        );
+        openMatches = ranked
+          .map((resource) => openOptions[Number(resource.id)])
+          .filter((option): option is ShellOpenOption => option !== undefined);
+      }
+    }
+
+    let pinMatches: ShellPinOption[] = [];
+    if (activePinPartial !== null) {
+      if (!activePinPartial) {
+        pinMatches = options.pinOptions ?? [];
+      } else {
+        const loweredPartial = activePinPartial.toLowerCase();
+        pinMatches = (options.pinOptions ?? []).filter((pin) =>
+          pin.label.includes(loweredPartial)
+        );
+      }
+    }
+
+    let slashMatches: CommandDefinition[] = [];
+    if (
+      showSlashMenu &&
+      inputBuffer.startsWith("/") &&
+      !(activeOpenPartial !== null && openMatches.length > 0)
+    ) {
+      const partial = inputBuffer.toLowerCase();
+      slashMatches = availableCommands.filter((command) =>
+        [command.name, ...(command.aliases ?? [])].some((alias) =>
+          alias.startsWith(partial)
+        )
+      );
+    }
+
+    inputStateCacheKey = cacheKey;
+    inputStateCache = {
+      activeOpenPartial,
+      activePinPartial,
+      openMatches,
+      pinMatches,
+      slashMatches,
+      hasVisibleOverlay:
+        openMatches.length > 0 ||
+        pinMatches.length > 0 ||
+        slashMatches.length > 0,
+    };
+    return inputStateCache;
   }
 
   function renderNow(): void {
     const transcriptIndex = getActiveTranscriptIndex();
+    const inputState = getInputState();
     const next = renderChatFrame({
       runtime: options.runtime,
       placeholder,
@@ -387,9 +424,9 @@ export async function runChatShell<TExit>(
       transcriptTotalLines: transcriptIndex.totalLines,
       getTranscriptLines: (startLine, endLine) =>
         collectTranscriptRange(transcriptIndex, startLine, endLine),
-      slashMatches: showSlashMenu ? getSlashMatches() : [],
-      openMatches: getOpenMatches(),
-      pinMatches: getPinMatches(),
+      slashMatches: inputState.slashMatches,
+      openMatches: inputState.openMatches,
+      pinMatches: inputState.pinMatches,
       slashSelected,
       openSelected,
       pinSelected,
@@ -425,36 +462,35 @@ export async function runChatShell<TExit>(
     scheduleRender(true);
   }
 
-  function renderInputOnly(): void {
+  function renderInputOnly(inputState: InputState = getInputState()): void {
     renderInputFooter({
       placeholder,
       inputBuffer,
       scopeLabel: options.runtime.scopeLabel,
       statusLabel: options.runtime.statusLabel,
       modelLabel: options.modelLabel,
-      slashMatches: showSlashMenu ? getSlashMatches() : [],
-      openMatches: getOpenMatches(),
-      pinMatches: getPinMatches(),
+      slashMatches: inputState.slashMatches,
+      openMatches: inputState.openMatches,
+      pinMatches: inputState.pinMatches,
       slashSelected,
       openSelected,
       pinSelected,
     });
   }
 
-  function hasVisibleOverlay(): boolean {
-    return (
-      getOpenMatches().length > 0 ||
-      getPinMatches().length > 0 ||
-      (showSlashMenu && getSlashMatches().length > 0)
-    );
+  function hasVisibleOverlay(inputState: InputState = getInputState()): boolean {
+    return inputState.hasVisibleOverlay;
   }
 
-  function renderAfterInputMutation(hadOverlay: boolean): void {
-    if (hadOverlay && !hasVisibleOverlay()) {
+  function renderAfterInputMutation(
+    hadOverlay: boolean,
+    inputState: InputState = getInputState()
+  ): void {
+    if (hadOverlay && !inputState.hasVisibleOverlay) {
       scheduleRender(true);
       return;
     }
-    renderInputOnly();
+    renderInputOnly(inputState);
   }
 
   function startSpinner(): void {
@@ -937,19 +973,18 @@ export async function runChatShell<TExit>(
         if (showSlashMenu) {
           const hadOverlay = hasVisibleOverlay();
           showSlashMenu = false;
-          renderAfterInputMutation(hadOverlay);
+          renderAfterInputMutation(hadOverlay, getInputState());
         }
         return;
       }
 
       if (key === "\r" || key === "\n") {
         setChatScrollOffset(0);
+        const inputState = getInputState();
 
-        const openPartial = getActiveOpenPartial();
-        if (openPartial !== null) {
-          const openMatches = getOpenMatches();
-          if (openMatches.length > 0) {
-            const selected = openMatches[openSelected]!;
+        if (inputState.activeOpenPartial !== null) {
+          if (inputState.openMatches.length > 0) {
+            const selected = inputState.openMatches[openSelected]!;
             await handleCommandInput(
               `/open ${selected.query}`,
               "/open",
@@ -959,26 +994,24 @@ export async function runChatShell<TExit>(
           }
         }
 
-        const pinPartial = getActivePinPartial();
-        if (pinPartial !== null) {
-          const pinMatches = getPinMatches();
+        if (inputState.activePinPartial !== null) {
           const isComplete = (options.pinOptions ?? []).some(
-            (pin) => pin.label === pinPartial
+            (pin) => pin.label === inputState.activePinPartial
           );
-          if (!isComplete && pinMatches.length > 0) {
-            const selected = pinMatches[pinSelected]!;
+          if (!isComplete && inputState.pinMatches.length > 0) {
+            const selected = inputState.pinMatches[pinSelected]!;
             inputBuffer = inputBuffer.replace(
               /\/pin(\s+\S*)?$/,
               `/pin ${selected.label}`
             );
             pinSelected = 0;
-            renderAfterInputMutation(true);
+            renderAfterInputMutation(true, getInputState());
             return;
           }
         }
 
-        if (showSlashMenu && getSlashMatches().length > 0) {
-          inputBuffer = getSlashMatches()[slashSelected]!.name;
+        if (inputState.slashMatches.length > 0) {
+          inputBuffer = inputState.slashMatches[slashSelected]!.name;
           showSlashMenu = false;
         }
 
@@ -1003,50 +1036,52 @@ export async function runChatShell<TExit>(
         return;
       }
 
+      const inputState = getInputState();
+
       if (
         key === "\x1B[A" &&
-        getActiveOpenPartial() !== null &&
-        getOpenMatches().length > 0
+        inputState.activeOpenPartial !== null &&
+        inputState.openMatches.length > 0
       ) {
         openSelected = Math.max(0, openSelected - 1);
-        renderInputOnly();
+        renderInputOnly(inputState);
         return;
       }
       if (
         key === "\x1B[B" &&
-        getActiveOpenPartial() !== null &&
-        getOpenMatches().length > 0
+        inputState.activeOpenPartial !== null &&
+        inputState.openMatches.length > 0
       ) {
-        openSelected = Math.min(getOpenMatches().length - 1, openSelected + 1);
-        renderInputOnly();
+        openSelected = Math.min(inputState.openMatches.length - 1, openSelected + 1);
+        renderInputOnly(inputState);
         return;
       }
       if (
         key === "\x1B[A" &&
-        getActivePinPartial() !== null &&
-        getPinMatches().length > 0
+        inputState.activePinPartial !== null &&
+        inputState.pinMatches.length > 0
       ) {
         pinSelected = Math.max(0, pinSelected - 1);
-        renderInputOnly();
+        renderInputOnly(inputState);
         return;
       }
       if (
         key === "\x1B[B" &&
-        getActivePinPartial() !== null &&
-        getPinMatches().length > 0
+        inputState.activePinPartial !== null &&
+        inputState.pinMatches.length > 0
       ) {
-        pinSelected = Math.min(getPinMatches().length - 1, pinSelected + 1);
-        renderInputOnly();
+        pinSelected = Math.min(inputState.pinMatches.length - 1, pinSelected + 1);
+        renderInputOnly(inputState);
         return;
       }
-      if (key === "\x1B[A" && showSlashMenu) {
+      if (key === "\x1B[A" && inputState.slashMatches.length > 0) {
         slashSelected = Math.max(0, slashSelected - 1);
-        renderInputOnly();
+        renderInputOnly(inputState);
         return;
       }
-      if (key === "\x1B[B" && showSlashMenu) {
-        slashSelected = Math.min(getSlashMatches().length - 1, slashSelected + 1);
-        renderInputOnly();
+      if (key === "\x1B[B" && inputState.slashMatches.length > 0) {
+        slashSelected = Math.min(inputState.slashMatches.length - 1, slashSelected + 1);
+        renderInputOnly(inputState);
         return;
       }
 
@@ -1068,52 +1103,48 @@ export async function runChatShell<TExit>(
           const hadOverlay = hasVisibleOverlay();
           inputBuffer = inputBuffer.slice(0, -1);
           showSlashMenu = inputBuffer.startsWith("/");
-          if (getActiveOpenPartial() !== null) {
+          const nextInputState = getInputState();
+          if (nextInputState.activeOpenPartial !== null) {
             openSelected = 0;
-          } else if (getActivePinPartial() !== null) {
+          } else if (nextInputState.activePinPartial !== null) {
             pinSelected = 0;
           } else {
             slashSelected = 0;
           }
-          renderAfterInputMutation(hadOverlay);
+          renderAfterInputMutation(hadOverlay, nextInputState);
         }
         return;
       }
 
-      if (key === "\t" && getActiveOpenPartial() !== null) {
-        const openMatches = getOpenMatches();
-        if (openMatches.length > 0) {
-          const selected = openMatches[openSelected]!;
+      if (key === "\t" && inputState.activeOpenPartial !== null) {
+        if (inputState.openMatches.length > 0) {
+          const selected = inputState.openMatches[openSelected]!;
           inputBuffer = `/open ${selected.query}`;
           openSelected = 0;
-          renderAfterInputMutation(true);
+          renderAfterInputMutation(true, getInputState());
         }
         return;
       }
 
-      if (key === "\t" && getActivePinPartial() !== null) {
-        const pinMatches = getPinMatches();
-        if (pinMatches.length > 0) {
-          const selected = pinMatches[pinSelected]!;
+      if (key === "\t" && inputState.activePinPartial !== null) {
+        if (inputState.pinMatches.length > 0) {
+          const selected = inputState.pinMatches[pinSelected]!;
           inputBuffer = inputBuffer.replace(
             /\/pin(\s+\S*)?$/,
             `/pin ${selected.label}`
           );
           pinSelected = 0;
-          renderAfterInputMutation(true);
+          renderAfterInputMutation(true, getInputState());
         }
         return;
       }
 
-      if (key === "\t" && showSlashMenu) {
-        const matches = getSlashMatches();
-        if (matches.length > 0) {
-          inputBuffer = matches[slashSelected]!.name + " ";
-          slashSelected = 0;
-          const hadOverlay = hasVisibleOverlay();
-          showSlashMenu = false;
-          renderAfterInputMutation(hadOverlay);
-        }
+      if (key === "\t" && inputState.slashMatches.length > 0) {
+        inputBuffer = inputState.slashMatches[slashSelected]!.name + " ";
+        slashSelected = 0;
+        const hadOverlay = inputState.hasVisibleOverlay;
+        showSlashMenu = false;
+        renderAfterInputMutation(hadOverlay, getInputState());
         return;
       }
 
@@ -1121,14 +1152,15 @@ export async function runChatShell<TExit>(
         const hadOverlay = hasVisibleOverlay();
         inputBuffer += key;
         showSlashMenu = inputBuffer.startsWith("/");
-        if (getActiveOpenPartial() !== null) {
+        const nextInputState = getInputState();
+        if (nextInputState.activeOpenPartial !== null) {
           openSelected = 0;
-        } else if (getActivePinPartial() !== null) {
+        } else if (nextInputState.activePinPartial !== null) {
           pinSelected = 0;
         } else if (showSlashMenu) {
           slashSelected = 0;
         }
-        renderAfterInputMutation(hadOverlay);
+        renderAfterInputMutation(hadOverlay, nextInputState);
       }
     }
 
