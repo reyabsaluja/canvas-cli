@@ -352,6 +352,7 @@ export async function runWorkspaceUI(
     stopSpinner();
     spinnerTimer = setInterval(() => {
       if (destroyed || !isProcessing || !currentSpinnerLine) return;
+      if (chatScrollOffset > 0) return;
       spinnerFrame = (spinnerFrame + 1) % SPINNER.length;
       currentSpinnerLine = `  ${C.primary(SPINNER[spinnerFrame])} ${C.accent(currentVerb)}${chalk.white("...")}`;
       scheduleRender();
