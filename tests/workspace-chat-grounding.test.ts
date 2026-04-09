@@ -1216,6 +1216,56 @@ test("tool-loop recovery only triggers when the loop produced no answer but gath
     ]),
     false
   );
+
+  assert.equal(
+    shouldRecoverFromToolLoop("", [
+      {
+        tool: "read_file",
+        status: "missing_text",
+        summary: "Matched lab4-brief.txt, but readable text is missing.",
+        artifacts: [
+          {
+            artifactId: "artifact-2",
+            title: "lab4-brief.txt",
+            kind: "attachment",
+          },
+        ],
+      },
+    ]),
+    false
+  );
+
+  assert.equal(
+    shouldRecoverFromToolLoop("", [
+      {
+        tool: "download_course_file",
+        status: "ok",
+        summary: "Downloaded and extracted lab4-brief.txt.",
+        artifacts: [
+          {
+            artifactId: "artifact-3",
+            title: "lab4-brief.txt",
+            kind: "attachment",
+            excerpt: "Grounded detail.",
+          },
+        ],
+        content: "Grounded detail.",
+      },
+      {
+        tool: "read_file",
+        status: "missing_text",
+        summary: "Matched docs/missing.txt, but readable text is missing.",
+        artifacts: [
+          {
+            artifactId: "artifact-4",
+            title: "docs/missing.txt",
+            kind: "extracted",
+          },
+        ],
+      },
+    ]),
+    true
+  );
 });
 
 test("failed gate reads fall back to the normal tool loop, but grounded gate reads do not", () => {
