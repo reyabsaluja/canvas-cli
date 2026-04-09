@@ -1,5 +1,4 @@
 import fs from "node:fs/promises";
-import fsSync from "node:fs";
 import path from "node:path";
 import { loadCourseCache } from "../enrich/cache-loader.js";
 import {
@@ -117,10 +116,10 @@ export function buildWorkspaceIntroMessages(
   return messages;
 }
 
-export function buildWorkspacePinOptions(
+export async function buildWorkspacePinOptions(
   loaded: Awaited<ReturnType<typeof loadWorkspace>>,
   cache: Awaited<ReturnType<typeof loadCourseCache>>
-): ShellPinOption[] {
+): Promise<ShellPinOption[]> {
   const options: ShellPinOption[] = [];
   const addOption = (option: ShellPinOption): void => {
     if (!options.some((existing) => existing.label === option.label)) {
@@ -134,14 +133,18 @@ export function buildWorkspacePinOptions(
       label: toPinLabel(extracted.name),
     });
   }
-  for (const file of listWorkspacePinFilesSync(loaded.path, "attachments")) {
+  const [attachmentFiles, resourceFiles] = await Promise.all([
+    listWorkspacePinFiles(loaded.path, "attachments"),
+    listWorkspacePinFiles(loaded.path, "resources"),
+  ]);
+  for (const file of attachmentFiles) {
     addOption({
       name: file,
       label: toPinLabel(file),
       workspaceRelativePath: file,
     });
   }
-  for (const file of listWorkspacePinFilesSync(loaded.path, "resources")) {
+  for (const file of resourceFiles) {
     addOption({
       name: file,
       label: toPinLabel(file),
@@ -208,31 +211,31 @@ export async function resolveWorkspacePinContent(
   return null;
 }
 
-function listWorkspacePinFilesSync(
+async function listWorkspacePinFiles(
   workspacePath: string,
   relativeDir: string
-): string[] {
+): Promise<string[]> {
   const root = path.join(workspacePath, relativeDir);
   try {
     const entries: string[] = [];
-    walkWorkspacePinFilesSync(root, relativeDir, entries);
+    await walkWorkspacePinFiles(root, relativeDir, entries);
     return entries.sort((a, b) => a.localeCompare(b));
   } catch {
     return [];
   }
 }
 
-function walkWorkspacePinFilesSync(
+async function walkWorkspacePinFiles(
   absoluteDir: string,
   relativeDir: string,
   entries: string[]
-): void {
-  const children = fsSync.readdirSync(absoluteDir, { withFileTypes: true });
+): Promise<void> {
+  const children = await fs.readdir(absoluteDir, { withFileTypes: true });
   for (const child of children) {
     const childAbsolute = path.join(absoluteDir, child.name);
     const childRelative = path.join(relativeDir, child.name);
     if (child.isDirectory()) {
-      walkWorkspacePinFilesSync(childAbsolute, childRelative, entries);
+      await walkWorkspacePinFiles(childAbsolute, childRelative, entries);
       continue;
     }
     if (child.isFile()) {

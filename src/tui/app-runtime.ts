@@ -369,7 +369,7 @@ async function loadOrCreateWorkspaceShell(
       }
       return nextMessages;
     },
-    pinOptions: buildWorkspacePinOptions(loaded, cache),
+    pinOptions: await buildWorkspacePinOptions(loaded, cache),
     resolvePinContent: async (pin) => resolveWorkspacePinContent(loaded, cache, pin),
     onAsk: async (input, callbacks) => {
       if (!services.aiConfig || !chatContext) {
