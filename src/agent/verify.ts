@@ -25,6 +25,10 @@ export function verifyWorkspaceAnswer(
   input: VerifyWorkspaceAnswerInput
 ): VerificationResult {
   const trimmedAnswer = input.answer.trim();
+  const relevantGroundedObservations = selectRelevantGroundedObservations(
+    input.question,
+    input.observations
+  );
   const sources = collectSources(
     input.question,
     input.observations,
@@ -46,9 +50,7 @@ export function verifyWorkspaceAnswer(
     missing.push("source");
   }
 
-  const hasDirectReadInEvidence = input.observations.some((observation) =>
-    isGroundedContentObservation(observation)
-  );
+  const hasDirectReadInEvidence = relevantGroundedObservations.length > 0;
   const workupSupportsQuestion = !input.usedWorkup
     ? false
     : workupExplicitlySupportsQuestion(input.question, input.loaded);
@@ -114,15 +116,30 @@ function selectCitationObservations(
   question: string,
   observations: Observation[]
 ): Observation[] {
-  const grounded = observations.filter((observation) =>
-    isGroundedContentObservation(observation)
-  );
-  const candidates = grounded.length > 0 ? grounded : observations;
-  const relevant = selectRelevantCitationObservations(question, candidates);
+  const relevantGrounded = selectRelevantGroundedObservations(question, observations);
+  if (relevantGrounded.length > 0) {
+    return relevantGrounded;
+  }
+
+  const relevant = selectRelevantCitationObservations(question, observations);
   if (relevant.length > 0) {
     return relevant;
   }
-  return candidates;
+
+  const grounded = observations.filter((observation) =>
+    isGroundedContentObservation(observation)
+  );
+  return grounded.length > 0 ? grounded : observations;
+}
+
+function selectRelevantGroundedObservations(
+  question: string,
+  observations: Observation[]
+): Observation[] {
+  return selectRelevantCitationObservations(
+    question,
+    observations.filter((observation) => isGroundedContentObservation(observation))
+  );
 }
 
 function selectRelevantCitationObservations(
