@@ -1378,6 +1378,9 @@ export function buildEvidenceBackedQuestion(
     observations,
     question
   );
+  if (supplementalObservations.length === 0) {
+    return question;
+  }
   const sections: string[] = [question, "", "Supplemental evidence already gathered in this chat:"];
   for (const observation of supplementalObservations) {
     sections.push(`- Tool: ${observation.tool}`);
@@ -1400,7 +1403,10 @@ function selectSupplementalEvidenceObservations(
   const grounded = observations.filter((observation) =>
     isGroundedContentObservation(observation)
   );
-  const candidates = grounded.length > 0 ? grounded : observations;
+  const candidates =
+    grounded.length > 0
+      ? grounded
+      : observations.filter(canObservationSupportAnswerRecovery);
 
   if (candidates.length === 0) {
     return [];
