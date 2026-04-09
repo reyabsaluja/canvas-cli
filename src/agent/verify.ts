@@ -10,6 +10,7 @@ export interface VerificationResult {
 }
 
 export interface VerifyWorkspaceAnswerInput {
+  question: string;
   answer: string;
   observations: Observation[];
   usedWorkup: boolean;
@@ -36,13 +37,26 @@ export function verifyWorkspaceAnswer(
     missing.push("source");
   }
 
-  const hasDirectRead = input.observations.some(
-    (observation) => observation.tool === "read_file" && observation.status === "ok"
+  const hasDirectReadInEvidence = input.observations.some(
+    (observation) =>
+      observation.tool === "read_file" &&
+      observation.status === "ok" &&
+      observation.content?.trim()
   );
+  const workupSupportsQuestion = !input.usedWorkup
+    ? false
+    : workupExplicitlySupportsQuestion(input.question, input.loaded);
+  const confidence = hasDirectReadInEvidence
+    ? "high"
+    : sources.length > 0
+      ? input.usedWorkup && !workupSupportsQuestion
+        ? "low"
+        : "medium"
+      : "low";
 
   return {
     ok: missing.length === 0,
-    confidence: hasDirectRead ? "high" : sources.length > 0 ? "medium" : "low",
+    confidence,
     sources,
     missing,
   };
@@ -101,4 +115,71 @@ function buildExcerpt(value: string | undefined): string | null {
     return cleaned;
   }
   return `${cleaned.slice(0, 157)}...`;
+}
+
+function workupExplicitlySupportsQuestion(
+  question: string,
+  loaded: LoadedWorkspace
+): boolean {
+  const workup = loaded.workupJson;
+  if (!workup) {
+    return false;
+  }
+
+  if (isDueDateQuestion(question)) {
+    return Boolean(getWorkupDueDate(workup));
+  }
+
+  if (/\b(deliverable|submit|submission|turn in|hand in)\b/i.test(question)) {
+    return hasNonEmptyStringArray(workup.deliverables);
+  }
+
+  if (/\b(constraint|restriction|format|rubric|grading|policy|policies)\b/i.test(question)) {
+    return hasNonEmptyStringArray(workup.constraints);
+  }
+
+  if (/\b(start|first|approach|read order|plan)\b/i.test(question)) {
+    return (
+      hasNonEmptyStringArray(
+        (workup as Record<string, unknown>).recommendedReadOrder ??
+          (workup as Record<string, unknown>).recommended_read_order
+      ) ||
+      hasNonEmptyArray(
+        (workup as Record<string, unknown>).actionPlan ??
+          (workup as Record<string, unknown>).action_plan
+      )
+    );
+  }
+
+  if (
+    /\b(overvi?ew|summary|goal|purpose|expected|what is this assignment about|what is this about)\b/i.test(
+      question
+    )
+  ) {
+    return typeof workup.overview === "string" && workup.overview.trim().length > 0;
+  }
+
+  return false;
+}
+
+function isDueDateQuestion(question: string): boolean {
+  return /\b(due|deadline)\b/i.test(question);
+}
+
+function getWorkupDueDate(workup: Record<string, unknown>): string | null {
+  const dueDate = workup.dueDate ?? workup.due_date;
+  return typeof dueDate === "string" && dueDate.trim().length > 0
+    ? dueDate
+    : null;
+}
+
+function hasNonEmptyStringArray(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.some((entry) => typeof entry === "string" && entry.trim().length > 0)
+  );
+}
+
+function hasNonEmptyArray(value: unknown): boolean {
+  return Array.isArray(value) && value.length > 0;
 }
