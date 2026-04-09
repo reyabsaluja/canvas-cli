@@ -1375,6 +1375,61 @@ test("tool-turn verification falls back to prior grounded evidence when no new t
   assert.equal(mixedTurn[1]?.tool, "search_workspace");
 });
 
+test("tool-turn verification fallback keeps only question-relevant prior evidence", () => {
+  const observations: Observation[] = [
+    {
+      tool: "read_file",
+      status: "ok",
+      summary: "Read docs/reference.txt.",
+      artifacts: [
+        {
+          artifactId: "artifact-branch",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          excerpt: "The waveform must show stall cycles around the branch hazard.",
+        },
+      ],
+      content: "The waveform must show stall cycles around the branch hazard.",
+    },
+    {
+      tool: "read_file",
+      status: "ok",
+      summary: "Read docs/resistor-table.txt.",
+      artifacts: [
+        {
+          artifactId: "artifact-resistors",
+          title: "docs/resistor-table.txt",
+          kind: "extracted",
+          excerpt: "Use 220 ohm and 1k ohm resistors in the LED test harness.",
+        },
+      ],
+      content: "Use 220 ohm and 1k ohm resistors in the LED test harness.",
+    },
+    {
+      tool: "search_workspace",
+      status: "ok",
+      summary: "Found a workspace match for branch hazard.",
+      artifacts: [
+        {
+          artifactId: "artifact-branch",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          excerpt: "The waveform must show stall cycles around the branch hazard.",
+        },
+      ],
+    },
+  ];
+
+  const fallback = resolveToolTurnVerificationObservations(
+    observations,
+    2,
+    "Explain the branch hazard requirement in detail."
+  );
+  assert.equal(fallback.length, 2);
+  assert.equal(fallback[0]?.summary, "Read docs/reference.txt.");
+  assert.equal(fallback[1]?.summary, "Found a workspace match for branch hazard.");
+});
+
 test("tool-turn verification keeps current-turn evidence only when the turn already read grounded content", () => {
   const observations: Observation[] = [
     {

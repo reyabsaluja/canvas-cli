@@ -474,7 +474,8 @@ async function runToolLoopTurn(
   let supportingObservations = ctx.runState.observations.slice(observationStart);
   let verificationObservations = resolveToolTurnVerificationObservations(
     ctx.runState.observations,
-    observationStart
+    observationStart,
+    question
   );
   if (fullText.trim().length === 0) {
     const recoveryArtifactId = selectRecoveryReadArtifactId(
@@ -500,7 +501,8 @@ async function runToolLoopTurn(
       supportingObservations = ctx.runState.observations.slice(observationStart);
       verificationObservations = resolveToolTurnVerificationObservations(
         ctx.runState.observations,
-        observationStart
+        observationStart,
+        question
       );
     }
   }
@@ -1595,11 +1597,12 @@ function collectObservationArtifactIds(
 
 export function resolveToolTurnVerificationObservations(
   observations: Observation[],
-  observationStart: number
+  observationStart: number,
+  question?: string
 ): Observation[] {
   const currentTurn = observations.slice(observationStart);
   if (currentTurn.length === 0) {
-    return selectSupplementalEvidenceObservations(observations);
+    return selectSupplementalEvidenceObservations(observations, question);
   }
 
   if (currentTurn.some((observation) => isGroundedContentObservation(observation))) {
@@ -1607,7 +1610,8 @@ export function resolveToolTurnVerificationObservations(
   }
 
   const priorSupport = selectSupplementalEvidenceObservations(
-    observations.slice(0, observationStart)
+    observations.slice(0, observationStart),
+    question
   );
   if (priorSupport.length === 0) {
     return currentTurn;
