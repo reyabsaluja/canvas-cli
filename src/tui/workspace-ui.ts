@@ -58,6 +58,7 @@ const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
   { cmd: "/quit", desc: "Exit canvas-cli" },
 ];
 
+const userBubbleBg = chalk.bgHex("#3a445d");
 const inputBg = chalk.bgHex("#2d3342");
 const workspaceTitleBold = chalk.hex("#a8b8d8").bold;
 const INPUT_PLACEHOLDER = "Type your message or /help for commands";
@@ -1297,16 +1298,20 @@ function renderMessage(
   switch (msg.role) {
     case "user": {
       const { cols: termCols } = getTermSize();
-      const boxWidth = Math.max(1, termCols - 1);
-      const emptyLine = " ".repeat(boxWidth + 1);
+      const indent = "  ";
+      const boxWidth = Math.max(12, Math.min(maxWidth + 2, termCols - 4));
+      const innerWidth = Math.max(1, boxWidth - 2);
+      const emptyLine = " ".repeat(boxWidth);
       const padInner = (line: string) =>
-        line + " ".repeat(Math.max(0, boxWidth - visibleWidth(line)));
-      const lines = wrapLines(msg.content, boxWidth);
-      buf.push(padAnsiToWidth(inputBg(emptyLine), termCols));
+        line + " ".repeat(Math.max(0, innerWidth - visibleWidth(line)));
+      const lines = wrapLines(msg.content, innerWidth);
+      buf.push(padAnsiToWidth(`${indent}${userBubbleBg(emptyLine)}`, termCols));
       for (const line of lines) {
-        buf.push(padAnsiToWidth(inputBg(` ${padInner(line)}`), termCols));
+        buf.push(
+          padAnsiToWidth(`${indent}${userBubbleBg(` ${padInner(line)} `)}`, termCols)
+        );
       }
-      buf.push(padAnsiToWidth(inputBg(emptyLine), termCols));
+      buf.push(padAnsiToWidth(`${indent}${userBubbleBg(emptyLine)}`, termCols));
       break;
     }
 
