@@ -834,6 +834,71 @@ test("memory prompts prefer grounded reads over later search echoes", () => {
   assert.doesNotMatch(prompt, /Found the latest workspace match for branch hazard/);
 });
 
+test("memory prompts prefer question-relevant evidence over newer unrelated reads", () => {
+  const prompt = buildEvidenceBackedQuestion("Explain the branch hazard requirement.", [
+    {
+      tool: "read_file",
+      status: "ok",
+      summary: "Read docs/reference.txt.",
+      artifacts: [
+        {
+          artifactId: "artifact-1",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          excerpt: "The waveform must show stall cycles around the branch hazard.",
+        },
+      ],
+      content: "The waveform must show stall cycles around the branch hazard.",
+    },
+    {
+      tool: "read_file",
+      status: "ok",
+      summary: "Read docs/resistor-table.txt.",
+      artifacts: [
+        {
+          artifactId: "artifact-2",
+          title: "docs/resistor-table.txt",
+          kind: "extracted",
+          excerpt: "Use a 4.7k resistor for the LED path.",
+        },
+      ],
+      content: "Use a 4.7k resistor for the LED path.",
+    },
+    {
+      tool: "read_file",
+      status: "ok",
+      summary: "Read docs/schedule.txt.",
+      artifacts: [
+        {
+          artifactId: "artifact-3",
+          title: "docs/schedule.txt",
+          kind: "extracted",
+          excerpt: "Demo day starts at 2pm on Friday.",
+        },
+      ],
+      content: "Demo day starts at 2pm on Friday.",
+    },
+    {
+      tool: "read_file",
+      status: "ok",
+      summary: "Read docs/bonus.txt.",
+      artifacts: [
+        {
+          artifactId: "artifact-4",
+          title: "docs/bonus.txt",
+          kind: "extracted",
+          excerpt: "Bonus marks come from the optimization section.",
+        },
+      ],
+      content: "Bonus marks come from the optimization section.",
+    },
+  ]);
+
+  assert.match(prompt, /docs\/reference\.txt/);
+  assert.doesNotMatch(prompt, /docs\/bonus\.txt/);
+  assert.doesNotMatch(prompt, /4\.7k resistor/);
+});
+
 test("tool-turn verification falls back to prior grounded evidence when no new tools run", () => {
   const observations: Observation[] = [
     {
