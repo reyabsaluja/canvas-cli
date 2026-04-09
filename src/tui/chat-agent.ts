@@ -1523,6 +1523,17 @@ export function selectRecoveryReadArtifactId(
   currentTurnObservations: Observation[],
   allObservations: Observation[] = currentTurnObservations
 ): string | null {
+  const groundedCurrentTurn = selectRelevantObservations(
+    currentTurnObservations.filter((observation) =>
+      isGroundedContentObservation(observation)
+    ),
+    question,
+    1
+  );
+  if (groundedCurrentTurn.length > 0) {
+    return null;
+  }
+
   const failedArtifactIds = collectFailedReadArtifactIds(allObservations);
   const breadcrumbs = selectRelevantSearchBreadcrumbObservations(
     question,

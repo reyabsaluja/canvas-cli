@@ -1574,6 +1574,32 @@ test("tool-loop recovery prefers reading a discovered artifact and skips prior f
     ),
     "artifact-notes"
   );
+
+  assert.equal(
+    selectRecoveryReadArtifactId(
+      "What does the lab brief say about saturating add mode?",
+      [
+        {
+          tool: "download_course_file",
+          status: "ok",
+          summary: "Downloaded and extracted lab4-brief.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-brief",
+              title: "lab4-brief.txt",
+              kind: "attachment",
+              excerpt:
+                "The ALU must support saturating add mode and signed overflow detection.",
+            },
+          ],
+          content:
+            "The ALU must support saturating add mode and signed overflow detection.",
+        },
+        notesBreadcrumb,
+      ]
+    ),
+    null
+  );
 });
 
 test("failed gate reads fall back to the normal tool loop, but grounded gate reads do not", () => {
