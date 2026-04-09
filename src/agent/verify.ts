@@ -52,6 +52,11 @@ function collectSources(
   const seen = new Set<string>();
 
   for (const observation of observations) {
+    // Only successful tool observations count as evidence. Failed lookups like
+    // missing_text/not_found should never create grounding-looking citations.
+    if (observation.status !== "ok") {
+      continue;
+    }
     for (const artifact of observation.artifacts) {
       const key = `${artifact.kind}:${artifact.title}`;
       if (seen.has(key)) {
