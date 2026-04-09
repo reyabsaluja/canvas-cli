@@ -1488,28 +1488,31 @@ function selectSupplementalEvidenceObservations(
   observations: Observation[],
   question?: string
 ): Observation[] {
-  const grounded = observations.filter((observation) =>
-    isGroundedContentObservation(observation)
-  );
-  const candidates =
-    grounded.length > 0
-      ? grounded
-      : observations.filter(canObservationSupportAnswerRecovery);
-
-  if (candidates.length === 0) {
+  const allCandidates = observations.filter(canObservationSupportAnswerRecovery);
+  if (allCandidates.length === 0) {
     return [];
   }
 
-  const relevant = selectRelevantObservations(candidates, question, 3);
+  const grounded = allCandidates.filter((observation) =>
+    isGroundedContentObservation(observation)
+  );
+  const relevantGrounded = selectRelevantObservations(grounded, question, 3);
+  if (relevantGrounded.length > 0) {
+    return relevantGrounded;
+  }
+
+  const relevant = selectRelevantObservations(allCandidates, question, 3);
   if (relevant.length > 0) {
     return relevant;
   }
 
-  if (candidates.length <= 3) {
-    return candidates;
+  const fallbackCandidates = grounded.length > 0 ? grounded : allCandidates;
+
+  if (fallbackCandidates.length <= 3) {
+    return fallbackCandidates;
   }
 
-  return candidates.slice(-3);
+  return fallbackCandidates.slice(-3);
 }
 
 function selectRelevantObservations(
