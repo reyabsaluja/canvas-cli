@@ -156,11 +156,40 @@ export async function streamWithTools(
   maxSteps: number = 10
 ): Promise<string> {
   const STREAM_TEXT_FLUSH_MS = 16;
+  const STREAM_TEXT_MAX_HOLD_MS = 40;
+  const STREAM_TEXT_FORCE_FLUSH_CHARS = 64;
   const aiTools: Record<string, any> = {};
   let pendingTextDelta = "";
   let textFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingTextStartedAt = 0;
 
-  function flushPendingTextDelta(): void {
+  function findFlushBoundary(text: string): number {
+    for (let index = text.length - 1; index >= 0; index--) {
+      const char = text[index]!;
+      if (char === "\n" || char === "\r") {
+        return index + 1;
+      }
+      if (/\s/.test(char)) {
+        return index + 1;
+      }
+      if (/[.,!?;:)\]]/.test(char)) {
+        const next = text[index + 1];
+        if (next === undefined || /\s/.test(next)) {
+          return index + 1;
+        }
+      }
+    }
+    return 0;
+  }
+
+  function emitTextDelta(delta: string): void {
+    if (!delta) {
+      return;
+    }
+    callbacks.onTextDelta?.(delta);
+  }
+
+  function flushPendingTextDelta(force: boolean = false): void {
     if (textFlushTimer) {
       clearTimeout(textFlushTimer);
       textFlushTimer = null;
@@ -168,9 +197,33 @@ export async function streamWithTools(
     if (!pendingTextDelta) {
       return;
     }
-    const delta = pendingTextDelta;
+
+    const boundary = findFlushBoundary(pendingTextDelta);
+    if (!force) {
+      if (boundary > 0 && boundary < pendingTextDelta.length) {
+        emitTextDelta(pendingTextDelta.slice(0, boundary));
+        pendingTextDelta = pendingTextDelta.slice(boundary);
+        pendingTextStartedAt = Date.now();
+        schedulePendingTextFlush();
+        return;
+      }
+
+      const holdingTooLong =
+        pendingTextStartedAt > 0 &&
+        Date.now() - pendingTextStartedAt >= STREAM_TEXT_MAX_HOLD_MS;
+      if (
+        boundary === 0 &&
+        !holdingTooLong &&
+        pendingTextDelta.length < STREAM_TEXT_FORCE_FLUSH_CHARS
+      ) {
+        schedulePendingTextFlush();
+        return;
+      }
+    }
+
+    emitTextDelta(pendingTextDelta);
     pendingTextDelta = "";
-    callbacks.onTextDelta?.(delta);
+    pendingTextStartedAt = 0;
   }
 
   function schedulePendingTextFlush(): void {
@@ -188,7 +241,7 @@ export async function streamWithTools(
       description: t.description,
       inputSchema: jsonSchema(t.parameters as any),
       execute: async (input: any) => {
-        flushPendingTextDelta();
+        flushPendingTextDelta(true);
         const result = await executeTool(t.name, input);
         callbacks.onToolCall?.(t.name, input, result);
         return result;
@@ -213,6 +266,9 @@ export async function streamWithTools(
         const delta = (part as any).text ?? "";
         if (delta) {
           fullText += delta;
+          if (!pendingTextDelta) {
+            pendingTextStartedAt = Date.now();
+          }
           pendingTextDelta += delta;
           schedulePendingTextFlush();
         }
@@ -223,13 +279,13 @@ export async function streamWithTools(
       }
     }
   } catch (err) {
-    flushPendingTextDelta();
+    flushPendingTextDelta(true);
     // If streaming fails partway, return whatever text we got
     if (!fullText) {
       throw err;
     }
   }
 
-  flushPendingTextDelta();
+  flushPendingTextDelta(true);
   return fullText;
 }
