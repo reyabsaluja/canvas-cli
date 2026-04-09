@@ -1,0 +1,191 @@
+import { callModel } from "../../ai/provider.js";
+import type { Observation } from "../../agent/observation.js";
+import { selectSupplementalEvidenceObservations } from "./verification.js";
+import type {
+  ChatAgentContext,
+  ChatAgentConversationEntry,
+} from "./types.js";
+
+export function buildSystemPrompt(ctx: ChatAgentContext): string {
+  const parts: string[] = [];
+
+  parts.push(`You are a workspace assistant for a university assignment. You help students understand their assignments.
+
+You already have a detailed workup of this assignment pre-loaded below. For most questions, you can answer directly from this context WITHOUT using tools.
+
+Use tools ONLY when:
+- The question asks about something not covered in the workup
+- You need to read a specific document in detail
+- You need to find information not already summarized
+
+IMPORTANT tool usage rules:
+- If you already read a file earlier in this conversation, DO NOT read it again. Use the content from the earlier read.
+- read_file returns the FULL content of the file. After reading, IMMEDIATELY use that content to answer in detail.
+- If a file is inside a zip (e.g., lab4.pdf inside lab4.zip), use read_file with the PDF name — it extracts the content from the zip.
+- If the user explicitly asks you to open a file, PDF, assignment page, or resource, immediately call open_resource.
+- After reading a file, give a DETAILED and SPECIFIC answer based on what you read. Do not give vague summaries.
+- When the user asks to "explain part X in depth", find the specific section in the document and quote the actual requirements, addresses, functionality needed, etc.
+- Do NOT re-read files you already have in the conversation. Just reference the earlier content.
+
+Rules:
+- When the user asks for detail or "in depth", give thorough answers with specific requirements, addresses, values, and steps from the documents.
+- If the workup already contains the answer, respond immediately (no tool calls needed).
+- Cite sources when relevant.
+- Do NOT solve the assignment — help the student understand it.
+- For simple questions, keep it brief. For "explain" or "in depth" questions, be thorough and specific.
+
+IMPORTANT: Before calling any tool, ALWAYS write a brief sentence explaining what you're about to do. For example, write "Let me read the lab document..." before calling read_file, or "Searching for that..." before calling search_workspace. This sentence must come BEFORE the tool call, not after. The student needs to see your thought process in real-time.
+
+When you have enough information, respond with your answer directly (no tool calls).`);
+
+  if (ctx.loaded.workupJson) {
+    const workup = ctx.loaded.workupJson;
+    parts.push("\n--- PRE-LOADED ASSIGNMENT CONTEXT ---\n");
+
+    if (workup.overview) parts.push(`Overview: ${workup.overview}`);
+
+    const deliverables = (workup.deliverables ?? workup.deliverables) as
+      | string[]
+      | undefined;
+    if (deliverables?.length) {
+      parts.push(
+        `\nDeliverables:\n${deliverables.map((deliverable: string) => `- ${deliverable}`).join("\n")}`
+      );
+    }
+
+    const constraints = workup.constraints as string[] | undefined;
+    if (constraints?.length) {
+      parts.push(
+        `\nConstraints:\n${constraints.map((constraint: string) => `- ${constraint}`).join("\n")}`
+      );
+    }
+
+    const plan = (workup.actionPlan ?? workup.action_plan) as any[] | undefined;
+    if (plan?.length) {
+      parts.push(
+        `\nAction plan:\n${plan
+          .map(
+            (step: any) =>
+              `${step.step}. ${step.action}${step.detail ? " — " + step.detail : ""}`
+          )
+          .join("\n")}`
+      );
+    }
+
+    const resources = (workup.relevantResources ?? workup.relevant_resources) as
+      | any[]
+      | undefined;
+    if (resources?.length) {
+      parts.push(
+        `\nKey resources:\n${resources
+          .map((resource: any) => `- ${resource.title} (${resource.type}) — ${resource.why}`)
+          .join("\n")}`
+      );
+    }
+
+    const trace = (workup.sourceTrace ?? workup.source_trace) as any[] | undefined;
+    if (trace?.length) {
+      parts.push(
+        `\nSource trace:\n${trace
+          .map((entry: any) => `- ${entry.conclusion} [source: ${entry.source}]`)
+          .join("\n")}`
+      );
+    }
+
+    const uncertainties = workup.uncertainties as string[] | undefined;
+    if (uncertainties?.length) {
+      parts.push(
+        `\nOpen questions:\n${uncertainties.map((uncertainty: string) => `- ${uncertainty}`).join("\n")}`
+      );
+    }
+
+    if (workup.dueDate ?? workup.due_date) {
+      parts.push(`\nDue date: ${workup.dueDate ?? workup.due_date}`);
+    }
+
+    parts.push("\n--- END PRE-LOADED CONTEXT ---");
+  }
+
+  if (ctx.loaded.extractedFiles.length > 0) {
+    parts.push(`\nExtracted documents available (use read_file to access):`);
+    for (const extractedFile of ctx.loaded.extractedFiles) {
+      const isZip = extractedFile.name.endsWith(".zip.txt");
+      const hint = isZip
+        ? " (contains extracted files — PDFs inside are readable)"
+        : "";
+      parts.push(`- ${extractedFile.name}${hint}`);
+    }
+  }
+
+  return parts.join("\n");
+}
+
+export async function answerWithoutTools(
+  ctx: ChatAgentContext,
+  systemPrompt: string,
+  question: string,
+  observations: Observation[],
+  onTextDelta?: (delta: string) => void
+): Promise<string> {
+  const userMessage = buildEvidenceBackedQuestion(question, observations);
+  const answer = await callModel(
+    ctx.aiConfig,
+    `${systemPrompt}\n\nNo tools are available for this turn. Answer only from the pre-loaded assignment context and any supplemental evidence provided in the user message.`,
+    buildConversationPrompt(ctx.conversationHistory, userMessage)
+  );
+  if (answer && onTextDelta) {
+    onTextDelta(answer);
+  }
+  return answer;
+}
+
+export function buildEvidenceBackedQuestion(
+  question: string,
+  observations: Observation[]
+): string {
+  if (observations.length === 0) {
+    return question;
+  }
+
+  const supplementalObservations = selectSupplementalEvidenceObservations(
+    observations,
+    question
+  );
+  if (supplementalObservations.length === 0) {
+    return question;
+  }
+
+  const sections: string[] = [
+    question,
+    "",
+    "Supplemental evidence already gathered in this chat:",
+  ];
+  for (const observation of supplementalObservations) {
+    sections.push(`- Tool: ${observation.tool}`);
+    sections.push(`  Summary: ${observation.summary}`);
+    for (const artifact of observation.artifacts) {
+      sections.push(`  Source: [${artifact.kind}] ${artifact.title}`);
+    }
+    if (observation.content) {
+      sections.push(observation.content);
+    }
+    sections.push("");
+  }
+  return sections.join("\n");
+}
+
+function buildConversationPrompt(
+  history: ChatAgentConversationEntry[],
+  userMessage: string
+): string {
+  const sections: string[] = [];
+  if (history.length > 0) {
+    sections.push("Conversation so far:");
+    for (const entry of history.slice(-6)) {
+      sections.push(`${entry.role.toUpperCase()}: ${entry.content}`);
+    }
+    sections.push("");
+  }
+  sections.push(userMessage);
+  return sections.join("\n");
+}
