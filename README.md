@@ -56,7 +56,14 @@ npm run check
 
 ## Documentation
 
-<<<<<<< HEAD
+- [Documentation index](docs/README.md)
+- [Architecture overview](docs/architecture.md)
+- [Project structure](docs/project-structure.md)
+- [Development guide](docs/development.md)
+- [Contributing guide](CONTRIBUTING.md)
+
+## Interactive Shell
+
 1. **Start in global chat** — open directly into a persistent home session
 2. **Move between scopes** — global, course, and workspace all use the same shell
 3. **Open pickers from commands** — `/courses`, `/recent`, `/assignments`, `/open`
@@ -82,17 +89,7 @@ The interactive TUI uses persistent chat sessions stored under `.canvas-cli/chat
 - Each workspace gets its own persistent workspace session
 
 Reopening a course or workspace restores the prior thread instead of starting from scratch.
-=======
-- [Documentation index](docs/README.md)
-- [Architecture overview](docs/architecture.md)
-- [Project structure](docs/project-structure.md)
-- [Development guide](docs/development.md)
-- [Contributing guide](CONTRIBUTING.md)
->>>>>>> main
 
-## Conventions
-
-<<<<<<< HEAD
 ```
 $ canvas-cli
 
@@ -741,91 +738,13 @@ By default, `canvas-cli` optimizes for relevance over completeness:
 
 ## Project Structure
 
-```
-src/
-  cli.ts                          — Entry point (TUI default + CLI subcommands)
-  tui/
-    app.ts                        — Interactive TUI state machine
-    picker.ts                     — Arrow-key list picker component
-    app-runtime.ts                — Chat-native shell runtime and scope orchestration
-    chat-shell.ts                 — Shared transcript, input, and shell rendering
-    chat-agent.ts                 — Evidence-aware workspace chat agent
-    screen.ts                     — ANSI terminal utilities
-    services.ts                   — Service layer wrapping existing logic
-  errors.ts                       — Shared error handling
-  ai/
-    types.ts                      — AI overview types
-    provider.ts                   — AI provider abstraction (Anthropic)
-    prompts.ts                    — System/user prompt construction
-    context-bundle.ts             — Assemble context for AI from enrichment
-    parse.ts                      — Parse structured AI response
-    generate-overview.ts          — AI overview pipeline orchestrator
-  work/
-    types.ts                      — AssignmentWorkup, InvestigationState types
-    orchestrator.ts               — Bounded tool-calling investigation loop
-    tools.ts                      — Tool definitions for the agent
-    tool-handlers.ts              — Tool execution (search, read, extract)
-    synthesis.ts                  — Final structured synthesis pass
-    workspace.ts                  — Rich workspace creation
-    generate-markdown.ts          — assignment.md and plan.md generation
-  ask/
-    types.ts                      — WorkspaceAnswer, ContentChunk types
-    resolve-workspace.ts          — Find active workspace
-    load-workspace.ts             — Load workspace artifacts
-    retrieve.ts                   — BM25 keyword retrieval over chunks
-    answer.ts                     — Grounded QA via LLM
-    render.ts                     — Terminal output rendering
-  commands/
-    courses.ts                    — courses command
-    assignments.ts                — assignments command
-    show-assignment.ts            — show assignment detail command
-    do-assignment.ts              — do command (basic workspace)
-    work.ts                       — work command (AI-powered deep workspace)
-    ask.ts                        — ask command (workspace QA)
-    ingest-course.ts              — ingest command (course ingestion)
-  canvas/
-    client.ts                     — Canvas REST API client
-    types.ts                      — Raw Canvas API types
-  domain/
-    models.ts                     — Normalized internal types
-    normalize.ts                  — Canvas → internal mapping
-    course-relevance.ts           — Course relevance heuristics
-    assignment-relevance.ts       — Assignment filtering logic
-    matching.ts                   — Course and assignment matching
-    sorting.ts                    — Urgency-based sorting
-    resolve-assignment.ts         — Shared assignment resolution logic
-  enrich/
-    types.ts                      — Enriched assignment types
-    enrich-assignment.ts          — Core enrichment logic
-    cache-loader.ts               — Load course cache from disk
-    matchers.ts                   — Title similarity matching
-    scoring.ts                    — Weak description, submission shell, confidence
-  ingest/
-    types.ts                      — Ingestion-specific normalized types
-    slug.ts                       — Course slug generation, paths
-    ingest-course.ts              — Main ingestion pipeline orchestrator
-    fetch-course-content.ts       — Fetch all course data from Canvas
-    normalize-content.ts          — Normalize raw API data for storage
-    syllabus-heuristics.ts        — Identify likely syllabus sources
-    attachment-selection.ts       — Select which files to download
-    attachment-download.ts        — Download selected attachments
-    storage.ts                    — Write artifacts to local filesystem
-  format/
-    renderCourses.ts              — Course list formatting
-    renderAssignments.ts          — Assignment list formatting
-    renderAssignmentDetail.ts     — Single assignment detail view
-    render-ingestion-summary.ts   — Ingestion result formatting
-    html-to-text.ts               — HTML → terminal text converter
-  workspace/
-    paths.ts                      — Slug generation, workspace paths
-    session.ts                    — Session metadata types
-    create.ts                     — Workspace creation logic
-    assignment-markdown.ts        — assignment.md generation
-  config/
-    env.ts                        — Environment variable loading
-```
-=======
 - `src/` is the source root and `dist/` is build output.
+- `src/tui/` contains the chat-native shell, scope runtime, and interactive workflows.
+- `src/workspace/` owns workspace lifecycle orchestration, workspace creation, and persisted session files.
+- `src/work/` contains the bounded assignment investigation pipeline and synthesis logic.
+- `src/ingest/`, `src/enrich/`, and `src/knowledge/` handle local course caching, enrichment, and retrieval.
+- `src/commands/` keeps the non-interactive CLI entrypoints.
+- `tests/` covers workspace lifecycle, chat grounding, and regression behavior.
 - Source folders are organized by responsibility rather than by command surface alone.
 - New source files should use kebab-case names.
->>>>>>> main
+- For the up-to-date detailed map, use [Project structure](docs/project-structure.md).
