@@ -1,5 +1,8 @@
 import chalk from "chalk";
 
+let lastFlushedRows: Array<string | null> | null = null;
+let lastFlushedSize = "";
+
 // --- Pale blue color palette ---
 export const C = {
   primary: chalk.hex("#7aa2f7"),
@@ -75,8 +78,14 @@ class ScreenBuffer {
     const { rows, cols } = getTermSize();
     const reserve = Math.max(0, bottomReserveRows);
     const maxContentLines = Math.max(1, rows - reserve);
+    const screenSizeKey = `${rows}:${cols}`;
     const normalizeLine = (line: string): string => `\x1B[0m${line}\x1B[0m`;
     const maxVisibleCols = Math.max(1, cols - 1);
+
+    if (lastFlushedSize !== screenSizeKey) {
+      lastFlushedRows = null;
+      lastFlushedSize = screenSizeKey;
+    }
 
     // Truncate lines to terminal width so they never wrap
     let rendered = this.lines.map((line) => {
@@ -100,12 +109,25 @@ class ScreenBuffer {
       rendered.push("");
     }
 
-    const writes: string[] = ["\x1B[0m"];
+    const writes: string[] = [];
     for (let row = 0; row < rows; row++) {
+      if (lastFlushedRows?.[row] === rendered[row]) {
+        continue;
+      }
+      if (writes.length === 0) {
+        writes.push("\x1B[0m");
+      }
       writes.push(`\x1B[${row + 1};1H\x1B[0m\x1B[2K${rendered[row]!}`);
     }
-    writes.push("\x1B[0m");
-    process.stdout.write(writes.join(""));
+
+    if (writes.length > 0) {
+      writes.push("\x1B[0m");
+      process.stdout.write(writes.join(""));
+    }
+
+    lastFlushedRows = rendered.map((line, index) =>
+      index >= rows - reserve ? null : line
+    );
 
     this.lines = [];
   }
@@ -118,6 +140,8 @@ export function createBuffer(): ScreenBuffer {
 
 /** Clear the terminal screen and move cursor to top-left (used only for full transitions). */
 export function clearScreen(): void {
+  lastFlushedRows = null;
+  lastFlushedSize = "";
   process.stdout.write("\x1B[2J\x1B[H");
 }
 
@@ -137,11 +161,15 @@ export function showCursor(): void {
  * from past writes (which looks like “scrolling” hides your prompt).
  */
 export function enterAlternateScreen(): void {
+  lastFlushedRows = null;
+  lastFlushedSize = "";
   process.stdout.write("\x1B[?1049h");
 }
 
 /** Restore the normal screen buffer; call when leaving a full-screen TUI. */
 export function leaveAlternateScreen(): void {
+  lastFlushedRows = null;
+  lastFlushedSize = "";
   process.stdout.write("\x1B[?1049l");
 }
 
