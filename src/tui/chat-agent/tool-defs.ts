@@ -88,23 +88,6 @@ const OPEN_RESOURCE_TOOL: ToolDefinition = {
   },
 };
 
-const OPEN_LECTURE_TOOL: ToolDefinition = {
-  name: "open_lecture",
-  description:
-    "Find and open lecture content (video, slides, or page). Use when the user asks about lectures, recordings, or slides.",
-  parameters: {
-    type: "object",
-    properties: {
-      query: {
-        type: "string",
-        description:
-          "Lecture number, title keyword, or content type (e.g. '13', 'lecture 13 slides', 'video')",
-      },
-    },
-    required: ["query"],
-  },
-};
-
 export function getAvailableChatToolNames(
   ctx: Pick<ChatAgentContext, "cache" | "client">
 ): string[] {
@@ -129,10 +112,6 @@ export function buildChatTools(
   }
 
   tools.push(OPEN_RESOURCE_TOOL);
-
-  if (ctx.cache) {
-    tools.push(OPEN_LECTURE_TOOL);
-  }
 
   return tools;
 }
@@ -172,12 +151,6 @@ export function mapToolCall(
       return {
         action: "open",
         target: (input.query as string) ?? "resource",
-        color: "green",
-      };
-    case "open_lecture":
-      return {
-        action: "open",
-        target: (input.query as string) ?? "lecture",
         color: "green",
       };
     default:
