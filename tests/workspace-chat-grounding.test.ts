@@ -245,6 +245,33 @@ test("workspace retrieval gate prefers workup, then direct reads, then prior mem
   });
 });
 
+test("workspace retrieval gate does not trust token overlap for due-date questions when workup has no due date", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+    const emptyRunState = {
+      observations: [],
+      readArtifactIds: [],
+      stepCount: 0,
+    };
+
+    loaded.workupJson = {
+      overview: "Implement the datapath and explain branch behavior.",
+      deliverables: ["Waveform screenshot", "Short analysis"],
+    };
+
+    const decision = await decideWorkspaceRetrieval({
+      question: "When is it due, and what do I need to submit?",
+      runState: emptyRunState,
+      loaded,
+      cache,
+    });
+
+    assert.notEqual(decision.action, "answer_from_workup");
+  });
+});
+
 test("workspace answer verification derives sources and confidence deterministically", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
