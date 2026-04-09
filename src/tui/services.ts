@@ -4,14 +4,10 @@ import { normalizeCourse, normalizeAssignment } from "../domain/normalize.js";
 import { filterRelevantAssignments } from "../domain/assignment-relevance.js";
 import { sortByUrgency } from "../domain/sorting.js";
 import { loadCourseCache, type CourseCache } from "../enrich/cache-loader.js";
-import { enrichAssignmentDetail } from "../enrich/enrich-assignment.js";
 import {
   normalizeAssignmentDetail,
 } from "../domain/normalize.js";
 import { matchAssignments } from "../domain/matching.js";
-import { ingestCourse } from "../ingest/ingest-course.js";
-import { runInvestigation } from "../work/orchestrator.js";
-import { createWorkWorkspace } from "../workspace/create.js";
 import { loadWorkspace } from "../ask/load-workspace.js";
 // buildChunks, retrieveRelevant, answerQuestion now used by chat-agent.ts
 import { getAIConfig, type AIProviderConfig } from "../ai/provider.js";
@@ -20,6 +16,7 @@ import {
   getSessionsRoot,
   getWorkspacePath,
 } from "../workspace/paths.js";
+import { runWorkspaceLifecycle } from "../workspace/lifecycle.js";
 import { listWorkspaces } from "../ask/resolve-workspace.js";
 import {
   loadWorkspaceSessionMeta,
@@ -250,84 +247,39 @@ export async function openWorkspace(
     return loadExistingWorkspaceResult(wsPath, course, onProgress);
   }
 
-  await persistWorkspaceLifecycleState(wsPath, detail, course, "creating");
-
-  try {
-    // Step 3: Check ingestion cache
-    onProgress("checking course cache");
-    let cache = await loadCourseCache(course.courseCode, course.id);
-
-    if (!cache) {
-      // Need to ingest first
-      await persistWorkspaceLifecycleState(wsPath, detail, course, "ingesting");
-      onProgress("ingesting course data");
-      await ingestCourse(course, services.client, services.config, {
-        refresh: false,
-      });
-      onProgress("course ingested");
-      cache = await loadCourseCache(course.courseCode, course.id);
-      await persistWorkspaceLifecycleState(wsPath, detail, course, "creating");
-    }
-
-    if (!cache) {
-      throw new Error("Failed to load course cache after ingestion");
-    }
-
-    // Step 4: Run work pipeline
-    if (!services.aiConfig) {
-      throw new Error(
-        "ANTHROPIC_API_KEY not set — cannot run assignment workup"
+  const lifecycle = await runWorkspaceLifecycle({
+    aiConfig: services.aiConfig,
+    detail,
+    course,
+    client: services.client,
+    config: services.config,
+    cachePolicy: "ensure_present",
+    onProgress,
+    onStateChange: async (workspaceState, lastError) => {
+      await persistWorkspaceLifecycleState(
+        wsPath,
+        detail,
+        course,
+        workspaceState,
+        lastError ?? null
       );
-    }
+    },
+  });
 
-    onProgress("enriching assignment");
-    const enriched = enrichAssignmentDetail(detail, cache);
+  onProgress("workspace ready");
+  const loaded = await loadWorkspace(lifecycle.result.workspacePath);
+  const lifecycleState = await syncLoadedWorkspaceLifecycle(
+    lifecycle.result.workspacePath,
+    loaded,
+    course
+  );
 
-    onProgress("investigating assignment");
-    const investigation = await runInvestigation(
-      services.aiConfig,
-      detail,
-      course,
-      enriched.enrichment,
-      cache,
-      services.client,
-      services.config,
-      (phase) => onProgress(phase)
-    );
-
-    onProgress("creating workspace");
-    const result = await createWorkWorkspace(
-      detail,
-      course,
-      investigation.workup,
-      investigation.state,
-      services.config
-    );
-
-    onProgress("workspace ready");
-    const loaded = await loadWorkspace(result.workspacePath);
-    const lifecycleState = await syncLoadedWorkspaceLifecycle(
-      result.workspacePath,
-      loaded,
-      course
-    );
-
-    return {
-      workspacePath: result.workspacePath,
-      workup: investigation.workup,
-      loaded,
-      lifecycleState,
-    };
-  } catch (error) {
-    await persistWorkspaceLifecycleState(
-      wsPath,
-      detail,
-      course,
-      "error",
-      error instanceof Error ? error.message : "unknown error"
-    );
-    throw error;
-  }
+  return {
+    workspacePath: lifecycle.result.workspacePath,
+    workup: lifecycle.workup,
+    loaded,
+    lifecycleState,
+  };
 }
 
 async function loadExistingWorkspaceResult(
@@ -456,71 +408,39 @@ export async function refreshWorkspace(
   const slug = makeSessionSlug(course.courseCode, detail.name, detail.id);
   const wsPath = getWorkspacePath(slug);
 
-  await persistWorkspaceLifecycleState(wsPath, detail, course, "refreshing");
+  const lifecycle = await runWorkspaceLifecycle({
+    aiConfig: services.aiConfig,
+    detail,
+    course,
+    client: services.client,
+    config: services.config,
+    cachePolicy: "refresh",
+    onProgress,
+    onStateChange: async (workspaceState, lastError) => {
+      await persistWorkspaceLifecycleState(
+        wsPath,
+        detail,
+        course,
+        workspaceState,
+        lastError ?? null
+      );
+    },
+  });
 
-  try {
-    // Step 2: Force re-ingest
-    onProgress("re-ingesting course data");
-    await ingestCourse(course, services.client, services.config, { refresh: true });
+  onProgress("workspace refreshed");
+  const loaded = await loadWorkspace(lifecycle.result.workspacePath);
+  const lifecycleState = await syncLoadedWorkspaceLifecycle(
+    lifecycle.result.workspacePath,
+    loaded,
+    course
+  );
 
-    // Step 3: Load fresh cache
-    onProgress("loading fresh course cache");
-    const cache = await loadCourseCache(course.courseCode, course.id);
-    if (!cache) throw new Error("Failed to load course cache after re-ingestion");
-
-    // Step 4: Re-run work pipeline
-    if (!services.aiConfig) {
-      throw new Error("ANTHROPIC_API_KEY not set — cannot run assignment workup");
-    }
-
-    onProgress("enriching assignment");
-    const enriched = enrichAssignmentDetail(detail, cache);
-
-    onProgress("investigating assignment");
-    const investigation = await runInvestigation(
-      services.aiConfig,
-      detail,
-      course,
-      enriched.enrichment,
-      cache,
-      services.client,
-      services.config,
-      (phase) => onProgress(phase)
-    );
-
-    onProgress("creating workspace");
-    const result = await createWorkWorkspace(
-      detail,
-      course,
-      investigation.workup,
-      investigation.state,
-      services.config
-    );
-
-    onProgress("workspace refreshed");
-    const loaded = await loadWorkspace(result.workspacePath);
-    const lifecycleState = await syncLoadedWorkspaceLifecycle(
-      result.workspacePath,
-      loaded,
-      course
-    );
-
-    return {
-      workspacePath: result.workspacePath,
-      workup: investigation.workup,
-      loaded,
-      lifecycleState,
-    };
-  } catch (error) {
-    await persistWorkspaceLifecycleState(
-      wsPath,
-      detail,
-      course,
-      "error",
-      error instanceof Error ? error.message : "unknown error"
-    );
-    throw error;
-  }
+  return {
+    workspacePath: lifecycle.result.workspacePath,
+    workup: lifecycle.workup,
+    loaded,
+    lifecycleState,
+  };
 }
 
 // ToolCallEvent is defined in chat-agent.ts

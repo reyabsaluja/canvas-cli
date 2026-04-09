@@ -972,6 +972,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
 
       let assignmentCalls = 0;
       let detailCalls = 0;
+      let courseDetailCalls = 0;
       const services = {
         client: {
           async getAssignments() {
@@ -1012,6 +1013,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
             };
           },
           async getCourseDetail() {
+            courseDetailCalls += 1;
             return {
               id: course.id,
               name: course.name,
@@ -1053,6 +1055,11 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
       );
       assert.equal(assignmentCalls, 1);
       assert.equal(detailCalls, 1);
+      assert.equal(
+        courseDetailCalls,
+        0,
+        "openWorkspace should fail before ingest when AI config is missing"
+      );
     });
   });
 
@@ -1079,6 +1086,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
 
       let assignmentCalls = 0;
       let detailCalls = 0;
+      let courseDetailCalls = 0;
       const services = {
         client: {
           async getAssignments() {
@@ -1110,6 +1118,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
             };
           },
           async getCourseDetail() {
+            courseDetailCalls += 1;
             return {
               id: course.id,
               name: course.name,
@@ -1151,6 +1160,11 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
       );
       assert.equal(assignmentCalls, 0);
       assert.equal(detailCalls, 1);
+      assert.equal(
+        courseDetailCalls,
+        0,
+        "openWorkspace should not ingest when AI config is missing"
+      );
     });
   });
 
@@ -1177,6 +1191,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
 
       let assignmentCalls = 0;
       let detailCalls = 0;
+      let courseDetailCalls = 0;
       const services = {
         client: {
           async getAssignments() {
@@ -1217,6 +1232,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
             };
           },
           async getCourseDetail() {
+            courseDetailCalls += 1;
             return {
               id: course.id,
               name: course.name,
@@ -1268,6 +1284,11 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
         "openWorkspace should reuse cached assignments instead of refetching them"
       );
       assert.equal(detailCalls, 1);
+      assert.equal(
+        courseDetailCalls,
+        0,
+        "openWorkspace should still avoid ingest when AI config is missing"
+      );
     });
   });
 
@@ -1393,7 +1414,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     });
   });
 
-  await t.test("refresh still uses Canvas-backed resolution", async () => {
+  await t.test("refresh still resolves assignment details from Canvas without unnecessary re-ingest", async () => {
     await withTempCwd(async (tempDir) => {
       const course: Course = {
         id: 17,
@@ -1439,6 +1460,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
 
       let assignmentCalls = 0;
       let detailCalls = 0;
+      let courseDetailCalls = 0;
       const services = {
         client: {
           async getAssignments() {
@@ -1479,6 +1501,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
             };
           },
           async getCourseDetail() {
+            courseDetailCalls += 1;
             return {
               id: course.id,
               name: course.name,
@@ -1518,11 +1541,17 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
         refreshWorkspace(services, course, { id: 42, name: "Lab 4" }, () => {}),
         /ANTHROPIC_API_KEY not set/
       );
-      assert.ok(
-        assignmentCalls >= 1,
-        `expected refresh to hit Canvas assignments, saw ${assignmentCalls} calls`
+      assert.equal(
+        assignmentCalls,
+        0,
+        "refreshWorkspace should not list assignments when the assignment id is already known"
       );
       assert.equal(detailCalls, 1);
+      assert.equal(
+        courseDetailCalls,
+        0,
+        "refreshWorkspace should fail before re-ingest when AI config is missing"
+      );
     });
   });
 
