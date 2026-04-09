@@ -43,6 +43,17 @@ export async function decideWorkspaceRetrieval(
     );
     return reusableMemoryArtifactIds;
   };
+  let reusableDiscoveredArtifactId: string | null | undefined;
+  const getReusableDiscoveredArtifactId = (): string | null => {
+    if (reusableDiscoveredArtifactId !== undefined) {
+      return reusableDiscoveredArtifactId;
+    }
+    reusableDiscoveredArtifactId = selectReusableDiscoveredArtifactId(
+      question,
+      input.runState
+    );
+    return reusableDiscoveredArtifactId;
+  };
 
   if (shouldBypassGate(question)) {
     return { action: "let_model_decide", reason: "explicit_tool_request" };
@@ -68,6 +79,14 @@ export async function decideWorkspaceRetrieval(
         action: "answer_from_memory",
         reason: "already_read_relevant_artifact",
         sourceArtifactIds: fallbackMemoryArtifactIds,
+      };
+    }
+    const fallbackDiscoveredArtifactId = getReusableDiscoveredArtifactId();
+    if (fallbackDiscoveredArtifactId) {
+      return {
+        action: "read_artifact",
+        reason: "already_discovered_relevant_artifact",
+        artifactId: fallbackDiscoveredArtifactId,
       };
     }
     return { action: "let_model_decide", reason: "weak_workspace_match" };
@@ -99,6 +118,14 @@ export async function decideWorkspaceRetrieval(
         action: "answer_from_memory",
         reason: "already_read_relevant_artifact",
         sourceArtifactIds: fallbackMemoryArtifactIds,
+      };
+    }
+    const fallbackDiscoveredArtifactId = getReusableDiscoveredArtifactId();
+    if (fallbackDiscoveredArtifactId) {
+      return {
+        action: "read_artifact",
+        reason: "already_discovered_relevant_artifact",
+        artifactId: fallbackDiscoveredArtifactId,
       };
     }
     return { action: "let_model_decide", reason: "recent_artifact_read_failed" };
@@ -321,6 +348,54 @@ function selectReusableMemoryArtifactIds(
     })
     .slice(0, MAX_MEMORY_REUSE_ARTIFACTS)
     .map(([artifactId]) => artifactId);
+}
+
+function selectReusableDiscoveredArtifactId(
+  question: string,
+  runState: RunState
+): string | null {
+  const candidates = runState.observations
+    .map((observation, index) => ({
+      observation,
+      index,
+      score: scoreObservationRelevance(question, observation),
+    }))
+    .filter(
+      (entry) =>
+        entry.score >= MIN_MEMORY_REUSE_SCORE &&
+        isArtifactDiscoveryObservation(entry.observation)
+    )
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+      return right.index - left.index;
+    });
+
+  for (const candidate of candidates) {
+    const artifact = candidate.observation.artifacts.find(
+      (entry) =>
+        !hasReadArtifact(runState, entry.artifactId) &&
+        !hasRecentFailedArtifactRead(runState, entry.artifactId)
+    );
+    if (artifact) {
+      return artifact.artifactId;
+    }
+  }
+
+  return null;
+}
+
+function isArtifactDiscoveryObservation(
+  observation: RunState["observations"][number]
+): boolean {
+  return (
+    observation.status === "ok" &&
+    observation.artifacts.length > 0 &&
+    !observation.content &&
+    (observation.tool === "search_workspace" ||
+      observation.tool === "search_course")
+  );
 }
 
 function hasRecentFailedArtifactRead(

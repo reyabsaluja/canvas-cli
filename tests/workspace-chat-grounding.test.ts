@@ -720,6 +720,48 @@ test("workspace retrieval gate reuses grounded course-file memory when workspace
   });
 });
 
+test("workspace retrieval gate reuses remembered search breadcrumbs when no strong workspace match exists", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+
+    const decision = await decideWorkspaceRetrieval({
+      question: "What does the lab brief say about saturating add mode?",
+      runState: {
+        observations: [
+          {
+            tool: "search_course",
+            status: "ok",
+            summary: 'Found 1 relevant course match for "saturating add mode".',
+            artifacts: [
+              {
+                artifactId:
+                  "course:attachment:attachments/modules/lab4-brief.txt:lab4-brief.txt",
+                title: "lab4-brief.txt",
+                kind: "attachment",
+                excerpt:
+                  "The ALU must support saturating add mode and signed overflow detection.",
+              },
+            ],
+          },
+        ],
+        readArtifactIds: [],
+        stepCount: 1,
+      },
+      loaded,
+      cache,
+    });
+
+    assert.deepEqual(decision, {
+      action: "read_artifact",
+      reason: "already_discovered_relevant_artifact",
+      artifactId:
+        "course:attachment:attachments/modules/lab4-brief.txt:lab4-brief.txt",
+    });
+  });
+});
+
 test("workspace retrieval gate ignores weak remembered course evidence when the question is unrelated", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
