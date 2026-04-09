@@ -1266,6 +1266,87 @@ test("workspace chat reuses downloaded attachment content across tools within a 
   });
 });
 
+test("workspace chat dedupes repeated missing download lookups within a single turn", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      { cache, client: null, config: null, courseId: 17 }
+    );
+    const turnToolCache = new Map();
+
+    const firstAttempt = await executeToolCallForTurn(
+      turnToolCache,
+      "download_course_file",
+      { title: "lab4-brief" },
+      ctx
+    );
+    const secondAttempt = await executeToolCallForTurn(
+      turnToolCache,
+      "download_course_file",
+      { title: "lab4 brief" },
+      ctx
+    );
+
+    assert.equal(firstAttempt.deduped, false);
+    assert.equal(firstAttempt.result.observation.status, "not_found");
+    assert.equal(secondAttempt.deduped, true);
+    assert.equal(secondAttempt.result.observation.status, "not_found");
+    assert.equal(secondAttempt.result.modelText, firstAttempt.result.modelText);
+  });
+});
+
+test("workspace chat dedupes repeated missing read lookups within a single turn", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    const cache = createCourseCache(coursePath);
+    cache.attachments = [
+      {
+        sourceType: "module_linked",
+        canvasFileId: 99,
+        originalFilename: "lab4-brief.txt",
+        localPath: "attachments/modules/lab4-brief.txt",
+        contentType: "text/plain",
+        size: 256,
+        downloadUrl: "https://canvas.example/files/99/download",
+        reason: "downloaded on demand from module item \"lab4-brief.txt\"",
+        status: "downloaded",
+      },
+    ];
+
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      { cache, client: null, config: null, courseId: 17 }
+    );
+    const turnToolCache = new Map();
+
+    const firstAttempt = await executeToolCallForTurn(
+      turnToolCache,
+      "read_file",
+      { filename: "lab4-brief.txt" },
+      ctx
+    );
+    const secondAttempt = await executeToolCallForTurn(
+      turnToolCache,
+      "read_file",
+      { filename: "lab4 brief" },
+      ctx
+    );
+
+    assert.equal(firstAttempt.deduped, false);
+    assert.equal(firstAttempt.result.observation.status, "missing_text");
+    assert.equal(secondAttempt.deduped, true);
+    assert.equal(secondAttempt.result.observation.status, "missing_text");
+    assert.equal(secondAttempt.result.modelText, firstAttempt.result.modelText);
+  });
+});
+
 test("run-state compaction keeps grounded reads while trimming stale transient observations", () => {
   const runState = createEmptyRunState();
 
