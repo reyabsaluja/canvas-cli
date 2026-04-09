@@ -1511,6 +1511,62 @@ test("tool-turn verification keeps current-turn evidence only when the turn alre
   assert.equal(currentTurn[0]?.tool, "download_course_file");
 });
 
+test("tool-turn verification keeps prior relevant grounding when current-turn grounded reads are irrelevant", () => {
+  const observations: Observation[] = [
+    {
+      tool: "read_file",
+      status: "ok",
+      summary: "Read docs/reference.txt.",
+      artifacts: [
+        {
+          artifactId: "artifact-branch",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          excerpt: "The waveform must show stall cycles around the branch hazard.",
+        },
+      ],
+      content: "The waveform must show stall cycles around the branch hazard.",
+    },
+    {
+      tool: "read_file",
+      status: "ok",
+      summary: "Read docs/resistor-table.txt.",
+      artifacts: [
+        {
+          artifactId: "artifact-resistors",
+          title: "docs/resistor-table.txt",
+          kind: "extracted",
+          excerpt: "Use 220 ohm and 1k ohm resistors in the LED test harness.",
+        },
+      ],
+      content: "Use 220 ohm and 1k ohm resistors in the LED test harness.",
+    },
+    {
+      tool: "search_workspace",
+      status: "ok",
+      summary: "Found a workspace match for branch hazard.",
+      artifacts: [
+        {
+          artifactId: "artifact-branch",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          excerpt: "The waveform must show stall cycles around the branch hazard.",
+        },
+      ],
+    },
+  ];
+
+  const fallback = resolveToolTurnVerificationObservations(
+    observations,
+    1,
+    "Explain the branch hazard requirement in detail."
+  );
+  assert.equal(fallback.length, 3);
+  assert.equal(fallback[0]?.summary, "Read docs/reference.txt.");
+  assert.equal(fallback[1]?.summary, "Read docs/resistor-table.txt.");
+  assert.equal(fallback[2]?.summary, "Found a workspace match for branch hazard.");
+});
+
 test("tool-loop recovery only triggers when the loop produced no answer but gathered usable evidence", () => {
   assert.equal(
     shouldRecoverFromToolLoop("", [

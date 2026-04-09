@@ -1618,7 +1618,14 @@ export function resolveToolTurnVerificationObservations(
     return selectSupplementalEvidenceObservations(observations, question);
   }
 
-  if (currentTurn.some((observation) => isGroundedContentObservation(observation))) {
+  const currentTurnGrounded = currentTurn.filter((observation) =>
+    isGroundedContentObservation(observation)
+  );
+  if (
+    currentTurnGrounded.length > 0 &&
+    (!question ||
+      selectRelevantObservations(currentTurnGrounded, question, 1).length > 0)
+  ) {
     return currentTurn;
   }
 
