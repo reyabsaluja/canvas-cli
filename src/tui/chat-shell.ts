@@ -1140,22 +1140,53 @@ export async function runChatShell<TExit>(
       }
 
       if (key.length === 1 && key >= " ") {
-        const hadOverlay = hasVisibleOverlay();
-        inputBuffer += key;
-        showSlashMenu = inputBuffer.startsWith("/");
-        const nextInputState = getInputState();
-        if (nextInputState.activeOpenPartial !== null) {
-          openSelected = 0;
-        } else if (nextInputState.activePinPartial !== null) {
-          pinSelected = 0;
-        } else if (showSlashMenu) {
-          slashSelected = 0;
-        }
-        renderAfterInputMutation(hadOverlay, nextInputState);
+        await handleTextInputChunk(key);
       }
     }
 
+    async function handleTextInputChunk(text: string): Promise<void> {
+      if (shellClosed || !text || isProcessing) return;
+
+      const hadOverlay = hasVisibleOverlay();
+      inputBuffer += text;
+      showSlashMenu = inputBuffer.startsWith("/");
+
+      const nextInputState = getInputState();
+      if (nextInputState.activeOpenPartial !== null) {
+        openSelected = 0;
+      } else if (nextInputState.activePinPartial !== null) {
+        pinSelected = 0;
+      } else if (showSlashMenu) {
+        slashSelected = 0;
+      }
+
+      renderAfterInputMutation(hadOverlay, nextInputState);
+    }
+
     let stdinEscHold = "";
+    function enqueueInputChunk(chunk: string): void {
+      if (!chunk) return;
+
+      let textBuffer = "";
+      const flushTextBuffer = (): void => {
+        if (!textBuffer) return;
+        const next = textBuffer;
+        textBuffer = "";
+        keyQueue.enqueue(() => handleTextInputChunk(next));
+      };
+
+      for (const char of Array.from(chunk)) {
+        if (!/[\x00-\x1f\x7f]/.test(char)) {
+          textBuffer += char;
+          continue;
+        }
+        flushTextBuffer();
+        keyQueue.enqueue(() => handleKey(char));
+      }
+
+      flushTextBuffer();
+    }
+
     function onData(data: string): void {
       if (shellClosed) return;
       let input = stdinEscHold + data;
@@ -1164,17 +1195,11 @@ export async function runChatShell<TExit>(
       while (input.length > 0) {
         const escIdx = input.indexOf("\x1b");
         if (escIdx < 0) {
-          for (let index = 0; index < input.length; index++) {
-            const key = input[index]!;
-            keyQueue.enqueue(() => handleKey(key));
-          }
+          enqueueInputChunk(input);
           return;
         }
 
-        for (let index = 0; index < escIdx; index++) {
-          const key = input[index]!;
-          keyQueue.enqueue(() => handleKey(key));
-        }
+        enqueueInputChunk(input.slice(0, escIdx));
         input = input.slice(escIdx);
 
         if (input.length === 1) {
