@@ -284,5 +284,30 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.equal(verifiedFromWorkup.ok, true);
     assert.equal(verifiedFromWorkup.confidence, "medium");
     assert.equal(verifiedFromWorkup.sources[0]?.title, "workup.json");
+
+    const verifiedFromMissingText = verifyWorkspaceAnswer({
+      answer: "I think the spec might mention a waveform screenshot.",
+      observations: [
+        {
+          tool: "read_file",
+          status: "missing_text",
+          summary: "Matched lab4-spec.pdf, but the cached extracted text is missing.",
+          artifacts: [
+            {
+              artifactId: "artifact-2",
+              title: "lab4-spec.pdf",
+              kind: "attachment",
+              excerpt: "The specification requires a waveform screenshot and short analysis.",
+            },
+          ],
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedFromMissingText.ok, false);
+    assert.equal(verifiedFromMissingText.confidence, "low");
+    assert.deepEqual(verifiedFromMissingText.sources, []);
+    assert.deepEqual(verifiedFromMissingText.missing, ["source"]);
   });
 });
