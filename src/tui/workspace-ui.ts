@@ -88,6 +88,11 @@ type TranscriptIndexState = {
   totalLines: number;
   dirtyFrom: number;
 };
+type CachedRowsState = {
+  rows: string[] | null;
+  screenSize: string;
+  startRow: number;
+};
 type InputState = {
   activePinPartial: string | null;
   pinMatches: Array<{ name: string; label: string }>;
@@ -119,17 +124,14 @@ export async function runWorkspaceUI(
   let renderTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingTextInput = "";
   let pendingTextInputFlushQueued = false;
-  let lastFooterRows: string[] | null = null;
-  let lastFooterScreenSize = "";
-  let lastOverlayRows: string[] | null = null;
-  let lastOverlayStartRow = -1;
-  let lastOverlayScreenSize = "";
   let totalMessageChars = 0;
   let archivedMessageCount = 0;
   let archivedMessageChars = 0;
   let archiveNoticeMessage: ChatMessage | null = null;
   let inputStateCacheKey = "";
   let inputStateCache: InputState | null = null;
+  const footerRenderCache = createCachedRowsState();
+  const overlayRenderCache = createCachedRowsState();
 
   let renderCache = new WeakMap<ChatMessage, RenderCacheEntry>();
   const transcriptIndexes = {
@@ -207,6 +209,14 @@ export async function runWorkspaceUI(
       cumulativeEnds: [],
       totalLines: 0,
       dirtyFrom: 0,
+    };
+  }
+
+  function createCachedRowsState(): CachedRowsState {
+    return {
+      rows: null,
+      screenSize: "",
+      startRow: -1,
     };
   }
 
@@ -455,87 +465,68 @@ export async function runWorkspaceUI(
   }
 
   function resetPartialRenderCaches(): void {
-    lastFooterRows = null;
-    lastFooterScreenSize = "";
-    lastOverlayRows = null;
-    lastOverlayStartRow = -1;
-    lastOverlayScreenSize = "";
+    resetCachedRowsState(footerRenderCache);
+    resetCachedRowsState(overlayRenderCache);
+  }
+
+  function resetCachedRowsState(cache: CachedRowsState): void {
+    cache.rows = null;
+    cache.screenSize = "";
+    cache.startRow = -1;
+  }
+
+  function writeCachedRows(
+    cache: CachedRowsState,
+    startRow: number,
+    rows: string[]
+  ): void {
+    const { rows: totalRows, cols } = getTermSize();
+    const screenSizeKey = `${totalRows}:${cols}`;
+    const normalized = rows.map((line) => padAnsiToWidth(line, cols));
+
+    if (
+      cache.screenSize !== screenSizeKey ||
+      cache.startRow !== startRow ||
+      !cache.rows ||
+      cache.rows.length !== normalized.length
+    ) {
+      cache.rows = null;
+      cache.screenSize = screenSizeKey;
+      cache.startRow = startRow;
+    }
+
+    const writes: string[] = [];
+    for (let index = 0; index < normalized.length; index++) {
+      if (cache.rows?.[index] === normalized[index]) {
+        continue;
+      }
+      if (writes.length === 0) {
+        writes.push("\x1B[0m");
+      }
+      writes.push(`\x1B[${startRow + index};1H\x1B[0m\x1B[2K${normalized[index]!}`);
+    }
+    if (writes.length > 0) {
+      writes.push("\x1B[0m");
+      process.stdout.write(writes.join(""));
+    }
+
+    cache.rows = normalized.slice();
   }
 
   function writeFooterRows(rows: string[]): void {
-    const { rows: totalRows, cols } = getTermSize();
-    const screenSizeKey = `${totalRows}:${cols}`;
-    const normalized = rows.map((line) => padAnsiToWidth(line, cols));
-
-    if (
-      lastFooterScreenSize !== screenSizeKey ||
-      !lastFooterRows ||
-      lastFooterRows.length !== normalized.length
-    ) {
-      lastFooterRows = null;
-      lastFooterScreenSize = screenSizeKey;
-    }
-
-    const startRow = totalRows - NORMAL_FOOTER_ROWS + 1;
-    const writes: string[] = [];
-    for (let index = 0; index < normalized.length; index++) {
-      if (lastFooterRows?.[index] === normalized[index]) {
-        continue;
-      }
-      if (writes.length === 0) {
-        writes.push("\x1B[0m");
-      }
-      writes.push(`\x1B[${startRow + index};1H\x1B[0m\x1B[2K${normalized[index]!}`);
-    }
-    if (writes.length > 0) {
-      writes.push("\x1B[0m");
-      process.stdout.write(writes.join(""));
-    }
-
-    lastFooterRows = normalized.slice();
+    const { rows: totalRows } = getTermSize();
+    writeCachedRows(footerRenderCache, totalRows - NORMAL_FOOTER_ROWS + 1, rows);
   }
 
   function writeOverlayRows(rows: string[]): void {
-    const { rows: totalRows, cols } = getTermSize();
-    const screenSizeKey = `${totalRows}:${cols}`;
-
     if (rows.length === 0) {
-      lastOverlayRows = null;
-      lastOverlayStartRow = -1;
-      lastOverlayScreenSize = screenSizeKey;
+      resetCachedRowsState(overlayRenderCache);
       return;
     }
 
-    const normalized = rows.map((line) => padAnsiToWidth(line, cols));
-    const startRow = totalRows - NORMAL_FOOTER_ROWS - normalized.length + 1;
-
-    if (
-      lastOverlayScreenSize !== screenSizeKey ||
-      lastOverlayStartRow !== startRow ||
-      !lastOverlayRows ||
-      lastOverlayRows.length !== normalized.length
-    ) {
-      lastOverlayRows = null;
-      lastOverlayStartRow = startRow;
-      lastOverlayScreenSize = screenSizeKey;
-    }
-
-    const writes: string[] = [];
-    for (let index = 0; index < normalized.length; index++) {
-      if (lastOverlayRows?.[index] === normalized[index]) {
-        continue;
-      }
-      if (writes.length === 0) {
-        writes.push("\x1B[0m");
-      }
-      writes.push(`\x1B[${startRow + index};1H\x1B[0m\x1B[2K${normalized[index]!}`);
-    }
-    if (writes.length > 0) {
-      writes.push("\x1B[0m");
-      process.stdout.write(writes.join(""));
-    }
-
-    lastOverlayRows = normalized.slice();
+    const { rows: totalRows } = getTermSize();
+    const startRow = totalRows - NORMAL_FOOTER_ROWS - rows.length + 1;
+    writeCachedRows(overlayRenderCache, startRow, rows);
   }
 
   function writeFrame(lines: string[]): void {
