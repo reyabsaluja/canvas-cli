@@ -397,6 +397,116 @@ test("workspace retrieval gate skips a recently failed direct-read artifact and 
   });
 });
 
+test("workspace retrieval gate falls back to grounded memory when all strong workspace matches recently failed", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+
+    const relativePath = path.join("extracted", "docs", "saturating-add-notes.txt");
+    await fs.writeFile(
+      path.join(loaded.path, relativePath),
+      [
+        "Saturating add mode requirement notes.",
+        "Saturating add mode requirement notes.",
+        "Saturating add mode requirement notes.",
+      ].join("\n"),
+      "utf-8"
+    );
+    loaded.extractedFiles.push({
+      name: "docs/saturating-add-notes.txt",
+      relativePath,
+    });
+    clearArtifactIndexCache();
+
+    const matches = await searchWorkspaceKnowledge(
+      loaded,
+      cache,
+      "saturating add mode requirement",
+      3
+    );
+    assert.ok(matches.length >= 1);
+    const failedWorkspaceArtifacts = [
+      ...matches.map((match) => ({
+        artifactId: match.artifact.id,
+        title: match.artifact.title,
+        kind: "extracted" as const,
+      })),
+      {
+        artifactId: "workspace:assignment:assignment.md",
+        title: "assignment.md",
+        kind: "assignment" as const,
+      },
+      {
+        artifactId: "workspace:plan:plan.md",
+        title: "plan.md",
+        kind: "plan" as const,
+      },
+      {
+        artifactId: "workspace:workup:workup.json",
+        title: "workup.json",
+        kind: "workup" as const,
+      },
+      {
+        artifactId: "workspace:extracted:docs/reference.txt",
+        title: "docs/reference.txt",
+        kind: "extracted" as const,
+      },
+    ];
+
+    const decision = await decideWorkspaceRetrieval({
+      question: "What does the saturating add mode requirement say?",
+      runState: {
+        observations: [
+          ...failedWorkspaceArtifacts.map((artifact) => ({
+            tool: "read_file" as const,
+            status: "missing_text" as const,
+            summary: `Matched ${artifact.title}, but readable text is missing.`,
+            artifacts: [
+              {
+                artifactId: artifact.artifactId,
+                title: artifact.title,
+                kind: artifact.kind,
+              },
+            ],
+          })),
+          {
+            tool: "download_course_file",
+            status: "ok",
+            summary: "Downloaded and extracted lab4-brief.txt.",
+            artifacts: [
+              {
+                artifactId:
+                  "course:attachment:attachments/modules/lab4-brief.txt:lab4-brief.txt",
+                title: "lab4-brief.txt",
+                kind: "attachment",
+                excerpt:
+                  "The ALU must support saturating add mode and signed overflow detection.",
+              },
+            ],
+            content:
+              "The ALU must support saturating add mode and signed overflow detection.",
+          },
+        ],
+        readArtifactIds: [
+          "course:attachment:attachments/modules/lab4-brief.txt:lab4-brief.txt",
+        ],
+        stepCount: failedWorkspaceArtifacts.length + 1,
+      },
+      loaded,
+      cache,
+    });
+
+    assert.deepEqual(decision, {
+      action: "answer_from_memory",
+      reason: "already_read_relevant_artifact",
+      sourceArtifactIds: [
+        "course:attachment:attachments/modules/lab4-brief.txt:lab4-brief.txt",
+      ],
+    });
+  });
+});
+
 test("workspace retrieval gate reuses multiple already-read strong matches before rereading", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
