@@ -1375,6 +1375,46 @@ test("memory prompts fall back to the raw question when no successful evidence e
   );
 });
 
+test("memory prompts prefer relevant search evidence over irrelevant grounded reads", () => {
+  const prompt = buildEvidenceBackedQuestion(
+    "Explain the branch hazard requirement in detail.",
+    [
+      {
+        tool: "read_file",
+        status: "ok",
+        summary: "Read docs/resistor-table.txt.",
+        artifacts: [
+          {
+            artifactId: "artifact-3",
+            title: "docs/resistor-table.txt",
+            kind: "extracted",
+            excerpt: "Use 220 ohm and 1k ohm resistors in the LED test harness.",
+          },
+        ],
+        content: "Use 220 ohm and 1k ohm resistors in the LED test harness.",
+      },
+      {
+        tool: "search_workspace",
+        status: "ok",
+        summary: "Found a workspace match for branch hazard.",
+        artifacts: [
+          {
+            artifactId: "artifact-1",
+            title: "docs/reference.txt",
+            kind: "extracted",
+            excerpt: "The waveform must show stall cycles around the branch hazard.",
+          },
+        ],
+      },
+    ]
+  );
+
+  assert.match(prompt, /docs\/reference\.txt/);
+  assert.match(prompt, /branch hazard/i);
+  assert.doesNotMatch(prompt, /docs\/resistor-table\.txt/);
+  assert.doesNotMatch(prompt, /220 ohm/i);
+});
+
 test("tool-turn verification falls back to prior grounded evidence when no new tools run", () => {
   const observations: Observation[] = [
     {
