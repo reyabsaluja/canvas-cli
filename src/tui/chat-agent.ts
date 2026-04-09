@@ -419,12 +419,10 @@ async function runToolLoopTurn(
   }> = []
 ): Promise<ToolLoopRunResult> {
   const pendingToolResults: ToolExecutionResult[] = [];
-  const turnToolCache: TurnToolCache = new Map(
-    initialToolCacheEntries.map((entry) => [
-      buildTurnToolCacheKey(entry.name, entry.input),
-      entry.result,
-    ])
-  );
+  const turnToolCache: TurnToolCache = new Map();
+  for (const entry of initialToolCacheEntries) {
+    seedTurnToolCacheEntry(turnToolCache, entry.name, entry.input, entry.result);
+  }
   const promptMessages = buildToolPromptMessages(
     ctx.conversationHistory,
     question,
@@ -740,12 +738,7 @@ export async function executeToolCallForTurn(
   // Keep dedupe scoped to a single chat turn so we avoid repeated local reads
   // and searches without changing any cross-turn grounding behavior.
   const result = await executeToolCallDetailed(name, input, ctx);
-  turnToolCache.set(cacheKey, result);
-  if (!isGroundedContentObservation(result.observation)) {
-    for (const aliasKey of buildSemanticTurnToolAliasKeys(name, input)) {
-      turnToolCache.set(aliasKey, result);
-    }
-  }
+  seedTurnToolCacheEntry(turnToolCache, name, input, result);
   return { result, deduped: false };
 }
 
@@ -754,6 +747,21 @@ export function buildTurnToolCacheKey(
   input: Record<string, unknown>
 ): string {
   return `${name}:${normalizeToolInput(input)}`;
+}
+
+export function seedTurnToolCacheEntry(
+  turnToolCache: TurnToolCache,
+  name: string,
+  input: Record<string, unknown>,
+  result: ToolExecutionResult
+): void {
+  turnToolCache.set(buildTurnToolCacheKey(name, input), result);
+  if (isGroundedContentObservation(result.observation)) {
+    return;
+  }
+  for (const aliasKey of buildSemanticTurnToolAliasKeys(name, input)) {
+    turnToolCache.set(aliasKey, result);
+  }
 }
 
 function buildSemanticTurnToolAliasKeys(
