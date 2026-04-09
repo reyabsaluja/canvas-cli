@@ -3,6 +3,7 @@ import {
   C,
   createBuffer,
   getTermSize,
+  invalidateScreenRows,
   stripAnsi,
   truncateAnsiToWidth,
 } from "./screen.js";
@@ -22,6 +23,9 @@ const toolTargetRed = chalk.hex("#f7768e");
 const statusBarGrey = chalk.hex("#9ca3af");
 let lastStickyBottomRows: string[] | null = null;
 let lastStickyBottomScreenSize = "";
+let lastOverlayRows: string[] | null = null;
+let lastOverlayStartRow = -1;
+let lastOverlayScreenSize = "";
 
 export const STICKY_BOTTOM_ROWS = 4;
 const CHAT_GAP_ROWS = 2;
@@ -52,6 +56,9 @@ const messageRenderCache = new WeakMap<ChatMessage, Map<string, string[]>>();
 export function resetChatShellRenderCache(): void {
   lastStickyBottomRows = null;
   lastStickyBottomScreenSize = "";
+  lastOverlayRows = null;
+  lastOverlayStartRow = -1;
+  lastOverlayScreenSize = "";
 }
 
 export function buildBannerLines(options: {
@@ -115,6 +122,24 @@ export function renderChatFrame(
     Math.max(0, start - transcriptSectionStart),
     Math.max(0, end - transcriptSectionStart)
   );
+  const overlayRows = buildAutocompleteOverlayRows(
+    options.slashMatches,
+    options.openMatches,
+    options.pinMatches,
+    options.slashSelected,
+    options.openSelected,
+    options.pinSelected,
+    options.inputBuffer
+  );
+  if (overlayRows === null && lastOverlayRows) {
+    invalidateScreenRows(
+      lastOverlayStartRow,
+      lastOverlayStartRow + lastOverlayRows.length - 1
+    );
+    lastOverlayRows = null;
+    lastOverlayStartRow = -1;
+    lastOverlayScreenSize = "";
+  }
 
   appendVisibleLines(buf, headerLines, start, end, 0);
   appendVisibleLines(buf, olderHintLines, start, end, headerLines.length);
@@ -147,18 +172,7 @@ export function renderChatFrame(
       options.modelLabel
     )
   );
-  const overlay = renderAutocompleteOverlay(
-    options.slashMatches,
-    options.openMatches,
-    options.pinMatches,
-    options.slashSelected,
-    options.openSelected,
-    options.pinSelected,
-    options.inputBuffer
-  );
-  if (overlay) {
-    process.stdout.write(overlay);
-  }
+  writeAutocompleteOverlay(overlayRows);
 
   return { chatScrollOffset, maxScroll };
 }
@@ -185,7 +199,7 @@ export function renderInputFooter(options: {
       options.modelLabel
     )
   );
-  const overlay = renderAutocompleteOverlay(
+  const overlayRows = buildAutocompleteOverlayRows(
     options.slashMatches,
     options.openMatches,
     options.pinMatches,
@@ -194,12 +208,10 @@ export function renderInputFooter(options: {
     options.pinSelected,
     options.inputBuffer
   );
-  if (overlay) {
-    process.stdout.write(overlay);
-  }
+  writeAutocompleteOverlay(overlayRows);
 }
 
-function renderAutocompleteOverlay(
+function buildAutocompleteOverlayRows(
   slashMatches: CommandDefinition[],
   openMatches: ShellOpenOption[],
   pinMatches: ShellPinOption[],
@@ -207,17 +219,20 @@ function renderAutocompleteOverlay(
   openSelected: number,
   pinSelected: number,
   inputBuffer: string
-): string {
+): string[] | null {
   const { cols, rows } = getTermSize();
   const maxVisibleCols = Math.max(1, cols - 1);
   const lastRowAboveInput = rows - STICKY_BOTTOM_ROWS;
-  if (lastRowAboveInput < 1) return "";
+  if (lastRowAboveInput < 1) return null;
   const hasOverlay =
     openMatches.length > 0 || pinMatches.length > 0 || slashMatches.length > 0;
-  if (!hasOverlay) return "";
+  if (!hasOverlay) return null;
 
-  const writes: string[] = [];
   const clearStartRow = Math.max(1, lastRowAboveInput - MAX_OVERLAY_ROWS + 1);
+  const overlayRows = Array.from(
+    { length: lastRowAboveInput - clearStartRow + 1 },
+    () => ""
+  );
   const fitToRow = (value: string): string => {
     const visible = stripAnsi(value).length;
     if (visible > maxVisibleCols) {
@@ -225,9 +240,6 @@ function renderAutocompleteOverlay(
     }
     return value;
   };
-  for (let row = clearStartRow; row <= lastRowAboveInput; row++) {
-    writes.push(`\x1B[${row};1H\x1B[0m\x1B[2K`);
-  }
 
   if (openMatches.length > 0) {
     const maxShow = Math.min(openMatches.length, lastRowAboveInput, MAX_OVERLAY_ROWS);
@@ -243,16 +255,13 @@ function renderAutocompleteOverlay(
       const selected = start + index === openSelected;
       const pointer = selected ? C.bold("❯ ") : "  ";
       const title = selected ? C.bold(option.title) : C.text(option.title);
-      writes.push(
-        `\x1B[${firstRow + index};1H\x1B[0m\x1B[2K${fitToRow(
-          `${indent}${pointer}${title}${
-            option.detail ? `  ${C.dim(option.detail)}` : ""
-          }`
-        )}`
+      overlayRows[firstRow + index - clearStartRow] = fitToRow(
+        `${indent}${pointer}${title}${
+          option.detail ? `  ${C.dim(option.detail)}` : ""
+        }`
       );
     }
-    writes.push("\x1B[0m");
-    return writes.join("");
+    return overlayRows;
   }
 
   if (pinMatches.length > 0) {
@@ -269,14 +278,11 @@ function renderAutocompleteOverlay(
       const selected = start + index === pinSelected;
       const pointer = selected ? C.bold("❯ ") : "  ";
       const label = selected ? C.bold(pin.label) : C.text(pin.label);
-      writes.push(
-        `\x1B[${firstRow + index};1H\x1B[0m\x1B[2K${fitToRow(
-          `${indent}${pointer}${label}  ${C.dim(pin.name)}`
-        )}`
+      overlayRows[firstRow + index - clearStartRow] = fitToRow(
+        `${indent}${pointer}${label}  ${C.dim(pin.name)}`
       );
     }
-    writes.push("\x1B[0m");
-    return writes.join("");
+    return overlayRows;
   }
 
   const maxShow = Math.min(slashMatches.length, lastRowAboveInput, MAX_OVERLAY_ROWS);
@@ -290,15 +296,12 @@ function renderAutocompleteOverlay(
     const selected = start + index === slashSelected;
     const pointer = selected ? C.bold("❯ ") : "  ";
     const name = selected ? C.bold(command.name) : C.text(command.name);
-    writes.push(
-      `\x1B[${firstRow + index};1H\x1B[0m\x1B[2K${fitToRow(
-        ` ${pointer}${name}  ${C.muted(command.description)}`
-      )}`
+    overlayRows[firstRow + index - clearStartRow] = fitToRow(
+      ` ${pointer}${name}  ${C.muted(command.description)}`
     );
   }
 
-  writes.push("\x1B[0m");
-  return writes.join("");
+  return overlayRows;
 }
 
 function buildStickyBottomRows(
@@ -401,6 +404,46 @@ function writeStickyBottom(rows: string[]): void {
     process.stdout.write(writes.join(""));
   }
   lastStickyBottomRows = rows.slice();
+}
+
+function writeAutocompleteOverlay(rows: string[] | null): void {
+  const { rows: totalRows, cols } = getTermSize();
+  const screenSizeKey = `${totalRows}:${cols}`;
+  if (rows === null) {
+    lastOverlayRows = null;
+    lastOverlayStartRow = -1;
+    lastOverlayScreenSize = screenSizeKey;
+    return;
+  }
+
+  const startRow = Math.max(1, totalRows - STICKY_BOTTOM_ROWS - rows.length + 1);
+  if (
+    lastOverlayScreenSize !== screenSizeKey ||
+    lastOverlayStartRow !== startRow ||
+    !lastOverlayRows ||
+    lastOverlayRows.length !== rows.length
+  ) {
+    lastOverlayRows = null;
+    lastOverlayStartRow = startRow;
+    lastOverlayScreenSize = screenSizeKey;
+  }
+
+  const writes: string[] = [];
+  for (let index = 0; index < rows.length; index++) {
+    if (lastOverlayRows?.[index] === rows[index]) {
+      continue;
+    }
+    if (writes.length === 0) {
+      writes.push("\x1B[0m");
+    }
+    writes.push(`\x1B[${startRow + index};1H\x1B[0m\x1B[2K${rows[index]!}`);
+  }
+  if (writes.length > 0) {
+    writes.push("\x1B[0m");
+    process.stdout.write(writes.join(""));
+  }
+
+  lastOverlayRows = rows.slice();
 }
 
 export function getRenderedMessageLines(
