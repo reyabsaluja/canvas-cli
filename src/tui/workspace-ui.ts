@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import type { AssignmentWorkup } from "../work/types.js";
 import type { LoadedWorkspace } from "../ask/types.js";
+import { readWorkspaceExtractedFile } from "../ask/load-workspace.js";
 import type { AIProviderConfig } from "../ai/provider.js";
 import { askWorkspaceQuestion, createChatContext, type ToolCallEvent } from "./services.js";
 import {
@@ -712,7 +713,7 @@ export async function runWorkspaceUI(
           return;
         }
 
-        const fullQuestion = buildPinnedQuestion(input, ctx, pinOptions);
+        const fullQuestion = await buildPinnedQuestion(input, ctx, pinOptions);
 
         const userMessage: ChatMessage = { role: "user", content: input };
         appendMessage(userMessage);
@@ -765,7 +766,7 @@ export async function runWorkspaceUI(
               scheduleRender();
             },
             ctx.agentContext,
-            chatCtx,
+            chatCtx ?? undefined,
             (delta: string) => {
               if (!streamingStarted) {
                 streamingStarted = true;
@@ -912,11 +913,11 @@ function cmdFromInput(input: string): string {
   return input.toLowerCase().split(/\s/)[0];
 }
 
-function buildPinnedQuestion(
+async function buildPinnedQuestion(
   input: string,
   ctx: WorkspaceContext,
   pinOptions: Array<{ label: string; name: string }>
-): string {
+): Promise<string> {
   const pinRegex = /\/pin\s+(\S+)/g;
   const pins: Array<{ label: string; name: string }> = [];
   let pinMatch: RegExpExecArray | null;
@@ -934,7 +935,8 @@ function buildPinnedQuestion(
     let content = "";
     for (const ef of ctx.loaded.extractedFiles) {
       if (ef.name === pin.name || ef.name.includes(pin.label)) {
-        content = ef.content.slice(0, 15000);
+        const extracted = await readWorkspaceExtractedFile(ctx.loaded, ef);
+        content = extracted?.slice(0, 15000) ?? "";
         break;
       }
     }
