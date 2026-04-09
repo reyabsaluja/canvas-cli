@@ -725,6 +725,13 @@ export async function executeToolCallForTurn(
     return { result: cached, deduped: true };
   }
 
+  for (const aliasKey of buildSemanticTurnToolAliasKeys(name, input)) {
+    const aliasCached = turnToolCache.get(aliasKey);
+    if (aliasCached) {
+      return { result: aliasCached, deduped: true };
+    }
+  }
+
   const semanticCached = findSemanticTurnToolCacheHit(turnToolCache, name, input);
   if (semanticCached) {
     return { result: semanticCached, deduped: true };
@@ -734,6 +741,11 @@ export async function executeToolCallForTurn(
   // and searches without changing any cross-turn grounding behavior.
   const result = await executeToolCallDetailed(name, input, ctx);
   turnToolCache.set(cacheKey, result);
+  if (!isGroundedContentObservation(result.observation)) {
+    for (const aliasKey of buildSemanticTurnToolAliasKeys(name, input)) {
+      turnToolCache.set(aliasKey, result);
+    }
+  }
   return { result, deduped: false };
 }
 
@@ -742,6 +754,20 @@ export function buildTurnToolCacheKey(
   input: Record<string, unknown>
 ): string {
   return `${name}:${normalizeToolInput(input)}`;
+}
+
+function buildSemanticTurnToolAliasKeys(
+  name: string,
+  input: Record<string, unknown>
+): string[] {
+  const target = getSemanticReuseTarget(name, input);
+  if (!target) {
+    return [];
+  }
+
+  return [...buildSemanticLookupAliases(target)].map(
+    (alias) => `semantic:${name}:${alias}`
+  );
 }
 
 function findSemanticTurnToolCacheHit(
@@ -1792,11 +1818,46 @@ function buildFileLookupAliases(value: string): Set<string> {
   return candidates;
 }
 
+function buildSemanticLookupAliases(value: string): Set<string> {
+  const candidates = buildFileLookupAliases(value);
+  const cleaned = value.trim();
+  if (!cleaned) {
+    return candidates;
+  }
+
+  addFuzzyLookupAliases(candidates, cleaned);
+  const basename = path.basename(cleaned);
+  if (basename !== cleaned) {
+    addFuzzyLookupAliases(candidates, basename);
+  }
+
+  return candidates;
+}
+
+function addFuzzyLookupAliases(target: Set<string>, value: string): void {
+  const normalized = normalizeFuzzyLookupAlias(value);
+  if (!normalized) {
+    return;
+  }
+  target.add(normalized);
+  addTrimmedWordExtensionAlias(target, normalized);
+}
+
 function addTrimmedExtensionAlias(target: Set<string>, value: string): void {
   const stripped = value.replace(
     /\.(txt|md|pdf|html|htm|zip|csv|json)$/i,
     ""
   );
+  if (stripped && stripped !== value) {
+    target.add(stripped);
+  }
+}
+
+function addTrimmedWordExtensionAlias(target: Set<string>, value: string): void {
+  const stripped = value.replace(
+    /\b(txt|md|pdf|html|htm|zip|csv|json)$/i,
+    ""
+  ).replace(/\s+/g, " ").trim();
   if (stripped && stripped !== value) {
     target.add(stripped);
   }
