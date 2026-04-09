@@ -119,6 +119,11 @@ export async function runWorkspaceUI(
   let renderTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingTextInput = "";
   let pendingTextInputFlushQueued = false;
+  let lastFooterRows: string[] | null = null;
+  let lastFooterScreenSize = "";
+  let lastOverlayRows: string[] | null = null;
+  let lastOverlayStartRow = -1;
+  let lastOverlayScreenSize = "";
   let totalMessageChars = 0;
   let archivedMessageCount = 0;
   let archivedMessageChars = 0;
@@ -416,6 +421,7 @@ export async function runWorkspaceUI(
       return;
     }
 
+    const previousInputState = getInputState();
     inputBuffer += pendingTextInput;
     pendingTextInput = "";
     showSlashMenu = inputBuffer.startsWith("/");
@@ -427,7 +433,7 @@ export async function runWorkspaceUI(
       slashSelected = 0;
     }
 
-    scheduleRender();
+    renderAfterInputMutation(previousInputState, nextInputState);
   }
 
   function flushPendingTextInput(): void {
@@ -446,6 +452,90 @@ export async function runWorkspaceUI(
       }
       flushPendingTextInput();
     });
+  }
+
+  function resetPartialRenderCaches(): void {
+    lastFooterRows = null;
+    lastFooterScreenSize = "";
+    lastOverlayRows = null;
+    lastOverlayStartRow = -1;
+    lastOverlayScreenSize = "";
+  }
+
+  function writeFooterRows(rows: string[]): void {
+    const { rows: totalRows, cols } = getTermSize();
+    const screenSizeKey = `${totalRows}:${cols}`;
+    const normalized = rows.map((line) => padAnsiToWidth(line, cols));
+
+    if (
+      lastFooterScreenSize !== screenSizeKey ||
+      !lastFooterRows ||
+      lastFooterRows.length !== normalized.length
+    ) {
+      lastFooterRows = null;
+      lastFooterScreenSize = screenSizeKey;
+    }
+
+    const startRow = totalRows - NORMAL_FOOTER_ROWS + 1;
+    const writes: string[] = [];
+    for (let index = 0; index < normalized.length; index++) {
+      if (lastFooterRows?.[index] === normalized[index]) {
+        continue;
+      }
+      if (writes.length === 0) {
+        writes.push("\x1B[0m");
+      }
+      writes.push(`\x1B[${startRow + index};1H\x1B[0m\x1B[2K${normalized[index]!}`);
+    }
+    if (writes.length > 0) {
+      writes.push("\x1B[0m");
+      process.stdout.write(writes.join(""));
+    }
+
+    lastFooterRows = normalized.slice();
+  }
+
+  function writeOverlayRows(rows: string[]): void {
+    const { rows: totalRows, cols } = getTermSize();
+    const screenSizeKey = `${totalRows}:${cols}`;
+
+    if (rows.length === 0) {
+      lastOverlayRows = null;
+      lastOverlayStartRow = -1;
+      lastOverlayScreenSize = screenSizeKey;
+      return;
+    }
+
+    const normalized = rows.map((line) => padAnsiToWidth(line, cols));
+    const startRow = totalRows - NORMAL_FOOTER_ROWS - normalized.length + 1;
+
+    if (
+      lastOverlayScreenSize !== screenSizeKey ||
+      lastOverlayStartRow !== startRow ||
+      !lastOverlayRows ||
+      lastOverlayRows.length !== normalized.length
+    ) {
+      lastOverlayRows = null;
+      lastOverlayStartRow = startRow;
+      lastOverlayScreenSize = screenSizeKey;
+    }
+
+    const writes: string[] = [];
+    for (let index = 0; index < normalized.length; index++) {
+      if (lastOverlayRows?.[index] === normalized[index]) {
+        continue;
+      }
+      if (writes.length === 0) {
+        writes.push("\x1B[0m");
+      }
+      writes.push(`\x1B[${startRow + index};1H\x1B[0m\x1B[2K${normalized[index]!}`);
+    }
+    if (writes.length > 0) {
+      writes.push("\x1B[0m");
+      process.stdout.write(writes.join(""));
+    }
+
+    lastOverlayRows = normalized.slice();
   }
 
   function writeFrame(lines: string[]): void {
@@ -579,9 +669,49 @@ export async function runWorkspaceUI(
     return lines;
   }
 
+  function buildVisibleOverlayLines(inputState: InputState): string[] {
+    const { cols, rows } = getTermSize();
+    const headerLines = buildHeaderLines(chatScrollOffset > 0);
+    const overlayBudget = Math.max(0, rows - headerLines.length - NORMAL_FOOTER_ROWS - 1);
+    return buildOverlayLines(cols, overlayBudget, inputState);
+  }
+
+  function renderInputOnly(
+    inputState: InputState = getInputState(),
+    overlayLines: string[] = buildVisibleOverlayLines(inputState)
+  ): void {
+    if (toolOutputExpanded || isProcessing) {
+      scheduleRender(true);
+      return;
+    }
+    const { cols } = getTermSize();
+    writeFooterRows(buildNormalFooterLines(cols));
+    writeOverlayRows(overlayLines);
+  }
+
+  function renderAfterInputMutation(
+    previousInputState: InputState,
+    nextInputState: InputState = getInputState()
+  ): void {
+    if (toolOutputExpanded || isProcessing) {
+      scheduleRender(true);
+      return;
+    }
+
+    const previousOverlayLines = buildVisibleOverlayLines(previousInputState);
+    const nextOverlayLines = buildVisibleOverlayLines(nextInputState);
+    if (previousOverlayLines.length !== nextOverlayLines.length) {
+      scheduleRender(true);
+      return;
+    }
+
+    renderInputOnly(nextInputState, nextOverlayLines);
+  }
+
   function renderNow(): void {
     const { cols, rows } = getTermSize();
     if (cols <= 0 || rows <= 0) return;
+    resetPartialRenderCaches();
 
     const contentWidth = Math.max(20, Math.min(cols - 4, 100));
     const headerLines = buildHeaderLines(chatScrollOffset > 0);
@@ -733,8 +863,9 @@ export async function runWorkspaceUI(
 
       if (key === "\x1B") {
         if (showSlashMenu) {
+          const previousInputState = getInputState();
           showSlashMenu = false;
-          scheduleRender();
+          renderAfterInputMutation(previousInputState, getInputState());
         }
         return;
       }
@@ -751,7 +882,7 @@ export async function runWorkspaceUI(
             const selected = pinMatches[pinSelected];
             inputBuffer = inputBuffer.replace(/\/pin(\s+\S*)?$/, `/pin ${selected.label}`);
             pinSelected = 0;
-            scheduleRender();
+            renderAfterInputMutation(inputState, getInputState());
             return;
           }
         }
@@ -768,7 +899,7 @@ export async function runWorkspaceUI(
         showSlashMenu = false;
 
         if (!input) {
-          scheduleRender();
+          renderAfterInputMutation(inputState, getInputState());
           return;
         }
 
@@ -895,22 +1026,22 @@ export async function runWorkspaceUI(
 
       if (key === "\x1B[A" && inputState.activePinPartial !== null && inputState.pinMatches.length > 0) {
         pinSelected = Math.max(0, pinSelected - 1);
-        scheduleRender();
+        renderInputOnly(inputState);
         return;
       }
       if (key === "\x1B[B" && inputState.activePinPartial !== null && inputState.pinMatches.length > 0) {
         pinSelected = Math.min(inputState.pinMatches.length - 1, pinSelected + 1);
-        scheduleRender();
+        renderInputOnly(inputState);
         return;
       }
       if (key === "\x1B[A" && inputState.slashMatches.length > 0) {
         slashSelected = Math.max(0, slashSelected - 1);
-        scheduleRender();
+        renderInputOnly(inputState);
         return;
       }
       if (key === "\x1B[B" && inputState.slashMatches.length > 0) {
         slashSelected = Math.min(inputState.slashMatches.length - 1, slashSelected + 1);
-        scheduleRender();
+        renderInputOnly(inputState);
         return;
       }
 
@@ -927,10 +1058,11 @@ export async function runWorkspaceUI(
 
       if (key === "\x7F" || key === "\b") {
         if (inputBuffer.length > 0) {
+          const previousInputState = inputState;
           inputBuffer = inputBuffer.slice(0, -1);
           showSlashMenu = inputBuffer.startsWith("/");
           slashSelected = 0;
-          scheduleRender();
+          renderAfterInputMutation(previousInputState, getInputState());
         }
         return;
       }
@@ -938,7 +1070,7 @@ export async function runWorkspaceUI(
       if (key === "\t" && inputState.slashMatches.length > 0) {
         inputBuffer = inputState.slashMatches[slashSelected].cmd;
         showSlashMenu = true;
-        scheduleRender();
+        renderAfterInputMutation(inputState, getInputState());
         return;
       }
 
@@ -964,6 +1096,7 @@ export async function runWorkspaceUI(
       destroyed = true;
       pendingTextInput = "";
       pendingTextInputFlushQueued = false;
+      resetPartialRenderCaches();
       stopSpinner();
       if (renderTimer) {
         clearTimeout(renderTimer);
