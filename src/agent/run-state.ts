@@ -60,13 +60,35 @@ export function compactRunState(runState: RunState): void {
 
   const selected = new Set<number>();
   const groundedArtifacts = new Set<string>();
+  const discoveredArtifactKeys = new Set<string>();
+
+  const rememberObservation = (index: number): void => {
+    if (selected.has(index)) {
+      return;
+    }
+
+    selected.add(index);
+    const observation = runState.observations[index]!;
+    if (isGroundedContentObservation(observation)) {
+      for (const artifact of observation.artifacts) {
+        groundedArtifacts.add(artifact.artifactId);
+      }
+    }
+
+    if (shouldRememberArtifactDiscovery(observation)) {
+      const artifactKey = buildObservationArtifactKey(observation);
+      if (artifactKey) {
+        discoveredArtifactKeys.add(artifactKey);
+      }
+    }
+  };
 
   for (
     let index = runState.observations.length - 1;
     index >= 0 && selected.size < MAX_RECENT_TRANSIENT_OBSERVATIONS;
     index -= 1
   ) {
-    selected.add(index);
+    rememberObservation(index);
   }
 
   for (let index = runState.observations.length - 1; index >= 0; index -= 1) {
@@ -88,8 +110,29 @@ export function compactRunState(runState: RunState): void {
     }
 
     if (shouldKeep) {
-      selected.add(index);
+      rememberObservation(index);
     }
+  }
+
+  for (let index = runState.observations.length - 1; index >= 0; index -= 1) {
+    if (selected.size >= MAX_RUN_STATE_OBSERVATIONS) {
+      break;
+    }
+    if (selected.has(index)) {
+      continue;
+    }
+
+    const observation = runState.observations[index]!;
+    if (!shouldRememberArtifactDiscovery(observation)) {
+      continue;
+    }
+
+    const artifactKey = buildObservationArtifactKey(observation);
+    if (!artifactKey || discoveredArtifactKeys.has(artifactKey)) {
+      continue;
+    }
+
+    rememberObservation(index);
   }
 
   runState.observations = [...selected]

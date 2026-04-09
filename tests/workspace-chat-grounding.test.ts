@@ -1812,6 +1812,41 @@ test("run-state compaction keeps grounded reads while trimming stale transient o
   );
 });
 
+test("run-state compaction preserves older successful search breadcrumbs", () => {
+  const runState = createEmptyRunState();
+
+  appendObservation(runState, {
+    tool: "search_workspace",
+    status: "ok",
+    summary: 'Found 1 relevant workspace match for "branch hazard".',
+    artifacts: [
+      {
+        artifactId: "workspace:extracted:docs/reference.txt",
+        title: "docs/reference.txt",
+        kind: "extracted",
+        excerpt: "The waveform must show stall cycles around the branch hazard.",
+      },
+    ],
+  });
+
+  for (let index = 0; index < 30; index += 1) {
+    appendObservation(runState, {
+      tool: "search_workspace",
+      status: "not_found",
+      summary: `No relevant workspace content found for "miss ${index}".`,
+      artifacts: [],
+    });
+  }
+
+  assert.ok(
+    runState.observations.some(
+      (observation) =>
+        observation.summary === 'Found 1 relevant workspace match for "branch hazard".'
+    )
+  );
+  assert.equal(runState.readArtifactIds.length, 0);
+});
+
 test("run-state does not store duplicate grounded observations for the same evidence", () => {
   const runState = createEmptyRunState();
 
