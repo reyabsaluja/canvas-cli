@@ -1847,6 +1847,40 @@ test("run-state compaction preserves older successful search breadcrumbs", () =>
   assert.equal(runState.readArtifactIds.length, 0);
 });
 
+test("run-state compaction preserves older failed artifact reads", () => {
+  const runState = createEmptyRunState();
+
+  appendObservation(runState, {
+    tool: "read_file",
+    status: "missing_text",
+    summary: "Matched lab4-brief.txt, but readable text is missing.",
+    artifacts: [
+      {
+        artifactId: "course:attachment:attachments/modules/lab4-brief.txt:lab4-brief.txt",
+        title: "lab4-brief.txt",
+        kind: "attachment",
+      },
+    ],
+  });
+
+  for (let index = 0; index < 30; index += 1) {
+    appendObservation(runState, {
+      tool: "search_workspace",
+      status: "not_found",
+      summary: `No relevant workspace content found for "miss ${index}".`,
+      artifacts: [],
+    });
+  }
+
+  assert.ok(
+    runState.observations.some(
+      (observation) =>
+        observation.summary ===
+        "Matched lab4-brief.txt, but readable text is missing."
+    )
+  );
+});
+
 test("run-state does not store duplicate grounded observations for the same evidence", () => {
   const runState = createEmptyRunState();
 
