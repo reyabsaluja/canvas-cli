@@ -484,10 +484,15 @@ export async function runChatShell<TExit>(
     renderInputOnly(inputState);
   }
 
+  function isSpinnerVisible(): boolean {
+    return chatScrollOffset === 0;
+  }
+
   function startSpinner(): void {
     stopSpinner();
     spinnerTimer = setInterval(() => {
       if (!isProcessing || !currentSpinnerLine) return;
+      if (!isSpinnerVisible()) return;
       spinnerFrame = (spinnerFrame + 1) % SPINNER.length;
       currentSpinnerLine = `${C.dim(SPINNER[spinnerFrame])} ${C.text(
         currentVerb
