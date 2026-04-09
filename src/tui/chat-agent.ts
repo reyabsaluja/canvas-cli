@@ -285,6 +285,7 @@ export async function runChatAgent(
 
   let fullText = "";
   let supportingObservations: Observation[] = [];
+  let verificationObservations: Observation[] = [];
   let usedWorkup = false;
 
   if (retrievalDecision.action === "answer_from_workup") {
@@ -294,6 +295,9 @@ export async function runChatAgent(
     supportingObservations = findObservationsForArtifacts(
       ctx.runState.observations,
       retrievalDecision.sourceArtifactIds
+    );
+    verificationObservations = selectSupplementalEvidenceObservations(
+      supportingObservations
     );
     fullText = await answerWithoutTools(
       ctx,
@@ -306,6 +310,7 @@ export async function runChatAgent(
     const toolResult = await readArtifactForGate(retrievalDecision.artifactId, ctx);
     appendObservation(ctx.runState, toolResult.observation);
     supportingObservations = [toolResult.observation];
+    verificationObservations = supportingObservations;
     const { action, target } = mapToolCall("read_file", {
       filename: toolResult.observation.artifacts[0]?.title ?? retrievalDecision.artifactId,
     });
@@ -366,11 +371,13 @@ export async function runChatAgent(
       10
     );
     supportingObservations = ctx.runState.observations.slice(observationStart);
+    verificationObservations = supportingObservations;
   }
 
   const verification = verifyWorkspaceAnswer({
+    question,
     answer: fullText,
-    observations: supportingObservations,
+    observations: verificationObservations,
     usedWorkup,
     loaded: ctx.loaded,
   });
@@ -942,9 +949,7 @@ export function buildEvidenceBackedQuestion(
     return question;
   }
 
-  const supplementalObservations = selectSupplementalEvidenceObservations(
-    observations
-  );
+  const supplementalObservations = selectSupplementalEvidenceObservations(observations);
   const sections: string[] = [question, "", "Supplemental evidence already gathered in this chat:"];
   for (const observation of supplementalObservations) {
     sections.push(`- Tool: ${observation.tool}`);

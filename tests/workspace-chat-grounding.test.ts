@@ -317,6 +317,7 @@ test("workspace answer verification derives sources and confidence deterministic
     const loaded = await createWorkspace(tempDir);
 
     const verifiedFromRead = verifyWorkspaceAnswer({
+      question: "Explain the branch hazard requirement in detail.",
       answer: "You need to show the stall cycles around the branch hazard.",
       observations: [
         {
@@ -342,6 +343,7 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.equal(verifiedFromRead.sources[0]?.title, "docs/reference.txt");
 
     const verifiedFromWorkup = verifyWorkspaceAnswer({
+      question: "What do I need to submit?",
       answer: "You need to submit a waveform screenshot and short analysis.",
       observations: [],
       usedWorkup: true,
@@ -352,6 +354,7 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.equal(verifiedFromWorkup.sources[0]?.title, "workup.json");
 
     const verifiedFromMissingText = verifyWorkspaceAnswer({
+      question: "What does the spec say about the waveform screenshot?",
       answer: "I think the spec might mention a waveform screenshot.",
       observations: [
         {
@@ -377,6 +380,7 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.deepEqual(verifiedFromMissingText.missing, ["source"]);
 
     const verifiedFromActionOnlyTool = verifyWorkspaceAnswer({
+      question: "List the files I have available.",
       answer: "I listed the available files for you.",
       observations: [
         {
@@ -393,6 +397,38 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.equal(verifiedFromActionOnlyTool.confidence, "low");
     assert.deepEqual(verifiedFromActionOnlyTool.sources, []);
     assert.deepEqual(verifiedFromActionOnlyTool.missing, []);
+
+    const verifiedFromSearchOnly = verifyWorkspaceAnswer({
+      question: "What does the branch hazard section mention?",
+      answer: "It mentions the branch hazard section.",
+      observations: [
+        {
+          tool: "search_workspace",
+          status: "ok",
+          summary: "Found a workspace match for branch hazard.",
+          artifacts: [
+            {
+              artifactId: "artifact-1",
+              title: "docs/reference.txt",
+              kind: "extracted",
+              excerpt: "The waveform must show stall cycles around the branch hazard.",
+            },
+          ],
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedFromSearchOnly.confidence, "medium");
+
+    const verifiedFromUnsupportedWorkup = verifyWorkspaceAnswer({
+      question: "Explain the branch hazard requirement in detail.",
+      answer: "The workup says to explain branch behavior.",
+      observations: [],
+      usedWorkup: true,
+      loaded,
+    });
+    assert.equal(verifiedFromUnsupportedWorkup.confidence, "low");
   });
 });
 
