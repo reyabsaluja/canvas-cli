@@ -22,12 +22,17 @@ export function verifyWorkspaceAnswer(
   const trimmedAnswer = input.answer.trim();
   const sources = collectSources(input.observations, input.usedWorkup, input.loaded);
   const missing: string[] = [];
+  const hasCitationCapableObservation = input.observations.some((observation) =>
+    canObservationProduceCitation(observation)
+  );
 
   if (!trimmedAnswer) {
     missing.push("answer");
   }
 
-  if (input.observations.length > 0 && sources.length === 0) {
+  // Action-only tools like list_files/open_resource intentionally return no
+  // artifacts, so they should not trigger a missing-source warning.
+  if (hasCitationCapableObservation && sources.length === 0) {
     missing.push("source");
   }
 
@@ -81,6 +86,10 @@ function collectSources(
   }
 
   return resolved;
+}
+
+function canObservationProduceCitation(observation: Observation): boolean {
+  return observation.artifacts.length > 0;
 }
 
 function buildExcerpt(value: string | undefined): string | null {
