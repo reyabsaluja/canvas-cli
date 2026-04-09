@@ -8,6 +8,7 @@ import { clearArtifactIndexCache } from "../../knowledge/artifact-index.js";
 import { extractFileText } from "../../extract/extract-text.js";
 import { getExtractedAttachmentPath } from "../../enrich/course-documents.js";
 import { handleOpenResourceQuery } from "../open-resources.js";
+import { handleLectureQuery } from "../lecture-resources.js";
 import {
   renderCourseArtifactSearchResult,
   searchCourseKnowledge,
@@ -47,6 +48,8 @@ async function executeToolCallDetailed(
       return downloadCourseFile(input.title as string, ctx);
     case "open_resource":
       return openResource(input.query as string, ctx);
+    case "open_lecture":
+      return openLecture(input.query as string, ctx);
     default:
       return {
         observation: {
@@ -600,6 +603,29 @@ async function openResource(
   return {
     observation: {
       tool: "open_resource",
+      status: success ? "ok" : "not_found",
+      summary: result.message,
+      artifacts: [],
+    },
+    modelText: result.message,
+    uiText: result.message,
+  };
+}
+
+async function openLecture(
+  query: string,
+  ctx: ChatAgentContext
+): Promise<ToolExecutionResult> {
+  const result = await handleLectureQuery(
+    query,
+    ctx.cache,
+    ctx.client,
+    ctx.cache?.courseId ?? null
+  );
+  const success = result.status === "opened" || result.status === "listed";
+  return {
+    observation: {
+      tool: "open_lecture",
       status: success ? "ok" : "not_found",
       summary: result.message,
       artifacts: [],

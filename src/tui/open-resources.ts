@@ -8,6 +8,7 @@ import {
   getExtractedSyllabusPath,
 } from "../enrich/course-documents.js";
 import type { ShellOpenOption } from "./app-types.js";
+import { buildLectureIndex } from "./lecture-resources.js";
 
 export interface OpenableResource {
   id: string;
@@ -330,6 +331,10 @@ export async function collectOpenableResources(
           [file.filename, file.contentType]
         )
       );
+    }
+
+    for (const lecture of buildLectureIndex(cache)) {
+      push(lecture);
     }
 
     const syllabusPath = getExtractedSyllabusPath(cache.coursePath);

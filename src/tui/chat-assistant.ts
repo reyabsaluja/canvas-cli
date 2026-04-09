@@ -18,6 +18,7 @@ import {
   searchCourseKnowledge,
 } from "./course-retrieval.js";
 import { handleOpenResourceQuery } from "./open-resources.js";
+import { handleLectureQuery } from "./lecture-resources.js";
 import {
   formatRadarItems,
   resolveAndRenderThread,
@@ -143,6 +144,22 @@ const COURSE_TOOLS: ToolDefinition[] = [
       type: "object",
       properties: {
         query: { type: "string", description: "Resource name or description to open" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "open_lecture",
+    description:
+      "Find and open lecture content (video, slides, or page). Use when the user asks about lectures, recordings, or slides.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description:
+            "Lecture number, title keyword, or content type (e.g. '13', 'lecture 13 slides', 'video')",
+        },
       },
       required: ["query"],
     },
@@ -381,6 +398,25 @@ export async function answerCourseQuestion(
           options.onToolCall?.({
             action: "open",
             target: query || "resource",
+            result: result.message,
+            color:
+              result.status === "opened" || result.status === "listed"
+                ? "green"
+                : "red",
+          });
+          return result.message;
+        }
+        case "open_lecture": {
+          const query = String(input.query ?? "");
+          const result = await handleLectureQuery(
+            query,
+            options.cache,
+            options.services.client,
+            options.courseId
+          );
+          options.onToolCall?.({
+            action: "open",
+            target: query || "lecture",
             result: result.message,
             color:
               result.status === "opened" || result.status === "listed"
