@@ -78,9 +78,13 @@ export async function decideWorkspaceRetrieval(
     };
   }
 
-  const topMatch = selectPreferredWorkspaceMatch(question, promotedMatches);
+  const unreadRetryableMatches = filterRetryableArtifactMatches(
+    promotedMatches,
+    input.runState
+  );
+  const topMatch = selectPreferredWorkspaceMatch(question, unreadRetryableMatches);
   if (!topMatch) {
-    return { action: "let_model_decide", reason: "weak_workspace_match" };
+    return { action: "let_model_decide", reason: "recent_artifact_read_failed" };
   }
 
   return {
@@ -248,6 +252,17 @@ function selectReusableReadArtifactIds<
   return ordered.slice(0, MAX_MEMORY_REUSE_ARTIFACTS).map((match) => match.artifact.id);
 }
 
+function filterRetryableArtifactMatches<
+  T extends { artifact: { id: string } }
+>(
+  matches: T[],
+  runState: RunState
+): T[] {
+  return matches.filter(
+    (match) => !hasRecentFailedArtifactRead(runState, match.artifact.id)
+  );
+}
+
 function selectReusableMemoryArtifactIds(
   question: string,
   runState: RunState
@@ -289,4 +304,23 @@ function selectReusableMemoryArtifactIds(
     })
     .slice(0, MAX_MEMORY_REUSE_ARTIFACTS)
     .map(([artifactId]) => artifactId);
+}
+
+function hasRecentFailedArtifactRead(
+  runState: RunState,
+  artifactId: string
+): boolean {
+  return runState.observations.some((observation) => {
+    if (
+      observation.status === "ok" ||
+      (observation.tool !== "read_file" &&
+        observation.tool !== "download_course_file")
+    ) {
+      return false;
+    }
+
+    return observation.artifacts.some(
+      (artifact) => artifact.artifactId === artifactId
+    );
+  });
 }
