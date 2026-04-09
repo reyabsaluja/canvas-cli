@@ -141,3 +141,61 @@ test("buildToolPromptMessages prefers question-relevant memory over newer unrela
   assert.match(latestMessage, /docs\/reference\.txt/);
   assert.doesNotMatch(latestMessage, /docs\/bonus\.txt/);
 });
+
+test("buildToolPromptMessages keeps relevant search breadcrumbs alongside grounded reads", () => {
+  const promptMessages = buildToolPromptMessages(
+    [],
+    "Compare the branch hazard walkthrough to the reference.",
+    {
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read docs/reference.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-1",
+              title: "docs/reference.txt",
+              kind: "extracted",
+              excerpt: "The waveform must show stall cycles around the branch hazard.",
+            },
+          ],
+          content: "The waveform must show stall cycles around the branch hazard.",
+        },
+        {
+          tool: "search_workspace",
+          status: "ok",
+          summary: 'Found 1 relevant workspace match for "branch hazard walkthrough".',
+          artifacts: [
+            {
+              artifactId: "artifact-2",
+              title: "docs/walkthrough.txt",
+              kind: "extracted",
+              excerpt: "The walkthrough explains each branch hazard stall step-by-step.",
+            },
+          ],
+        },
+        {
+          tool: "search_workspace",
+          status: "ok",
+          summary: 'Found 1 relevant workspace match for "resistor values".',
+          artifacts: [
+            {
+              artifactId: "artifact-3",
+              title: "docs/resistor-table.txt",
+              kind: "extracted",
+              excerpt: "Use a 4.7k resistor for the LED path.",
+            },
+          ],
+        },
+      ],
+      readArtifactIds: ["artifact-1"],
+      stepCount: 3,
+    }
+  );
+
+  const latestMessage = promptMessages.at(-1)?.content ?? "";
+  assert.match(latestMessage, /docs\/reference\.txt/);
+  assert.match(latestMessage, /docs\/walkthrough\.txt/);
+  assert.doesNotMatch(latestMessage, /docs\/resistor-table\.txt/);
+});
