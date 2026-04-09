@@ -535,8 +535,9 @@ export async function runWorkspaceUI(
 
   function writeFrame(lines: string[], bottomReserveRows: number = 0): void {
     const { cols, rows } = getTermSize();
-    const frame = lines.slice(0, rows).map((line) => padAnsiToWidth(line, cols));
-    while (frame.length < rows) {
+    const maxContentRows = Math.max(1, rows - Math.max(0, bottomReserveRows));
+    const frame = lines.slice(0, maxContentRows).map((line) => padAnsiToWidth(line, cols));
+    while (frame.length < maxContentRows) {
       frame.push(" ".repeat(cols));
     }
     const buf = createBuffer();
