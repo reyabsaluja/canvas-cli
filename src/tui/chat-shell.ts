@@ -35,6 +35,7 @@ import { ChatShellPersistence } from "./chat-shell-persistence.js";
 import { enterChatShell, leaveChatShell } from "./chat-shell-terminal.js";
 import { createSerialTaskQueue } from "./serial-task-queue.js";
 import { exitShellAborted } from "./chat-shell-exit.js";
+import { getActivePinPartial } from "./workspace-input.js";
 
 interface ChatShellApi<TExit> extends ShellRuntimeApi {
   addMessage: (message: ChatMessage) => Promise<void>;
@@ -347,12 +348,6 @@ export async function runChatShell<TExit>(
     const match = value.match(/\/open(?:\s+(.*))?$/i);
     if (!match) return null;
     return (match[1] ?? "").trim();
-  }
-
-  function getActivePinPartial(value: string): string | null {
-    const match = value.match(/\/pin(\s+(\S*))?$/);
-    if (!match) return null;
-    return match[2] ?? "";
   }
 
   function getInputState(): InputState {

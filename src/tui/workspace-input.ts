@@ -2,6 +2,10 @@ import { tailPlainToWidth } from "./screen.js";
 
 const ACTIVE_PIN_PATTERN = /\/pin(\s+(\S*))?$/i;
 
+/**
+ * Shared helpers for shell pin-input behavior. These support the active chat
+ * shell and its regression tests; they are not tied to the retired legacy UI.
+ */
 export function getActivePinPartial(inputBuffer: string): string | null {
   const match = ACTIVE_PIN_PATTERN.exec(inputBuffer);
   if (!match) return null;
