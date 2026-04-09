@@ -63,11 +63,13 @@ function stubClient(opts: {
   announcements?: CanvasDiscussionTopic[];
   discussions?: CanvasDiscussionTopic[];
   view?: CanvasDiscussionTopicView | null;
+  searchResults?: CanvasDiscussionTopic[];
 }) {
   return {
     getAnnouncementsSafe: async () => opts.announcements ?? [],
     getDiscussionTopicsSafe: async () => opts.discussions ?? [],
     getDiscussionTopicViewSafe: async () => opts.view ?? null,
+    searchDiscussionTopicsSafe: async () => opts.searchResults ?? [],
   } as unknown as import("../src/canvas/client.js").CanvasClient;
 }
 
@@ -453,4 +455,236 @@ test("RadarService.resolveTopicByPartialTitle returns null when no match", async
     "nonexistent"
   );
   assert.equal(result, null);
+});
+
+// ---------------------------------------------------------------------------
+// resolveTopicByPartialTitle — API search fallback
+// ---------------------------------------------------------------------------
+
+test("resolveTopicByPartialTitle falls back to API search when catalog has no match", async () => {
+  const searchHit = makeTopic({
+    id: 90,
+    title: "Ancient Syllabus Thread",
+    is_announcement: false,
+    posted_at: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
+  });
+  const client = stubClient({
+    announcements: [],
+    discussions: [],
+    searchResults: [searchHit],
+  });
+  const service = new RadarService(client);
+
+  const result = await service.resolveTopicByPartialTitle(
+    [{ id: 1, name: "CS 101" }],
+    "syllabus"
+  );
+  assert.ok(result);
+  assert.equal(result.status, "found");
+  assert.equal(result.status === "found" && result.item.topicId, 90);
+});
+
+test("resolveTopicByPartialTitle skips API search when catalog already matched", async () => {
+  let searchCalled = false;
+  const catalogTopic = makeTopic({
+    id: 91,
+    title: "Syllabus Overview",
+    is_announcement: true,
+    posted_at: new Date().toISOString(),
+  });
+  const client = stubClient({ announcements: [catalogTopic], discussions: [] });
+  client.searchDiscussionTopicsSafe = async () => {
+    searchCalled = true;
+    return [];
+  };
+  const service = new RadarService(client);
+
+  const result = await service.resolveTopicByPartialTitle(
+    [{ id: 1, name: "CS 101" }],
+    "syllabus"
+  );
+  assert.ok(result);
+  assert.equal(result.status, "found");
+  assert.equal(searchCalled, false);
+});
+
+test("resolveTopicByPartialTitle returns ambiguous from API search with multiple hits", async () => {
+  const hit1 = makeTopic({ id: 92, title: "Lab Setup A" });
+  const hit2 = makeTopic({ id: 93, title: "Lab Setup B" });
+  const client = stubClient({
+    announcements: [],
+    discussions: [],
+    searchResults: [hit1, hit2],
+  });
+  const service = new RadarService(client);
+
+  const result = await service.resolveTopicByPartialTitle(
+    [{ id: 1, name: "CS 101" }],
+    "lab setup"
+  );
+  assert.ok(result);
+  assert.equal(result.status, "ambiguous");
+});
+
+// ---------------------------------------------------------------------------
+// Command-level: /radar and /thread via resolveAndRenderThread
+// ---------------------------------------------------------------------------
+
+import { resolveAndRenderThread } from "../src/tui/radar-commands.js";
+import type { AppServices } from "../src/tui/services/types.js";
+
+function makeServices(radarService: RadarService): AppServices {
+  return { radar: radarService } as unknown as AppServices;
+}
+
+// -- /radar (tested via getRadarItems / getRadarItemsMultiCourse) --
+
+test("/radar global scope: merges items from multiple courses", async () => {
+  const now = new Date().toISOString();
+  const client = stubClient({});
+  client.getAnnouncementsSafe = async (courseId: number) =>
+    courseId === 1
+      ? [makeTopic({ id: 10, title: "CS Announcement", is_announcement: true, posted_at: now })]
+      : [makeTopic({ id: 20, title: "Math Announcement", is_announcement: true, posted_at: now })];
+  client.getDiscussionTopicsSafe = async () => [];
+
+  const service = new RadarService(client);
+  const items = await service.getRadarItemsMultiCourse(
+    [{ id: 1, name: "CS 101" }, { id: 2, name: "MATH 200" }],
+    "all"
+  );
+  assert.equal(items.length, 2);
+  const titles = items.map((i) => i.title);
+  assert.ok(titles.includes("CS Announcement"));
+  assert.ok(titles.includes("Math Announcement"));
+});
+
+test("/radar course scope: returns only that course's items", async () => {
+  const now = new Date().toISOString();
+  const client = stubClient({
+    announcements: [makeTopic({ id: 10, title: "Only Mine", is_announcement: true, posted_at: now })],
+    discussions: [],
+  });
+  const service = new RadarService(client);
+
+  const items = await service.getRadarItems(5, "BIO 300", "all");
+  assert.equal(items.length, 1);
+  assert.equal(items[0]!.courseName, "BIO 300");
+});
+
+test("/radar discussions filter excludes announcements", async () => {
+  const now = new Date().toISOString();
+  const client = stubClient({
+    announcements: [makeTopic({ id: 10, title: "Ann", is_announcement: true, posted_at: now })],
+    discussions: [makeTopic({ id: 11, title: "Disc", is_announcement: false, posted_at: now })],
+  });
+  const service = new RadarService(client);
+
+  const items = await service.getRadarItems(1, "CS 101", "discussions");
+  assert.ok(items.every((i) => i.kind === "discussion"));
+});
+
+test("/radar announcements filter excludes discussions", async () => {
+  const now = new Date().toISOString();
+  const client = stubClient({
+    announcements: [makeTopic({ id: 10, title: "Ann", is_announcement: true, posted_at: now })],
+    discussions: [makeTopic({ id: 11, title: "Disc", is_announcement: false, posted_at: now })],
+  });
+  const service = new RadarService(client);
+
+  const items = await service.getRadarItems(1, "CS 101", "announcements");
+  assert.ok(items.every((i) => i.kind === "announcement"));
+});
+
+// -- /thread --
+
+test("/thread global scope: resolves numeric ID across courses", async () => {
+  const topic = makeTopic({ id: 50, title: "Found It" });
+  const view = makeView({
+    view: [{
+      id: 200,
+      user_id: 1,
+      user_name: "Alice",
+      message: "<p>reply</p>",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      read_state: "read",
+    }],
+  });
+  const client = stubClient({ discussions: [topic], announcements: [], view });
+  const service = new RadarService(client);
+  const services = makeServices(service);
+
+  const result = await resolveAndRenderThread(
+    services,
+    [{ id: 1, name: "CS 101" }, { id: 2, name: "MATH 200" }],
+    "50"
+  );
+  assert.equal(result.found, true);
+  assert.ok(result.content.includes("Found It"));
+});
+
+test("/thread course scope: resolves by partial title within single course", async () => {
+  const topic = makeTopic({ id: 60, title: "Homework 3 Questions", posted_at: new Date().toISOString() });
+  const view = makeView();
+  const client = stubClient({ discussions: [topic], announcements: [], view });
+  const service = new RadarService(client);
+  const services = makeServices(service);
+
+  const result = await resolveAndRenderThread(services, [{ id: 1, name: "CS 101" }], "homework 3");
+  assert.equal(result.found, true);
+  assert.ok(result.content.includes("Homework 3 Questions"));
+});
+
+test("/thread shows disambiguation when multiple titles match", async () => {
+  const now = new Date().toISOString();
+  const t1 = makeTopic({ id: 70, title: "Exam Review Part 1", posted_at: now });
+  const t2 = makeTopic({ id: 71, title: "Exam Review Part 2", posted_at: now });
+  const client = stubClient({ discussions: [t1, t2], announcements: [] });
+  const service = new RadarService(client);
+  const services = makeServices(service);
+
+  const result = await resolveAndRenderThread(services, [{ id: 1, name: "CS 101" }], "exam review");
+  assert.equal(result.found, false);
+  assert.ok(result.content.includes("Multiple threads"));
+  assert.ok(result.content.includes("70"));
+  assert.ok(result.content.includes("71"));
+});
+
+test("/thread returns not-found for unknown query", async () => {
+  const client = stubClient({ discussions: [], announcements: [] });
+  const service = new RadarService(client);
+  const services = makeServices(service);
+
+  const result = await resolveAndRenderThread(services, [{ id: 1, name: "CS 101" }], "nonexistent");
+  assert.equal(result.found, false);
+  assert.ok(result.content.includes("No discussion thread"));
+});
+
+test("/thread global scope: finds old topic via API search fallback", async () => {
+  // Catalog is empty (topic is too old), but API search finds it
+  const oldTopic = makeTopic({
+    id: 80,
+    title: "Semester 1 Setup Guide",
+    posted_at: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
+  });
+  const view = makeView();
+  const client = stubClient({
+    announcements: [],
+    discussions: [],
+    view,
+  });
+  // Only course 1 returns the search hit
+  client.searchDiscussionTopicsSafe = async (courseId: number) =>
+    courseId === 1 ? [oldTopic] : [];
+  const service = new RadarService(client);
+  const services = makeServices(service);
+
+  const result = await resolveAndRenderThread(
+    services,
+    [{ id: 1, name: "CS 101" }, { id: 2, name: "MATH 200" }],
+    "setup guide"
+  );
+  assert.equal(result.found, true);
+  assert.ok(result.content.includes("Semester 1 Setup Guide"));
 });

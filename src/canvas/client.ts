@@ -209,6 +209,16 @@ export class CanvasClient {
     return topics.filter((t) => !t.is_announcement);
   }
 
+  /** Search discussion topics by title. Returns empty array on access errors. */
+  async searchDiscussionTopicsSafe(
+    courseId: number,
+    searchTerm: string
+  ): Promise<CanvasDiscussionTopic[]> {
+    const encoded = encodeURIComponent(searchTerm);
+    const url = `${this.baseUrl}/courses/${courseId}/discussion_topics?per_page=10&search_term=${encoded}`;
+    return this.fetchPaginatedSafe<CanvasDiscussionTopic>(url);
+  }
+
   /** Get the full thread view for a discussion topic. Returns null on error. */
   async getDiscussionTopicViewSafe(
     courseId: number,
