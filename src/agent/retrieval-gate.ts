@@ -39,22 +39,30 @@ export async function decideWorkspaceRetrieval(
     question,
     3
   );
-  const topMatch = selectPreferredWorkspaceMatch(question, matches);
-
-  if (!topMatch) {
-    return { action: "let_model_decide", reason: "no_workspace_match" };
-  }
-
-  if (!shouldPromoteTopMatch(question, topMatch.score)) {
+  const promotedMatches = matches.filter((match) =>
+    shouldPromoteTopMatch(question, match.score)
+  );
+  if (promotedMatches.length === 0) {
     return { action: "let_model_decide", reason: "weak_workspace_match" };
   }
 
-  if (hasReadArtifact(input.runState, topMatch.artifact.id)) {
+  const reusableArtifactIds = selectReusableReadArtifactIds(
+    question,
+    promotedMatches,
+    input.runState
+  );
+
+  if (reusableArtifactIds.length > 0) {
     return {
       action: "answer_from_memory",
       reason: "already_read_relevant_artifact",
-      sourceArtifactIds: [topMatch.artifact.id],
+      sourceArtifactIds: reusableArtifactIds,
     };
+  }
+
+  const topMatch = selectPreferredWorkspaceMatch(question, promotedMatches);
+  if (!topMatch) {
+    return { action: "let_model_decide", reason: "weak_workspace_match" };
   }
 
   return {
@@ -193,4 +201,31 @@ function selectPreferredWorkspaceMatch<
   }
 
   return matches[0] ?? null;
+}
+
+function selectReusableReadArtifactIds<
+  T extends { artifact: { id: string; kind: string }; score: number }
+>(
+  question: string,
+  matches: T[],
+  runState: RunState
+): string[] {
+  const reusableMatches = matches.filter((match) =>
+    hasReadArtifact(runState, match.artifact.id)
+  );
+  if (reusableMatches.length === 0) {
+    return [];
+  }
+
+  const preferred = selectPreferredWorkspaceMatch(question, reusableMatches);
+  const ordered = preferred
+    ? [
+        preferred,
+        ...reusableMatches.filter(
+          (match) => match.artifact.id !== preferred.artifact.id
+        ),
+      ]
+    : reusableMatches;
+
+  return ordered.slice(0, 3).map((match) => match.artifact.id);
 }

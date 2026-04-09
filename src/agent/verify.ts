@@ -66,8 +66,9 @@ function collectSources(
 ): AnswerSource[] {
   const resolved: AnswerSource[] = [];
   const seen = new Set<string>();
+  const citationObservations = selectCitationObservations(observations);
 
-  for (const observation of observations) {
+  for (const observation of citationObservations) {
     // Only successful tool observations count as evidence. Failed lookups like
     // missing_text/not_found should never create grounding-looking citations.
     if (observation.status !== "ok") {
@@ -97,6 +98,18 @@ function collectSources(
   }
 
   return resolved;
+}
+
+function selectCitationObservations(
+  observations: Observation[]
+): Observation[] {
+  const grounded = observations.filter((observation) =>
+    isGroundedContentObservation(observation)
+  );
+  if (grounded.length > 0) {
+    return grounded;
+  }
+  return observations;
 }
 
 function canObservationProduceCitation(observation: Observation): boolean {
