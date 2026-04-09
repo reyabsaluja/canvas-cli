@@ -3,14 +3,19 @@ import type { EnrichmentSummary } from "../enrich/types.js";
 import type { CourseCache } from "../enrich/cache-loader.js";
 import type { Config } from "../config/env.js";
 import type { CanvasClient } from "../canvas/client.js";
-import type { AssignmentWorkup, InvestigationState } from "./types.js";
+import type {
+  AssignmentWorkup,
+  InvestigationState,
+  WorkVerificationResult,
+} from "./types.js";
 import type { ToolContext } from "./tool-handlers.js";
 import {
   generateWithTools,
   type AIProviderConfig,
 } from "../ai/provider.js";
+import { appendObservation, createEmptyRunState } from "../agent/run-state.js";
 import { INVESTIGATION_TOOLS } from "./tools.js";
-import { executeTool } from "./tool-handlers.js";
+import { executeToolDetailed } from "./tool-handlers.js";
 import { synthesizeWorkup } from "./synthesis.js";
 import { htmlToText } from "../format/html-to-text.js";
 
@@ -27,7 +32,7 @@ CRITICAL RULES:
 - Do NOT call complete_investigation until you have read at least the primary instruction document for this assignment.
 - If list_downloaded_files shows the file you need, use read_document to read it.
 - If the file isn't downloaded, use download_module_file to fetch it from the module.
-- Always check the syllabus for due dates and schedule info.
+- Confirm due dates from Canvas first, then use list_assignments or get_syllabus when needed.
 
 Strategy:
 1. list_downloaded_files — see what's already available locally
@@ -35,8 +40,8 @@ Strategy:
 3. get_module_items on the relevant module — see all context around the assignment
 4. READ the instruction document (read_document if downloaded, download_module_file if not)
 5. READ any rubric or grading document you find
-6. get_syllabus — check for due dates and schedule
-7. list_assignments — cross-reference timeline
+6. list_assignments — cross-reference the assignment row and due date
+7. get_syllabus — check schedule details if Canvas/list_assignments still leave due dates unclear
 8. ONLY THEN call complete_investigation with a detailed summary of what you learned from reading the documents
 
 Be thorough. The student is depending on you to actually read and understand the assignment instructions.`;
@@ -59,14 +64,7 @@ export async function runInvestigation(
   config: Config,
   onProgress: (phase: string) => void
 ): Promise<InvestigationResult> {
-  const state: InvestigationState = {
-    assignmentName: detail.name,
-    courseName: course.name,
-    visitedSources: [],
-    extractedTexts: new Map(),
-    evidenceNotes: [],
-    toolCallCount: 0,
-  };
+  const state = createInvestigationState(detail, course);
 
   const toolCtx: ToolContext = {
     cache,
@@ -93,6 +91,10 @@ export async function runInvestigation(
       state.toolCallCount++;
 
       if (name === "complete_investigation") {
+        const verification = verifyInvestigationState(state);
+        if (!verification.ok) {
+          return renderInvestigationVerificationMessage(verification);
+        }
         investigationSummary = (input as any).summary ?? "";
         return "Investigation complete. Proceeding to synthesis.";
       }
@@ -100,7 +102,9 @@ export async function runInvestigation(
       const label = input.query ?? input.filename ?? input.item_title ?? input.module_name ?? "";
       onProgress(`${name}${label ? ` (${label})` : ""}`);
 
-      return executeTool(name, input, toolCtx);
+      const result = await executeToolDetailed(name, input, toolCtx);
+      appendObservation(state.runState, result.observation);
+      return result.modelText;
     },
     undefined,
     MAX_ITERATIONS
@@ -112,6 +116,7 @@ export async function runInvestigation(
 
   // Synthesis phase
   onProgress("synthesizing assignment workup");
+  const verification = verifyInvestigationState(state);
 
   const workup = await synthesizeWorkup(
     aiConfig,
@@ -119,10 +124,79 @@ export async function runInvestigation(
     course,
     enrichment,
     state,
-    investigationSummary
+    investigationSummary,
+    verification
   );
 
   return { workup, state };
+}
+
+export function verifyInvestigationState(
+  state: InvestigationState
+): WorkVerificationResult {
+  const missing: WorkVerificationResult["missing"] = [];
+
+  if (state.primaryInstructionSourceIds.length === 0) {
+    missing.push("primary_instruction");
+  }
+
+  if (state.dueDateSourceIds.length === 0) {
+    missing.push("due_date_source");
+  }
+
+  return {
+    ok: missing.length === 0,
+    missing,
+    confidence:
+      missing.length === 0 ? "high" : missing.length === 1 ? "medium" : "low",
+  };
+}
+
+export function renderInvestigationVerificationMessage(
+  verification: WorkVerificationResult
+): string {
+  if (verification.ok) {
+    return "Investigation complete. Proceeding to synthesis.";
+  }
+
+  const guidance: string[] = [
+    "Investigation is not complete yet.",
+    "Missing required evidence:",
+  ];
+
+  if (verification.missing.includes("primary_instruction")) {
+    guidance.push(
+      '- Read at least one real instruction document with "read_document" or "download_module_file".'
+    );
+  }
+
+  if (verification.missing.includes("due_date_source")) {
+    guidance.push(
+      '- Confirm a due-date source from Canvas, "list_assignments", or "get_syllabus".'
+    );
+  }
+
+  guidance.push("Do not call complete_investigation again until these are covered.");
+  return guidance.join("\n");
+}
+
+export function createInvestigationState(
+  detail: AssignmentDetail,
+  course: Course
+): InvestigationState {
+  return {
+    assignmentName: detail.name,
+    courseName: course.name,
+    visitedSources: [],
+    extractedTexts: new Map(),
+    evidenceNotes: [],
+    toolCallCount: 0,
+    runState: createEmptyRunState(),
+    primaryInstructionSourceIds: [],
+    // Treat the assignment detail due date as a valid local-first source so the
+    // agent does not waste a syllabus read when Canvas already has the answer.
+    dueDateSourceIds: detail.dueAt ? ["canvas_assignment"] : [],
+  };
 }
 
 /**
