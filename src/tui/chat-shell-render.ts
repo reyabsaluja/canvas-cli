@@ -553,6 +553,22 @@ export function getRenderedMessageLines(
   return lines;
 }
 
+export function buildTranscriptLines(options: {
+  messages: ChatMessage[];
+  contentWidth: number;
+  cols: number;
+  expanded: boolean;
+}): string[] {
+  return options.messages.flatMap((message) =>
+    getRenderedMessageLines(
+      message,
+      options.contentWidth,
+      options.cols,
+      options.expanded
+    )
+  );
+}
+
 function renderWrappedContent(content: string, lines: string[], maxWidth: number): void {
   for (const line of content.split("\n")) {
     const trimmed = line.trim();

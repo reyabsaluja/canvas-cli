@@ -1,12 +1,13 @@
 import { getAIConfig } from "../ai/provider.js";
 import { resolveWorkspace, listWorkspaces } from "../ask/resolve-workspace.js";
 import { loadWorkspace } from "../ask/load-workspace.js";
-import {
-  buildWorkspaceRetrievalContext,
-  retrieveRelevant,
-} from "../ask/retrieve.js";
-import { answerQuestion } from "../ask/answer.js";
+import { loadCourseCache } from "../enrich/cache-loader.js";
 import { renderWorkspaceAnswer } from "../ask/render.js";
+import {
+  askWorkspaceQuestion,
+  createChatContext,
+  type ToolCallEvent,
+} from "../tui/services.js";
 import chalk from "chalk";
 
 interface AskOptions {
@@ -19,16 +20,14 @@ export async function askCommand(
   question: string,
   options: AskOptions
 ): Promise<void> {
-  // Check AI config
   const aiConfig = getAIConfig();
   if (!aiConfig) {
     console.error(
-      "Error: ANTHROPIC_API_KEY is not set.\nThe ask command requires AI. Add ANTHROPIC_API_KEY to your .env file."
+      "Error: no AI provider key is configured.\nAdd ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY to your .env file."
     );
     process.exit(1);
   }
 
-  // Resolve workspace
   const wsPath = await resolveWorkspace(options.workspace);
   if (!wsPath) {
     console.error("No assignment workspace found.\n");
@@ -49,7 +48,6 @@ export async function askCommand(
     process.exit(1);
   }
 
-  // Load workspace
   const ws = await loadWorkspace(wsPath);
 
   if (!ws.workupJson && !ws.assignmentMd) {
@@ -60,34 +58,35 @@ export async function askCommand(
     process.exit(1);
   }
 
-  // Build retrieval context and retrieve
-  const retrievalContext = await buildWorkspaceRetrievalContext(ws);
+  const cache =
+    ws.courseId !== null && ws.courseCode
+      ? await loadCourseCache(ws.courseCode, ws.courseId)
+      : null;
+  const chatContext = createChatContext(aiConfig, ws, {
+    cache,
+    client: null,
+    config: null,
+    courseId: ws.courseId,
+  });
+  const toolEvents: ToolCallEvent[] = [];
 
-  if (retrievalContext.chunks.length === 0) {
-    console.error("Workspace has no content to answer from.");
-    process.exit(1);
-  }
-
-  const relevant = retrieveRelevant(question, retrievalContext);
-
-  if (options.debug) {
-    console.log(chalk.dim("\n--- Debug: Retrieved chunks ---"));
-    for (const c of relevant) {
-      console.log(
-        chalk.dim(
-          `  [${c.kind}] ${c.source} / ${c.section} (${c.text.length} chars, score ${(
-            c.score ?? 0
-          ).toFixed(2)})`
-        )
-      );
-    }
-    console.log(chalk.dim("--- End debug ---\n"));
-  }
-
-  // Generate answer
   let answer;
   try {
-    answer = await answerQuestion(aiConfig, question, relevant);
+    answer = await askWorkspaceQuestion(
+      aiConfig,
+      ws,
+      question,
+      (event) => {
+        toolEvents.push(event);
+      },
+      {
+        cache,
+        client: null,
+        config: null,
+        courseId: ws.courseId,
+      },
+      chatContext
+    );
   } catch (err) {
     console.error(
       `Failed to generate answer: ${err instanceof Error ? err.message : "unknown error"}`
@@ -95,7 +94,39 @@ export async function askCommand(
     process.exit(1);
   }
 
-  // Render
+  if (options.debug) {
+    console.log(chalk.dim("\n--- Debug: Workspace agent ---"));
+    console.log(chalk.dim(`  Workspace: ${ws.sessionSlug}`));
+    console.log(chalk.dim(`  Course cache: ${cache ? "loaded" : "unavailable"}`));
+    console.log(
+      chalk.dim(
+        "  Network-backed downloads: disabled for `canvas-cli ask` (local-first mode)"
+      )
+    );
+    if (toolEvents.length === 0) {
+      console.log(chalk.dim("  Tool calls: none"));
+    } else {
+      console.log(chalk.dim("  Tool calls:"));
+      for (const event of toolEvents) {
+        console.log(
+          chalk.dim(
+            `    - ${event.action} ${event.target}${
+              event.observation
+                ? ` [${event.observation.tool}:${event.observation.status}]`
+                : ""
+            }`
+          )
+        );
+      }
+    }
+    console.log(
+      chalk.dim(
+        `  Remembered observations: ${chatContext.runState.observations.length}`
+      )
+    );
+    console.log(chalk.dim("--- End debug ---\n"));
+  }
+
   if (options.json) {
     console.log(JSON.stringify(answer, null, 2));
   } else {

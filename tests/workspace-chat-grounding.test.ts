@@ -13,6 +13,7 @@ import { verifyWorkspaceAnswer } from "../src/agent/verify.js";
 import {
   buildEvidenceBackedQuestion,
   executeToolCallForTurn,
+  getAvailableChatToolNames,
   resolveToolTurnVerificationObservations,
   seedTurnToolCacheEntry,
   selectArtifactSupportObservations,
@@ -173,6 +174,59 @@ test("hydrateConversationHistory restores persisted workspace chat observations"
     ]);
     assert.equal(ctx.runState.observations.length, 1);
     assert.deepEqual(ctx.runState.readArtifactIds, ["artifact-1"]);
+  });
+});
+
+test("workspace chat exposes only local-first tools when no Canvas client is available", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      {
+        cache,
+        client: null,
+        config: null,
+        courseId: loaded.courseId,
+      }
+    );
+
+    assert.deepEqual(getAvailableChatToolNames(ctx), [
+      "search_workspace",
+      "read_file",
+      "list_files",
+      "search_course",
+      "open_resource",
+    ]);
+  });
+});
+
+test("workspace chat only exposes Canvas downloads when a client is available", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      {
+        cache,
+        client: {} as any,
+        config: {} as any,
+        courseId: loaded.courseId,
+      }
+    );
+
+    assert.deepEqual(getAvailableChatToolNames(ctx), [
+      "search_workspace",
+      "read_file",
+      "list_files",
+      "search_course",
+      "download_course_file",
+      "open_resource",
+    ]);
   });
 });
 

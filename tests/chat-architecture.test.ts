@@ -1943,7 +1943,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
         extractedFileCache: new Map(),
       };
 
-      const options = buildWorkspacePinOptions(loaded as any, null as any);
+      const options = await buildWorkspacePinOptions(loaded as any, null as any);
 
       assert.ok(
         options.some(
