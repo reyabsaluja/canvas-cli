@@ -9,6 +9,7 @@ import {
   clearScreen,
   createBuffer,
   getTermSize,
+  invalidateScreenRows,
   padAnsiToWidth,
   stripAnsi,
   truncatePlainToWidth,
@@ -509,6 +510,7 @@ export async function runWorkspaceUI(
     if (writes.length > 0) {
       writes.push("\x1B[0m");
       process.stdout.write(writes.join(""));
+      invalidateScreenRows(startRow, startRow + normalized.length - 1);
     }
 
     cache.rows = normalized.slice();
