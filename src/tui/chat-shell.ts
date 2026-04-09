@@ -143,8 +143,6 @@ export async function runChatShell<TExit>(
   let currentVerb = "";
   let bannerLinesCache: string[] | null = null;
   let bannerCacheCols = -1;
-  let inputStateCache: InputState | null = null;
-  let inputStateCacheKey = "";
   const transcriptIndexes = {
     normal: createTranscriptIndexState(),
     expanded: createTranscriptIndexState(),
@@ -334,11 +332,6 @@ export async function runChatShell<TExit>(
   }
 
   function getInputState(): InputState {
-    const cacheKey = `${showSlashMenu ? 1 : 0}\n${inputBuffer}`;
-    if (inputStateCache && inputStateCacheKey === cacheKey) {
-      return inputStateCache;
-    }
-
     const activeOpenPartial = getActiveOpenPartial(inputBuffer);
     const activePinPartial = getActivePinPartial(inputBuffer);
 
@@ -394,8 +387,7 @@ export async function runChatShell<TExit>(
       );
     }
 
-    inputStateCacheKey = cacheKey;
-    inputStateCache = {
+    return {
       activeOpenPartial,
       activePinPartial,
       openMatches,
@@ -406,7 +398,6 @@ export async function runChatShell<TExit>(
         pinMatches.length > 0 ||
         slashMatches.length > 0,
     };
-    return inputStateCache;
   }
 
   function renderNow(): void {
