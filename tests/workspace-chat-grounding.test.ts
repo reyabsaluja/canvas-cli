@@ -1440,6 +1440,16 @@ test("workspace chat dedupes repeated tool calls within a single turn", async ()
     assert.equal(secondSearch.deduped, true);
     assert.equal(secondSearch.result.modelText, firstSearch.result.modelText);
 
+    const reorderedSearch = await executeToolCallForTurn(
+      turnToolCache,
+      "search_workspace",
+      { query: "hazard branch" },
+      ctx
+    );
+
+    assert.equal(reorderedSearch.deduped, true);
+    assert.equal(reorderedSearch.result.modelText, firstSearch.result.modelText);
+
     const firstRead = await executeToolCallForTurn(
       turnToolCache,
       "read_file",
@@ -1474,6 +1484,59 @@ test("workspace chat dedupes repeated tool calls within a single turn", async ()
       aliasRead.result.observation.summary,
       /Reused docs\/reference\.txt from an earlier tool call in this turn/i
     );
+  });
+});
+
+test("workspace chat dedupes reordered course searches within a single turn", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "pages"), {
+      recursive: true,
+    });
+
+    const cache = createCourseCache(coursePath);
+    cache.pages = [
+      {
+        pageId: "lab4-brief",
+        title: "Lab 4 Brief",
+        htmlUrl: null,
+        updatedAt: null,
+        hasBody: true,
+      },
+    ];
+
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "pages", "lab4-brief.txt"),
+      "The lab brief explains saturating add mode and signed overflow detection.\n",
+      "utf-8"
+    );
+
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      { cache, client: null, config: null, courseId: 17 }
+    );
+    const turnToolCache = new Map();
+
+    const firstSearch = await executeToolCallForTurn(
+      turnToolCache,
+      "search_course",
+      { query: "saturating add mode" },
+      ctx
+    );
+    const secondSearch = await executeToolCallForTurn(
+      turnToolCache,
+      "search_course",
+      { query: "mode add saturating" },
+      ctx
+    );
+
+    assert.equal(firstSearch.deduped, false);
+    assert.equal(firstSearch.result.observation.status, "ok");
+    assert.equal(secondSearch.deduped, true);
+    assert.equal(secondSearch.result.modelText, firstSearch.result.modelText);
   });
 });
 

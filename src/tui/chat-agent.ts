@@ -768,14 +768,26 @@ function buildSemanticTurnToolAliasKeys(
   name: string,
   input: Record<string, unknown>
 ): string[] {
-  const target = getSemanticReuseTarget(name, input);
-  if (!target) {
-    return [];
-  }
-
-  return [...buildSemanticLookupAliases(target)].map(
+  return [...buildToolSemanticAliases(name, input)].map(
     (alias) => `semantic:${name}:${alias}`
   );
+}
+
+function buildToolSemanticAliases(
+  name: string,
+  input: Record<string, unknown>
+): Set<string> {
+  if (name === "search_workspace" || name === "search_course") {
+    const query = typeof input.query === "string" ? input.query.trim() : "";
+    return buildSemanticSearchAliases(query);
+  }
+
+  const target = getSemanticReuseTarget(name, input);
+  if (!target) {
+    return new Set();
+  }
+
+  return buildSemanticLookupAliases(target);
 }
 
 function findSemanticTurnToolCacheHit(
@@ -1858,6 +1870,18 @@ function buildSemanticLookupAliases(value: string): Set<string> {
   }
 
   return candidates;
+}
+
+function buildSemanticSearchAliases(value: string): Set<string> {
+  const normalized = normalizeFuzzyLookupAlias(value);
+  if (!normalized) {
+    return new Set();
+  }
+
+  const sortedTokens = [...new Set(normalized.split(/\s+/).filter(Boolean))]
+    .sort()
+    .join(" ");
+  return sortedTokens ? new Set([sortedTokens]) : new Set();
 }
 
 function addFuzzyLookupAliases(target: Set<string>, value: string): void {
