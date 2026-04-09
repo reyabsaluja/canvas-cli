@@ -15,6 +15,7 @@ import {
   executeToolCallForTurn,
   resolveToolTurnVerificationObservations,
   selectArtifactSupportObservations,
+  shouldContinueToolLoopAfterGateRead,
   shouldRecoverFromToolLoop,
 } from "../src/tui/chat-agent.js";
 import { createChatContext, hydrateConversationHistory } from "../src/tui/services.js";
@@ -1029,6 +1030,42 @@ test("tool-loop recovery only triggers when the loop produced no answer but gath
         artifacts: [],
       },
     ]),
+    false
+  );
+});
+
+test("failed gate reads fall back to the normal tool loop, but grounded gate reads do not", () => {
+  assert.equal(
+    shouldContinueToolLoopAfterGateRead({
+      tool: "read_file",
+      status: "missing_text",
+      summary: "Matched lab4-brief.txt, but readable text is missing.",
+      artifacts: [
+        {
+          artifactId: "artifact-1",
+          title: "lab4-brief.txt",
+          kind: "attachment",
+        },
+      ],
+    }),
+    true
+  );
+
+  assert.equal(
+    shouldContinueToolLoopAfterGateRead({
+      tool: "read_file",
+      status: "ok",
+      summary: "Read docs/reference.txt.",
+      artifacts: [
+        {
+          artifactId: "artifact-2",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          excerpt: "Grounded detail.",
+        },
+      ],
+      content: "Grounded detail.",
+    }),
     false
   );
 });
