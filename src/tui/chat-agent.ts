@@ -691,10 +691,16 @@ function selectToolMemoryObservations(
 ): Observation[] {
   const selected = selectSupplementalEvidenceObservations(observations, question);
   const coveredArtifactIds = collectObservationArtifactIds(selected);
-  const searchBreadcrumbs = selectRelevantSearchBreadcrumbObservations(
-    question,
-    observations,
-    coveredArtifactIds
+  const failedArtifactIds = collectFailedReadArtifactIds(observations);
+  const excludedBreadcrumbArtifactIds = new Set([
+    ...coveredArtifactIds,
+    ...failedArtifactIds,
+  ]);
+  const searchBreadcrumbs = selectRelevantSearchBreadcrumbObservations(question, observations, {
+    coveredArtifactIds,
+    failedArtifactIds,
+  }).map((observation) =>
+    pruneSearchBreadcrumbArtifacts(observation, excludedBreadcrumbArtifactIds)
   );
   if (selected.length === 0 && searchBreadcrumbs.length === 0) {
     return [];
@@ -1543,19 +1549,41 @@ function selectRelevantObservations(
 function selectRelevantSearchBreadcrumbObservations(
   question: string,
   observations: Observation[],
-  coveredArtifactIds: Set<string>
+  options?: {
+    coveredArtifactIds?: Set<string>;
+    failedArtifactIds?: Set<string>;
+  }
 ): Observation[] {
-  const candidates = observations.filter(
+  const coveredArtifactIds = options?.coveredArtifactIds ?? new Set<string>();
+  const failedArtifactIds = options?.failedArtifactIds ?? new Set<string>();
+  const viableCandidates = observations.filter(
+    (observation) =>
+      isSuccessfulSearchBreadcrumbObservation(observation) &&
+      observation.artifacts.some(
+        (artifact) =>
+          !coveredArtifactIds.has(artifact.artifactId) &&
+          !failedArtifactIds.has(artifact.artifactId)
+      )
+  );
+  if (viableCandidates.length > 0) {
+    return selectRelevantObservations(viableCandidates, question, 2);
+  }
+
+  if (failedArtifactIds.size === 0) {
+    return [];
+  }
+
+  const fallbackCandidates = observations.filter(
     (observation) =>
       isSuccessfulSearchBreadcrumbObservation(observation) &&
       observation.artifacts.some(
         (artifact) => !coveredArtifactIds.has(artifact.artifactId)
       )
   );
-  if (candidates.length === 0) {
+  if (fallbackCandidates.length === 0) {
     return [];
   }
-  return selectRelevantObservations(candidates, question, 2);
+  return selectRelevantObservations(fallbackCandidates, question, 2);
 }
 
 export function selectRecoveryReadArtifactId(
@@ -1578,7 +1606,9 @@ export function selectRecoveryReadArtifactId(
   const breadcrumbs = selectRelevantSearchBreadcrumbObservations(
     question,
     currentTurnObservations,
-    new Set()
+    {
+      failedArtifactIds,
+    }
   );
 
   for (const observation of breadcrumbs) {
@@ -1619,6 +1649,33 @@ function isSuccessfulSearchBreadcrumbObservation(
     (observation.tool === "search_workspace" ||
       observation.tool === "search_course")
   );
+}
+
+function pruneSearchBreadcrumbArtifacts(
+  observation: Observation,
+  excludedArtifactIds: Set<string>
+): Observation {
+  if (
+    excludedArtifactIds.size === 0 ||
+    !isSuccessfulSearchBreadcrumbObservation(observation)
+  ) {
+    return observation;
+  }
+
+  const filteredArtifacts = observation.artifacts.filter(
+    (artifact) => !excludedArtifactIds.has(artifact.artifactId)
+  );
+  if (
+    filteredArtifacts.length === 0 ||
+    filteredArtifacts.length === observation.artifacts.length
+  ) {
+    return observation;
+  }
+
+  return {
+    ...observation,
+    artifacts: filteredArtifacts,
+  };
 }
 
 function collectObservationArtifactIds(
