@@ -747,7 +747,9 @@ src/
   tui/
     app.ts                        — Interactive TUI state machine
     picker.ts                     — Arrow-key list picker component
-    workspace-ui.ts               — Workspace REPL (chat + slash commands)
+    app-runtime.ts                — Chat-native shell runtime and scope orchestration
+    chat-shell.ts                 — Shared transcript, input, and shell rendering
+    chat-agent.ts                 — Evidence-aware workspace chat agent
     screen.ts                     — ANSI terminal utilities
     services.ts                   — Service layer wrapping existing logic
   errors.ts                       — Shared error handling
