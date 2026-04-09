@@ -32,6 +32,18 @@ export async function decideWorkspaceRetrieval(
     return { action: "let_model_decide", reason: "empty_question" };
   }
 
+  let reusableMemoryArtifactIds: string[] | null = null;
+  const getReusableMemoryArtifactIds = (): string[] => {
+    if (reusableMemoryArtifactIds) {
+      return reusableMemoryArtifactIds;
+    }
+    reusableMemoryArtifactIds = selectReusableMemoryArtifactIds(
+      question,
+      input.runState
+    );
+    return reusableMemoryArtifactIds;
+  };
+
   if (shouldBypassGate(question)) {
     return { action: "let_model_decide", reason: "explicit_tool_request" };
   }
@@ -50,15 +62,12 @@ export async function decideWorkspaceRetrieval(
     shouldPromoteTopMatch(question, match.score)
   );
   if (promotedMatches.length === 0) {
-    const reusableMemoryArtifactIds = selectReusableMemoryArtifactIds(
-      question,
-      input.runState
-    );
-    if (reusableMemoryArtifactIds.length > 0) {
+    const fallbackMemoryArtifactIds = getReusableMemoryArtifactIds();
+    if (fallbackMemoryArtifactIds.length > 0) {
       return {
         action: "answer_from_memory",
         reason: "already_read_relevant_artifact",
-        sourceArtifactIds: reusableMemoryArtifactIds,
+        sourceArtifactIds: fallbackMemoryArtifactIds,
       };
     }
     return { action: "let_model_decide", reason: "weak_workspace_match" };
@@ -84,6 +93,14 @@ export async function decideWorkspaceRetrieval(
   );
   const topMatch = selectPreferredWorkspaceMatch(question, unreadRetryableMatches);
   if (!topMatch) {
+    const fallbackMemoryArtifactIds = getReusableMemoryArtifactIds();
+    if (fallbackMemoryArtifactIds.length > 0) {
+      return {
+        action: "answer_from_memory",
+        reason: "already_read_relevant_artifact",
+        sourceArtifactIds: fallbackMemoryArtifactIds,
+      };
+    }
     return { action: "let_model_decide", reason: "recent_artifact_read_failed" };
   }
 
