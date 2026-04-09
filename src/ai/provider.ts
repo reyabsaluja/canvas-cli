@@ -155,12 +155,40 @@ export async function streamWithTools(
   },
   maxSteps: number = 10
 ): Promise<string> {
+  const STREAM_TEXT_FLUSH_MS = 16;
   const aiTools: Record<string, any> = {};
+  let pendingTextDelta = "";
+  let textFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function flushPendingTextDelta(): void {
+    if (textFlushTimer) {
+      clearTimeout(textFlushTimer);
+      textFlushTimer = null;
+    }
+    if (!pendingTextDelta) {
+      return;
+    }
+    const delta = pendingTextDelta;
+    pendingTextDelta = "";
+    callbacks.onTextDelta?.(delta);
+  }
+
+  function schedulePendingTextFlush(): void {
+    if (textFlushTimer) {
+      return;
+    }
+    textFlushTimer = setTimeout(() => {
+      textFlushTimer = null;
+      flushPendingTextDelta();
+    }, STREAM_TEXT_FLUSH_MS);
+  }
+
   for (const t of toolDefs) {
     aiTools[t.name] = tool({
       description: t.description,
       inputSchema: jsonSchema(t.parameters as any),
       execute: async (input: any) => {
+        flushPendingTextDelta();
         const result = await executeTool(t.name, input);
         callbacks.onToolCall?.(t.name, input, result);
         return result;
@@ -185,7 +213,8 @@ export async function streamWithTools(
         const delta = (part as any).text ?? "";
         if (delta) {
           fullText += delta;
-          callbacks.onTextDelta?.(delta);
+          pendingTextDelta += delta;
+          schedulePendingTextFlush();
         }
       }
       // "error" parts indicate stream-level errors
@@ -194,11 +223,13 @@ export async function streamWithTools(
       }
     }
   } catch (err) {
+    flushPendingTextDelta();
     // If streaming fails partway, return whatever text we got
     if (!fullText) {
       throw err;
     }
   }
 
+  flushPendingTextDelta();
   return fullText;
 }
