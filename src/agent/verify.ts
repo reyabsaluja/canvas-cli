@@ -1,7 +1,10 @@
 import type { AnswerSource } from "../ask/types.js";
 import type { LoadedWorkspace } from "../ask/types.js";
 import type { Observation } from "./observation.js";
-import { isGroundedContentObservation } from "./observation-relevance.js";
+import {
+  isGroundedContentObservation,
+  scoreObservationRelevance,
+} from "./observation-relevance.js";
 
 export interface VerificationResult {
   ok: boolean;
@@ -22,7 +25,12 @@ export function verifyWorkspaceAnswer(
   input: VerifyWorkspaceAnswerInput
 ): VerificationResult {
   const trimmedAnswer = input.answer.trim();
-  const sources = collectSources(input.observations, input.usedWorkup, input.loaded);
+  const sources = collectSources(
+    input.question,
+    input.observations,
+    input.usedWorkup,
+    input.loaded
+  );
   const missing: string[] = [];
   const hasCitationCapableObservation = input.observations.some((observation) =>
     canObservationProduceCitation(observation)
@@ -61,13 +69,14 @@ export function verifyWorkspaceAnswer(
 }
 
 function collectSources(
+  question: string,
   observations: Observation[],
   usedWorkup: boolean,
   loaded: LoadedWorkspace
 ): AnswerSource[] {
   const resolved: AnswerSource[] = [];
   const seen = new Set<string>();
-  const citationObservations = selectCitationObservations(observations);
+  const citationObservations = selectCitationObservations(question, observations);
 
   for (const observation of citationObservations) {
     // Only successful tool observations count as evidence. Failed lookups like
@@ -102,15 +111,32 @@ function collectSources(
 }
 
 function selectCitationObservations(
+  question: string,
   observations: Observation[]
 ): Observation[] {
   const grounded = observations.filter((observation) =>
     isGroundedContentObservation(observation)
   );
-  if (grounded.length > 0) {
-    return grounded;
+  const candidates = grounded.length > 0 ? grounded : observations;
+  const relevant = selectRelevantCitationObservations(question, candidates);
+  if (relevant.length > 0) {
+    return relevant;
   }
-  return observations;
+  return candidates;
+}
+
+function selectRelevantCitationObservations(
+  question: string,
+  observations: Observation[]
+): Observation[] {
+  const trimmedQuestion = question.trim();
+  if (!trimmedQuestion) {
+    return [];
+  }
+
+  return observations.filter(
+    (observation) => scoreObservationRelevance(trimmedQuestion, observation) > 0
+  );
 }
 
 function canObservationProduceCitation(observation: Observation): boolean {

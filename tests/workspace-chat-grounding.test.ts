@@ -1088,6 +1088,51 @@ test("workspace answer verification derives sources and confidence deterministic
       },
     ]);
 
+    const verifiedFromMixedGroundedReads = verifyWorkspaceAnswer({
+      question: "Explain the branch hazard requirement in detail.",
+      answer: "You need to show the stall cycles around the branch hazard.",
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read docs/reference.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-1",
+              title: "docs/reference.txt",
+              kind: "extracted",
+              excerpt: "The waveform must show stall cycles around the branch hazard.",
+            },
+          ],
+          content: "The waveform must show stall cycles around the branch hazard.",
+        },
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read docs/resistor-table.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-3",
+              title: "docs/resistor-table.txt",
+              kind: "extracted",
+              excerpt: "Use 220 ohm and 1k ohm resistors in the LED test harness.",
+            },
+          ],
+          content: "Use 220 ohm and 1k ohm resistors in the LED test harness.",
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedFromMixedGroundedReads.confidence, "high");
+    assert.deepEqual(verifiedFromMixedGroundedReads.sources, [
+      {
+        title: "docs/reference.txt",
+        kind: "extracted",
+        excerpt: "The waveform must show stall cycles around the branch hazard.",
+      },
+    ]);
+
     const verifiedFromUnsupportedWorkup = verifyWorkspaceAnswer({
       question: "Explain the branch hazard requirement in detail.",
       answer: "The workup says to explain branch behavior.",
