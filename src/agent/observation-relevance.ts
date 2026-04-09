@@ -52,13 +52,14 @@ export function scoreObservationRelevance(
   const titleText = normalizeObservationRelevanceText(
     observation.artifacts.map((artifact) => artifact.title).join(" ")
   );
+  const summaryText = normalizeObservationRelevanceText(observation.summary ?? "");
   const excerptText = normalizeObservationRelevanceText(
     observation.artifacts
       .map((artifact) => artifact.excerpt ?? "")
       .join(" ")
   );
   const contentText = normalizeObservationRelevanceText(observation.content ?? "");
-  const haystack = `${titleText} ${excerptText} ${contentText}`.trim();
+  const haystack = `${titleText} ${summaryText} ${excerptText} ${contentText}`.trim();
   if (!haystack) {
     return 0;
   }
@@ -77,6 +78,11 @@ export function scoreObservationRelevance(
     }
     if (excerptText.includes(token)) {
       score += 4;
+      matchedTokens += 1;
+      continue;
+    }
+    if (summaryText.includes(token)) {
+      score += 3;
       matchedTokens += 1;
       continue;
     }

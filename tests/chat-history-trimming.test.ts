@@ -199,3 +199,39 @@ test("buildToolPromptMessages keeps relevant search breadcrumbs alongside ground
   assert.match(latestMessage, /docs\/walkthrough\.txt/);
   assert.doesNotMatch(latestMessage, /docs\/resistor-table\.txt/);
 });
+
+test("buildToolPromptMessages prefers question-relevant failed searches over newer unrelated failures", () => {
+  const promptMessages = buildToolPromptMessages(
+    [],
+    "Explain the branch hazard requirement in detail.",
+    {
+      observations: [
+        {
+          tool: "search_workspace",
+          status: "not_found",
+          summary: 'No relevant workspace content found for "branch hazard".',
+          artifacts: [],
+        },
+        {
+          tool: "search_workspace",
+          status: "not_found",
+          summary: 'No relevant workspace content found for "resistor values".',
+          artifacts: [],
+        },
+        {
+          tool: "read_file",
+          status: "not_found",
+          summary: 'File "bonus.txt" not found. Use list_files to see available files.',
+          artifacts: [],
+        },
+      ],
+      readArtifactIds: [],
+      stepCount: 3,
+    }
+  );
+
+  const latestMessage = promptMessages.at(-1)?.content ?? "";
+  assert.match(latestMessage, /branch hazard/i);
+  assert.doesNotMatch(latestMessage, /resistor values/i);
+  assert.doesNotMatch(latestMessage, /bonus\.txt/i);
+});
