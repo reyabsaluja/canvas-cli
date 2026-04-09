@@ -40,6 +40,8 @@ import {
 const MAX_DOC_TEXT = 30000;
 const MAX_CONVERSATION_MESSAGES = 12;
 const MAX_CONVERSATION_CHARS = 80000;
+const MAX_TOOL_MEMORY_CHARS = 2400;
+const MAX_TOOL_MEMORY_DETAIL_CHARS = 220;
 
 const CHAT_TOOLS: ToolDefinition[] = [
   {
@@ -333,7 +335,8 @@ export async function runChatAgent(
     const turnToolCache: TurnToolCache = new Map();
     const promptMessages = buildToolPromptMessages(
       ctx.conversationHistory,
-      question
+      question,
+      ctx.runState
     );
     fullText = await streamWithTools(
       ctx.aiConfig,
@@ -402,9 +405,16 @@ function trimConversationHistory(ctx: ChatAgentContext): void {
 
 export function buildToolPromptMessages(
   history: ChatAgentConversationEntry[],
-  question: string
+  question: string,
+  runState?: RunState
 ): ChatAgentConversationEntry[] {
-  return trimConversationEntries([...history, { role: "user", content: question }]);
+  return trimConversationEntries([
+    ...history,
+    {
+      role: "user",
+      content: buildToolPromptQuestion(question, runState),
+    },
+  ]);
 }
 
 function trimConversationEntries(
@@ -475,6 +485,64 @@ function conversationCharCount(
     (sum, [user, assistant]) => sum + user.content.length + assistant.content.length,
     pendingUser?.content.length ?? 0
   );
+}
+
+function buildToolPromptQuestion(
+  question: string,
+  runState?: RunState
+): string {
+  const memory = buildToolRuntimeMemory(runState?.observations ?? []);
+  if (!memory) {
+    return question;
+  }
+  return `${question}\n\n${memory}`;
+}
+
+function buildToolRuntimeMemory(
+  observations: Observation[]
+): string {
+  if (observations.length === 0) {
+    return "";
+  }
+
+  const selected = selectSupplementalEvidenceObservations(observations);
+  if (selected.length === 0) {
+    return "";
+  }
+
+  const lines = [
+    "Previously gathered tool memory (reuse this before calling tools again):",
+  ];
+
+  for (const observation of selected) {
+    const parts = [
+      `- ${observation.tool} [${observation.status}] ${observation.summary}`,
+    ];
+    const sourceTitles = [...new Set(
+      observation.artifacts
+        .map((artifact) => artifact.title.trim())
+        .filter((title) => title.length > 0)
+    )].slice(0, 2);
+    if (sourceTitles.length > 0) {
+      parts.push(`Sources: ${sourceTitles.join(", ")}`);
+    }
+
+    const detail = summarizeObservationDetail(observation);
+    if (detail) {
+      parts.push(`Key detail: ${detail}`);
+    }
+
+    lines.push(parts.join(" "));
+  }
+
+  lines.push("Only call a tool if you still need new evidence beyond this memory.");
+
+  const rendered = lines.join("\n");
+  if (rendered.length <= MAX_TOOL_MEMORY_CHARS) {
+    return rendered;
+  }
+
+  return `${rendered.slice(0, MAX_TOOL_MEMORY_CHARS - 3).trimEnd()}...`;
 }
 
 // --- Tool execution ---
@@ -751,6 +819,36 @@ async function downloadCourseFile(
       uiText: `No downloadable file matching "${title}" found.`,
     };
   }
+
+  const cachedAttachment = ctx.cache.attachments.find(
+    (attachment) => attachment.canvasFileId === foundItem!.contentId
+  );
+  if (cachedAttachment) {
+    const cachedArtifactId = buildCourseAttachmentArtifactId(
+      cachedAttachment.localPath,
+      cachedAttachment.originalFilename
+    );
+    const cachedRead = await readWorkspaceKnowledgeArtifactById(
+      ctx.loaded,
+      ctx.cache,
+      cachedArtifactId,
+      MAX_DOC_TEXT
+    );
+    if (cachedRead.status === "ok") {
+      return {
+        observation: {
+          tool: "download_course_file",
+          status: "ok",
+          summary: `Reused cached text for ${cachedRead.artifact.title}.`,
+          artifacts: [toArtifactRef(cachedRead.artifact)],
+          content: cachedRead.content,
+        },
+        modelText: cachedRead.content,
+        uiText: cachedRead.content,
+      };
+    }
+  }
+
   const fileMeta = await ctx.client.getFileSafe(foundItem.contentId);
   if (!fileMeta) {
     return {
@@ -805,12 +903,17 @@ async function downloadCourseFile(
         extracted.endsWith("\n") ? extracted : extracted + "\n",
         "utf-8"
       );
+      const artifactRef = createCourseAttachmentArtifactRef(
+        relativeLocalPath,
+        fileMeta.display_name,
+        extracted
+      );
       return {
         observation: {
           tool: "download_course_file",
           status: "ok",
           summary: `Downloaded and extracted ${fileMeta.display_name}.`,
-          artifacts: [],
+          artifacts: [artifactRef],
           content: extracted,
         },
         modelText: extracted,
@@ -826,7 +929,12 @@ async function downloadCourseFile(
       tool: "download_course_file",
       status: "missing_text",
       summary: message,
-      artifacts: [],
+      artifacts: [
+        createCourseAttachmentArtifactRef(
+          relativeLocalPath,
+          fileMeta.display_name
+        ),
+      ],
     },
     modelText: message,
     uiText: message,
@@ -1032,6 +1140,26 @@ function finalizeAnswerText(answer: string, missing: string[]): string {
   return trimmed;
 }
 
+function summarizeObservationDetail(
+  observation: Observation
+): string | null {
+  const fromExcerpt = observation.artifacts
+    .map((artifact) => cleanInlineText(artifact.excerpt))
+    .find((excerpt) => excerpt.length > 0);
+  const detail = cleanInlineText(observation.content) || fromExcerpt;
+  if (!detail) {
+    return null;
+  }
+  if (detail.length <= MAX_TOOL_MEMORY_DETAIL_CHARS) {
+    return detail;
+  }
+  return `${detail.slice(0, MAX_TOOL_MEMORY_DETAIL_CHARS - 3).trimEnd()}...`;
+}
+
+function cleanInlineText(value?: string | null): string {
+  return (value ?? "").replace(/\s+/g, " ").trim();
+}
+
 function normalizeToolInput(value: unknown): string {
   if (typeof value === "string") {
     return value.trim().replace(/\s+/g, " ").toLowerCase();
@@ -1067,6 +1195,26 @@ function toArtifactRef(artifact: {
   };
 }
 
+function createCourseAttachmentArtifactRef(
+  localPath: string,
+  originalFilename: string,
+  excerpt?: string
+): ArtifactRef {
+  return {
+    artifactId: buildCourseAttachmentArtifactId(localPath, originalFilename),
+    title: originalFilename,
+    kind: "attachment",
+    excerpt: buildArtifactExcerpt(excerpt),
+  };
+}
+
+function buildCourseAttachmentArtifactId(
+  localPath: string,
+  originalFilename: string
+): string {
+  return `course:attachment:${localPath}:${originalFilename}`;
+}
+
 function renderWorkspaceArtifactLookupFailure(
   filename: string,
   result: Awaited<ReturnType<typeof readWorkspaceKnowledgeArtifact>>
@@ -1086,4 +1234,15 @@ function renderWorkspaceArtifactLookupFailure(
     default:
       return `File "${filename}" not found. Use list_files to see available files.`;
   }
+}
+
+function buildArtifactExcerpt(value?: string | null): string | null {
+  const cleaned = cleanInlineText(value);
+  if (!cleaned) {
+    return null;
+  }
+  if (cleaned.length <= 180) {
+    return cleaned;
+  }
+  return `${cleaned.slice(0, 177).trimEnd()}...`;
 }

@@ -8,6 +8,7 @@ import type { CourseCache } from "../src/enrich/cache-loader.js";
 import type { Observation } from "../src/agent/observation.js";
 import { clearArtifactIndexCache } from "../src/knowledge/artifact-index.js";
 import { decideWorkspaceRetrieval } from "../src/agent/retrieval-gate.js";
+import { appendObservation, createEmptyRunState } from "../src/agent/run-state.js";
 import { verifyWorkspaceAnswer } from "../src/agent/verify.js";
 import {
   buildEvidenceBackedQuestion,
@@ -546,5 +547,141 @@ test("workspace chat dedupes repeated tool calls within a single turn", async ()
       secondRead.result.modelText,
       /stall cycles around the branch hazard/i
     );
+  });
+});
+
+test("download_course_file reuses cached extracted attachments instead of redownloading", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "attachments", "modules"), {
+      recursive: true,
+    });
+
+    const cache = createCourseCache(coursePath);
+    cache.modules = [
+      {
+        id: 8,
+        name: "Lab 4 Module",
+        position: 1,
+        itemCount: 1,
+        items: [
+          {
+            id: 10,
+            title: "lab4-brief.txt",
+            type: "File",
+            position: 1,
+            contentId: 99,
+            pageUrl: null,
+            htmlUrl: null,
+            externalUrl: null,
+          },
+        ],
+      },
+    ];
+    cache.attachments = [
+      {
+        sourceType: "module_linked",
+        canvasFileId: 99,
+        originalFilename: "lab4-brief.txt",
+        localPath: "attachments/modules/lab4-brief.txt",
+        contentType: "text/plain",
+        size: 256,
+        downloadUrl: "https://canvas.example/files/99/download",
+        reason: "downloaded on demand from module item \"lab4-brief.txt\"",
+        status: "downloaded",
+      },
+    ];
+
+    await fs.writeFile(
+      path.join(
+        coursePath,
+        "extracted",
+        "attachments",
+        "modules",
+        "lab4-brief.txt.txt"
+      ),
+      "The brief says to include the waveform and explain the branch hazard.\n",
+      "utf-8"
+    );
+
+    let getFileCalls = 0;
+    let downloadCalls = 0;
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      {
+        cache,
+        client: {
+          getFileSafe: async () => {
+            getFileCalls += 1;
+            return null;
+          },
+          downloadFile: async () => {
+            downloadCalls += 1;
+            return null;
+          },
+        } as any,
+        config: null,
+        courseId: 17,
+      }
+    );
+
+    const result = await executeToolCallForTurn(
+      new Map(),
+      "download_course_file",
+      { title: "lab4-brief" },
+      ctx
+    );
+
+    assert.equal(result.deduped, false);
+    assert.equal(result.result.observation.status, "ok");
+    assert.equal(getFileCalls, 0);
+    assert.equal(downloadCalls, 0);
+    assert.equal(
+      result.result.observation.artifacts[0]?.artifactId,
+      "course:attachment:attachments/modules/lab4-brief.txt:lab4-brief.txt"
+    );
+    assert.match(result.result.modelText, /waveform/i);
+  });
+});
+
+test("artifact-backed download observations count as already-read evidence for retrieval", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+
+    const runState = createEmptyRunState();
+    appendObservation(runState, {
+      tool: "download_course_file",
+      status: "ok",
+      summary: "Downloaded and extracted lab4-brief.txt.",
+      artifacts: [
+        {
+          artifactId: "workspace:extracted:docs/reference.txt",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          excerpt: "The waveform must show stall cycles around the branch hazard.",
+        },
+      ],
+      content: "The waveform must show stall cycles around the branch hazard.",
+    });
+
+    assert.deepEqual(runState.readArtifactIds, ["workspace:extracted:docs/reference.txt"]);
+
+    const decision = await decideWorkspaceRetrieval({
+      question: "Explain the branch hazard requirement in detail.",
+      runState,
+      loaded,
+      cache,
+    });
+
+    assert.deepEqual(decision, {
+      action: "answer_from_memory",
+      reason: "already_read_relevant_artifact",
+      sourceArtifactIds: ["workspace:extracted:docs/reference.txt"],
+    });
   });
 });
