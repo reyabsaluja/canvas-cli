@@ -109,7 +109,8 @@ function isDuplicateObservation(
 ): boolean {
   return (
     isDuplicateGroundedObservation(observations, nextObservation) ||
-    isDuplicateArtifactFailureObservation(observations, nextObservation)
+    isDuplicateArtifactFailureObservation(observations, nextObservation) ||
+    isDuplicateArtifactDiscoveryObservation(observations, nextObservation)
   );
 }
 
@@ -165,12 +166,46 @@ function isDuplicateArtifactFailureObservation(
   });
 }
 
+function isDuplicateArtifactDiscoveryObservation(
+  observations: Observation[],
+  nextObservation: Observation
+): boolean {
+  if (!shouldRememberArtifactDiscovery(nextObservation)) {
+    return false;
+  }
+
+  const nextArtifactKey = buildObservationArtifactKey(nextObservation);
+  if (!nextArtifactKey) {
+    return false;
+  }
+
+  return observations.some((observation) => {
+    if (!shouldRememberArtifactDiscovery(observation)) {
+      return false;
+    }
+    return (
+      observation.tool === nextObservation.tool &&
+      buildObservationArtifactKey(observation) === nextArtifactKey
+    );
+  });
+}
+
 function shouldRememberArtifactFailure(observation: Observation): boolean {
   return (
     observation.status !== "ok" &&
     observation.artifacts.length > 0 &&
     (observation.tool === "read_file" ||
       observation.tool === "download_course_file")
+  );
+}
+
+function shouldRememberArtifactDiscovery(observation: Observation): boolean {
+  return (
+    observation.status === "ok" &&
+    observation.artifacts.length > 0 &&
+    !observation.content &&
+    (observation.tool === "search_workspace" ||
+      observation.tool === "search_course")
   );
 }
 
