@@ -26,7 +26,7 @@ import { searchOpenableResources } from "./open-resources.js";
 import {
   MAIN_VIEW_BOTTOM_RESERVE,
   buildBannerLines,
-  buildTranscriptLines,
+  getRenderedMessageLines,
   renderChatFrame,
   renderInputFooter,
 } from "./chat-shell-render.js";
@@ -88,6 +88,22 @@ const VERBS = [
   "Reviewing",
 ];
 const FULL_RENDER_BATCH_MS = 16;
+const CLEAN_TRANSCRIPT_INDEX = Number.MAX_SAFE_INTEGER;
+
+type TranscriptBlock = {
+  message: ChatMessage;
+  lines: string[];
+  lineCount: number;
+};
+
+type TranscriptIndexState = {
+  contentWidth: number;
+  cols: number;
+  blocks: TranscriptBlock[];
+  cumulativeEnds: number[];
+  totalLines: number;
+  dirtyFrom: number;
+};
 
 export async function runChatShell<TExit>(
   options: ChatShellOptions<TExit>
@@ -116,16 +132,37 @@ export async function runChatShell<TExit>(
   let renderQueued = false;
   let renderTimer: ReturnType<typeof setTimeout> | null = null;
   let currentVerb = "";
-  let transcriptLinesCache: string[] | null = null;
-  let transcriptCacheKey = "";
   let bannerLinesCache: string[] | null = null;
   let bannerCacheCols = -1;
+  const transcriptIndexes = {
+    normal: createTranscriptIndexState(),
+    expanded: createTranscriptIndexState(),
+  };
 
   const placeholder =
     options.runtime.placeholder ?? "Type your message or /help for commands";
 
-  function markTranscriptDirty(): void {
-    transcriptLinesCache = null;
+  function createTranscriptIndexState(): TranscriptIndexState {
+    return {
+      contentWidth: -1,
+      cols: -1,
+      blocks: [],
+      cumulativeEnds: [],
+      totalLines: 0,
+      dirtyFrom: 0,
+    };
+  }
+
+  function markTranscriptDirty(index: number): void {
+    const normalized = Math.max(0, index);
+    transcriptIndexes.normal.dirtyFrom = Math.min(
+      transcriptIndexes.normal.dirtyFrom,
+      normalized
+    );
+    transcriptIndexes.expanded.dirtyFrom = Math.min(
+      transcriptIndexes.expanded.dirtyFrom,
+      normalized
+    );
   }
 
   function getCachedBannerLines(): string[] {
@@ -141,21 +178,131 @@ export async function runChatShell<TExit>(
     return bannerLinesCache;
   }
 
-  function getCachedTranscriptLines(): string[] {
+  function ensureTranscriptIndex(
+    state: TranscriptIndexState,
+    contentWidth: number,
+    cols: number,
+    expanded: boolean
+  ): void {
+    if (state.contentWidth !== contentWidth || state.cols !== cols) {
+      state.contentWidth = contentWidth;
+      state.cols = cols;
+      state.blocks = [];
+      state.cumulativeEnds = [];
+      state.totalLines = 0;
+      state.dirtyFrom = 0;
+    }
+
+    if (messages.length === 0) {
+      state.blocks = [];
+      state.cumulativeEnds = [];
+      state.totalLines = 0;
+      state.dirtyFrom = CLEAN_TRANSCRIPT_INDEX;
+      return;
+    }
+
+    if (
+      state.dirtyFrom === CLEAN_TRANSCRIPT_INDEX &&
+      state.blocks.length === messages.length
+    ) {
+      return;
+    }
+
+    const start = Math.min(state.dirtyFrom, messages.length - 1);
+    for (let index = start; index < messages.length; index++) {
+      const message = messages[index]!;
+      const lines = getRenderedMessageLines(message, contentWidth, cols, expanded);
+      state.blocks[index] = {
+        message,
+        lines,
+        lineCount: lines.length,
+      };
+      const prevEnd = index === 0 ? 0 : state.cumulativeEnds[index - 1]!;
+      state.cumulativeEnds[index] = prevEnd + lines.length;
+    }
+
+    state.blocks.length = messages.length;
+    state.cumulativeEnds.length = messages.length;
+    state.totalLines = state.cumulativeEnds[messages.length - 1] ?? 0;
+    state.dirtyFrom = CLEAN_TRANSCRIPT_INDEX;
+  }
+
+  function findFirstBlockEndingAfter(
+    cumulativeEnds: number[],
+    lineIndex: number
+  ): number {
+    let lo = 0;
+    let hi = cumulativeEnds.length - 1;
+    let found = cumulativeEnds.length;
+
+    while (lo <= hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (cumulativeEnds[mid]! > lineIndex) {
+        found = mid;
+        hi = mid - 1;
+      } else {
+        lo = mid + 1;
+      }
+    }
+
+    return found;
+  }
+
+  function collectTranscriptRange(
+    state: TranscriptIndexState,
+    startLine: number,
+    endLine: number
+  ): string[] {
+    if (startLine >= endLine || state.blocks.length === 0) {
+      return [];
+    }
+
+    const lines: string[] = [];
+    let blockIndex = findFirstBlockEndingAfter(state.cumulativeEnds, startLine);
+    if (blockIndex >= state.blocks.length) {
+      return lines;
+    }
+
+    while (blockIndex < state.blocks.length) {
+      const block = state.blocks[blockIndex]!;
+      const blockStart =
+        blockIndex === 0 ? 0 : state.cumulativeEnds[blockIndex - 1]!;
+      if (blockStart >= endLine) {
+        break;
+      }
+
+      const sliceStart = Math.max(0, startLine - blockStart);
+      const sliceEnd = Math.min(block.lineCount, endLine - blockStart);
+      if (sliceStart < sliceEnd) {
+        lines.push(...block.lines.slice(sliceStart, sliceEnd));
+      }
+      blockIndex += 1;
+    }
+
+    return lines;
+  }
+
+  function getActiveTranscriptIndex(): TranscriptIndexState {
     const { cols } = getTermSize();
     const contentWidth = Math.min(cols - 4, 100);
-    const cacheKey = `${cols}:${contentWidth}:${toolOutputExpanded ? 1 : 0}`;
-    if (transcriptLinesCache && transcriptCacheKey === cacheKey) {
-      return transcriptLinesCache;
+    const state = toolOutputExpanded
+      ? transcriptIndexes.expanded
+      : transcriptIndexes.normal;
+    ensureTranscriptIndex(state, contentWidth, cols, toolOutputExpanded);
+    return state;
+  }
+
+  async function appendPersistedMessage(message: ChatMessage): Promise<void> {
+    markTranscriptDirty(messages.length);
+    await persistence.addMessage(message);
+  }
+
+  async function appendPersistedMessages(nextMessages: ChatMessage[]): Promise<void> {
+    if (nextMessages.length === 0) {
+      return;
     }
-    transcriptLinesCache = buildTranscriptLines({
-      messages,
-      contentWidth,
-      cols,
-      expanded: toolOutputExpanded,
-    });
-    transcriptCacheKey = cacheKey;
-    return transcriptLinesCache;
+    markTranscriptDirty(messages.length);
+    await persistence.addMessages(nextMessages);
   }
 
   function getSlashMatches(): CommandDefinition[] {
@@ -227,6 +374,7 @@ export async function runChatShell<TExit>(
   }
 
   function renderNow(): void {
+    const transcriptIndex = getActiveTranscriptIndex();
     const next = renderChatFrame({
       runtime: options.runtime,
       placeholder,
@@ -234,10 +382,11 @@ export async function runChatShell<TExit>(
       chatScrollOffset,
       isProcessing,
       currentSpinnerLine,
-      toolOutputExpanded,
       modelLabel: options.modelLabel,
       bannerLines: getCachedBannerLines(),
-      transcriptLines: getCachedTranscriptLines(),
+      transcriptTotalLines: transcriptIndex.totalLines,
+      getTranscriptLines: (startLine, endLine) =>
+        collectTranscriptRange(transcriptIndex, startLine, endLine),
       slashMatches: showSlashMenu ? getSlashMatches() : [],
       openMatches: getOpenMatches(),
       pinMatches: getPinMatches(),
@@ -354,12 +503,10 @@ export async function runChatShell<TExit>(
 
     const api: ChatShellApi<TExit> = {
       addMessage: async (message) => {
-        markTranscriptDirty();
-        await persistence.addMessage(message);
+        await appendPersistedMessage(message);
       },
       addMessages: async (nextMessages) => {
-        markTranscriptDirty();
-        await persistence.addMessages(nextMessages);
+        await appendPersistedMessages(nextMessages);
       },
       resolve: (result) => resolve(result),
       render,
@@ -430,8 +577,7 @@ export async function runChatShell<TExit>(
           );
         }
         lines.push("Use `/pin` to list available files, then try again.");
-        markTranscriptDirty();
-        await persistence.addMessage({
+        await appendPersistedMessage({
           role: "system",
           content: lines.join("\n"),
         });
@@ -456,8 +602,7 @@ export async function runChatShell<TExit>(
           fullInput = `${attached.join("\n\n")}\n\nUser question: ${cleanInput}`;
         }
       }
-      markTranscriptDirty();
-      await persistence.addMessage({ role: "user", content: input });
+      await appendPersistedMessage({ role: "user", content: input });
       isProcessing = true;
       currentVerb = VERBS[Math.floor(Math.random() * VERBS.length)]!;
       spinnerFrame = 0;
@@ -478,7 +623,7 @@ export async function runChatShell<TExit>(
                 role: "assistant",
                 content: streamedText.trim(),
               };
-              markTranscriptDirty();
+              markTranscriptDirty(messages.length - 1);
               persistence.schedule();
               streamingStarted = false;
               streamedText = "";
@@ -492,7 +637,7 @@ export async function runChatShell<TExit>(
               toolColor: event.color,
               observation: event.observation,
             });
-            markTranscriptDirty();
+            markTranscriptDirty(messages.length - 1);
             persistence.schedule();
             currentSpinnerLine = `${C.dim(
               SPINNER[spinnerFrame]
@@ -506,14 +651,14 @@ export async function runChatShell<TExit>(
               stopSpinner();
               currentSpinnerLine = "";
               messages.push({ role: "assistant", content: "" });
-              markTranscriptDirty();
+              markTranscriptDirty(messages.length - 1);
             }
             streamedText += delta;
             messages[messages.length - 1] = {
               role: "assistant",
               content: streamedText,
             };
-            markTranscriptDirty();
+            markTranscriptDirty(messages.length - 1);
             scheduleRender();
           },
         });
@@ -527,7 +672,7 @@ export async function runChatShell<TExit>(
             sources: final.sources,
             confidence: final.confidence,
           };
-          markTranscriptDirty();
+          markTranscriptDirty(messages.length - 1);
         } else {
           messages.push({
             role: "assistant",
@@ -536,14 +681,13 @@ export async function runChatShell<TExit>(
             sources: final.sources,
             confidence: final.confidence,
           });
-          markTranscriptDirty();
+          markTranscriptDirty(messages.length - 1);
         }
         persistence.schedule(0);
         pendingPins = [];
       } catch (error) {
         stopSpinner();
-        markTranscriptDirty();
-        await persistence.addMessage({
+        await appendPersistedMessage({
           role: "system",
           content: `Error: ${error instanceof Error ? error.message : "unknown"}`,
         });
@@ -559,8 +703,7 @@ export async function runChatShell<TExit>(
       commandName: string,
       args: string
     ): Promise<void> {
-      markTranscriptDirty();
-      await persistence.addMessage({ role: "user", content: rawInput });
+      await appendPersistedMessage({ role: "user", content: rawInput });
 
       if (commandName === "/help") {
         const helpLines = availableCommands.map(
@@ -570,8 +713,7 @@ export async function runChatShell<TExit>(
         for (const extra of options.extraHelpCommands ?? []) {
           helpLines.push(`${C.text(extra.cmd.padEnd(16))}${extra.desc}`);
         }
-        markTranscriptDirty();
-        await persistence.addMessage({
+        await appendPersistedMessage({
           role: "assistant",
           content: helpLines.join("\n"),
         });
@@ -590,7 +732,7 @@ export async function runChatShell<TExit>(
         currentSpinnerLine = "";
         stopSpinner();
         messages.splice(0, messages.length, ...resetMessages);
-        markTranscriptDirty();
+        markTranscriptDirty(0);
         chatScrollOffset = 0;
         await persistence.flush();
         render();
@@ -603,8 +745,7 @@ export async function runChatShell<TExit>(
           !pinCommand ||
           !pinCommand.scopes.includes(options.runtime.scope.type)
         ) {
-          markTranscriptDirty();
-          await persistence.addMessage({
+          await appendPersistedMessage({
             role: "system",
             content: `${commandName} is only available in ${formatScopeTargets(
               pinCommand?.scopes ?? ["workspace"]
@@ -619,8 +760,7 @@ export async function runChatShell<TExit>(
         const requested = pinArgs[0]?.toLowerCase() ?? "";
 
         if (availablePins.length === 0) {
-          markTranscriptDirty();
-          await persistence.addMessage({
+          await appendPersistedMessage({
             role: "system",
             content: "No pinnable files are available in this workspace yet.",
           });
@@ -649,8 +789,7 @@ export async function runChatShell<TExit>(
             "Use `/pin <label>` to queue a file for your next prompt.",
             "Use `/pin clear` to remove queued pins."
           );
-          markTranscriptDirty();
-          await persistence.addMessage({
+          await appendPersistedMessage({
             role: "assistant",
             content: lines.join("\n"),
           });
@@ -660,8 +799,7 @@ export async function runChatShell<TExit>(
 
         if (requested === "clear" || requested === "reset") {
           pendingPins = [];
-          markTranscriptDirty();
-          await persistence.addMessage({
+          await appendPersistedMessage({
             role: "assistant",
             content: "Cleared queued pins for the next prompt.",
           });
@@ -707,8 +845,7 @@ export async function runChatShell<TExit>(
           lines.push("Nothing was queued. Use `/pin` to see available files.");
         }
 
-        markTranscriptDirty();
-        await persistence.addMessage({
+        await appendPersistedMessage({
           role: resolution.resolved.length > 0 ? "assistant" : "system",
           content: lines.join("\n"),
         });
@@ -718,8 +855,7 @@ export async function runChatShell<TExit>(
 
       const resolvedCommand = resolveCommand(options.commands, commandName);
       if (!resolvedCommand) {
-        markTranscriptDirty();
-        await persistence.addMessage({
+        await appendPersistedMessage({
           role: "system",
           content: `Unknown command: ${commandName}. Type /help for options.`,
         });
@@ -728,8 +864,7 @@ export async function runChatShell<TExit>(
       }
 
       if (!resolvedCommand.scopes.includes(options.runtime.scope.type)) {
-        markTranscriptDirty();
-        await persistence.addMessage({
+        await appendPersistedMessage({
           role: "system",
           content: `${commandName} is only available in ${formatScopeTargets(
             resolvedCommand.scopes
@@ -751,8 +886,7 @@ export async function runChatShell<TExit>(
         }
         render();
       } catch (error) {
-        markTranscriptDirty();
-        await persistence.addMessage({
+        await appendPersistedMessage({
           role: "system",
           content: `Error: ${error instanceof Error ? error.message : "unknown"}`,
         });
@@ -770,7 +904,6 @@ export async function runChatShell<TExit>(
 
       if (key === "\x0F") {
         toolOutputExpanded = !toolOutputExpanded;
-        markTranscriptDirty();
         render();
         return;
       }
@@ -1083,8 +1216,7 @@ export async function runChatShell<TExit>(
           })
           .catch(async (error: unknown) => {
             if (shellClosed) return;
-            markTranscriptDirty();
-            await persistence.addMessage({
+            await appendPersistedMessage({
               role: "system",
               content: `Error: ${error instanceof Error ? error.message : "unknown"}`,
             });

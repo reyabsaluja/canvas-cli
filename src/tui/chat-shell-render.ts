@@ -33,10 +33,10 @@ export interface RenderChatFrameOptions {
   chatScrollOffset: number;
   isProcessing: boolean;
   currentSpinnerLine: string;
-  toolOutputExpanded: boolean;
   modelLabel: string;
   bannerLines: string[];
-  transcriptLines: string[];
+  transcriptTotalLines: number;
+  getTranscriptLines: (startLine: number, endLine: number) => string[];
   slashMatches: CommandDefinition[];
   openMatches: ShellOpenOption[];
   pinMatches: ShellPinOption[];
@@ -70,26 +70,6 @@ export function buildBannerLines(options: {
   return [`  ${C.bold(options.runtime.title)}${subtitle}${status}`];
 }
 
-export function buildTranscriptLines(options: {
-  messages: ChatMessage[];
-  contentWidth: number;
-  cols: number;
-  expanded: boolean;
-}): string[] {
-  const lines: string[] = [];
-  for (const message of options.messages) {
-    lines.push(
-      ...getRenderedMessageLines(
-        message,
-        options.contentWidth,
-        options.cols,
-        options.expanded
-      )
-    );
-  }
-  return lines;
-}
-
 export function renderChatFrame(
   options: RenderChatFrameOptions
 ): { chatScrollOffset: number; maxScroll: number } {
@@ -112,7 +92,7 @@ export function renderChatFrame(
   const totalVirtualLines =
     headerLines.length +
     olderHintLines.length +
-    options.transcriptLines.length +
+    options.transcriptTotalLines +
     spinnerLines.length +
     CHAT_GAP_ROWS;
   const maxContent = Math.max(1, rows - MAIN_VIEW_BOTTOM_RESERVE);
@@ -123,22 +103,21 @@ export function renderChatFrame(
   );
   const end = totalVirtualLines - chatScrollOffset;
   const start = Math.max(0, end - maxContent);
+  const transcriptSectionStart = headerLines.length + olderHintLines.length;
+  const transcriptLines = options.getTranscriptLines(
+    Math.max(0, start - transcriptSectionStart),
+    Math.max(0, end - transcriptSectionStart)
+  );
 
   appendVisibleLines(buf, headerLines, start, end, 0);
   appendVisibleLines(buf, olderHintLines, start, end, headerLines.length);
-  appendVisibleLines(
-    buf,
-    options.transcriptLines,
-    start,
-    end,
-    headerLines.length + olderHintLines.length
-  );
+  appendVisibleLines(buf, transcriptLines, 0, transcriptLines.length, 0);
   appendVisibleLines(
     buf,
     spinnerLines,
     start,
     end,
-    headerLines.length + olderHintLines.length + options.transcriptLines.length
+    transcriptSectionStart + options.transcriptTotalLines
   );
   appendVisibleBlankSection(
     buf,
@@ -147,7 +126,7 @@ export function renderChatFrame(
     end,
     headerLines.length +
       olderHintLines.length +
-      options.transcriptLines.length +
+      options.transcriptTotalLines +
       spinnerLines.length
   );
 
@@ -388,7 +367,7 @@ function renderStickyBottom(
   );
 }
 
-function getRenderedMessageLines(
+export function getRenderedMessageLines(
   message: ChatMessage,
   maxWidth: number,
   cols: number,
