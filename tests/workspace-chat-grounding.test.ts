@@ -1885,6 +1885,43 @@ test("run-state does not store duplicate failed artifact observations for the sa
   assert.equal(runState.observations[0]?.status, "missing_text");
 });
 
+test("run-state does not store duplicate successful search observations for the same artifacts", () => {
+  const runState = createEmptyRunState();
+
+  appendObservation(runState, {
+    tool: "search_workspace",
+    status: "ok",
+    summary: 'Found 1 relevant workspace match for "branch hazard".',
+    artifacts: [
+      {
+        artifactId: "workspace:extracted:docs/reference.txt",
+        title: "docs/reference.txt",
+        kind: "extracted",
+        excerpt: "The waveform must show stall cycles around the branch hazard.",
+      },
+    ],
+  });
+
+  appendObservation(runState, {
+    tool: "search_workspace",
+    status: "ok",
+    summary: 'Found 1 relevant workspace match for "hazard branch".',
+    artifacts: [
+      {
+        artifactId: "workspace:extracted:docs/reference.txt",
+        title: "docs/reference.txt",
+        kind: "extracted",
+        excerpt: "The waveform must show stall cycles around the branch hazard.",
+      },
+    ],
+  });
+
+  assert.equal(runState.stepCount, 2);
+  assert.equal(runState.observations.length, 1);
+  assert.equal(runState.observations[0]?.tool, "search_workspace");
+  assert.equal(runState.readArtifactIds.length, 0);
+});
+
 test("read_file reuses previously read content across turns", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
