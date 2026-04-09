@@ -87,6 +87,7 @@ const VERBS = [
   "Exploring",
   "Reviewing",
 ];
+const FULL_RENDER_BATCH_MS = 16;
 
 export async function runChatShell<TExit>(
   options: ChatShellOptions<TExit>
@@ -112,6 +113,8 @@ export async function runChatShell<TExit>(
   let chatScrollOffset = 0;
   let maxChatScrollOffset = 0;
   let spinnerTimer: ReturnType<typeof setInterval> | null = null;
+  let renderQueued = false;
+  let renderTimer: ReturnType<typeof setTimeout> | null = null;
   let currentVerb = "";
   let transcriptLinesCache: string[] | null = null;
   let transcriptCacheKey = "";
@@ -223,7 +226,7 @@ export async function runChatShell<TExit>(
     );
   }
 
-  function render(): void {
+  function renderNow(): void {
     const next = renderChatFrame({
       runtime: options.runtime,
       placeholder,
@@ -244,6 +247,33 @@ export async function runChatShell<TExit>(
     });
     chatScrollOffset = next.chatScrollOffset;
     maxChatScrollOffset = next.maxScroll;
+  }
+
+  function scheduleRender(immediate: boolean = false): void {
+    if (immediate) {
+      if (renderTimer) {
+        clearTimeout(renderTimer);
+        renderTimer = null;
+      }
+      renderQueued = false;
+      renderNow();
+      return;
+    }
+
+    if (renderQueued) {
+      return;
+    }
+
+    renderQueued = true;
+    renderTimer = setTimeout(() => {
+      renderQueued = false;
+      renderTimer = null;
+      renderNow();
+    }, FULL_RENDER_BATCH_MS);
+  }
+
+  function render(): void {
+    scheduleRender(true);
   }
 
   function renderInputOnly(): void {
@@ -272,7 +302,7 @@ export async function runChatShell<TExit>(
 
   function renderAfterInputMutation(hadOverlay: boolean): void {
     if (hadOverlay && !hasVisibleOverlay()) {
-      render();
+      scheduleRender(true);
       return;
     }
     renderInputOnly();
@@ -286,7 +316,7 @@ export async function runChatShell<TExit>(
       currentSpinnerLine = `${C.dim(SPINNER[spinnerFrame])} ${C.text(
         currentVerb
       )}${C.dim("...")}`;
-      render();
+      scheduleRender();
     }, 80);
   }
 
@@ -301,6 +331,11 @@ export async function runChatShell<TExit>(
     stdin: NodeJS.ReadStream,
     onData: (data: string) => void
   ): Promise<string | null> {
+    if (renderTimer) {
+      clearTimeout(renderTimer);
+      renderTimer = null;
+    }
+    renderQueued = false;
     return leaveChatShell(
       stdin,
       onData,
@@ -434,8 +469,6 @@ export async function runChatShell<TExit>(
 
       let streamingStarted = false;
       let streamedText = "";
-      let lastRenderTime = 0;
-      const renderInterval = 80;
 
       try {
         const final = await options.onAsk(fullInput, {
@@ -464,7 +497,7 @@ export async function runChatShell<TExit>(
             currentSpinnerLine = `${C.dim(
               SPINNER[spinnerFrame]
             )} ${C.text(currentVerb)}${C.dim("...")}`;
-            render();
+            scheduleRender();
             startSpinner();
           },
           onTextDelta: (delta) => {
@@ -476,16 +509,12 @@ export async function runChatShell<TExit>(
               markTranscriptDirty();
             }
             streamedText += delta;
-            const now = Date.now();
-            if (now - lastRenderTime > renderInterval) {
-              lastRenderTime = now;
-              messages[messages.length - 1] = {
-                role: "assistant",
-                content: streamedText,
-              };
-              markTranscriptDirty();
-              render();
-            }
+            messages[messages.length - 1] = {
+              role: "assistant",
+              content: streamedText,
+            };
+            markTranscriptDirty();
+            scheduleRender();
           },
         });
 
