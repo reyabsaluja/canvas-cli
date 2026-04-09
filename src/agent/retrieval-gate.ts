@@ -108,6 +108,12 @@ function workupLikelyCoversQuestion(
     return false;
   }
 
+  // Deadline questions are higher-risk: if the workup does not have an explicit
+  // due-date field, do not let generic token overlap short-circuit retrieval.
+  if (isDueDateQuestion(question)) {
+    return Boolean(getWorkupDueDate(workup));
+  }
+
   const questionTokens = tokenize(question).filter(
     (token) => !WORKUP_STOP_WORDS.has(token)
   );
@@ -121,10 +127,6 @@ function workupLikelyCoversQuestion(
     return true;
   }
 
-  if (/\b(due|deadline)\b/i.test(question)) {
-    return Boolean((workup as Record<string, unknown>).dueDate ?? (workup as Record<string, unknown>).due_date);
-  }
-
   if (/\b(deliverable|submit|submission|turn in)\b/i.test(question)) {
     const deliverables = (workup as Record<string, unknown>).deliverables;
     return Array.isArray(deliverables) && deliverables.length > 0;
@@ -136,6 +138,19 @@ function workupLikelyCoversQuestion(
   }
 
   return false;
+}
+
+function isDueDateQuestion(question: string): boolean {
+  return /\b(due|deadline)\b/i.test(question);
+}
+
+function getWorkupDueDate(
+  workup: Record<string, unknown>
+): string | null {
+  const dueDate = workup.dueDate ?? workup.due_date;
+  return typeof dueDate === "string" && dueDate.trim().length > 0
+    ? dueDate
+    : null;
 }
 
 function shouldPromoteTopMatch(question: string, score: number): boolean {
