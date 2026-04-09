@@ -104,3 +104,41 @@ export interface CanvasPage {
   updated_at: string | null;
   body?: string | null;
 }
+
+/** A discussion topic or announcement from the Canvas API. */
+export interface CanvasDiscussionTopic {
+  id: number;
+  title: string;
+  message: string | null;
+  posted_at: string | null;
+  last_reply_at: string | null;
+  discussion_type: string;
+  read_state: string;
+  unread_count: number;
+  user_name: string | null;
+  html_url: string;
+  published: boolean;
+  is_announcement: boolean;
+  locked: boolean;
+}
+
+/** A single entry (reply) within a discussion topic. */
+export interface CanvasDiscussionEntry {
+  id: number;
+  user_id: number;
+  user_name: string | null;
+  message: string | null;
+  created_at: string;
+  updated_at: string;
+  read_state: string;
+  recent_replies?: CanvasDiscussionEntry[];
+  has_more_replies?: boolean;
+}
+
+/** Full topic view returned by GET /discussion_topics/:id/view. */
+export interface CanvasDiscussionTopicView {
+  participants: Array<{ id: number; display_name: string }>;
+  unread_entries: number[];
+  view: CanvasDiscussionEntry[];
+  new_entries: CanvasDiscussionEntry[];
+}

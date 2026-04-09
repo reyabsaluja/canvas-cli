@@ -12,6 +12,11 @@ import {
 import type { CommandApi, ShellResult } from "./app-types.js";
 import { resolveGlobalOpen } from "./app-navigation.js";
 import { handleOpenResourceQuery } from "./open-resources.js";
+import {
+  formatRadarItems,
+  parseRadarArgs,
+  resolveAndRenderThread,
+} from "./radar-commands.js";
 
 export async function handleCommand(
   command: string,
@@ -95,6 +100,38 @@ export async function handleCommand(
         return;
       }
       return { type: "recent-picker" };
+    }
+    if (command === "/radar") {
+      const courses = getDisplayCourses(services);
+      if (courses.length === 0) {
+        await api.addMessage({ role: "system", content: "No courses configured." });
+        return;
+      }
+      const { filter, query: radarQuery } = parseRadarArgs(args);
+      const items = await services.radar.getRadarItemsMultiCourse(
+        courses.map((c) => ({ id: c.id, name: c.name })),
+        filter,
+        radarQuery || undefined
+      );
+      await api.addMessage({
+        role: items.length > 0 ? "assistant" : "system",
+        content: formatRadarItems(items, filter, radarQuery),
+      });
+      return;
+    }
+    if (command === "/thread") {
+      const trimmed = args.trim();
+      if (!trimmed) {
+        await api.addMessage({ role: "system", content: "Usage: /thread <topic-id or title>" });
+        return;
+      }
+      const courses = getDisplayCourses(services);
+      const result = await resolveAndRenderThread(services, courses, trimmed);
+      await api.addMessage({
+        role: result.found ? "assistant" : "system",
+        content: result.content,
+      });
+      return;
     }
     return;
   }
@@ -207,6 +244,35 @@ export async function handleCommand(
           `Course file index (${cache.files.length})`,
           indexed.length > 0 ? indexed.join("\n") : "• none indexed",
         ].join("\n"),
+      });
+      return;
+    }
+
+    if (command === "/radar") {
+      const { filter, query: radarQuery } = parseRadarArgs(args);
+      const items = await services.radar.getRadarItems(
+        course.id,
+        course.name,
+        filter,
+        radarQuery || undefined
+      );
+      await api.addMessage({
+        role: items.length > 0 ? "assistant" : "system",
+        content: formatRadarItems(items, filter, radarQuery),
+      });
+      return;
+    }
+
+    if (command === "/thread") {
+      const trimmed = args.trim();
+      if (!trimmed) {
+        await api.addMessage({ role: "system", content: "Usage: /thread <topic-id or title>" });
+        return;
+      }
+      const result = await resolveAndRenderThread(services, [course], trimmed);
+      await api.addMessage({
+        role: result.found ? "assistant" : "system",
+        content: result.content,
       });
       return;
     }

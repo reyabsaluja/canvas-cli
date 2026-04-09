@@ -13,6 +13,8 @@ export const COMMANDS: CommandDefinition[] = [
     description: "Open a course, assignment, or resource",
     scopes: ["global", "course", "workspace"],
   },
+  { name: "/radar", description: "Show recent announcements and discussions", scopes: ["global", "course"] },
+  { name: "/thread", description: "Read a discussion thread by ID or title", scopes: ["global", "course"] },
   { name: "/assignments", description: "Open the assignment picker", scopes: ["course"] },
   { name: "/files", description: "List course files and cached downloads", scopes: ["course"] },
   { name: "/modules", description: "List course modules", scopes: ["course"] },

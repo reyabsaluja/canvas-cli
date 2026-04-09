@@ -32,3 +32,10 @@ export {
 } from "./services/workspace-chat.js";
 
 export type { ToolCallEvent } from "./services/workspace-chat.js";
+
+export type {
+  RadarFilter,
+  RadarItem,
+  RadarThread,
+  RadarThreadEntry,
+} from "./services/radar-types.js";

@@ -6,6 +6,7 @@ import { filterRelevantAssignments } from "../../domain/assignment-relevance.js"
 import { sortByUrgency } from "../../domain/sorting.js";
 import type { Course, Assignment } from "../../domain/models.js";
 import type { AppServices, DisplayCourseAvailability } from "./types.js";
+import { RadarService } from "./radar-service.js";
 
 export async function initServices(): Promise<AppServices> {
   const config = loadConfig();
@@ -24,6 +25,7 @@ export async function initServices(): Promise<AppServices> {
     allCourses,
     courseConfig: null,
     assignmentCache: new Map(),
+    radar: new RadarService(client),
   };
 }
 
