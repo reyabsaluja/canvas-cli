@@ -182,7 +182,8 @@ function isDuplicateObservation(
   return (
     isDuplicateGroundedObservation(observations, nextObservation) ||
     isDuplicateArtifactFailureObservation(observations, nextObservation) ||
-    isDuplicateArtifactDiscoveryObservation(observations, nextObservation)
+    isDuplicateArtifactDiscoveryObservation(observations, nextObservation) ||
+    isDuplicateSearchMissObservation(observations, nextObservation)
   );
 }
 
@@ -262,6 +263,27 @@ function isDuplicateArtifactDiscoveryObservation(
   });
 }
 
+function isDuplicateSearchMissObservation(
+  observations: Observation[],
+  nextObservation: Observation
+): boolean {
+  if (!shouldRememberSearchMiss(nextObservation)) {
+    return false;
+  }
+
+  const nextSearchMissKey = buildSearchMissKey(nextObservation);
+  if (!nextSearchMissKey) {
+    return false;
+  }
+
+  return observations.some((observation) => {
+    if (!shouldRememberSearchMiss(observation)) {
+      return false;
+    }
+    return buildSearchMissKey(observation) === nextSearchMissKey;
+  });
+}
+
 function shouldRememberArtifactFailure(observation: Observation): boolean {
   return (
     observation.status !== "ok" &&
@@ -276,6 +298,15 @@ function shouldRememberArtifactDiscovery(observation: Observation): boolean {
     observation.status === "ok" &&
     observation.artifacts.length > 0 &&
     !observation.content &&
+    (observation.tool === "search_workspace" ||
+      observation.tool === "search_course")
+  );
+}
+
+function shouldRememberSearchMiss(observation: Observation): boolean {
+  return (
+    observation.status === "not_found" &&
+    observation.artifacts.length === 0 &&
     (observation.tool === "search_workspace" ||
       observation.tool === "search_course")
   );
@@ -297,6 +328,42 @@ function normalizeObservationContent(content?: string): string {
 
 function normalizeObservationSummary(summary?: string): string {
   return (summary ?? "").replace(/\s+/g, " ").trim();
+}
+
+function buildSearchMissKey(observation: Observation): string | null {
+  const summary = normalizeObservationSummary(observation.summary);
+  if (!summary) {
+    return null;
+  }
+
+  const quotedQueryMatch = summary.match(/"([^"]+)"/);
+  if (!quotedQueryMatch) {
+    return `${observation.tool}:${summary.toLowerCase()}`;
+  }
+
+  const normalizedQuery = normalizeSearchMissQuery(quotedQueryMatch[1]);
+  if (!normalizedQuery) {
+    return `${observation.tool}:${summary.toLowerCase()}`;
+  }
+
+  return `${observation.tool}:${normalizedQuery}`;
+}
+
+function normalizeSearchMissQuery(value: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/\\/g, "/")
+    .replace(/[/._-]+/g, " ")
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) {
+    return "";
+  }
+
+  return [...new Set(normalized.split(" ").filter(Boolean))].sort().join(" ");
 }
 
 function collectRememberedArtifactIds(observations: Observation[]): string[] {

@@ -2268,6 +2268,29 @@ test("run-state does not store duplicate successful search observations for the 
   assert.equal(runState.readArtifactIds.length, 0);
 });
 
+test("run-state does not store duplicate semantic search misses", () => {
+  const runState = createEmptyRunState();
+
+  appendObservation(runState, {
+    tool: "search_workspace",
+    status: "not_found",
+    summary: 'No relevant workspace content found for "branch hazard".',
+    artifacts: [],
+  });
+
+  appendObservation(runState, {
+    tool: "search_workspace",
+    status: "not_found",
+    summary: 'No relevant workspace content found for "hazard branch".',
+    artifacts: [],
+  });
+
+  assert.equal(runState.stepCount, 2);
+  assert.equal(runState.observations.length, 1);
+  assert.equal(runState.observations[0]?.tool, "search_workspace");
+  assert.equal(runState.observations[0]?.status, "not_found");
+});
+
 test("read_file reuses previously read content across turns", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
