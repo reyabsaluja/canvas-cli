@@ -75,6 +75,7 @@ const MAX_TOOL_CONTENT_CHARS = 8000;
 const MAX_UI_MESSAGES = 120;
 const MIN_UI_MESSAGES = 80;
 const MAX_UI_MESSAGE_CHARS = 140000;
+const FULL_RENDER_BATCH_MS = 16;
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const VERBS = ["Working", "Thinking", "Studying", "Reading", "Analyzing", "Exploring", "Reviewing"];
 
@@ -931,6 +932,48 @@ export async function runWorkspaceUI(
 
         let streamingStarted = false;
         let streamedText = "";
+        let pendingStreamDelta = "";
+        let streamCommitTimer: ReturnType<typeof setTimeout> | null = null;
+
+        function commitPendingStreamDelta(): void {
+          if (!pendingStreamDelta) {
+            return;
+          }
+
+          if (!streamingStarted) {
+            streamingStarted = true;
+            stopSpinner();
+            currentSpinnerLine = "";
+            const assistantMessage: ChatMessage = { role: "assistant", content: "" };
+            appendMessage(assistantMessage);
+          }
+
+          streamedText += pendingStreamDelta;
+          pendingStreamDelta = "";
+          replaceLastMessage({
+            role: "assistant",
+            content: streamedText,
+          });
+          scheduleRender();
+        }
+
+        function flushPendingStreamDelta(): void {
+          if (streamCommitTimer) {
+            clearTimeout(streamCommitTimer);
+            streamCommitTimer = null;
+          }
+          commitPendingStreamDelta();
+        }
+
+        function schedulePendingStreamDelta(): void {
+          if (streamCommitTimer) {
+            return;
+          }
+          streamCommitTimer = setTimeout(() => {
+            streamCommitTimer = null;
+            commitPendingStreamDelta();
+          }, FULL_RENDER_BATCH_MS);
+        }
 
         try {
           const answer = await askWorkspaceQuestion(
@@ -938,6 +981,7 @@ export async function runWorkspaceUI(
             ctx.loaded,
             fullQuestion,
             (event: ToolCallEvent) => {
+              flushPendingStreamDelta();
               if (streamingStarted && streamedText.trim()) {
                 const partialMessage: ChatMessage = {
                   role: "assistant",
@@ -962,24 +1006,12 @@ export async function runWorkspaceUI(
             ctx.agentContext,
             chatCtx ?? undefined,
             (delta: string) => {
-              if (!streamingStarted) {
-                streamingStarted = true;
-                stopSpinner();
-                currentSpinnerLine = "";
-                const assistantMessage: ChatMessage = { role: "assistant", content: "" };
-                appendMessage(assistantMessage);
-              }
-
-              streamedText += delta;
-              const assistantMessage: ChatMessage = {
-                role: "assistant",
-                content: streamedText,
-              };
-              replaceLastMessage(assistantMessage);
-              scheduleRender();
+              pendingStreamDelta += delta;
+              schedulePendingStreamDelta();
             }
           );
 
+          flushPendingStreamDelta();
           stopSpinner();
 
           if (streamingStarted) {
@@ -999,6 +1031,7 @@ export async function runWorkspaceUI(
             appendMessage(assistantMessage);
           }
         } catch (err) {
+          flushPendingStreamDelta();
           stopSpinner();
           const errorMessage: ChatMessage = {
             role: "system",
