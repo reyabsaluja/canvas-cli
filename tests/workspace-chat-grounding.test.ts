@@ -336,5 +336,23 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.equal(verifiedFromMissingText.confidence, "low");
     assert.deepEqual(verifiedFromMissingText.sources, []);
     assert.deepEqual(verifiedFromMissingText.missing, ["source"]);
+
+    const verifiedFromActionOnlyTool = verifyWorkspaceAnswer({
+      answer: "I listed the available files for you.",
+      observations: [
+        {
+          tool: "list_files",
+          status: "ok",
+          summary: "Listed workspace and course files available to chat.",
+          artifacts: [],
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedFromActionOnlyTool.ok, true);
+    assert.equal(verifiedFromActionOnlyTool.confidence, "low");
+    assert.deepEqual(verifiedFromActionOnlyTool.sources, []);
+    assert.deepEqual(verifiedFromActionOnlyTool.missing, []);
   });
 });
