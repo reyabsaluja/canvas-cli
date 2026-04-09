@@ -1161,11 +1161,11 @@ export async function runChatShell<TExit>(
       }
 
       if (key.length === 1 && key >= " ") {
-        await handleTextInputChunk(key);
+        handleTextInputChunk(key);
       }
     }
 
-    async function handleTextInputChunk(text: string): Promise<void> {
+    function handleTextInputChunk(text: string): void {
       if (shellClosed || !text || isProcessing) return;
 
       const hadOverlay = hasVisibleOverlay();
