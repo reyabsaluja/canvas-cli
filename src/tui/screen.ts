@@ -138,6 +138,17 @@ export function createBuffer(): ScreenBuffer {
   return new ScreenBuffer();
 }
 
+export function invalidateScreenRows(startRow: number, endRow: number): void {
+  if (!lastFlushedRows) {
+    return;
+  }
+  const start = Math.max(1, Math.min(startRow, endRow));
+  const end = Math.min(lastFlushedRows.length, Math.max(startRow, endRow));
+  for (let row = start; row <= end; row++) {
+    lastFlushedRows[row - 1] = null;
+  }
+}
+
 /** Clear the terminal screen and move cursor to top-left (used only for full transitions). */
 export function clearScreen(): void {
   lastFlushedRows = null;
