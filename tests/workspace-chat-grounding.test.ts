@@ -2008,6 +2008,134 @@ test("workspace chat dedupes reordered course searches within a single turn", as
   });
 });
 
+test("search_workspace prefers viable matches over artifacts that already failed a read", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    await fs.writeFile(
+      path.join(loaded.path, "extracted", "docs", "notes.txt"),
+      "Branch hazard notes explain the same stall-cycle requirement in more detail.\n",
+      "utf-8"
+    );
+    loaded.extractedFiles.push({
+      name: "docs/notes.txt",
+      relativePath: path.join("extracted", "docs", "notes.txt"),
+    });
+
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      { cache: null, client: null, config: null, courseId: 17 }
+    );
+
+    appendObservation(ctx.runState, {
+      tool: "read_file",
+      status: "missing_text",
+      summary: "Matched docs/reference.txt, but readable text is missing.",
+      artifacts: [
+        {
+          artifactId: "workspace:extracted:docs/reference.txt",
+          title: "docs/reference.txt",
+          kind: "extracted",
+        },
+      ],
+    });
+
+    const result = await executeToolCallForTurn(
+      new Map(),
+      "search_workspace",
+      { query: "branch hazard" },
+      ctx
+    );
+
+    assert.equal(result.result.observation.status, "ok");
+    const artifactIds = result.result.observation.artifacts.map(
+      (artifact) => artifact.artifactId
+    );
+    assert.ok(artifactIds.includes("workspace:extracted:docs/notes.txt"));
+    assert.ok(!artifactIds.includes("workspace:extracted:docs/reference.txt"));
+    assert.match(result.result.modelText, /notes\.txt/i);
+    assert.doesNotMatch(result.result.modelText, /reference\.txt/i);
+  });
+});
+
+test("search_course prefers viable matches over artifacts that already failed a read", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "pages"), {
+      recursive: true,
+    });
+
+    const cache = createCourseCache(coursePath);
+    cache.pages = [
+      {
+        pageId: "lab4-brief",
+        title: "Lab 4 Brief",
+        htmlUrl: null,
+        updatedAt: null,
+        hasBody: true,
+      },
+      {
+        pageId: "lab4-notes",
+        title: "Lab 4 Notes",
+        htmlUrl: null,
+        updatedAt: null,
+        hasBody: true,
+      },
+    ];
+
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "pages", "lab4-brief.txt"),
+      "The lab brief explains saturating add mode and signed overflow detection.\n",
+      "utf-8"
+    );
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "pages", "lab4-notes.txt"),
+      "The notes explain saturating add mode and signed overflow detection with examples.\n",
+      "utf-8"
+    );
+
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      { cache, client: null, config: null, courseId: 17 }
+    );
+
+    const baseline = await executeToolCallForTurn(
+      new Map(),
+      "search_course",
+      { query: "saturating add mode" },
+      ctx
+    );
+    assert.equal(baseline.result.observation.status, "ok");
+    assert.ok(baseline.result.observation.artifacts.length >= 2);
+
+    const failedArtifact = baseline.result.observation.artifacts[0]!;
+    appendObservation(ctx.runState, {
+      tool: "read_file",
+      status: "missing_text",
+      summary: `Matched ${failedArtifact.title}, but readable text is missing.`,
+      artifacts: [failedArtifact],
+    });
+
+    const filtered = await executeToolCallForTurn(
+      new Map(),
+      "search_course",
+      { query: "saturating add mode" },
+      ctx
+    );
+
+    assert.equal(filtered.result.observation.status, "ok");
+    assert.ok(
+      filtered.result.observation.artifacts.every(
+        (artifact) => artifact.artifactId !== failedArtifact.artifactId
+      )
+    );
+  });
+});
+
 test("workspace chat reuses downloaded attachment content across tools within a single turn", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
