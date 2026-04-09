@@ -162,7 +162,7 @@ export function renderChatFrame(
       spinnerLines.length
   );
 
-  buf.flush(MAIN_VIEW_BOTTOM_RESERVE, chatScrollOffset);
+  buf.flush(STICKY_BOTTOM_ROWS, chatScrollOffset);
   writeStickyBottom(
     buildStickyBottomRows(
       options.placeholder,
