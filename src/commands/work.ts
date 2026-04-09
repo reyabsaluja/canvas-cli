@@ -1,11 +1,11 @@
 import { CanvasClient } from "../canvas/client.js";
 import { loadConfig } from "../config/env.js";
 import { resolveAssignment } from "../domain/resolve-assignment.js";
-import { loadCourseCache } from "../enrich/cache-loader.js";
-import { enrichAssignmentDetail } from "../enrich/enrich-assignment.js";
 import { getAIConfig } from "../ai/provider.js";
-import { runInvestigation } from "../work/orchestrator.js";
-import { createWorkWorkspace } from "../workspace/create.js";
+import {
+  MissingCourseCacheError,
+  runWorkspaceLifecycle,
+} from "../workspace/lifecycle.js";
 import { handleError } from "../errors.js";
 import chalk from "chalk";
 import path from "node:path";
@@ -53,63 +53,39 @@ export async function workCommand(
   const { detail, course } = resolved;
   logPhase(`found: ${detail.name}`);
 
-  // Phase 2: Load course cache
-  logPhase("loading course cache");
-
-  const cache = await loadCourseCache(course.courseCode, course.id);
-  if (!cache) {
-    console.error(
-      `\nNo ingestion cache found for ${course.courseCode}.\n` +
-        chalk.dim(`Run: canvas-cli ingest ${options.course ?? course.courseCode}\n`) +
-        chalk.dim("The work command needs ingested course data to investigate.\n")
-    );
-    process.exit(1);
-  }
-
-  // Phase 3: Deterministic enrichment
-  logPhase("enriching assignment context");
-  const enriched = enrichAssignmentDetail(detail, cache);
-
-  // Phase 4: Run investigation agent
-  logPhase("starting investigation agent");
-
-  let investigation;
+  let lifecycle;
   try {
-    investigation = await runInvestigation(
+    lifecycle = await runWorkspaceLifecycle({
       aiConfig,
       detail,
       course,
-      enriched.enrichment,
-      cache,
       client,
       config,
-      (phase) => logPhase(phase)
-    );
+      cachePolicy: "require_existing",
+      onProgress: (phase) => logPhase(phase),
+      progressLabels: {
+        enrich: "enriching assignment context",
+        investigate: "starting investigation agent",
+      },
+    });
   } catch (err) {
+    if (err instanceof MissingCourseCacheError) {
+      console.error(
+        `\nNo ingestion cache found for ${course.courseCode}.\n` +
+          chalk.dim(`Run: canvas-cli ingest ${options.course ?? course.courseCode}\n`) +
+          chalk.dim("The work command needs ingested course data to investigate.\n")
+      );
+      process.exit(1);
+    }
     if (err instanceof Error) {
-      console.error(`\nInvestigation failed: ${err.message}`);
+      console.error(`\nWork pipeline failed: ${err.message}`);
     } else {
-      console.error("\nInvestigation failed.");
+      console.error("\nWork pipeline failed.");
     }
     process.exit(1);
   }
 
-  const { workup, state } = investigation;
-
-  // Phase 5: Create workspace
-  logPhase("creating workspace");
-
-  let result;
-  try {
-    result = await createWorkWorkspace(detail, course, workup, state, config);
-  } catch (err) {
-    if (err instanceof Error) {
-      console.error(`\nFailed to create workspace: ${err.message}`);
-    } else {
-      console.error("\nFailed to create workspace.");
-    }
-    process.exit(1);
-  }
+  const { workup, result } = lifecycle;
 
   // Phase 6: Render summary
   const relativePath = path.relative(process.cwd(), result.workspacePath);
