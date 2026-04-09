@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import { C, getTermSize } from "./screen.js";
+import type { Observation } from "../agent/observation.js";
 import type {
   ChatMessage,
   CommandDefinition,
@@ -46,6 +47,7 @@ interface AskCallbacks {
     target: string;
     result: string;
     color: "green" | "red";
+    observation?: Observation;
   }) => void;
   onTextDelta?: (delta: string) => void;
 }
@@ -455,6 +457,7 @@ export async function runChatShell<TExit>(
               toolAction: event.action,
               toolTarget: event.target,
               toolColor: event.color,
+              observation: event.observation,
             });
             markTranscriptDirty();
             persistence.schedule();
