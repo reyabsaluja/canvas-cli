@@ -9,6 +9,7 @@ import type { Observation } from "../src/agent/observation.js";
 import { clearArtifactIndexCache } from "../src/knowledge/artifact-index.js";
 import { decideWorkspaceRetrieval } from "../src/agent/retrieval-gate.js";
 import { verifyWorkspaceAnswer } from "../src/agent/verify.js";
+import { buildEvidenceBackedQuestion } from "../src/tui/chat-agent.js";
 import { createChatContext, hydrateConversationHistory } from "../src/tui/services.js";
 import {
   readWorkspaceKnowledgeArtifactById,
@@ -355,4 +356,68 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.deepEqual(verifiedFromActionOnlyTool.sources, []);
     assert.deepEqual(verifiedFromActionOnlyTool.missing, []);
   });
+});
+
+test("memory prompts preserve the latest successful direct read evidence", () => {
+  const prompt = buildEvidenceBackedQuestion("Explain the branch hazard requirement.", [
+    {
+      tool: "read_file",
+      status: "ok",
+      summary: "Read docs/reference.txt.",
+      artifacts: [
+        {
+          artifactId: "artifact-1",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          excerpt: "The waveform must show stall cycles around the branch hazard.",
+        },
+      ],
+      content: "The waveform must show stall cycles around the branch hazard.",
+    },
+    {
+      tool: "search_workspace",
+      status: "ok",
+      summary: "Found a workspace match for branch hazard.",
+      artifacts: [
+        {
+          artifactId: "artifact-1",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          excerpt: "The waveform must show stall cycles around the branch hazard.",
+        },
+      ],
+    },
+    {
+      tool: "search_workspace",
+      status: "ok",
+      summary: "Found another workspace match for branch hazard.",
+      artifacts: [
+        {
+          artifactId: "artifact-1",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          excerpt: "The waveform must show stall cycles around the branch hazard.",
+        },
+      ],
+    },
+    {
+      tool: "search_workspace",
+      status: "ok",
+      summary: "Found the latest workspace match for branch hazard.",
+      artifacts: [
+        {
+          artifactId: "artifact-1",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          excerpt: "The waveform must show stall cycles around the branch hazard.",
+        },
+      ],
+    },
+  ]);
+
+  assert.match(
+    prompt,
+    /The waveform must show stall cycles around the branch hazard\./
+  );
+  assert.equal((prompt.match(/- Tool:/g) ?? []).length, 3);
 });

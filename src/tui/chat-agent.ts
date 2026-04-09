@@ -894,7 +894,7 @@ function buildConversationPrompt(
   return sections.join("\n");
 }
 
-function buildEvidenceBackedQuestion(
+export function buildEvidenceBackedQuestion(
   question: string,
   observations: Observation[]
 ): string {
@@ -902,8 +902,11 @@ function buildEvidenceBackedQuestion(
     return question;
   }
 
+  const supplementalObservations = selectSupplementalEvidenceObservations(
+    observations
+  );
   const sections: string[] = [question, "", "Supplemental evidence already gathered in this chat:"];
-  for (const observation of observations.slice(-3)) {
+  for (const observation of supplementalObservations) {
     sections.push(`- Tool: ${observation.tool}`);
     sections.push(`  Summary: ${observation.summary}`);
     for (const artifact of observation.artifacts) {
@@ -915,6 +918,52 @@ function buildEvidenceBackedQuestion(
     sections.push("");
   }
   return sections.join("\n");
+}
+
+function selectSupplementalEvidenceObservations(
+  observations: Observation[]
+): Observation[] {
+  if (observations.length <= 3) {
+    return observations;
+  }
+
+  const selected = new Set<number>();
+  // Keep the latest successful direct read in prompt context so memory answers
+  // still include the underlying text instead of only later search summaries.
+  const latestSuccessfulReadIndex = findLatestSuccessfulReadObservationIndex(
+    observations
+  );
+
+  if (latestSuccessfulReadIndex !== -1) {
+    selected.add(latestSuccessfulReadIndex);
+  }
+
+  for (let index = observations.length - 1; index >= 0; index -= 1) {
+    selected.add(index);
+    if (selected.size === 3) {
+      break;
+    }
+  }
+
+  return [...selected]
+    .sort((a, b) => a - b)
+    .map((index) => observations[index]!);
+}
+
+function findLatestSuccessfulReadObservationIndex(
+  observations: Observation[]
+): number {
+  for (let index = observations.length - 1; index >= 0; index -= 1) {
+    const observation = observations[index]!;
+    if (
+      observation.tool === "read_file" &&
+      observation.status === "ok" &&
+      observation.content?.trim()
+    ) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function findObservationsForArtifacts(
