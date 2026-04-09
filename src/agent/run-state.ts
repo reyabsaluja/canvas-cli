@@ -60,6 +60,7 @@ export function compactRunState(runState: RunState): void {
 
   const selected = new Set<number>();
   const groundedArtifacts = new Set<string>();
+  const failedArtifactKeys = new Set<string>();
   const discoveredArtifactKeys = new Set<string>();
 
   const rememberObservation = (index: number): void => {
@@ -72,6 +73,13 @@ export function compactRunState(runState: RunState): void {
     if (isGroundedContentObservation(observation)) {
       for (const artifact of observation.artifacts) {
         groundedArtifacts.add(artifact.artifactId);
+      }
+    }
+
+    if (shouldRememberArtifactFailure(observation)) {
+      const artifactKey = buildObservationArtifactKey(observation);
+      if (artifactKey) {
+        failedArtifactKeys.add(artifactKey);
       }
     }
 
@@ -112,6 +120,27 @@ export function compactRunState(runState: RunState): void {
     if (shouldKeep) {
       rememberObservation(index);
     }
+  }
+
+  for (let index = runState.observations.length - 1; index >= 0; index -= 1) {
+    if (selected.size >= MAX_RUN_STATE_OBSERVATIONS) {
+      break;
+    }
+    if (selected.has(index)) {
+      continue;
+    }
+
+    const observation = runState.observations[index]!;
+    if (!shouldRememberArtifactFailure(observation)) {
+      continue;
+    }
+
+    const artifactKey = buildObservationArtifactKey(observation);
+    if (!artifactKey || failedArtifactKeys.has(artifactKey)) {
+      continue;
+    }
+
+    rememberObservation(index);
   }
 
   for (let index = runState.observations.length - 1; index >= 0; index -= 1) {
