@@ -17,6 +17,7 @@ import {
   parseRadarArgs,
   resolveAndRenderThread,
 } from "./radar-commands.js";
+import { handleLectureQuery } from "./lecture-resources.js";
 
 export async function handleCommand(
   command: string,
@@ -277,6 +278,20 @@ export async function handleCommand(
       return;
     }
 
+    if (command === "/lecture" || command === "/lec") {
+      const result = await handleLectureQuery(
+        args,
+        cache,
+        services.client,
+        course.id
+      );
+      await api.addMessage({
+        role: result.status === "opened" || result.status === "listed" ? "assistant" : "system",
+        content: result.message,
+      });
+      return;
+    }
+
     return;
   }
 
@@ -425,6 +440,26 @@ export async function handleCommand(
         name: api.session.metadata.assignmentName ?? api.session.title,
       },
     };
+  }
+
+  if (command === "/lecture" || command === "/lec") {
+    const loaded = getCurrentWorkspace();
+    const cache =
+      api.getCourseCache?.() ??
+      (loaded?.courseCode && loaded?.courseId
+        ? await loadCourseCache(loaded.courseCode, loaded.courseId)
+        : null);
+    const result = await handleLectureQuery(
+      args,
+      cache,
+      services.client,
+      loaded?.courseId ?? scope.courseId ?? null
+    );
+    await api.addMessage({
+      role: result.status === "opened" || result.status === "listed" ? "assistant" : "system",
+      content: result.message,
+    });
+    return;
   }
 
   if (command === "/open") {
