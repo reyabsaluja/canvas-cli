@@ -1084,6 +1084,63 @@ test("memory prompts prefer question-relevant evidence over newer unrelated read
   assert.doesNotMatch(prompt, /4\.7k resistor/);
 });
 
+test("memory prompts exclude failed lookups when successful evidence exists", () => {
+  const prompt = buildEvidenceBackedQuestion("What does the lab brief say about saturating add mode?", [
+    {
+      tool: "search_course",
+      status: "ok",
+      summary: "Found a course document mentioning saturating add mode.",
+      artifacts: [
+        {
+          artifactId: "artifact-1",
+          title: "lab4-brief.txt",
+          kind: "attachment",
+          excerpt: "The ALU must support saturating add mode and signed overflow detection.",
+        },
+      ],
+    },
+    {
+      tool: "read_file",
+      status: "missing_text",
+      summary: "Matched docs/missing.txt, but readable text is missing.",
+      artifacts: [
+        {
+          artifactId: "artifact-2",
+          title: "docs/missing.txt",
+          kind: "extracted",
+        },
+      ],
+    },
+  ]);
+
+  assert.match(prompt, /lab4-brief\.txt/);
+  assert.match(prompt, /saturating add mode/i);
+  assert.doesNotMatch(prompt, /docs\/missing\.txt/);
+  assert.doesNotMatch(prompt, /readable text is missing/i);
+});
+
+test("memory prompts fall back to the raw question when no successful evidence exists", () => {
+  const prompt = buildEvidenceBackedQuestion("What does the lab brief say about saturating add mode?", [
+    {
+      tool: "read_file",
+      status: "missing_text",
+      summary: "Matched lab4-brief.txt, but readable text is missing.",
+      artifacts: [
+        {
+          artifactId: "artifact-1",
+          title: "lab4-brief.txt",
+          kind: "attachment",
+        },
+      ],
+    },
+  ]);
+
+  assert.equal(
+    prompt,
+    "What does the lab brief say about saturating add mode?"
+  );
+});
+
 test("tool-turn verification falls back to prior grounded evidence when no new tools run", () => {
   const observations: Observation[] = [
     {
