@@ -230,6 +230,12 @@ export interface ToolCallEvent {
 
 type ConversationEntry = ChatAgentContext["conversationHistory"][number];
 type ConversationTurn = [ConversationEntry, ConversationEntry];
+type TurnToolCache = Map<string, ToolExecutionResult>;
+
+export interface TurnToolExecutionResult {
+  result: ToolExecutionResult;
+  deduped: boolean;
+}
 
 function mapToolCall(
   name: string,
@@ -319,6 +325,7 @@ export async function runChatAgent(
     );
   } else {
     const pendingToolResults: ToolExecutionResult[] = [];
+    const turnToolCache: TurnToolCache = new Map();
     const promptMessages = buildToolPromptMessages(
       ctx.conversationHistory,
       question
@@ -329,10 +336,17 @@ export async function runChatAgent(
       promptMessages,
       CHAT_TOOLS,
       async (name, input) => {
-        const result = await executeToolCallDetailed(name, input, ctx);
-        pendingToolResults.push(result);
-        appendObservation(ctx.runState, result.observation);
-        return result.modelText;
+        const execution = await executeToolCallForTurn(
+          turnToolCache,
+          name,
+          input,
+          ctx
+        );
+        pendingToolResults.push(execution.result);
+        if (!execution.deduped) {
+          appendObservation(ctx.runState, execution.result.observation);
+        }
+        return execution.result.modelText;
       },
       {
         onToolCall: (name, input, toolResult) => {
@@ -488,6 +502,32 @@ async function executeToolCallDetailed(
         uiText: `Unknown tool: ${name}`,
       };
   }
+}
+
+export async function executeToolCallForTurn(
+  turnToolCache: TurnToolCache,
+  name: string,
+  input: Record<string, unknown>,
+  ctx: ChatAgentContext
+): Promise<TurnToolExecutionResult> {
+  const cacheKey = buildTurnToolCacheKey(name, input);
+  const cached = turnToolCache.get(cacheKey);
+  if (cached) {
+    return { result: cached, deduped: true };
+  }
+
+  // Keep dedupe scoped to a single chat turn so we avoid repeated local reads
+  // and searches without changing any cross-turn grounding behavior.
+  const result = await executeToolCallDetailed(name, input, ctx);
+  turnToolCache.set(cacheKey, result);
+  return { result, deduped: false };
+}
+
+export function buildTurnToolCacheKey(
+  name: string,
+  input: Record<string, unknown>
+): string {
+  return `${name}:${normalizeToolInput(input)}`;
 }
 
 async function searchWorkspace(
@@ -985,6 +1025,27 @@ function finalizeAnswerText(answer: string, missing: string[]): string {
     return `${trimmed}\n\nI may be missing an exact source for part of this answer, so treat it as tentative.`;
   }
   return trimmed;
+}
+
+function normalizeToolInput(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim().replace(/\s+/g, " ").toLowerCase();
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => normalizeToolInput(entry)).join(",")}]`;
+  }
+
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).sort(
+      ([left], [right]) => left.localeCompare(right)
+    );
+    return `{${entries
+      .map(([key, entry]) => `${key}:${normalizeToolInput(entry)}`)
+      .join(",")}}`;
+  }
+
+  return String(value ?? "");
 }
 
 function toArtifactRef(artifact: {

@@ -9,7 +9,10 @@ import type { Observation } from "../src/agent/observation.js";
 import { clearArtifactIndexCache } from "../src/knowledge/artifact-index.js";
 import { decideWorkspaceRetrieval } from "../src/agent/retrieval-gate.js";
 import { verifyWorkspaceAnswer } from "../src/agent/verify.js";
-import { buildEvidenceBackedQuestion } from "../src/tui/chat-agent.js";
+import {
+  buildEvidenceBackedQuestion,
+  executeToolCallForTurn,
+} from "../src/tui/chat-agent.js";
 import { createChatContext, hydrateConversationHistory } from "../src/tui/services.js";
 import {
   readWorkspaceKnowledgeArtifactById,
@@ -455,4 +458,57 @@ test("memory prompts preserve the latest successful direct read evidence", () =>
     /The waveform must show stall cycles around the branch hazard\./
   );
   assert.equal((prompt.match(/- Tool:/g) ?? []).length, 3);
+});
+
+test("workspace chat dedupes repeated tool calls within a single turn", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      { cache, client: null, config: null, courseId: 17 }
+    );
+    const turnToolCache = new Map();
+
+    const firstSearch = await executeToolCallForTurn(
+      turnToolCache,
+      "search_workspace",
+      { query: "branch hazard" },
+      ctx
+    );
+    const secondSearch = await executeToolCallForTurn(
+      turnToolCache,
+      "search_workspace",
+      { query: "  BRANCH   HAZARD " },
+      ctx
+    );
+
+    assert.equal(firstSearch.deduped, false);
+    assert.equal(secondSearch.deduped, true);
+    assert.equal(secondSearch.result.modelText, firstSearch.result.modelText);
+
+    const firstRead = await executeToolCallForTurn(
+      turnToolCache,
+      "read_file",
+      { filename: "docs/reference.txt" },
+      ctx
+    );
+    const secondRead = await executeToolCallForTurn(
+      turnToolCache,
+      "read_file",
+      { filename: " docs/reference.txt " },
+      ctx
+    );
+
+    assert.equal(firstRead.deduped, false);
+    assert.equal(secondRead.deduped, true);
+    assert.equal(firstRead.result.observation.status, "ok");
+    assert.equal(secondRead.result.modelText, firstRead.result.modelText);
+    assert.match(
+      secondRead.result.modelText,
+      /stall cycles around the branch hazard/i
+    );
+  });
 });
