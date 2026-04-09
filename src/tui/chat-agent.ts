@@ -1248,43 +1248,16 @@ export function buildEvidenceBackedQuestion(
 function selectSupplementalEvidenceObservations(
   observations: Observation[]
 ): Observation[] {
-  if (observations.length <= 3) {
-    return observations;
-  }
-
-  const selected = new Set<number>();
-  // Keep the latest grounded content read in prompt context so memory answers
-  // still include the underlying text instead of only later search summaries.
-  const latestSuccessfulReadIndex = findLatestSuccessfulGroundedContentObservationIndex(
-    observations
+  const grounded = observations.filter((observation) =>
+    isGroundedContentObservation(observation)
   );
+  const candidates = grounded.length > 0 ? grounded : observations;
 
-  if (latestSuccessfulReadIndex !== -1) {
-    selected.add(latestSuccessfulReadIndex);
+  if (candidates.length <= 3) {
+    return candidates;
   }
 
-  for (let index = observations.length - 1; index >= 0; index -= 1) {
-    selected.add(index);
-    if (selected.size === 3) {
-      break;
-    }
-  }
-
-  return [...selected]
-    .sort((a, b) => a - b)
-    .map((index) => observations[index]!);
-}
-
-function findLatestSuccessfulGroundedContentObservationIndex(
-  observations: Observation[]
-): number {
-  for (let index = observations.length - 1; index >= 0; index -= 1) {
-    const observation = observations[index]!;
-    if (isGroundedContentObservation(observation)) {
-      return index;
-    }
-  }
-  return -1;
+  return candidates.slice(-3);
 }
 
 export function resolveToolTurnVerificationObservations(
@@ -1597,26 +1570,15 @@ function findReusableReadObservation(
   filename: string,
   observations: Observation[]
 ): Observation | null {
-  const lookupAliases = buildFileLookupAliases(filename);
-  if (lookupAliases.size === 0) {
-    return null;
-  }
-
   for (let index = observations.length - 1; index >= 0; index -= 1) {
     const observation = observations[index]!;
     if (!isGroundedContentObservation(observation)) {
       continue;
     }
 
-    const matches = observation.artifacts.some((artifact) => {
-      const artifactAliases = buildFileLookupAliases(artifact.title);
-      for (const alias of artifactAliases) {
-        if (lookupAliases.has(alias)) {
-          return true;
-        }
-      }
-      return false;
-    });
+    const matches = observation.artifacts.some((artifact) =>
+      scoreFileLookupMatch(filename, artifact.title) > 0
+    );
 
     if (matches) {
       return observation;

@@ -680,7 +680,7 @@ test("workspace answer verification derives sources and confidence deterministic
   });
 });
 
-test("memory prompts preserve the latest successful direct read evidence", () => {
+test("memory prompts prefer grounded reads over later search echoes", () => {
   const prompt = buildEvidenceBackedQuestion("Explain the branch hazard requirement.", [
     {
       tool: "read_file",
@@ -741,7 +741,8 @@ test("memory prompts preserve the latest successful direct read evidence", () =>
     prompt,
     /The waveform must show stall cycles around the branch hazard\./
   );
-  assert.equal((prompt.match(/- Tool:/g) ?? []).length, 3);
+  assert.equal((prompt.match(/- Tool:/g) ?? []).length, 1);
+  assert.doesNotMatch(prompt, /Found the latest workspace match for branch hazard/);
 });
 
 test("tool-turn verification falls back to prior grounded evidence when no new tools run", () => {
@@ -779,7 +780,7 @@ test("tool-turn verification falls back to prior grounded evidence when no new t
     observations,
     observations.length
   );
-  assert.equal(fallback.length, 2);
+  assert.equal(fallback.length, 1);
   assert.equal(fallback[0]?.tool, "download_course_file");
 
   const mixedTurn = resolveToolTurnVerificationObservations(observations, 1);
@@ -1218,6 +1219,45 @@ test("read_file reuses previously read content across turns", async () => {
     assert.equal(result.result.observation.status, "ok");
     assert.match(result.result.observation.summary, /Reused previously read/i);
     assert.match(result.result.modelText, /stall cycles around the branch hazard/i);
+  });
+});
+
+test("read_file reuses fuzzy-matched grounded content across turns", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      { cache: null, client: null, config: null, courseId: 17 }
+    );
+
+    appendObservation(ctx.runState, {
+      tool: "download_course_file",
+      status: "ok",
+      summary: "Downloaded and extracted lab4-brief.txt.",
+      artifacts: [
+        {
+          artifactId: "course:attachment:attachments/modules/lab4-brief.txt:lab4-brief.txt",
+          title: "lab4-brief.txt",
+          kind: "attachment",
+          excerpt: "The downloaded brief explains the branch hazard waveform in detail.",
+        },
+      ],
+      content: "The downloaded brief explains the branch hazard waveform in detail.",
+    });
+
+    const result = await executeToolCallForTurn(
+      new Map(),
+      "read_file",
+      { filename: "lab4 brief" },
+      ctx
+    );
+
+    assert.equal(result.deduped, false);
+    assert.equal(result.result.observation.status, "ok");
+    assert.match(result.result.observation.summary, /Reused previously read lab4-brief\.txt/i);
+    assert.match(result.result.modelText, /branch hazard waveform in detail/i);
   });
 });
 
