@@ -519,6 +519,176 @@ test("handleLectureQuery: query that does not match shows available lectures", a
   assert.ok(result.message.includes("Available lectures"));
 });
 
+test("handleLectureQuery: empty query stays local-first when cached lectures exist", async () => {
+  let pageFetches = 0;
+  const cache = makeCache({
+    coursePath: "/tmp/test-course-local-list",
+    modules: [
+      makeModule({
+        items: [
+          {
+            id: 41,
+            title: "Lecture 1 Video",
+            type: "ExternalUrl",
+            position: 1,
+            contentId: null,
+            pageUrl: null,
+            htmlUrl: null,
+            externalUrl: "https://youtube.com/watch?v=abc",
+          },
+        ],
+      }),
+    ],
+    pages: [
+      {
+        pageId: "lecture-links",
+        title: "Lecture Links",
+        htmlUrl: "https://canvas.example.com/courses/1/pages/lecture-links",
+        updatedAt: null,
+        hasBody: true,
+      },
+    ],
+  });
+  const client = {
+    async getPageBySlugSafe() {
+      pageFetches += 1;
+      return {
+        title: "Lecture Links",
+        body: '<a href="https://example.com/lecture-99">Lecture 99 Video</a>',
+      };
+    },
+  } as const;
+
+  const result = await handleLectureQuery("", cache, client as any, 1);
+  assert.equal(result.status, "listed");
+  assert.equal(pageFetches, 0);
+  assert.ok(result.message.includes("Lecture 1 Video"));
+  assert.ok(!result.message.includes("Lecture 99 Video"));
+});
+
+test("handleLectureQuery: local lecture matches open without fetching lecture hub pages", async () => {
+  let pageFetches = 0;
+  const opened: string[] = [];
+  const cache = makeCache({
+    coursePath: "/tmp/test-course-local-open",
+    modules: [
+      makeModule({
+        items: [
+          {
+            id: 42,
+            title: "Lecture 3 Slides.pdf",
+            type: "ExternalUrl",
+            position: 1,
+            contentId: null,
+            pageUrl: null,
+            htmlUrl: null,
+            externalUrl: "https://example.com/lecture-3.pdf",
+          },
+        ],
+      }),
+    ],
+    pages: [
+      {
+        pageId: "lecture-links",
+        title: "Lecture Links",
+        htmlUrl: "https://canvas.example.com/courses/1/pages/lecture-links",
+        updatedAt: null,
+        hasBody: true,
+      },
+    ],
+  });
+  const client = {
+    async getPageBySlugSafe() {
+      pageFetches += 1;
+      return {
+        title: "Lecture Links",
+        body: '<a href="https://example.com/lecture-99">Lecture 99 Video</a>',
+      };
+    },
+  } as const;
+
+  const result = await handleLectureQuery(
+    "lecture 3 slides",
+    cache,
+    client as any,
+    1,
+    async (resource) => {
+      opened.push(resource.title);
+    }
+  );
+  assert.equal(result.status, "opened");
+  assert.equal(pageFetches, 0);
+  assert.deepEqual(opened, ["Lecture 3 Slides.pdf"]);
+});
+
+test("handleLectureQuery: missing local match falls back to lecture hub pages", async () => {
+  let pageFetches = 0;
+  const opened: string[] = [];
+  const cache = makeCache({
+    coursePath: "/tmp/test-course-hub-fallback",
+    pages: [
+      {
+        pageId: "lecture-links",
+        title: "Lecture Links",
+        htmlUrl: "https://canvas.example.com/courses/1/pages/lecture-links",
+        updatedAt: null,
+        hasBody: true,
+      },
+    ],
+  });
+  const client = {
+    async getPageBySlugSafe() {
+      pageFetches += 1;
+      return {
+        title: "Lecture Links",
+        body: '<a href="https://example.com/lecture-7">Lecture 7 Video</a>',
+      };
+    },
+  } as const;
+
+  const result = await handleLectureQuery(
+    "lecture 7",
+    cache,
+    client as any,
+    1,
+    async (resource) => {
+      opened.push(resource.title);
+    }
+  );
+  assert.equal(result.status, "opened");
+  assert.equal(pageFetches, 1);
+  assert.deepEqual(opened, ["Lecture 7 Video"]);
+});
+
+test("handleLectureQuery: lecture hub results are cached across repeated misses", async () => {
+  let pageFetches = 0;
+  const cache = makeCache({
+    coursePath: "/tmp/test-course-hub-cache",
+    pages: [
+      {
+        pageId: "lecture-links",
+        title: "Lecture Links",
+        htmlUrl: "https://canvas.example.com/courses/1/pages/lecture-links",
+        updatedAt: null,
+        hasBody: true,
+      },
+    ],
+  });
+  const client = {
+    async getPageBySlugSafe() {
+      pageFetches += 1;
+      return {
+        title: "Lecture Links",
+        body: '<a href="https://example.com/lecture-8">Lecture 8 Video</a>',
+      };
+    },
+  } as const;
+
+  await handleLectureQuery("lecture 8", cache, client as any, 1, async () => {});
+  await handleLectureQuery("lecture 8", cache, client as any, 1, async () => {});
+  assert.equal(pageFetches, 1);
+});
+
 test("handleLectureQuery: search terms include lecture number aliases", () => {
   const cache = makeCache({
     modules: [

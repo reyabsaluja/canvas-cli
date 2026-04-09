@@ -17,6 +17,11 @@ import {
 
 type LectureContentType = "video" | "slides" | "page" | "unknown";
 
+interface CachedLectureHubPages {
+  items: OpenableResource[];
+  fetchedAt: number;
+}
+
 // ---------------------------------------------------------------------------
 // Heuristic helpers (exported for testing)
 // ---------------------------------------------------------------------------
@@ -262,6 +267,10 @@ function extractLectureLinksFromHtml(
 const LECTURE_HUB_PATTERNS =
   /\b(lecture\s*[\/\-&]?\s*(links?|slides?|recordings?|notes?|videos?)|recordings?\s*[&\/\-]?\s*links?|lecture\s*notes?\s*and|notes?\s*[\/\-&]?\s*recordings?)\b/i;
 
+const LECTURE_HUB_CACHE_TTL_MS = 300_000;
+const lectureHubPageCache = new Map<string, CachedLectureHubPages>();
+const lectureHubPageInflight = new Map<string, Promise<OpenableResource[]>>();
+
 function findLectureHubPages(cache: CourseCache): Array<{ pageId: string; title: string }> {
   return cache.pages.filter((p) => LECTURE_HUB_PATTERNS.test(p.title));
 }
@@ -271,19 +280,45 @@ async function resolveLectureHubPages(
   client: CanvasClient,
   courseId: number
 ): Promise<OpenableResource[]> {
-  const hubs = findLectureHubPages(cache);
-  const results: OpenableResource[] = [];
-  for (const hub of hubs) {
-    try {
-      const page = await client.getPageBySlugSafe(courseId, hub.pageId);
-      if (page?.body) {
-        results.push(...extractLectureLinksFromHtml(page.body, hub.title));
-      }
-    } catch {
-      // skip unreachable pages
-    }
+  const cacheKey = `${courseId}:${cache.coursePath}`;
+  const cached = lectureHubPageCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < LECTURE_HUB_CACHE_TTL_MS) {
+    return cached.items;
   }
-  return results;
+
+  const inFlight = lectureHubPageInflight.get(cacheKey);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const hubs = findLectureHubPages(cache);
+  const load = (async () => {
+    const results = (
+      await Promise.all(
+        hubs.map(async (hub) => {
+          try {
+            const page = await client.getPageBySlugSafe(courseId, hub.pageId);
+            if (!page?.body) return [];
+            return extractLectureLinksFromHtml(page.body, hub.title);
+          } catch {
+            return [];
+          }
+        })
+      )
+    ).flat();
+    lectureHubPageCache.set(cacheKey, {
+      items: results,
+      fetchedAt: Date.now(),
+    });
+    return results;
+  })();
+
+  lectureHubPageInflight.set(cacheKey, load);
+  try {
+    return await load;
+  } finally {
+    lectureHubPageInflight.delete(cacheKey);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -294,7 +329,8 @@ export async function handleLectureQuery(
   query: string,
   cache: CourseCache | null,
   client?: CanvasClient | null,
-  courseId?: number | null
+  courseId?: number | null,
+  opener: typeof openResourceTarget = openResourceTarget
 ): Promise<OpenResourceResult> {
   if (!cache) {
     return {
@@ -310,21 +346,12 @@ export async function handleLectureQuery(
   // Add front-page links (disk read only)
   const frontPageLectures = await extractFrontPageLectures(cache.coursePath);
   const seenTargets = new Set(lectures.map((l) => l.target));
-  for (const lecture of frontPageLectures) {
-    if (!seenTargets.has(lecture.target)) {
-      seenTargets.add(lecture.target);
-      lectures.push(lecture);
-    }
-  }
+  mergeLectureResources(lectures, seenTargets, frontPageLectures);
 
-  // Optionally resolve lecture hub pages (network, lazy)
-  if (client && courseId) {
-    const hubLectures = await resolveLectureHubPages(cache, client, courseId);
-    for (const lecture of hubLectures) {
-      if (!seenTargets.has(lecture.target)) {
-        seenTargets.add(lecture.target);
-        lectures.push(lecture);
-      }
+  if (lectures.length === 0) {
+    if (client && courseId) {
+      const hubLectures = await resolveLectureHubPages(cache, client, courseId);
+      mergeLectureResources(lectures, seenTargets, hubLectures);
     }
   }
 
@@ -341,16 +368,28 @@ export async function handleLectureQuery(
     return {
       status: "listed",
       message: formatLectureList(lectures),
-    };
+      };
   }
 
-  const resolved = resolveOpenableResource(trimmed, lectures);
+  let resolved = resolveOpenableResource(trimmed, lectures);
+  if (
+    resolved.status === "missing" &&
+    client &&
+    courseId &&
+    findLectureHubPages(cache).length > 0
+  ) {
+    const hubLectures = await resolveLectureHubPages(cache, client, courseId);
+    mergeLectureResources(lectures, seenTargets, hubLectures);
+    resolved = resolveOpenableResource(trimmed, lectures);
+  }
+
   if (resolved.status === "missing") {
     return {
       status: "missing",
       message: `No lecture matched "${trimmed}".\nAvailable lectures:\n${formatLectureList(lectures)}`,
     };
   }
+
   if (resolved.status === "ambiguous") {
     return {
       status: "ambiguous",
@@ -366,7 +405,7 @@ export async function handleLectureQuery(
   }
 
   try {
-    await openResourceTarget(resolved.resource);
+    await opener(resolved.resource);
   } catch (error) {
     return {
       status: "missing",
@@ -436,6 +475,18 @@ function buildLectureAliases(
   aliases.push(...words);
   if (source) aliases.push(source);
   return aliases;
+}
+
+function mergeLectureResources(
+  lectures: OpenableResource[],
+  seenTargets: Set<string>,
+  additions: OpenableResource[]
+): void {
+  for (const lecture of additions) {
+    if (seenTargets.has(lecture.target)) continue;
+    seenTargets.add(lecture.target);
+    lectures.push(lecture);
+  }
 }
 
 function formatLectureList(lectures: OpenableResource[]): string {
