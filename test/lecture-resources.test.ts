@@ -131,12 +131,20 @@ test("isLectureLikeTitle: 'video-lec01' is true", () => {
   assert.equal(isLectureLikeTitle("video-lec01"), true);
 });
 
-test("isLectureLikeTitle: 'Slide Deck' is true", () => {
-  assert.equal(isLectureLikeTitle("Slide Deck"), true);
+test("isLectureLikeTitle: 'Week 5 Video' is true", () => {
+  assert.equal(isLectureLikeTitle("Week 5 Video"), true);
 });
 
-test("isLectureLikeTitle: 'presentation materials' is true", () => {
-  assert.equal(isLectureLikeTitle("presentation materials"), true);
+test("isLectureLikeTitle: 'Slide Deck' is false without lecture context", () => {
+  assert.equal(isLectureLikeTitle("Slide Deck"), false);
+});
+
+test("isLectureLikeTitle: 'presentation materials' is false without lecture context", () => {
+  assert.equal(isLectureLikeTitle("presentation materials"), false);
+});
+
+test("isLectureLikeTitle: 'Project Presentation' is false", () => {
+  assert.equal(isLectureLikeTitle("Project Presentation"), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -402,6 +410,29 @@ test("buildLectureIndex: skips non-lecture module items", () => {
             pageUrl: null,
             htmlUrl: null,
             externalUrl: "https://example.com/hw3",
+          },
+        ],
+      }),
+    ],
+  });
+  const lectures = buildLectureIndex(cache);
+  assert.equal(lectures.length, 0);
+});
+
+test("buildLectureIndex: skips generic slide decks without lecture context", () => {
+  const cache = makeCache({
+    modules: [
+      makeModule({
+        items: [
+          {
+            id: 17,
+            title: "Slide Deck",
+            type: "ExternalUrl",
+            position: 1,
+            contentId: null,
+            pageUrl: null,
+            htmlUrl: null,
+            externalUrl: "https://example.com/slides",
           },
         ],
       }),
