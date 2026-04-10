@@ -18,6 +18,7 @@ function makeTopic(overrides: Partial<CanvasDiscussionTopic> = {}): CanvasDiscus
     id: 1,
     title: "Test Topic",
     message: "<p>Hello world</p>",
+    context_code: null,
     posted_at: new Date().toISOString(),
     last_reply_at: null,
     discussion_type: "side_comment",
@@ -64,9 +65,11 @@ function stubClient(opts: {
   discussions?: CanvasDiscussionTopic[];
   view?: CanvasDiscussionTopicView | null;
   searchResults?: CanvasDiscussionTopic[];
+  bulkAnnouncements?: CanvasDiscussionTopic[];
 }) {
   return {
     getAnnouncementsSafe: async () => opts.announcements ?? [],
+    getAnnouncementsForContexts: async () => opts.bulkAnnouncements ?? [],
     getDiscussionTopicsSafe: async () => opts.discussions ?? [],
     getDiscussionTopicViewSafe: async () => opts.view ?? null,
     searchDiscussionTopicsSafe: async () => opts.searchResults ?? [],
@@ -374,15 +377,25 @@ test("RadarService.getThread returns null for non-existent topic", async () => {
 test("RadarService.getRadarItemsMultiCourse merges and sorts items from multiple courses", async () => {
   const recent = new Date().toISOString();
   const older = new Date(Date.now() - 3600_000).toISOString();
-  const ann1 = makeTopic({ id: 1, title: "Course A Ann", is_announcement: true, posted_at: older });
-  const ann2 = makeTopic({ id: 2, title: "Course B Ann", is_announcement: true, posted_at: recent });
+  const ann1 = makeTopic({
+    id: 1,
+    title: "Course A Ann",
+    is_announcement: true,
+    context_code: "course_100",
+    html_url: "https://canvas.example.com/courses/100/discussion_topics/1",
+    posted_at: older,
+  });
+  const ann2 = makeTopic({
+    id: 2,
+    title: "Course B Ann",
+    is_announcement: true,
+    context_code: "course_200",
+    html_url: "https://canvas.example.com/courses/200/discussion_topics/2",
+    posted_at: recent,
+  });
 
-  let lastCourseId: number | undefined;
   const client = stubClient({});
-  client.getAnnouncementsSafe = async (courseId: number) => {
-    lastCourseId = courseId;
-    return courseId === 100 ? [ann1] : [ann2];
-  };
+  client.getAnnouncementsForContexts = async () => [ann1, ann2];
   client.getDiscussionTopicsSafe = async () => [];
 
   const service = new RadarService(client);
@@ -397,6 +410,114 @@ test("RadarService.getRadarItemsMultiCourse merges and sorts items from multiple
   assert.equal(items.length, 2);
   // Most recent first
   assert.equal(items[0]!.title, "Course B Ann");
+});
+
+test("RadarService.getRadarItemsMultiCourse uses one bulk announcements request before falling back", async () => {
+  let bulkCalls = 0;
+  let perCourseCalls = 0;
+  const now = new Date().toISOString();
+  const ann1 = makeTopic({
+    id: 3,
+    title: "Course A Ann",
+    is_announcement: true,
+    context_code: "course_100",
+    html_url: "https://canvas.example.com/courses/100/discussion_topics/3",
+    posted_at: now,
+  });
+  const ann2 = makeTopic({
+    id: 4,
+    title: "Course B Ann",
+    is_announcement: true,
+    context_code: "course_200",
+    html_url: "https://canvas.example.com/courses/200/discussion_topics/4",
+    posted_at: now,
+  });
+  const client = stubClient({});
+  client.getAnnouncementsForContexts = async () => {
+    bulkCalls += 1;
+    return [ann1, ann2];
+  };
+  client.getAnnouncementsSafe = async () => {
+    perCourseCalls += 1;
+    return [];
+  };
+  client.getDiscussionTopicsSafe = async () => [];
+
+  const service = new RadarService(client);
+  const items = await service.getRadarItemsMultiCourse(
+    [
+      { id: 100, name: "Course A" },
+      { id: 200, name: "Course B" },
+    ],
+    "all"
+  );
+
+  assert.equal(items.length, 2);
+  assert.equal(bulkCalls, 1);
+  assert.equal(perCourseCalls, 0);
+});
+
+test("RadarService.getRadarItemsMultiCourse falls back to per-course announcements when bulk fetch fails", async () => {
+  let bulkCalls = 0;
+  let perCourseCalls = 0;
+  const now = new Date().toISOString();
+  const client = stubClient({});
+  client.getAnnouncementsForContexts = async () => {
+    bulkCalls += 1;
+    throw new Error("Canvas API error: 403 Forbidden");
+  };
+  client.getAnnouncementsSafe = async (courseId: number) => {
+    perCourseCalls += 1;
+    return [
+      makeTopic({
+        id: courseId,
+        title: `Announcement ${courseId}`,
+        is_announcement: true,
+        html_url: `https://canvas.example.com/courses/${courseId}/discussion_topics/${courseId}`,
+        posted_at: now,
+      }),
+    ];
+  };
+  client.getDiscussionTopicsSafe = async () => [];
+
+  const service = new RadarService(client);
+  const items = await service.getRadarItemsMultiCourse(
+    [
+      { id: 100, name: "Course A" },
+      { id: 200, name: "Course B" },
+    ],
+    "announcements"
+  );
+
+  assert.equal(items.length, 2);
+  assert.equal(bulkCalls, 1);
+  assert.equal(perCourseCalls, 2);
+});
+
+test("RadarService.getRadarItemsMultiCourse caches bulk announcement responses across repeated calls", async () => {
+  let bulkCalls = 0;
+  const now = new Date().toISOString();
+  const client = stubClient({});
+  client.getAnnouncementsForContexts = async () => {
+    bulkCalls += 1;
+    return [
+      makeTopic({
+        id: 5,
+        title: "Course A Ann",
+        is_announcement: true,
+        context_code: "course_100",
+        html_url: "https://canvas.example.com/courses/100/discussion_topics/5",
+        posted_at: now,
+      }),
+    ];
+  };
+  client.getDiscussionTopicsSafe = async () => [];
+
+  const service = new RadarService(client);
+  await service.getRadarItemsMultiCourse([{ id: 100, name: "Course A" }], "announcements");
+  await service.getRadarItemsMultiCourse([{ id: 100, name: "Course A" }], "announcements");
+
+  assert.equal(bulkCalls, 1);
 });
 
 // ---------------------------------------------------------------------------
@@ -542,10 +663,24 @@ function makeServices(radarService: RadarService): AppServices {
 test("/radar global scope: merges items from multiple courses", async () => {
   const now = new Date().toISOString();
   const client = stubClient({});
-  client.getAnnouncementsSafe = async (courseId: number) =>
-    courseId === 1
-      ? [makeTopic({ id: 10, title: "CS Announcement", is_announcement: true, posted_at: now })]
-      : [makeTopic({ id: 20, title: "Math Announcement", is_announcement: true, posted_at: now })];
+  client.getAnnouncementsForContexts = async () => [
+    makeTopic({
+      id: 10,
+      title: "CS Announcement",
+      is_announcement: true,
+      context_code: "course_1",
+      html_url: "https://canvas.example.com/courses/1/discussion_topics/10",
+      posted_at: now,
+    }),
+    makeTopic({
+      id: 20,
+      title: "Math Announcement",
+      is_announcement: true,
+      context_code: "course_2",
+      html_url: "https://canvas.example.com/courses/2/discussion_topics/20",
+      posted_at: now,
+    }),
+  ];
   client.getDiscussionTopicsSafe = async () => [];
 
   const service = new RadarService(client);
