@@ -110,6 +110,7 @@ export interface CanvasDiscussionTopic {
   id: number;
   title: string;
   message: string | null;
+  context_code?: string | null;
   posted_at: string | null;
   last_reply_at: string | null;
   discussion_type: string;

@@ -20,6 +20,12 @@ interface CachedList {
 interface CachedTopicCatalog {
   announcements: CanvasDiscussionTopic[];
   discussions: CanvasDiscussionTopic[];
+  announcementsFetchedAt: number | null;
+  discussionsFetchedAt: number | null;
+}
+
+interface CachedBulkAnnouncements {
+  itemsByCourseId: Map<number, CanvasDiscussionTopic[]>;
   fetchedAt: number;
 }
 
@@ -37,6 +43,7 @@ export class RadarService {
   private client: CanvasClient;
   private listCache = new Map<string, CachedList>();
   private topicCatalogCache = new Map<string, CachedTopicCatalog>();
+  private bulkAnnouncementsCache = new Map<string, CachedBulkAnnouncements>();
   private threadCache = new Map<string, CachedThread>();
 
   constructor(client: CanvasClient) {
@@ -65,18 +72,42 @@ export class RadarService {
     filter: RadarFilter,
     query?: string
   ): Promise<RadarItem[]> {
+    if (courses.length === 0) return [];
+
+    const announcementsByCourse =
+      filter === "discussions"
+        ? new Map<number, CanvasDiscussionTopic[]>()
+        : await this.getAnnouncementsMultiCourse(courses);
+
     const results = await Promise.all(
-      courses.map(async (c) => {
+      courses.map(async (course) => {
         try {
-          return await this.getRadarItems(c.id, c.name, filter, query);
+          const items: RadarItem[] = [];
+
+          if (filter !== "discussions") {
+            items.push(
+              ...buildAnnouncementItems(
+                announcementsByCourse.get(course.id) ?? [],
+                course.id,
+                course.name
+              )
+            );
+          }
+
+          if (filter !== "announcements") {
+            const discussions = await this.getCourseDiscussions(course.id);
+            items.push(...buildDiscussionItems(discussions, course.id, course.name));
+          }
+
+          return items;
         } catch {
           return [];
         }
       })
     );
 
-    const merged = results.flat();
-    return sortRadarItems(merged);
+    const merged = sortRadarItems(results.flat());
+    return query ? filterByQuery(merged, query) : merged;
   }
 
   async getThread(
@@ -223,64 +254,203 @@ export class RadarService {
     courseName: string,
     filter: RadarFilter
   ): Promise<RadarItem[]> {
-    const cutoff = Date.now() - RECENT_WINDOW_MS;
-
     const catalog = await this.getTopicCatalog(courseId);
-    const announcements =
-      filter === "discussions" ? [] : catalog.announcements;
-    const discussions =
-      filter === "announcements" ? [] : catalog.discussions;
-
-    const items: RadarItem[] = [];
-
-    for (const a of announcements) {
-      const posted = a.posted_at ? new Date(a.posted_at).getTime() : 0;
-      if (posted >= cutoff) {
-        items.push(normalizeTopicToRadarItem(a, courseId, courseName));
-      }
-    }
-
-    const unread: RadarItem[] = [];
-    const recent: RadarItem[] = [];
-    for (const d of discussions) {
-      const item = normalizeTopicToRadarItem(d, courseId, courseName);
-      if (d.read_state === "unread" || d.unread_count > 0) {
-        unread.push(item);
-      } else {
-        const activity = d.last_reply_at
-          ? new Date(d.last_reply_at).getTime()
-          : d.posted_at
-            ? new Date(d.posted_at).getTime()
-            : 0;
-        if (activity >= cutoff) {
-          recent.push(item);
-        }
-      }
-    }
-
-    items.push(...unread, ...recent);
-    return sortRadarItems(items);
+    return sortRadarItems([
+      ...(filter === "discussions"
+        ? []
+        : buildAnnouncementItems(catalog.announcements, courseId, courseName)),
+      ...(filter === "announcements"
+        ? []
+        : buildDiscussionItems(catalog.discussions, courseId, courseName)),
+    ]);
   }
 
   private async getTopicCatalog(courseId: number): Promise<CachedTopicCatalog> {
     const cacheKey = String(courseId);
     const cached = this.topicCatalogCache.get(cacheKey);
-    if (cached && Date.now() - cached.fetchedAt < LIST_TTL_MS) {
+    const hasFreshAnnouncements = cached
+      ? this.isFresh(cached.announcementsFetchedAt)
+      : false;
+    const hasFreshDiscussions = cached
+      ? this.isFresh(cached.discussionsFetchedAt)
+      : false;
+
+    if (cached && hasFreshAnnouncements && hasFreshDiscussions) {
       return cached;
     }
 
     const [announcements, discussions] = await Promise.all([
-      this.client.getAnnouncementsSafe(courseId),
-      this.client.getDiscussionTopicsSafe(courseId),
+      hasFreshAnnouncements
+        ? Promise.resolve(cached?.announcements ?? [])
+        : this.client.getAnnouncementsSafe(courseId),
+      hasFreshDiscussions
+        ? Promise.resolve(cached?.discussions ?? [])
+        : this.client.getDiscussionTopicsSafe(courseId),
     ]);
+    const fetchedAt = Date.now();
     const catalog: CachedTopicCatalog = {
       announcements,
       discussions,
-      fetchedAt: Date.now(),
+      announcementsFetchedAt: hasFreshAnnouncements
+        ? cached?.announcementsFetchedAt ?? fetchedAt
+        : fetchedAt,
+      discussionsFetchedAt: hasFreshDiscussions
+        ? cached?.discussionsFetchedAt ?? fetchedAt
+        : fetchedAt,
     };
     this.topicCatalogCache.set(cacheKey, catalog);
     return catalog;
   }
+
+  private async getCourseDiscussions(
+    courseId: number
+  ): Promise<CanvasDiscussionTopic[]> {
+    const cacheKey = String(courseId);
+    const cached = this.topicCatalogCache.get(cacheKey);
+    if (cached && this.isFresh(cached.discussionsFetchedAt)) {
+      return cached.discussions;
+    }
+
+    const discussions = await this.client.getDiscussionTopicsSafe(courseId);
+    this.topicCatalogCache.set(cacheKey, {
+      announcements: cached?.announcements ?? [],
+      discussions,
+      announcementsFetchedAt: cached?.announcementsFetchedAt ?? null,
+      discussionsFetchedAt: Date.now(),
+    });
+    return discussions;
+  }
+
+  private async getAnnouncementsMultiCourse(
+    courses: Array<{ id: number; name: string }>
+  ): Promise<Map<number, CanvasDiscussionTopic[]>> {
+    const cacheKey = courses
+      .map((course) => course.id)
+      .sort((left, right) => left - right)
+      .join(",");
+    const cached = this.bulkAnnouncementsCache.get(cacheKey);
+    if (cached && Date.now() - cached.fetchedAt < LIST_TTL_MS) {
+      return cached.itemsByCourseId;
+    }
+
+    const startDate = new Date(Date.now() - RECENT_WINDOW_MS).toISOString();
+    let itemsByCourseId: Map<number, CanvasDiscussionTopic[]>;
+
+    try {
+      const announcements = await this.client.getAnnouncementsForContexts(
+        courses.map((course) => `course_${course.id}`),
+        { startDate }
+      );
+      itemsByCourseId = groupAnnouncementsByCourse(courses, announcements);
+    } catch {
+      const perCourse = await Promise.all(
+        courses.map(async (course) => [
+          course.id,
+          await this.client.getAnnouncementsSafe(course.id, { startDate }),
+        ] as const)
+      );
+      itemsByCourseId = new Map(perCourse);
+    }
+
+    const fetchedAt = Date.now();
+    for (const course of courses) {
+      const announcements = itemsByCourseId.get(course.id) ?? [];
+      const cachedCatalog = this.topicCatalogCache.get(String(course.id));
+      this.topicCatalogCache.set(String(course.id), {
+        announcements,
+        discussions: cachedCatalog?.discussions ?? [],
+        announcementsFetchedAt: fetchedAt,
+        discussionsFetchedAt: cachedCatalog?.discussionsFetchedAt ?? null,
+      });
+    }
+
+    this.bulkAnnouncementsCache.set(cacheKey, {
+      itemsByCourseId,
+      fetchedAt,
+    });
+    return itemsByCourseId;
+  }
+
+  private isFresh(fetchedAt: number | null): boolean {
+    return fetchedAt !== null && Date.now() - fetchedAt < LIST_TTL_MS;
+  }
+}
+
+function buildAnnouncementItems(
+  announcements: CanvasDiscussionTopic[],
+  courseId: number,
+  courseName: string
+): RadarItem[] {
+  const cutoff = Date.now() - RECENT_WINDOW_MS;
+  return announcements.flatMap((announcement) => {
+    const posted = announcement.posted_at
+      ? new Date(announcement.posted_at).getTime()
+      : 0;
+    if (posted < cutoff) return [];
+    return [normalizeTopicToRadarItem(announcement, courseId, courseName)];
+  });
+}
+
+function buildDiscussionItems(
+  discussions: CanvasDiscussionTopic[],
+  courseId: number,
+  courseName: string
+): RadarItem[] {
+  const cutoff = Date.now() - RECENT_WINDOW_MS;
+  const unread: RadarItem[] = [];
+  const recent: RadarItem[] = [];
+
+  for (const discussion of discussions) {
+    const item = normalizeTopicToRadarItem(discussion, courseId, courseName);
+    if (discussion.read_state === "unread" || discussion.unread_count > 0) {
+      unread.push(item);
+      continue;
+    }
+
+    const activity = discussion.last_reply_at
+      ? new Date(discussion.last_reply_at).getTime()
+      : discussion.posted_at
+        ? new Date(discussion.posted_at).getTime()
+        : 0;
+    if (activity >= cutoff) {
+      recent.push(item);
+    }
+  }
+
+  return [...unread, ...recent];
+}
+
+function groupAnnouncementsByCourse(
+  courses: Array<{ id: number; name: string }>,
+  announcements: CanvasDiscussionTopic[]
+): Map<number, CanvasDiscussionTopic[]> {
+  const allowedCourseIds = new Set(courses.map((course) => course.id));
+  const grouped = new Map<number, CanvasDiscussionTopic[]>();
+  for (const course of courses) {
+    grouped.set(course.id, []);
+  }
+
+  for (const announcement of announcements) {
+    const courseId = getAnnouncementCourseId(announcement);
+    if (courseId === null || !allowedCourseIds.has(courseId)) continue;
+    grouped.get(courseId)?.push(announcement);
+  }
+
+  return grouped;
+}
+
+function getAnnouncementCourseId(
+  announcement: CanvasDiscussionTopic
+): number | null {
+  const contextCode = announcement.context_code ?? null;
+  if (contextCode) {
+    const contextMatch = contextCode.match(/^course_(\d+)$/);
+    if (contextMatch?.[1]) return parseInt(contextMatch[1], 10);
+  }
+
+  const htmlUrlMatch = announcement.html_url.match(/\/courses\/(\d+)\//);
+  if (htmlUrlMatch?.[1]) return parseInt(htmlUrlMatch[1], 10);
+  return null;
 }
 
 function normalizeTopicToRadarItem(

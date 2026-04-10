@@ -196,9 +196,35 @@ export class CanvasClient {
     }
   }
 
+  async getAnnouncementsForContexts(
+    contextCodes: string[],
+    options?: { startDate?: string; endDate?: string; latestOnly?: boolean }
+  ): Promise<CanvasDiscussionTopic[]> {
+    if (contextCodes.length === 0) return [];
+
+    const params = new URLSearchParams();
+    for (const contextCode of contextCodes) {
+      params.append("context_codes[]", contextCode);
+    }
+    params.set("per_page", "50");
+    if (options?.startDate) params.set("start_date", options.startDate);
+    if (options?.endDate) params.set("end_date", options.endDate);
+    if (options?.latestOnly) params.set("latest_only", "true");
+
+    const url = `${this.baseUrl}/announcements?${params.toString()}`;
+    return this.fetchPaginated<CanvasDiscussionTopic>(url);
+  }
+
   /** Get announcements for a course. Returns empty array on access errors. */
-  async getAnnouncementsSafe(courseId: number): Promise<CanvasDiscussionTopic[]> {
-    const url = `${this.baseUrl}/courses/${courseId}/discussion_topics?only_announcements=true&per_page=30&order_by=recent_activity`;
+  async getAnnouncementsSafe(
+    courseId: number,
+    _options?: { startDate?: string; endDate?: string }
+  ): Promise<CanvasDiscussionTopic[]> {
+    const params = new URLSearchParams();
+    params.set("only_announcements", "true");
+    params.set("per_page", "50");
+    params.set("order_by", "recent_activity");
+    const url = `${this.baseUrl}/courses/${courseId}/discussion_topics?${params.toString()}`;
     return this.fetchPaginatedSafe<CanvasDiscussionTopic>(url);
   }
 
