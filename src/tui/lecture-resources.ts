@@ -40,11 +40,20 @@ export function extractLectureNumber(text: string): number | null {
   return null;
 }
 
-const LECTURE_KEYWORDS =
-  /\b(lecture|lec|recording|video|slides?|presentation)\b/i;
+const STRONG_LECTURE_KEYWORDS =
+  /\b(lecture|lec|recordings?)\b/i;
+const LECTURE_CONTENT_KEYWORDS =
+  /\b(video|slides?|presentation)\b/i;
+const LECTURE_CONTEXT_KEYWORDS =
+  /\b(lecture|lec|class|week|session|recordings?)\b/i;
 
 export function isLectureLikeTitle(title: string): boolean {
-  return LECTURE_KEYWORDS.test(title);
+  if (STRONG_LECTURE_KEYWORDS.test(title)) return true;
+  if (!LECTURE_CONTENT_KEYWORDS.test(title)) return false;
+
+  return (
+    extractLectureNumber(title) !== null || LECTURE_CONTEXT_KEYWORDS.test(title)
+  );
 }
 
 const VIDEO_URL_PATTERNS =
