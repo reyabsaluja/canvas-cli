@@ -516,6 +516,90 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     });
   });
 
+  await t.test("workspace shell context restores loaded scope ids for scope-aware commands", async () => {
+    await withTempCwd(async (tempDir) => {
+      const course: Course = {
+        id: 17,
+        name: "ECE243",
+        courseCode: "ECE243H1",
+        termName: "Winter 2026",
+        isCurrent: true,
+      };
+      const workspacePath = path.join(
+        tempDir,
+        ".canvas-cli",
+        "sessions",
+        "ece243h1-lab-4-42"
+      );
+
+      await fs.mkdir(path.join(workspacePath, "extracted"), { recursive: true });
+      await writeJson(path.join(workspacePath, "session.json"), {
+        version: 1,
+        createdAt: "2026-03-29T09:00:00.000Z",
+        updatedAt: "2026-03-29T09:30:00.000Z",
+        sessionSlug: "ece243h1-lab-4-42",
+        workspacePath,
+        assignmentId: 42,
+        assignmentName: "Lab 4",
+        courseId: 17,
+        courseName: "ECE243",
+        courseCode: "ECE243H1",
+        preparedAt: "2026-03-29T09:30:00.000Z",
+        workspaceState: "ready",
+      });
+      await fs.writeFile(path.join(workspacePath, "assignment.md"), "# Lab 4\n", "utf-8");
+
+      const services = {
+        client: {},
+        config: {} as never,
+        aiConfig: null,
+        rawCourses: [],
+        allCourses: [course],
+        courseConfig: null,
+        assignmentCache: new Map(),
+      } as any;
+
+      const shellContext = await createShellContext(services, {
+        type: "workspace",
+        workspacePath,
+        courseId: null,
+        assignmentId: null,
+      });
+
+      assert.deepEqual(shellContext.runtime.scope, {
+        type: "workspace",
+        workspacePath,
+        courseId: 17,
+        assignmentId: 42,
+      });
+
+      const messages: Array<{ role: string; content: string }> = [];
+      const api = {
+        addMessage: async (message: { role: string; content: string }) => {
+          messages.push(message);
+        },
+        session: shellContext.session,
+        runtime: shellContext.runtime,
+        getLoadedWorkspace: shellContext.getLoadedWorkspace,
+        getCourseCache: shellContext.getCourseCache,
+      } as any;
+
+      const backResult = await handleCommand("/back", "", api, services);
+      const refreshResult = await handleCommand("/refresh", "", api, services);
+
+      assert.deepEqual(backResult, {
+        type: "scope",
+        scope: { type: "course", courseId: 17 },
+      });
+      assert.deepEqual(refreshResult, {
+        type: "workspace-refresh",
+        courseId: 17,
+        assignmentTarget: { id: 42, name: "Lab 4" },
+      });
+      assert.equal(messages.length, 0);
+    });
+  });
+
   await t.test("course management normalization drops missing course scopes to global", async () => {
     const liveCourse: Course = {
       id: 17,
