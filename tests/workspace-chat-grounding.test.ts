@@ -2102,6 +2102,39 @@ test("workspace chat dedupes reordered course searches within a single turn", as
   });
 });
 
+test("workspace chat dedupes repeated failed open actions within a single turn", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      { cache, client: null, config: null, courseId: 17 }
+    );
+    const turnToolCache = new Map();
+
+    const firstAttempt = await executeToolCallForTurn(
+      turnToolCache,
+      "open_resource",
+      { query: "zyxwv qplm" },
+      ctx
+    );
+    const secondAttempt = await executeToolCallForTurn(
+      turnToolCache,
+      "open_resource",
+      { query: "qplm zyxwv" },
+      ctx
+    );
+
+    assert.equal(firstAttempt.deduped, false);
+    assert.equal(firstAttempt.result.observation.status, "not_found");
+    assert.equal(secondAttempt.deduped, true);
+    assert.equal(secondAttempt.result.observation.status, "not_found");
+    assert.equal(secondAttempt.result.modelText, firstAttempt.result.modelText);
+  });
+});
+
 test("search_workspace prefers viable matches over artifacts that already failed a read", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
