@@ -862,7 +862,12 @@ function buildSemanticTurnToolAliasKeys(
   name: string,
   input: Record<string, unknown>
 ): string[] {
-  if (name === "search_workspace" || name === "search_course") {
+  if (
+    name === "search_workspace" ||
+    name === "search_course" ||
+    name === "open_resource" ||
+    name === "open_lecture"
+  ) {
     const query = typeof input.query === "string" ? input.query.trim() : "";
     return [...buildSemanticSearchAliases(query)].map(
       (alias) => `semantic:${name}:${alias}`
