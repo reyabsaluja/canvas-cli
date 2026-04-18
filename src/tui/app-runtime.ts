@@ -297,6 +297,12 @@ async function loadOrCreateWorkspaceShell(
   const loaded = await loadWorkspace(scope.workspacePath);
   const workup = loaded.workupJson as AssignmentWorkup | null;
   const courseId = loaded.courseId ?? scope.courseId;
+  const normalizedScope: AppScope = {
+    type: "workspace",
+    workspacePath: scope.workspacePath,
+    courseId: courseId ?? null,
+    assignmentId: loaded.assignmentId ?? scope.assignmentId,
+  };
   const course = courseId ? getCourseById(services, courseId) : null;
   const cache = course ? await loadCourseCache(course.courseCode, course.id) : null;
   const openOptions = buildShellOpenOptions(
@@ -315,12 +321,7 @@ async function loadOrCreateWorkspaceShell(
   }));
 
   const session = await loadOrCreateChatSession(
-    {
-      type: "workspace",
-      workspacePath: scope.workspacePath,
-      courseId: courseId ?? null,
-      assignmentId: loaded.assignmentId ?? scope.assignmentId,
-    },
+    normalizedScope,
     {
       title: loaded.assignmentName,
       metadata: {
@@ -351,7 +352,7 @@ async function loadOrCreateWorkspaceShell(
   return {
     session,
     runtime: {
-      scope,
+      scope: normalizedScope,
       title: loaded.assignmentName,
       subtitle:
         lifecycleState === "stale"
