@@ -567,6 +567,18 @@ function buildCourseSystemPrompt(
     `Cache status: ready with ${cache.modules.length} modules, ${cache.files.length} files, ${cache.pages.length} pages, ${cache.attachments.length} attachments.`
   );
 
+  if (cache.lectures.length > 0) {
+    lines.push("", "Course lectures (use open_course_resource to open for the user):");
+    for (const lecture of cache.lectures.slice(0, 30)) {
+      const type = lecture.contentType !== "unknown" ? ` [${lecture.contentType}]` : "";
+      lines.push(`- ${lecture.title}${type}`);
+    }
+    if (cache.lectures.length > 30) {
+      lines.push(`- ... and ${cache.lectures.length - 30} more`);
+    }
+    lines.push("When the student asks what lectures to review, recommend from this list and offer to open them.");
+  }
+
   if (cache.ingestion?.ingestedAt) {
     lines.push(`Last ingested at: ${cache.ingestion.ingestedAt}`);
   }

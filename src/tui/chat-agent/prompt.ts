@@ -117,6 +117,19 @@ When you have enough information, respond with your answer directly (no tool cal
     }
   }
 
+  if (ctx.cache && ctx.cache.lectures.length > 0) {
+    const lectureTitles = ctx.cache.lectures.slice(0, 30);
+    parts.push(`\nCourse lectures (use open_resource to open for the user):`);
+    for (const lecture of lectureTitles) {
+      const type = lecture.contentType !== "unknown" ? ` [${lecture.contentType}]` : "";
+      parts.push(`- ${lecture.title}${type}`);
+    }
+    if (ctx.cache.lectures.length > 30) {
+      parts.push(`- ... and ${ctx.cache.lectures.length - 30} more`);
+    }
+    parts.push(`\nWhen the student asks what lectures to review, recommend from this list and offer to open them.`);
+  }
+
   return parts.join("\n");
 }
 

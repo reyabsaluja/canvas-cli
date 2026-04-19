@@ -6,6 +6,7 @@ import type {
   ModuleIndexEntry,
   FileIndexEntry,
   DownloadedAttachmentEntry,
+  LectureIndexEntry,
 } from "./types.js";
 import type { SelectedAttachment } from "./attachment-selection.js";
 import type { CanvasAssignment } from "../canvas/types.js";
@@ -17,6 +18,7 @@ import { normalizeCourseContent } from "./normalize-content.js";
 import { identifySyllabusCandidates } from "./syllabus-heuristics.js";
 import { selectAttachments } from "./attachment-selection.js";
 import { downloadSelectedAttachments } from "./attachment-download.js";
+import { discoverLectures } from "./lecture-discovery.js";
 import { writeIngestionArtifacts } from "./storage.js";
 import path from "node:path";
 
@@ -94,7 +96,16 @@ export async function ingestCourse(
     config
   );
 
-  // Step 7: Build ingestion metadata
+  // Step 7: Discover lectures from module items, front page, and fetched pages
+  const lectures = discoverLectures(
+    modules,
+    pages,
+    raw.frontPageBody,
+    raw.fetchedPages,
+    courseMeta.syllabusBody
+  );
+
+  // Step 8: Build ingestion metadata
   const downloaded = attachmentResults.filter((a) => a.status === "downloaded");
   const skipped = attachmentResults.filter((a) => a.status === "skipped");
   const failed = attachmentResults.filter((a) => a.status === "failed");
@@ -113,13 +124,14 @@ export async function ingestCourse(
       files: files.length,
       pages: pages.length,
       syllabusCandidates: syllabusCandidates.length,
+      lectures: lectures.length,
       attachmentsDownloaded: downloaded.length,
       attachmentsSkipped: skipped.length,
       attachmentsFailed: failed.length,
     },
   };
 
-  // Step 8: Write all artifacts (including front page and fetched pages)
+  // Step 9: Write all artifacts (including front page and fetched pages)
   await writeIngestionArtifacts(
     coursePath,
     courseMeta,
@@ -129,6 +141,7 @@ export async function ingestCourse(
     pages,
     syllabusCandidates,
     attachmentResults,
+    lectures,
     ingestion,
     raw.frontPageBody,
     raw.fetchedPages
@@ -142,6 +155,7 @@ export async function ingestCourse(
     pages,
     syllabusCandidates,
     attachments: attachmentResults,
+    lectures,
     ingestion,
     coursePath,
   };

@@ -30,6 +30,7 @@ function makeCache(overrides: Partial<CourseCache> = {}): CourseCache {
     pages: [],
     syllabusCandidates: [],
     attachments: [],
+    lectures: [],
     ingestion: null,
     ...overrides,
   };
@@ -652,9 +653,7 @@ test("handleLectureQuery: local lecture matches open without fetching lecture hu
   assert.deepEqual(opened, ["Lecture 3 Slides.pdf"]);
 });
 
-test("handleLectureQuery: missing local match falls back to lecture hub pages", async () => {
-  let pageFetches = 0;
-  const opened: string[] = [];
+test("handleLectureQuery: no lectures returns missing without network", async () => {
   const cache = makeCache({
     coursePath: "/tmp/test-course-hub-fallback",
     pages: [
@@ -667,57 +666,10 @@ test("handleLectureQuery: missing local match falls back to lecture hub pages", 
       },
     ],
   });
-  const client = {
-    async getPageBySlugSafe() {
-      pageFetches += 1;
-      return {
-        title: "Lecture Links",
-        body: '<a href="https://example.com/lecture-7">Lecture 7 Video</a>',
-      };
-    },
-  } as const;
 
-  const result = await handleLectureQuery(
-    "lecture 7",
-    cache,
-    client as any,
-    1,
-    async (resource) => {
-      opened.push(resource.title);
-    }
-  );
-  assert.equal(result.status, "opened");
-  assert.equal(pageFetches, 1);
-  assert.deepEqual(opened, ["Lecture 7 Video"]);
-});
-
-test("handleLectureQuery: lecture hub results are cached across repeated misses", async () => {
-  let pageFetches = 0;
-  const cache = makeCache({
-    coursePath: "/tmp/test-course-hub-cache",
-    pages: [
-      {
-        pageId: "lecture-links",
-        title: "Lecture Links",
-        htmlUrl: "https://canvas.example.com/courses/1/pages/lecture-links",
-        updatedAt: null,
-        hasBody: true,
-      },
-    ],
-  });
-  const client = {
-    async getPageBySlugSafe() {
-      pageFetches += 1;
-      return {
-        title: "Lecture Links",
-        body: '<a href="https://example.com/lecture-8">Lecture 8 Video</a>',
-      };
-    },
-  } as const;
-
-  await handleLectureQuery("lecture 8", cache, client as any, 1, async () => {});
-  await handleLectureQuery("lecture 8", cache, client as any, 1, async () => {});
-  assert.equal(pageFetches, 1);
+  const result = await handleLectureQuery("lecture 7", cache);
+  assert.equal(result.status, "missing");
+  assert.ok(result.message.includes("No lecture content"));
 });
 
 test("handleLectureQuery: search terms include lecture number aliases", () => {

@@ -101,6 +101,14 @@ export interface DownloadedAttachmentEntry {
   status: "downloaded" | "skipped" | "failed";
 }
 
+export interface LectureIndexEntry {
+  title: string;
+  url: string;
+  contentType: "video" | "slides" | "page" | "unknown";
+  source: string;
+  lectureNumber: number | null;
+}
+
 export interface IngestionMeta {
   version: number;
   ingestedAt: string;
@@ -115,6 +123,7 @@ export interface IngestionMeta {
     files: number;
     pages: number;
     syllabusCandidates: number;
+    lectures: number;
     attachmentsDownloaded: number;
     attachmentsSkipped: number;
     attachmentsFailed: number;
@@ -129,6 +138,7 @@ export interface IngestionResult {
   pages: PageIndexEntry[];
   syllabusCandidates: SyllabusCandidate[];
   attachments: DownloadedAttachmentEntry[];
+  lectures: LectureIndexEntry[];
   ingestion: IngestionMeta;
   coursePath: string;
 }

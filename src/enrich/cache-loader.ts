@@ -8,6 +8,7 @@ import type {
   PageIndexEntry,
   SyllabusCandidate,
   DownloadedAttachmentEntry,
+  LectureIndexEntry,
   IngestionMeta,
 } from "../ingest/types.js";
 
@@ -23,6 +24,7 @@ export interface CourseCache {
   pages: PageIndexEntry[];
   syllabusCandidates: SyllabusCandidate[];
   attachments: DownloadedAttachmentEntry[];
+  lectures: LectureIndexEntry[];
   ingestion: IngestionMeta | null;
 }
 
@@ -51,6 +53,7 @@ export async function loadCourseCache(
       pages,
       syllabusCandidates,
       attachments,
+      lectures,
       ingestion,
     ] =
       await Promise.all([
@@ -60,6 +63,7 @@ export async function loadCourseCache(
         readJsonSafe<PageIndexEntry[]>(path.join(coursePath, "pages.json"), []),
         readJsonSafe<SyllabusCandidate[]>(path.join(coursePath, "syllabus-candidates.json"), []),
         readJsonSafe<DownloadedAttachmentEntry[]>(path.join(coursePath, "attachments.json"), []),
+        readJsonSafe<LectureIndexEntry[]>(path.join(coursePath, "lectures.json"), []),
         readJsonSafe<IngestionMeta | null>(path.join(coursePath, "ingestion.json"), null),
       ]);
 
@@ -72,6 +76,7 @@ export async function loadCourseCache(
       pages,
       syllabusCandidates,
       attachments,
+      lectures,
       ingestion,
     };
   } catch {
