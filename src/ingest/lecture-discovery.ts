@@ -7,6 +7,7 @@ import { decodeEntities } from "../format/html-to-text.js";
 
 const LECTURE_NUMBER_PATTERNS = [
   /\blec(?:ture)?[-_ .]?(\d+)/i,
+  /\bmodule[-_ .]?(\d+)/i,
   /\bweek[-_ ]?(\d+)/i,
   /\bclass[-_ ]?(\d+)/i,
 ];
@@ -82,9 +83,12 @@ function extractAllLinksAsLectures(
   return entries;
 }
 
+const CANVAS_PAGE_URL_RE = /\/courses\/\d+\/pages\//i;
+
 function extractLecturesFromHtml(
   html: string,
-  source: string
+  source: string,
+  skipCanvasPages: boolean = false
 ): LectureIndexEntry[] {
   const links = parseHtmlLinks(html);
   const entries: LectureIndexEntry[] = [];
@@ -92,6 +96,7 @@ function extractLecturesFromHtml(
     if (!isLectureLikeTitle(link.text) && extractLectureNumber(link.text) === null) {
       continue;
     }
+    if (skipCanvasPages && CANVAS_PAGE_URL_RE.test(link.href)) continue;
     entries.push({
       title: link.text,
       url: link.href,
@@ -125,26 +130,34 @@ export function discoverLectures(
   };
 
   // 1. Module items with lecture-like titles
+  // Also: if the module name itself is lecture-like, include all slide/video
+  // files from it (e.g. "LEC01 & LEC02 - Prof. X" containing "Module1.pdf")
   for (const mod of modules) {
+    const moduleIsLecture = isLectureLikeTitle(mod.name);
     for (const item of mod.items) {
-      if (!isLectureLikeTitle(item.title) && extractLectureNumber(item.title) === null) {
-        continue;
-      }
+      const itemIsLecture = isLectureLikeTitle(item.title) || extractLectureNumber(item.title) !== null;
+      if (!itemIsLecture && !moduleIsLecture) continue;
+
       const url = item.externalUrl ?? item.htmlUrl ?? null;
       if (!url) continue;
+
+      const contentType = classifyContentType(url, item.title);
+      if (!itemIsLecture && contentType !== "slides" && contentType !== "video") continue;
+
       push({
         title: decodeEntities(item.title),
         url,
-        contentType: classifyContentType(url, item.title),
+        contentType,
         source: `module: ${mod.name}`,
-        lectureNumber: extractLectureNumber(item.title),
+        lectureNumber: extractLectureNumber(item.title) ?? extractLectureNumber(mod.name),
       });
     }
   }
 
-  // 2. Front page links
+  // 2. Front page links — skip links to Canvas pages since those are fetched
+  //    and scraped in step 4 (avoids listing empty hub pages as lectures)
   if (frontPageBody) {
-    for (const entry of extractLecturesFromHtml(frontPageBody, "front page")) {
+    for (const entry of extractLecturesFromHtml(frontPageBody, "front page", true)) {
       push(entry);
     }
   }
@@ -172,10 +185,14 @@ export function discoverLectures(
     }
   }
 
-  // 5. Pages themselves that have lecture-like titles (as hub pages)
+  // 5. Pages themselves that have lecture-like titles — only if their body
+  //    wasn't already fetched and scraped in step 4 (otherwise we already
+  //    have the individual lectures from within them)
+  const fetchedSlugs = new Set(fetchedPages.map(p => p.slug));
   for (const page of pages) {
     if (!isLectureLikeTitle(page.title)) continue;
     if (!page.htmlUrl) continue;
+    if (page.pageId && fetchedSlugs.has(page.pageId)) continue;
     push({
       title: decodeEntities(page.title),
       url: page.htmlUrl,
