@@ -38,13 +38,9 @@ export function buildGlobalIntroMessages(
   upcoming: Assignment[],
   unavailableCourses: Array<{ displayName: string; originalCode: string }>
 ): ChatMessage[] {
-  const lines = [
-    "Academic control center ready.",
-    "",
-    "Use `/courses` to open a course, `/manage-courses` to edit your list, `/recent` to reopen work, or ask a broad question across your courses.",
-  ];
+  const lines: string[] = [];
   if (unavailableCourses.length > 0) {
-    lines.push("", "**Unavailable courses**");
+    lines.push("**Unavailable courses**");
     for (const course of unavailableCourses.slice(0, 4)) {
       lines.push(
         `• ${course.displayName} (${course.originalCode}) is no longer available in Canvas`
@@ -52,18 +48,14 @@ export function buildGlobalIntroMessages(
     }
     lines.push("Use `/manage-courses` to remove or rename outdated entries.");
   }
-  if (recent.length > 0) {
-    lines.push("", "**Recent workspaces**");
-    for (const workspace of recent.slice(0, 4)) {
-      lines.push(`• ${workspace.name} — ${workspace.course}`);
-    }
-  }
   if (upcoming.length > 0) {
-    lines.push("", "**Upcoming assignments**");
+    if (lines.length > 0) lines.push("");
+    lines.push("**Upcoming assignments**");
     for (const assignment of upcoming.slice(0, 5)) {
       lines.push(`• ${assignment.name} — ${assignment.courseName}`);
     }
   }
+  if (lines.length === 0) return [];
   return [{ role: "assistant", content: lines.join("\n") }];
 }
 

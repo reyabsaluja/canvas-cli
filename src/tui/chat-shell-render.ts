@@ -90,7 +90,7 @@ export function renderChatFrame(
   const buf = createBuffer();
   const { cols, rows } = getTermSize();
   const contentWidth = Math.min(cols - 4, 100);
-  const headerLines = ["", "", ...options.bannerLines, ""];
+  const baseHeaderLines = ["", "", ...options.bannerLines, ""];
   const olderHintLines =
     options.chatScrollOffset > 0
       ? [
@@ -103,13 +103,22 @@ export function renderChatFrame(
     options.isProcessing && options.currentSpinnerLine
       ? ["", `  ${options.currentSpinnerLine}`]
       : [];
+  const maxContent = Math.max(1, rows - MAIN_VIEW_BOTTOM_RESERVE);
+  const baseContentHeight =
+    baseHeaderLines.length +
+    olderHintLines.length +
+    options.transcriptTotalLines +
+    spinnerLines.length +
+    CHAT_GAP_ROWS;
+  const topPadding = Math.floor(Math.max(0, maxContent - baseContentHeight) / 2);
+  const headerLines = [...new Array<string>(topPadding).fill(""), ...baseHeaderLines];
   const totalVirtualLines =
     headerLines.length +
     olderHintLines.length +
     options.transcriptTotalLines +
     spinnerLines.length +
     CHAT_GAP_ROWS;
-  const maxContent = Math.max(1, rows - MAIN_VIEW_BOTTOM_RESERVE);
+
   const maxScroll = Math.max(0, totalVirtualLines - maxContent);
   const chatScrollOffset = Math.min(
     Math.max(0, options.chatScrollOffset),
