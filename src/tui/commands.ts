@@ -5,7 +5,7 @@ export const COMMANDS: CommandDefinition[] = [
   {
     name: "/manage-courses",
     description: "Add, remove, or rename courses",
-    scopes: ["global", "course", "workspace"],
+    scopes: ["global"],
   },
   { name: "/recent", description: "Reopen a recent course or workspace", scopes: ["global"] },
   {
