@@ -13,6 +13,15 @@ import {
 } from "./screen.js";
 import { USER_ABORT_EXIT_CODE } from "./chat-shell-exit.js";
 
+const P = {
+  active: chalk.hex("#80a6f7"),
+  activeBold: chalk.hex("#80a6f7").bold,
+  white: chalk.hex("#e0e0e0"),
+  whiteBold: chalk.hex("#e0e0e0").bold,
+  dim: chalk.hex("#888888"),
+  dimmer: chalk.hex("#555555"),
+};
+
 export interface PickerItem {
   label: string;
   sublabel?: string;
@@ -76,27 +85,29 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
       const visibleItems = filtered.slice(windowStart, windowEnd);
 
       buf.push("");
-      buf.push(C.bold(`  ${title}`));
-      if (subtitle) buf.push(C.dim(`  ${subtitle}`));
+      buf.push(P.whiteBold(`  ${title}`));
+      if (subtitle) buf.push(P.dim(`  ${subtitle}`));
       buf.push("");
 
       if (filterable) {
+        const isSearchActive = filter.length > 0;
+        const borderColor = isSearchActive ? P.active : P.white;
         const innerWidth = cardWidth - 2;
-        const innerStyled = filter
-          ? C.dim("⌕ ") + C.text(filter) + chalk.white("█")
-          : C.dim("⌕ ") + C.dimmer("Search...");
+        const innerStyled = isSearchActive
+          ? P.active("⌕ ") + P.active(filter) + P.activeBold("█")
+          : P.dim("⌕ ") + P.dim("Search...");
         const contentLine = padAnsiToWidth(innerStyled, innerWidth);
-        buf.push(C.dim("  ╭" + "─".repeat(cardWidth) + "╮"));
-        buf.push(`  ${C.dim("│")} ${contentLine} ${C.dim("│")}`);
-        buf.push(C.dim("  ╰" + "─".repeat(cardWidth) + "╯"));
+        buf.push(borderColor("  ╭" + "─".repeat(cardWidth) + "╮"));
+        buf.push(`  ${borderColor("│")} ${contentLine} ${borderColor("│")}`);
+        buf.push(borderColor("  ╰" + "─".repeat(cardWidth) + "╯"));
         buf.push("");
       }
 
       if (filtered.length === 0) {
-        buf.push(C.dim("  No items match your search."));
+        buf.push(P.dim("  No items match your search."));
       } else {
         if (windowStart > 0) {
-          buf.push(C.dim(`  ↑ ${windowStart} more above`));
+          buf.push(P.dim(`  ↑ ${windowStart} more above`));
         }
 
         for (let i = 0; i < visibleItems.length; i++) {
@@ -105,30 +116,27 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
           const isSelected = absoluteIndex === selected;
 
           if (hasCards) {
-            const topBorder = isSelected
-              ? C.accent("  ┌" + "─".repeat(cardWidth) + "┐")
-              : C.dimmer("  ┌" + "─".repeat(cardWidth) + "┐");
-            const botBorder = isSelected
-              ? C.accent("  └" + "─".repeat(cardWidth) + "┘")
-              : C.dimmer("  └" + "─".repeat(cardWidth) + "┘");
-            const edge = isSelected ? C.accent("│") : C.dimmer("│");
+            const borderColor = isSelected ? P.active : P.dimmer;
+            const topBorder = borderColor("  ┌" + "─".repeat(cardWidth) + "┐");
+            const botBorder = borderColor("  └" + "─".repeat(cardWidth) + "┘");
+            const edge = borderColor("│");
 
             const label = item.dimmed
-              ? C.dim(item.label)
+              ? P.dim(item.label)
               : isSelected
-                ? C.accent(item.label)
-                : C.text(item.label);
+                ? P.activeBold(item.label)
+                : P.white(item.label);
             const sub = item.sublabel
-              ? (isSelected ? C.accent(` · ${item.sublabel}`) : C.dim(` · ${item.sublabel}`))
+              ? (isSelected ? P.active(` · ${item.sublabel}`) : P.dim(` · ${item.sublabel}`))
               : "";
             const innerWidth = cardWidth - 2;
             const labelLine = padAnsiToWidth(`${label}${sub}`, innerWidth);
 
             const desc = item.description
-              ? (isSelected ? C.muted(item.description) : C.dim(item.description))
+              ? (isSelected ? P.active(item.description) : P.dim(item.description))
               : "";
             const right = item.rightLabel
-              ? (isSelected ? C.accent(item.rightLabel) : C.dim(item.rightLabel))
+              ? (isSelected ? P.active(item.rightLabel) : P.dim(item.rightLabel))
               : "";
             const rightPlain = item.rightLabel ?? "";
             const descPlain = item.description ?? "";
@@ -142,14 +150,14 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
             buf.push(`  ${edge} ${descLine} ${edge}`);
             buf.push(botBorder);
           } else {
-            const pointer = isSelected ? C.accent("❯ ") : "  ";
+            const pointer = isSelected ? P.active("❯ ") : "  ";
             const label = item.dimmed
-              ? C.dim(item.label)
+              ? P.dim(item.label)
               : isSelected
-                ? C.accent(item.label)
-                : C.text(item.label);
+                ? P.activeBold(item.label)
+                : P.white(item.label);
             const sub = item.sublabel
-              ? (isSelected ? C.accent(` — ${item.sublabel}`) : C.dim(` — ${item.sublabel}`))
+              ? (isSelected ? P.active(` — ${item.sublabel}`) : P.dim(` — ${item.sublabel}`))
               : "";
             buf.push(`  ${pointer}${label}${sub}`);
           }
@@ -157,13 +165,13 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
 
         const remaining = filtered.length - windowEnd;
         if (remaining > 0) {
-          buf.push(C.dim(`  ↓ ${remaining} more below`));
+          buf.push(P.dim(`  ↓ ${remaining} more below`));
         }
       }
 
       buf.push("");
       buf.push(
-        C.dimmer(
+        P.dimmer(
           `  ↑↓ navigate  enter select${backLabel ? `  esc ${backLabel}` : ""}${filterable ? "  type to search" : ""}`
         )
       );
