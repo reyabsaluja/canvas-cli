@@ -518,11 +518,14 @@ export function getRenderedMessageLines(
       }
       break;
     }
-    case "system":
+    case "system": {
+      const isElapsedSummary = /^(Worked|Thought|Studied|Read|Analyzed|Explored|Reviewed) for \d/.test(message.content);
+      const systemColor = isElapsedSummary ? chalk.hex("#959595") : chalk.white;
       wrapLines(message.content, maxWidth).forEach((line) => {
-        lines.push(`  ${chalk.white(line)}`);
+        lines.push(`  ${systemColor(line)}`);
       });
       break;
+    }
     case "tool": {
       const marker = message.toolColor === "red" ? C.error("│") : C.success("│");
       const targetColor =
