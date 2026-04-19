@@ -112,7 +112,7 @@ export async function decideWorkspaceRetrieval(
 }
 
 function shouldBypassGate(question: string): boolean {
-  return /\b(open|download|list files|show files|search course)\b/i.test(question);
+  return /\b(open|launch|pull up|download|list files|show files|search course)\b/i.test(question);
 }
 
 function workupLikelyCoversQuestion(

@@ -22,7 +22,7 @@ IMPORTANT tool usage rules:
 - If you already read a file earlier in this conversation, DO NOT read it again. Use the content from the earlier read.
 - read_file returns the FULL content of the file. After reading, IMMEDIATELY use that content to answer in detail.
 - If a file is inside a zip (e.g., lab4.pdf inside lab4.zip), use read_file with the PDF name — it extracts the content from the zip.
-- If the user explicitly asks you to open a file, PDF, assignment page, or resource, immediately call open_resource.
+- IMPORTANT: If the user asks to open, launch, show, or pull up ANY file, PDF, page, or resource (e.g. "open the m3 pdf", "can you open a3", "pull up the instructions"), you MUST call open_resource immediately. Do NOT answer from the workup or describe the resource — the user wants it opened on their machine. After a successful open, just confirm it was opened.
 - After reading a file, give a DETAILED and SPECIFIC answer based on what you read. Do not give vague summaries.
 - When the user asks to "explain part X in depth", find the specific section in the document and quote the actual requirements, addresses, functionality needed, etc.
 - Do NOT re-read files you already have in the conversation. Just reference the earlier content.

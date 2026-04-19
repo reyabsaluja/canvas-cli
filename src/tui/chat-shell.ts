@@ -892,6 +892,16 @@ export async function runChatShell<TExit>(
           return;
         }
 
+        const firstPinResolution = resolvePinReferences([requested], availablePins);
+        const remainingText = pinArgs.slice(1).join(" ").trim();
+
+        if (firstPinResolution.resolved.length === 1 && remainingText) {
+          pendingPins = mergePinOptions(pendingPins, firstPinResolution.resolved);
+          await handlePrompt(`${remainingText}`);
+          render();
+          return;
+        }
+
         const resolution = resolvePinReferences(pinArgs, availablePins);
         pendingPins = mergePinOptions(pendingPins, resolution.resolved);
 
