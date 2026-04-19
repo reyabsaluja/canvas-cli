@@ -7,13 +7,17 @@ import {
   getTermSize,
   hideCursor,
   leaveAlternateScreen,
+  padAnsiToWidth,
   showCursor,
+  stripAnsi,
 } from "./screen.js";
 import { USER_ABORT_EXIT_CODE } from "./chat-shell-exit.js";
 
 export interface PickerItem {
   label: string;
   sublabel?: string;
+  description?: string;
+  rightLabel?: string;
   value: string;
   dimmed?: boolean;
 }
@@ -43,9 +47,12 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
       return items.filter(
         (item) =>
           item.label.toLowerCase().includes(q) ||
-          (item.sublabel?.toLowerCase().includes(q) ?? false)
+          (item.sublabel?.toLowerCase().includes(q) ?? false) ||
+          (item.description?.toLowerCase().includes(q) ?? false)
       );
     }
+
+    const hasCards = items.some((item) => item.description);
 
     function render(): void {
       const buf = createBuffer();
@@ -55,10 +62,11 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
         windowStart = selected;
       }
 
-      const { rows } = getTermSize();
-      const reservedRows =
-        5 + (subtitle ? 1 : 0) + (filterable && filter ? 2 : 0) + 2;
-      const visibleCount = Math.max(4, rows - reservedRows);
+      const { rows, cols } = getTermSize();
+      const cardWidth = cols - 6;
+      const linesPerItem = hasCards ? 4 : 1;
+      const reservedRows = 8 + (subtitle ? 1 : 0);
+      const visibleCount = Math.max(2, Math.floor((rows - reservedRows) / linesPerItem));
       if (selected >= windowStart + visibleCount) {
         windowStart = selected - visibleCount + 1;
       }
@@ -72,8 +80,15 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
       if (subtitle) buf.push(C.dim(`  ${subtitle}`));
       buf.push("");
 
-      if (filterable && filter) {
-        buf.push(C.dim("  search: ") + C.text(filter) + chalk.white("█"));
+      if (filterable) {
+        const innerWidth = cardWidth - 2;
+        const innerStyled = filter
+          ? C.dim("⌕ ") + C.text(filter) + chalk.white("█")
+          : C.dim("⌕ ") + C.dimmer("Search...");
+        const contentLine = padAnsiToWidth(innerStyled, innerWidth);
+        buf.push(C.dim("  ╭" + "─".repeat(cardWidth) + "╮"));
+        buf.push(`  ${C.dim("│")} ${contentLine} ${C.dim("│")}`);
+        buf.push(C.dim("  ╰" + "─".repeat(cardWidth) + "╯"));
         buf.push("");
       }
 
@@ -81,35 +96,75 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
         buf.push(C.dim("  No items match your search."));
       } else {
         if (windowStart > 0) {
-          buf.push(C.dim(`  ↑ ${windowStart} earlier item${windowStart === 1 ? "" : "s"}`));
+          buf.push(C.dim(`  ↑ ${windowStart} more above`));
         }
 
         for (let i = 0; i < visibleItems.length; i++) {
           const item = visibleItems[i]!;
           const absoluteIndex = windowStart + i;
           const isSelected = absoluteIndex === selected;
-          const pointer = isSelected ? C.bold("❯ ") : "  ";
-          const label = item.dimmed
-            ? C.dim(item.label)
-            : isSelected
-              ? C.bold(item.label)
-              : C.text(item.label);
-          const sub = item.sublabel
-            ? C.dim(` — ${item.sublabel}`)
-            : "";
-          buf.push(`  ${pointer}${label}${sub}`);
+
+          if (hasCards) {
+            const topBorder = isSelected
+              ? C.accent("  ┌" + "─".repeat(cardWidth) + "┐")
+              : C.dimmer("  ┌" + "─".repeat(cardWidth) + "┐");
+            const botBorder = isSelected
+              ? C.accent("  └" + "─".repeat(cardWidth) + "┘")
+              : C.dimmer("  └" + "─".repeat(cardWidth) + "┘");
+            const edge = isSelected ? C.accent("│") : C.dimmer("│");
+
+            const label = item.dimmed
+              ? C.dim(item.label)
+              : isSelected
+                ? C.accent(item.label)
+                : C.text(item.label);
+            const sub = item.sublabel
+              ? (isSelected ? C.accent(` · ${item.sublabel}`) : C.dim(` · ${item.sublabel}`))
+              : "";
+            const innerWidth = cardWidth - 2;
+            const labelLine = padAnsiToWidth(`${label}${sub}`, innerWidth);
+
+            const desc = item.description
+              ? (isSelected ? C.muted(item.description) : C.dim(item.description))
+              : "";
+            const right = item.rightLabel
+              ? (isSelected ? C.accent(item.rightLabel) : C.dim(item.rightLabel))
+              : "";
+            const rightPlain = item.rightLabel ?? "";
+            const descPlain = item.description ?? "";
+            const gapNeeded = innerWidth - descPlain.length - rightPlain.length;
+            const descLine = gapNeeded > 0
+              ? desc + " ".repeat(gapNeeded) + right
+              : padAnsiToWidth(desc, innerWidth);
+
+            buf.push(topBorder);
+            buf.push(`  ${edge} ${labelLine} ${edge}`);
+            buf.push(`  ${edge} ${descLine} ${edge}`);
+            buf.push(botBorder);
+          } else {
+            const pointer = isSelected ? C.accent("❯ ") : "  ";
+            const label = item.dimmed
+              ? C.dim(item.label)
+              : isSelected
+                ? C.accent(item.label)
+                : C.text(item.label);
+            const sub = item.sublabel
+              ? (isSelected ? C.accent(` — ${item.sublabel}`) : C.dim(` — ${item.sublabel}`))
+              : "";
+            buf.push(`  ${pointer}${label}${sub}`);
+          }
         }
 
         const remaining = filtered.length - windowEnd;
         if (remaining > 0) {
-          buf.push(C.dim(`  ↓ ${remaining} more item${remaining === 1 ? "" : "s"}`));
+          buf.push(C.dim(`  ↓ ${remaining} more below`));
         }
       }
 
       buf.push("");
       buf.push(
         C.dimmer(
-          `  ↑↓ navigate  enter select${backLabel ? `  esc ${backLabel}` : ""}${filterable ? "  type to filter" : ""}`
+          `  ↑↓ navigate  enter select${backLabel ? `  esc ${backLabel}` : ""}${filterable ? "  type to search" : ""}`
         )
       );
 
