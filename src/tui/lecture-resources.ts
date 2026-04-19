@@ -23,6 +23,7 @@ type LectureContentType = "video" | "slides" | "page" | "unknown";
 
 const LECTURE_NUMBER_PATTERNS = [
   /\blec(?:ture)?[-_ .]?(\d+)/i,
+  /\bmodule[-_ .]?(\d+)/i,
   /\bweek[-_ ]?(\d+)/i,
   /\bclass[-_ ]?(\d+)/i,
 ];
