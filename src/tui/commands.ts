@@ -10,7 +10,7 @@ export const COMMANDS: CommandDefinition[] = [
   { name: "/recent", description: "Reopen a recent course or workspace", scopes: ["global"] },
   {
     name: "/open",
-    description: "Open a course, assignment, or resource",
+    description: "Open a resource or file",
     scopes: ["global", "course", "workspace"],
   },
   { name: "/radar", description: "Show recent announcements and discussions", scopes: ["global", "course"] },

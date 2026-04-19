@@ -43,7 +43,8 @@ type ResourceOpener = (resource: OpenableResource) => Promise<void>;
 export async function handleOpenResourceQuery(
   query: string,
   context: OpenResourceContext,
-  opener: ResourceOpener = openResourceTarget
+  opener: ResourceOpener = openResourceTarget,
+  autoResolveAmbiguous: boolean = false
 ): Promise<OpenResourceResult> {
   const resources = await collectOpenableResources(context);
   if (resources.length === 0) {
@@ -61,7 +62,10 @@ export async function handleOpenResourceQuery(
     };
   }
 
-  const resolved = resolveOpenableResource(trimmed, resources);
+  let resolved = resolveOpenableResource(trimmed, resources);
+  if (resolved.status === "ambiguous" && autoResolveAmbiguous) {
+    resolved = { status: "unique", resource: resolved.matches[0]! };
+  }
   if (resolved.status === "missing") {
     return {
       status: "missing",
@@ -239,18 +243,6 @@ export async function collectOpenableResources(
       downloadedByFilename.set(
         normalizeDuplicateTitle(attachment.originalFilename),
         resource
-      );
-    }
-
-    for (const assignment of cache.assignments) {
-      push(
-        createUrlResource(
-          `course-assignment:${assignment.id}`,
-          assignment.name,
-          "assignment",
-          assignment.htmlUrl,
-          [assignment.submissionTypes.join(" "), assignment.gradingType]
-        )
       );
     }
 
@@ -656,8 +648,6 @@ function resourceTypePriority(resource: OpenableResource): number {
       return 30;
     case "workspace file":
       return 24;
-    case "assignment":
-      return 18;
     case "page":
     case "module item":
       return 14;

@@ -1,9 +1,7 @@
 import { loadCourseCache } from "../enrich/cache-loader.js";
 import type { LoadedWorkspace } from "../ask/types.js";
 import type { AssignmentWorkup } from "../work/types.js";
-import { matchAssignments } from "../domain/matching.js";
 import {
-  fetchAssignments,
   getCourseById,
   getDisplayCourses,
   getWorkspaceLifecycleState,
@@ -152,47 +150,13 @@ export async function handleCommand(
     }
 
     if (command === "/open") {
-      const trimmed = args.trim();
       const cache = await loadCourseCache(course.courseCode, course.id);
-      if (!trimmed) {
-        const result = await handleOpenResourceQuery("", { cache });
-        await api.addMessage({
-          role:
-            result.status === "opened" || result.status === "listed"
-              ? "assistant"
-              : "system",
-          content: result.message,
-        });
-        return;
-      }
-
-      const assignments = await fetchAssignments(services, course.id, course.name);
-      const matches = matchAssignments(trimmed, assignments);
-      if (matches.length === 1) {
-        return {
-          type: "open-assignment",
-          courseId: course.id,
-          assignmentTarget: {
-            id: matches[0]!.id,
-            name: matches[0]!.name,
-          },
-        };
-      }
-      if (matches.length > 1) {
-        await api.addMessage({
-          role: "system",
-          content: [
-            `Multiple assignments in ${course.name} matched "${trimmed}".`,
-            "Be more specific or use /assignments:",
-            ...matches.slice(0, 5).map((assignment) => `• ${assignment.name}`),
-          ].join("\n"),
-        });
-        return;
-      }
-
-      const result = await handleOpenResourceQuery(trimmed, { cache });
+      const result = await handleOpenResourceQuery(args.trim(), { cache });
       await api.addMessage({
-        role: result.status === "opened" || result.status === "listed" ? "assistant" : "system",
+        role:
+          result.status === "opened" || result.status === "listed"
+            ? "assistant"
+            : "system",
         content: result.message,
       });
       return;

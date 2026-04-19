@@ -139,11 +139,15 @@ const COURSE_TOOLS: ToolDefinition[] = [
   {
     name: "open_course_resource",
     description:
-      "Open a cached course resource or link on the user's machine. Use this when the user explicitly asks you to open a file, PDF, page, assignment, or resource.",
+      "Open a cached course resource or link on the user's machine. Use this when the user asks to open a file, PDF, page, or resource. Pass the most specific filename or title you can infer.",
     parameters: {
       type: "object",
       properties: {
-        query: { type: "string", description: "Resource name or description to open" },
+        query: {
+          type: "string",
+          description:
+            "The resource filename or title to open. Use the most specific name possible — e.g. 'a3.pdf', 'M3_Instructions.pdf'. Avoid vague descriptions.",
+        },
       },
       required: ["query"],
     },
@@ -392,9 +396,12 @@ export async function answerCourseQuestion(
         }
         case "open_course_resource": {
           const query = String(input.query ?? "");
-          const result = await handleOpenResourceQuery(query, {
-            cache: options.cache,
-          });
+          const result = await handleOpenResourceQuery(
+            query,
+            { cache: options.cache },
+            undefined,
+            true
+          );
           options.onToolCall?.({
             action: "open",
             target: query || "resource",
@@ -541,7 +548,7 @@ function buildCourseSystemPrompt(
     `You are the course assistant for ${courseName} (${courseCode}).`,
     "Answer questions about assignments, modules, files, and course structure.",
     "Use tools when the user asks for details that require searching or reading cached course materials.",
-    "If the user explicitly asks to open a file, PDF, page, assignment, or resource, immediately use the open_course_resource tool instead of just describing it.",
+    "IMPORTANT: If the user asks to open, launch, show, or pull up ANY file, PDF, page, or resource, you MUST call open_course_resource immediately. Do NOT describe the resource or answer from context — the user wants it opened on their machine. After a successful open, just confirm it was opened.",
     "Use list_radar and read_thread to check announcements and discussions for this course.",
     "Ground answers in the indexed local cache. If the cache does not contain the answer, say so plainly.",
     "If the cache is missing, say that clearly and guide the user toward opening a workspace or refreshing.",

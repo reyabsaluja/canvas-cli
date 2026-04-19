@@ -593,13 +593,9 @@ async function openResource(
   query: string,
   ctx: ChatAgentContext
 ): Promise<ToolExecutionResult> {
-  const result = await handleOpenResourceQuery(query, {
-    loaded: ctx.loaded,
-    cache: ctx.cache,
-  });
-  const success = !/No openable resource|Multiple resources matched|Failed to open|missing/i.test(
-    result.message
-  );
+  const context = { loaded: ctx.loaded, cache: ctx.cache };
+  const result = await handleOpenResourceQuery(query, context, undefined, true);
+  const success = result.status === "opened";
   return {
     observation: {
       tool: "open_resource",

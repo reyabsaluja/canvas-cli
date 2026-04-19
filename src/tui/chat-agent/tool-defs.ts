@@ -78,11 +78,15 @@ const DOWNLOAD_COURSE_FILE_TOOL: ToolDefinition = {
 const OPEN_RESOURCE_TOOL: ToolDefinition = {
   name: "open_resource",
   description:
-    "Open a workspace or course resource on the user's machine. Use this when the user explicitly asks to open a PDF, file, page, assignment, or resource.",
+    "Open a workspace or course resource on the user's machine. Use this when the user asks to open a PDF, file, page, or resource. Pass the most specific filename or resource name you can infer from the user's request as the query — e.g. 'M3_Instructions.pdf' rather than 'the m3 pdf'. If the user mentions a milestone, lab, or assignment number, include it.",
   parameters: {
     type: "object",
     properties: {
-      query: { type: "string", description: "Resource name or description to open" },
+      query: {
+        type: "string",
+        description:
+          "The resource filename or title to open. Use the most specific name possible — e.g. 'a3.pdf', 'M3_Instructions.pdf', 'lab4.zip'. Avoid vague descriptions.",
+      },
     },
     required: ["query"],
   },
