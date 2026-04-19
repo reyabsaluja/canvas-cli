@@ -1,9 +1,6 @@
 import { C, getTermSize, stripAnsi } from "./screen.js";
 import chalk from "chalk";
 
-/**
- * Fun verbs randomly selected once per prompt.
- */
 const WORKING_VERBS = [
   "Working",
   "Thinking",
@@ -17,11 +14,41 @@ const WORKING_VERBS = [
   "Processing",
 ];
 
-/** Braille spinner frames. */
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-/** Background for tool call blocks. */
 const toolBg = chalk.bgHex("#1e2030");
+const spinnerColor = chalk.hex("#dac894");
+const SHIMMER_COLORS = [
+  chalk.hex("#6b5f47"),
+  chalk.hex("#8a7a5e"),
+  chalk.hex("#a99575"),
+  chalk.hex("#c8b08c"),
+  chalk.hex("#dac894"),
+  chalk.hex("#e8dbb0"),
+  chalk.hex("#f5efd0"),
+  chalk.hex("#e8dbb0"),
+  chalk.hex("#dac894"),
+  chalk.hex("#c8b08c"),
+  chalk.hex("#a99575"),
+  chalk.hex("#8a7a5e"),
+];
+
+function buildShimmerText(text: string, frame: number): string {
+  let result = "";
+  for (let i = 0; i < text.length; i++) {
+    const colorIndex = (frame + i) % SHIMMER_COLORS.length;
+    result += SHIMMER_COLORS[colorIndex]!(text[i]!);
+  }
+  return result;
+}
+
+function formatElapsed(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remaining = seconds % 60;
+  return `${minutes}m${remaining}s`;
+}
 
 /**
  * Clean activity indicator for the chat agent.
@@ -32,21 +59,26 @@ const toolBg = chalk.bgHex("#1e2030");
 export class ActivityIndicator {
   private steps: string[] = [];
   private frame = 0;
+  private shimmerFrame = 0;
   private verb: string;
   private timer: ReturnType<typeof setInterval> | null = null;
   private baseRow: number;
+  private startTime: number;
 
   constructor(baseRow: number) {
     this.baseRow = baseRow;
-    this.verb = WORKING_VERBS[Math.floor(Math.random() * WORKING_VERBS.length)];
+    this.verb = WORKING_VERBS[Math.floor(Math.random() * WORKING_VERBS.length)]!;
+    this.startTime = Date.now();
   }
 
   start(): void {
+    this.startTime = Date.now();
     this.renderAll();
     this.timer = setInterval(() => {
       this.frame = (this.frame + 1) % SPINNER.length;
+      this.shimmerFrame = (this.shimmerFrame + 1) % SHIMMER_COLORS.length;
       this.renderSpinnerLine();
-    }, 100);
+    }, 80);
   }
 
   stop(): void {
@@ -119,8 +151,10 @@ export class ActivityIndicator {
   }
 
   private buildSpinnerLine(): string {
-    const s = C.dim(SPINNER[this.frame]);
-    return `  ${s} ${C.text(this.verb)}${C.dim("...")}`;
+    const elapsed = formatElapsed(Date.now() - this.startTime);
+    const verbText = `${this.verb}...`;
+    const shimmer = buildShimmerText(verbText, this.shimmerFrame);
+    return `  ${spinnerColor(SPINNER[this.frame]!)} ${shimmer} ${C.dim(`(${elapsed})`)}`;
   }
 
   private getRow(termRows: number): number {

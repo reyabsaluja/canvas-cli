@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { C, getTermSize } from "./screen.js";
+import { C, getTermSize, stripAnsi } from "./screen.js";
 import type { Observation } from "../agent/observation.js";
 import type {
   ChatMessage,
@@ -89,6 +89,47 @@ const VERBS = [
   "Exploring",
   "Reviewing",
 ];
+const PAST_TENSE: Record<string, string> = {
+  Working: "Worked",
+  Thinking: "Thought",
+  Studying: "Studied",
+  Reading: "Read",
+  Analyzing: "Analyzed",
+  Exploring: "Explored",
+  Reviewing: "Reviewed",
+};
+const spinnerColor = chalk.hex("#dac894");
+const SHIMMER_COLORS = [
+  chalk.hex("#6b5f47"),
+  chalk.hex("#8a7a5e"),
+  chalk.hex("#a99575"),
+  chalk.hex("#c8b08c"),
+  chalk.hex("#dac894"),
+  chalk.hex("#e8dbb0"),
+  chalk.hex("#f5efd0"),
+  chalk.hex("#e8dbb0"),
+  chalk.hex("#dac894"),
+  chalk.hex("#c8b08c"),
+  chalk.hex("#a99575"),
+  chalk.hex("#8a7a5e"),
+];
+
+function buildShimmerText(text: string, frame: number): string {
+  let result = "";
+  for (let i = 0; i < text.length; i++) {
+    const colorIndex = (frame + i) % SHIMMER_COLORS.length;
+    result += SHIMMER_COLORS[colorIndex]!(text[i]!);
+  }
+  return result;
+}
+
+function formatElapsed(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remaining = seconds % 60;
+  return `${minutes}m${remaining}s`;
+}
 const FULL_RENDER_BATCH_MS = 16;
 const CLEAN_TRANSCRIPT_INDEX = Number.MAX_SAFE_INTEGER;
 
@@ -143,6 +184,8 @@ export async function runChatShell<TExit>(
   let renderQueued = false;
   let renderTimer: ReturnType<typeof setTimeout> | null = null;
   let currentVerb = "";
+  let shimmerFrame = 0;
+  let processingStartTime = 0;
   let bannerLinesCache: string[] | null = null;
   let bannerCacheCols = -1;
   let openSearchOptionsRef: ShellOpenOption[] | null = null;
@@ -499,15 +542,21 @@ export async function runChatShell<TExit>(
     return chatScrollOffset === 0;
   }
 
+  function buildSpinnerLine(): string {
+    const elapsed = formatElapsed(Date.now() - processingStartTime);
+    const verbText = `${currentVerb}...`;
+    const shimmer = buildShimmerText(verbText, shimmerFrame);
+    return `${spinnerColor(SPINNER[spinnerFrame]!)} ${shimmer} ${C.dim(`(${elapsed})`)}`;
+  }
+
   function startSpinner(): void {
     stopSpinner();
     spinnerTimer = setInterval(() => {
       if (!isProcessing || !currentSpinnerLine) return;
       if (!isSpinnerVisible()) return;
       spinnerFrame = (spinnerFrame + 1) % SPINNER.length;
-      currentSpinnerLine = `${C.dim(SPINNER[spinnerFrame])} ${C.text(
-        currentVerb
-      )}${C.dim("...")}`;
+      shimmerFrame = (shimmerFrame + 1) % SHIMMER_COLORS.length;
+      currentSpinnerLine = buildSpinnerLine();
       scheduleRender();
     }, 80);
   }
@@ -633,9 +682,9 @@ export async function runChatShell<TExit>(
       isProcessing = true;
       currentVerb = VERBS[Math.floor(Math.random() * VERBS.length)]!;
       spinnerFrame = 0;
-      currentSpinnerLine = `${C.dim(SPINNER[0])} ${C.text(
-        currentVerb
-      )}${C.dim("...")}`;
+      shimmerFrame = 0;
+      processingStartTime = Date.now();
+      currentSpinnerLine = buildSpinnerLine();
       render();
       startSpinner();
 
@@ -734,9 +783,7 @@ export async function runChatShell<TExit>(
             });
             markTranscriptDirty(messages.length - 1);
             persistence.schedule();
-            currentSpinnerLine = `${C.dim(
-              SPINNER[spinnerFrame]
-            )} ${C.text(currentVerb)}${C.dim("...")}`;
+            currentSpinnerLine = buildSpinnerLine();
             scheduleRender();
             startSpinner();
           },
@@ -748,6 +795,8 @@ export async function runChatShell<TExit>(
 
         flushPendingStreamDelta();
         stopSpinner();
+        const elapsed = formatElapsed(Date.now() - processingStartTime);
+        const pastVerb = PAST_TENSE[currentVerb] ?? currentVerb;
         if (streamingStarted) {
           messages[messages.length - 1] = {
             role: "assistant",
@@ -767,6 +816,11 @@ export async function runChatShell<TExit>(
           });
           markTranscriptDirty(messages.length - 1);
         }
+        messages.push({
+          role: "system",
+          content: `${pastVerb} for ${elapsed}`,
+        });
+        markTranscriptDirty(messages.length - 1);
         persistence.schedule(0);
         pendingPins = [];
       } catch (error) {
