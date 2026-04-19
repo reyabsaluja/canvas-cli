@@ -22,12 +22,28 @@ import { matchAssignments } from "../domain/matching.js";
 export async function pickCourse(services: AppServices): Promise<Course | null> {
   const courses = getDisplayCourses(services);
   if (courses.length === 0) return null;
+
+  const sessions = await listChatSessions();
+  const lastOpenedMap = new Map<number, string>();
+  for (const session of sessions) {
+    if (session.scope.type === "course") {
+      lastOpenedMap.set(session.scope.courseId, session.lastOpenedAt);
+    } else if (session.scope.type === "workspace" && session.scope.courseId != null) {
+      const existing = lastOpenedMap.get(session.scope.courseId);
+      if (!existing || session.lastOpenedAt > existing) {
+        lastOpenedMap.set(session.scope.courseId, session.lastOpenedAt);
+      }
+    }
+  }
+
   const selected = await showPicker({
     title: "Courses",
     subtitle: `${courses.length} courses`,
     items: courses.map((course) => ({
       label: course.name,
       sublabel: course.courseCode,
+      description: course.termName ?? course.courseCode,
+      rightLabel: formatTimeAgo(lastOpenedMap.get(course.id)),
       value: String(course.id),
     })),
     filterable: true,
@@ -35,6 +51,25 @@ export async function pickCourse(services: AppServices): Promise<Course | null> 
   });
   if (!selected) return null;
   return courses.find((course) => String(course.id) === selected) ?? null;
+}
+
+function formatTimeAgo(isoDate: string | undefined): string {
+  if (!isoDate) return "";
+  const now = Date.now();
+  const then = new Date(isoDate).getTime();
+  if (isNaN(then)) return "";
+  const seconds = Math.floor((now - then) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return minutes === 1 ? "1 min ago" : `${minutes} mins ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return days === 1 ? "1 day ago" : `${days} days ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return months === 1 ? "1 month ago" : `${months} months ago`;
+  const years = Math.floor(months / 12);
+  return years === 1 ? "1 year ago" : `${years} years ago`;
 }
 
 export async function pickAssignmentScope(
