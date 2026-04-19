@@ -79,7 +79,7 @@ function stripTags(html: string): string {
   return html.replace(/<[^>]*>/g, "");
 }
 
-function decodeEntities(text: string): string {
+export function decodeEntities(text: string): string {
   const entities: Record<string, string> = {
     "&amp;": "&",
     "&lt;": "<",

@@ -80,6 +80,7 @@ test("collectOpenableResources includes workspace files and downloaded course at
           status: "downloaded",
         },
       ],
+      lectures: [],
       ingestion: null,
     };
 
@@ -193,6 +194,7 @@ test("handleOpenResourceQuery opens matching downloaded resources and reports am
           status: "downloaded",
         },
       ],
+      lectures: [],
       ingestion: null,
     };
 

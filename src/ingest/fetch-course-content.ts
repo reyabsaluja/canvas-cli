@@ -107,5 +107,42 @@ export async function fetchCourseContent(
     (page): page is { slug: string; title: string; body: string } => page !== null
   );
 
+  // Also fetch Canvas pages linked from the front page (e.g., lecture hub pages)
+  if (frontPageBody) {
+    const linkedSlugs = extractCanvasPageSlugs(frontPageBody, courseId)
+      .filter(s => !seenSlugs.has(s));
+    for (const s of linkedSlugs) seenSlugs.add(s);
+
+    const frontPageLinked = (
+      await mapWithConcurrency(
+        linkedSlugs,
+        PAGE_BODY_CONCURRENCY,
+        async (slug) => {
+          const page = await client.getPageBySlugSafe(courseId, slug);
+          if (!page?.body) return null;
+          return { slug, title: page.title, body: page.body };
+        }
+      )
+    ).filter(
+      (p): p is { slug: string; title: string; body: string } => p !== null
+    );
+
+    fetchedPages.push(...frontPageLinked);
+  }
+
   return { courseDetail, assignments, modules, files, pages, frontPageBody, fetchedPages, warnings };
+}
+
+const CANVAS_PAGE_LINK_RE = /href="[^"]*\/courses\/(\d+)\/pages\/([^"?#]+)/gi;
+
+function extractCanvasPageSlugs(html: string, courseId: number): string[] {
+  const slugs: string[] = [];
+  let match;
+  while ((match = CANVAS_PAGE_LINK_RE.exec(html)) !== null) {
+    if (parseInt(match[1]!, 10) === courseId) {
+      slugs.push(decodeURIComponent(match[2]!));
+    }
+  }
+  CANVAS_PAGE_LINK_RE.lastIndex = 0;
+  return slugs;
 }

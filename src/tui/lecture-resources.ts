@@ -1,7 +1,6 @@
-import fs from "node:fs/promises";
 import path from "node:path";
 import type { CourseCache } from "../enrich/cache-loader.js";
-import type { CanvasClient } from "../canvas/client.js";
+import type { LectureIndexEntry } from "../ingest/types.js";
 import type {
   OpenableResource,
   OpenResourceResult,
@@ -10,17 +9,13 @@ import {
   resolveOpenableResource,
   openResourceTarget,
 } from "./open-resources.js";
+import { decodeEntities } from "../format/html-to-text.js";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 type LectureContentType = "video" | "slides" | "page" | "unknown";
-
-interface CachedLectureHubPages {
-  items: OpenableResource[];
-  fetchedAt: number;
-}
 
 // ---------------------------------------------------------------------------
 // Heuristic helpers (exported for testing)
@@ -41,7 +36,7 @@ export function extractLectureNumber(text: string): number | null {
 }
 
 const STRONG_LECTURE_KEYWORDS =
-  /\b(lecture|lec|recordings?)\b/i;
+  /\b(lectures?|lec|recordings?)\b/i;
 const LECTURE_CONTENT_KEYWORDS =
   /\b(video|slides?|presentation)\b/i;
 const LECTURE_CONTEXT_KEYWORDS =
@@ -85,26 +80,47 @@ export function parseHtmlLinks(
     const text = match[2]!.replace(/<[^>]*>/g, "").trim();
     if (href && text) results.push({ text, href });
   }
-  // Reset lastIndex since LINK_REGEX has the global flag
   LINK_REGEX.lastIndex = 0;
   return results;
 }
 
 // ---------------------------------------------------------------------------
-// Lecture index builder (cache-only, no network)
+// Lecture index builder — reads from cached lectures.json, falls back to
+// module-item scanning for caches ingested before lecture discovery existed.
 // ---------------------------------------------------------------------------
 
 export function buildLectureIndex(cache: CourseCache): OpenableResource[] {
   const resources: OpenableResource[] = [];
   const seenTargets = new Set<string>();
+  const seenTitles = new Set<string>();
 
   const push = (resource: OpenableResource): void => {
     if (seenTargets.has(resource.target)) return;
+    const normalizedTitle = resource.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    if (seenTitles.has(normalizedTitle)) return;
     seenTargets.add(resource.target);
+    seenTitles.add(normalizedTitle);
     resources.push(resource);
   };
 
-  // 1. Module items
+  // Primary: use pre-discovered lectures from ingestion
+  if (cache.lectures.length > 0) {
+    for (const entry of cache.lectures) {
+      const lecNum = entry.lectureNumber;
+      const aliases = buildLectureAliases(lecNum, entry.title, entry.source);
+      push(makeLectureResource(
+        `lecture:cached:${entry.url}`,
+        entry.title,
+        entry.contentType,
+        "url",
+        entry.url,
+        aliases
+      ));
+    }
+    return resources;
+  }
+
+  // Fallback: scan module items (for caches without lectures.json)
   const downloadedByFileId = new Map<number, { localPath: string; filename: string }>();
   for (const attachment of cache.attachments) {
     if (
@@ -189,145 +205,26 @@ export function buildLectureIndex(cache: CourseCache): OpenableResource[] {
     }
   }
 
-  // 2. Standalone files matching lecture patterns
+  // Standalone files with lecture-like names (slides/video not linked from modules)
   for (const file of cache.files) {
-    if (extractLectureNumber(file.displayName) === null && extractLectureNumber(file.filename) === null) {
+    if (!isLectureLikeTitle(file.displayName) && extractLectureNumber(file.displayName) === null) {
       continue;
     }
-    const contentType = classifyContentType(null, file.filename);
+    const contentType = classifyContentType(file.url, file.displayName);
     if (contentType !== "slides" && contentType !== "video") continue;
-
-    const lecNum =
-      extractLectureNumber(file.displayName) ??
-      extractLectureNumber(file.filename);
+    const lecNum = extractLectureNumber(file.displayName);
     const aliases = buildLectureAliases(lecNum, file.displayName);
-
-    const downloaded = downloadedByFileId.get(file.id);
-    if (downloaded) {
-      push(makeLectureResource(
-        `lecture:file:${file.id}`,
-        file.displayName,
-        contentType,
-        "file",
-        downloaded.localPath,
-        aliases
-      ));
-    } else {
-      push(makeLectureResource(
-        `lecture:file:${file.id}`,
-        file.displayName,
-        contentType,
-        "url",
-        file.url,
-        aliases
-      ));
-    }
-  }
-
-  return resources;
-}
-
-// ---------------------------------------------------------------------------
-// Front-page HTML link extraction (reads from disk, no network)
-// ---------------------------------------------------------------------------
-
-async function extractFrontPageLectures(
-  coursePath: string
-): Promise<OpenableResource[]> {
-  const htmlPath = path.join(coursePath, "extracted", "front-page.html");
-  let html: string;
-  try {
-    html = await fs.readFile(htmlPath, "utf-8");
-  } catch {
-    return [];
-  }
-  return extractLectureLinksFromHtml(html, "front-page");
-}
-
-function extractLectureLinksFromHtml(
-  html: string,
-  source: string
-): OpenableResource[] {
-  const links = parseHtmlLinks(html);
-  const resources: OpenableResource[] = [];
-  for (const link of links) {
-    if (!isLectureLikeTitle(link.text) && extractLectureNumber(link.text) === null) {
-      continue;
-    }
-    const contentType = classifyContentType(link.href, link.text);
-    const lecNum = extractLectureNumber(link.text);
-    const aliases = buildLectureAliases(lecNum, link.text, source);
-    resources.push(makeLectureResource(
-      `lecture:link:${source}:${link.href}`,
-      link.text,
+    push(makeLectureResource(
+      `lecture:file:${file.id}`,
+      file.displayName,
       contentType,
       "url",
-      link.href,
+      file.url,
       aliases
     ));
   }
+
   return resources;
-}
-
-// ---------------------------------------------------------------------------
-// Lecture hub page resolution (runtime network fetch)
-// ---------------------------------------------------------------------------
-
-const LECTURE_HUB_PATTERNS =
-  /\b(lecture\s*[\/\-&]?\s*(links?|slides?|recordings?|notes?|videos?)|recordings?\s*[&\/\-]?\s*links?|lecture\s*notes?\s*and|notes?\s*[\/\-&]?\s*recordings?)\b/i;
-
-const LECTURE_HUB_CACHE_TTL_MS = 300_000;
-const lectureHubPageCache = new Map<string, CachedLectureHubPages>();
-const lectureHubPageInflight = new Map<string, Promise<OpenableResource[]>>();
-
-function findLectureHubPages(cache: CourseCache): Array<{ pageId: string; title: string }> {
-  return cache.pages.filter((p) => LECTURE_HUB_PATTERNS.test(p.title));
-}
-
-async function resolveLectureHubPages(
-  cache: CourseCache,
-  client: CanvasClient,
-  courseId: number
-): Promise<OpenableResource[]> {
-  const cacheKey = `${courseId}:${cache.coursePath}`;
-  const cached = lectureHubPageCache.get(cacheKey);
-  if (cached && Date.now() - cached.fetchedAt < LECTURE_HUB_CACHE_TTL_MS) {
-    return cached.items;
-  }
-
-  const inFlight = lectureHubPageInflight.get(cacheKey);
-  if (inFlight) {
-    return inFlight;
-  }
-
-  const hubs = findLectureHubPages(cache);
-  const load = (async () => {
-    const results = (
-      await Promise.all(
-        hubs.map(async (hub) => {
-          try {
-            const page = await client.getPageBySlugSafe(courseId, hub.pageId);
-            if (!page?.body) return [];
-            return extractLectureLinksFromHtml(page.body, hub.title);
-          } catch {
-            return [];
-          }
-        })
-      )
-    ).flat();
-    lectureHubPageCache.set(cacheKey, {
-      items: results,
-      fetchedAt: Date.now(),
-    });
-    return results;
-  })();
-
-  lectureHubPageInflight.set(cacheKey, load);
-  try {
-    return await load;
-  } finally {
-    lectureHubPageInflight.delete(cacheKey);
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -337,8 +234,8 @@ async function resolveLectureHubPages(
 export async function handleLectureQuery(
   query: string,
   cache: CourseCache | null,
-  client?: CanvasClient | null,
-  courseId?: number | null,
+  _client?: unknown,
+  _courseId?: number | null,
   opener: typeof openResourceTarget = openResourceTarget
 ): Promise<OpenResourceResult> {
   if (!cache) {
@@ -349,26 +246,13 @@ export async function handleLectureQuery(
     };
   }
 
-  // Build index from cache (no network)
   const lectures = buildLectureIndex(cache);
-
-  // Add front-page links (disk read only)
-  const frontPageLectures = await extractFrontPageLectures(cache.coursePath);
-  const seenTargets = new Set(lectures.map((l) => l.target));
-  mergeLectureResources(lectures, seenTargets, frontPageLectures);
-
-  if (lectures.length === 0) {
-    if (client && courseId) {
-      const hubLectures = await resolveLectureHubPages(cache, client, courseId);
-      mergeLectureResources(lectures, seenTargets, hubLectures);
-    }
-  }
 
   if (lectures.length === 0) {
     return {
       status: "missing",
       message:
-        "No lecture content was found in this course. Lectures may not be published yet, or may be hosted outside Canvas.",
+        "No lecture content was found in this course. Try refreshing the course cache, or lectures may be hosted outside Canvas.",
     };
   }
 
@@ -377,20 +261,10 @@ export async function handleLectureQuery(
     return {
       status: "listed",
       message: formatLectureList(lectures),
-      };
+    };
   }
 
-  let resolved = resolveOpenableResource(trimmed, lectures);
-  if (
-    resolved.status === "missing" &&
-    client &&
-    courseId &&
-    findLectureHubPages(cache).length > 0
-  ) {
-    const hubLectures = await resolveLectureHubPages(cache, client, courseId);
-    mergeLectureResources(lectures, seenTargets, hubLectures);
-    resolved = resolveOpenableResource(trimmed, lectures);
-  }
+  const resolved = resolveOpenableResource(trimmed, lectures);
 
   if (resolved.status === "missing") {
     return {
@@ -443,6 +317,7 @@ function makeLectureResource(
   target: string,
   aliases: string[]
 ): OpenableResource {
+  const decodedTitle = decodeEntities(title);
   const kindLabel =
     contentType === "video"
       ? "lecture video"
@@ -453,11 +328,11 @@ function makeLectureResource(
           : "lecture";
   return {
     id,
-    title,
+    title: decodedTitle,
     kind: kindLabel,
     targetType,
     target,
-    searchTerms: [title, kindLabel, contentType, ...aliases],
+    searchTerms: [decodedTitle, kindLabel, contentType, ...aliases],
   };
 }
 
@@ -475,7 +350,6 @@ function buildLectureAliases(
       `lec${lecNum}`
     );
   }
-  // Add meaningful words from the title
   const words = title
     .toLowerCase()
     .replace(/[^a-z0-9 ]/g, " ")
@@ -484,18 +358,6 @@ function buildLectureAliases(
   aliases.push(...words);
   if (source) aliases.push(source);
   return aliases;
-}
-
-function mergeLectureResources(
-  lectures: OpenableResource[],
-  seenTargets: Set<string>,
-  additions: OpenableResource[]
-): void {
-  for (const lecture of additions) {
-    if (seenTargets.has(lecture.target)) continue;
-    seenTargets.add(lecture.target);
-    lectures.push(lecture);
-  }
 }
 
 function formatLectureList(lectures: OpenableResource[]): string {

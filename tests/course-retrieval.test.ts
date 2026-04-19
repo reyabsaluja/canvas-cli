@@ -107,6 +107,7 @@ function makeCourseCache(coursePath: string): CourseCache {
         status: "downloaded",
       },
     ],
+    lectures: [],
     ingestion: {
       version: 1,
       ingestedAt: "2026-04-01T12:00:00.000Z",
@@ -121,6 +122,7 @@ function makeCourseCache(coursePath: string): CourseCache {
         files: 1,
         pages: 1,
         syllabusCandidates: 0,
+        lectures: 0,
         attachmentsDownloaded: 2,
         attachmentsSkipped: 0,
         attachmentsFailed: 0,

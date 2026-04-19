@@ -10,6 +10,7 @@ import type {
   PageIndexEntry,
   SyllabusCandidate,
   DownloadedAttachmentEntry,
+  LectureIndexEntry,
   IngestionMeta,
 } from "./types.js";
 import { htmlToText } from "../format/html-to-text.js";
@@ -27,6 +28,7 @@ export async function writeIngestionArtifacts(
   pages: PageIndexEntry[],
   syllabusCandidates: SyllabusCandidate[],
   attachments: DownloadedAttachmentEntry[],
+  lectures: LectureIndexEntry[],
   ingestion: IngestionMeta,
   frontPageBody?: string | null,
   fetchedPages?: Array<{ slug: string; title: string; body: string }>
@@ -44,6 +46,7 @@ export async function writeIngestionArtifacts(
     ["pages.json", pages],
     ["syllabus-candidates.json", syllabusCandidates],
     ["attachments.json", attachments],
+    ["lectures.json", lectures],
     ["ingestion.json", ingestion],
   ];
 
