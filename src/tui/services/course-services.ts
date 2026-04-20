@@ -15,7 +15,7 @@ export async function initServices(): Promise<AppServices> {
   const rawCourses = await client.getCourses();
   const allCourses = rawCourses
     .map(normalizeCourse)
-    .filter((course) => course.isCurrent);
+    .filter((course) => course.isCurrent && (course.name.trim() || course.courseCode.trim()));
 
   return {
     config,

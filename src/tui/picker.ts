@@ -116,7 +116,7 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
           const isSelected = absoluteIndex === selected;
 
           if (hasCards) {
-            const borderColor = isSelected ? P.active : P.dimmer;
+            const borderColor = isSelected ? P.white : P.dimmer;
             const topBorder = borderColor("  ┌" + "─".repeat(cardWidth) + "┐");
             const botBorder = borderColor("  └" + "─".repeat(cardWidth) + "┘");
             const edge = borderColor("│");
@@ -124,19 +124,19 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
             const label = item.dimmed
               ? P.dim(item.label)
               : isSelected
-                ? P.activeBold(item.label)
+                ? P.whiteBold(item.label)
                 : P.white(item.label);
             const sub = item.sublabel
-              ? (isSelected ? P.active(` · ${item.sublabel}`) : P.dim(` · ${item.sublabel}`))
+              ? (isSelected ? P.white(` · ${item.sublabel}`) : P.dim(` · ${item.sublabel}`))
               : "";
             const innerWidth = cardWidth - 2;
             const labelLine = padAnsiToWidth(`${label}${sub}`, innerWidth);
 
             const desc = item.description
-              ? (isSelected ? P.active(item.description) : P.dim(item.description))
+              ? (isSelected ? P.white(item.description) : P.dim(item.description))
               : "";
             const right = item.rightLabel
-              ? (isSelected ? P.active(item.rightLabel) : P.dim(item.rightLabel))
+              ? (isSelected ? P.white(item.rightLabel) : P.dim(item.rightLabel))
               : "";
             const rightPlain = item.rightLabel ?? "";
             const descPlain = item.description ?? "";
@@ -150,14 +150,14 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
             buf.push(`  ${edge} ${descLine} ${edge}`);
             buf.push(botBorder);
           } else {
-            const pointer = isSelected ? P.active("❯ ") : "  ";
+            const pointer = isSelected ? P.white("❯ ") : "  ";
             const label = item.dimmed
               ? P.dim(item.label)
               : isSelected
-                ? P.activeBold(item.label)
+                ? P.whiteBold(item.label)
                 : P.white(item.label);
             const sub = item.sublabel
-              ? (isSelected ? P.active(` — ${item.sublabel}`) : P.dim(` — ${item.sublabel}`))
+              ? (isSelected ? P.white(` — ${item.sublabel}`) : P.dim(` — ${item.sublabel}`))
               : "";
             buf.push(`  ${pointer}${label}${sub}`);
           }

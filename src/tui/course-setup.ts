@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import readline from "node:readline";
-import { hideCursor, showCursor, createBuffer, clearScreen, C } from "./screen.js";
+import { hideCursor, showCursor, createBuffer, clearScreen, getTermSize, padAnsiToWidth, stripAnsi, CANVAS_TEXT, C } from "./screen.js";
 import { USER_ABORT_EXIT_CODE } from "./chat-shell-exit.js";
 import type { Course } from "../domain/models.js";
 import type { UserCourse, CourseConfig } from "./course-config.js";
@@ -31,37 +31,84 @@ export function showMultiSelect(
       );
     }
 
+    let windowStart = 0;
+
     function render(): void {
       const buf = createBuffer();
       const filtered = getFiltered();
       if (selected >= filtered.length)
         selected = Math.max(0, filtered.length - 1);
 
+      const { rows, cols } = getTermSize();
+      const cardWidth = cols - 6;
+      const innerWidth = cardWidth - 2;
+      const linesPerItem = 3;
+      const asciiLines = CANVAS_TEXT.length + 2;
+      const reservedRows = asciiLines + 8 + (message ? 2 : 0);
+      const visibleCount = Math.max(2, Math.floor((rows - reservedRows) / linesPerItem));
+
+      if (selected < windowStart) windowStart = selected;
+      if (selected >= windowStart + visibleCount) windowStart = selected - visibleCount + 1;
+      const maxWindowStart = Math.max(0, filtered.length - visibleCount);
+      windowStart = Math.max(0, Math.min(windowStart, maxWindowStart));
+      const windowEnd = Math.min(filtered.length, windowStart + visibleCount);
+      const visibleItems = filtered.slice(windowStart, windowEnd);
+
       buf.push("");
-      buf.push(C.bold(`  ${title}`));
-      buf.push(C.dim(`  ${subtitle}`));
+      for (const line of CANVAS_TEXT) {
+        const lineWidth = stripAnsi(line).length;
+        const pad = Math.max(0, Math.floor((cols - lineWidth) / 2));
+        buf.push(" ".repeat(pad) + C.primary(line));
+      }
       buf.push("");
 
-      if (filter) {
-        buf.push(C.dim("  search: ") + C.text(filter) + chalk.white("█"));
-        buf.push("");
-      }
+      const isSearchActive = filter.length > 0;
+      const searchBorder = isSearchActive ? C.primary : C.text;
+      const searchInner = isSearchActive
+        ? C.primary("⌕ ") + C.primary(filter) + chalk.hex("#e82429").bold("█")
+        : C.dim("⌕ ") + C.dim("Search...");
+      const searchLine = padAnsiToWidth(searchInner, innerWidth);
+      buf.push(searchBorder("  ╭" + "─".repeat(cardWidth) + "╮"));
+      buf.push(`  ${searchBorder("│")} ${searchLine} ${searchBorder("│")}`);
+      buf.push(searchBorder("  ╰" + "─".repeat(cardWidth) + "╯"));
+      buf.push("");
 
       if (filtered.length === 0) {
         buf.push(C.dim("  No courses match your search."));
       } else {
-        for (let i = 0; i < filtered.length; i++) {
-          const c = filtered[i]!;
-          const isSel = i === selected;
+        if (windowStart > 0) {
+          buf.push(C.dim(`  ↑ ${windowStart} more above`));
+        }
+
+        for (let i = 0; i < visibleItems.length; i++) {
+          const c = visibleItems[i]!;
+          const absoluteIndex = windowStart + i;
+          const isSel = absoluteIndex === selected;
           const isChecked = checked.has(c.id);
-          const box = isChecked ? C.success("◉ ") : C.dim("○ ");
-          const pointer = isSel ? C.bold("❯ ") : "  ";
+
+          const borderColor = isSel ? C.text : C.dimmer;
+          const top = borderColor("  ┌" + "─".repeat(cardWidth) + "┐");
+          const bot = borderColor("  └" + "─".repeat(cardWidth) + "┘");
+          const edge = borderColor("│");
+
+          const checkIcon = isChecked ? C.success("◉ ") : C.dim("○ ");
           const label = isSel
             ? C.bold(c.courseCode || c.name)
             : C.text(c.courseCode || c.name);
           const sub =
-            c.courseCode !== c.name ? C.dim(` — ${c.name}`) : "";
-          buf.push(`  ${pointer}${box}${label}${sub}`);
+            c.courseCode !== c.name
+              ? (isSel ? C.text(` · ${c.name}`) : C.dim(` · ${c.name}`))
+              : "";
+          const labelLine = padAnsiToWidth(`${checkIcon}${label}${sub}`, innerWidth);
+
+          buf.push(top);
+          buf.push(`  ${edge} ${labelLine} ${edge}`);
+          buf.push(bot);
+        }
+
+        const remaining = filtered.length - windowEnd;
+        if (remaining > 0) {
+          buf.push(C.dim(`  ↓ ${remaining} more below`));
         }
       }
 
