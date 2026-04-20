@@ -3,24 +3,25 @@ import chalk from "chalk";
 let lastFlushedRows: Array<string | null> | null = null;
 let lastFlushedSize = "";
 
-// --- Pale blue color palette ---
+// --- Red accent color palette ---
 export const C = {
-  primary: chalk.hex("#7aa2f7"),
-  primaryBold: chalk.hex("#7aa2f7").bold,
-  accent: chalk.hex("#7dcfff"),
-  text: chalk.hex("#c0caf5"),
-  warm: chalk.hex("#d8c58f"),
-  muted: chalk.hex("#bcd1da"),
-  /** Home info: command descriptions, school/courses/model/workspaces labels */
-  secondary: chalk.hex("#536878"),
-  dim: chalk.hex("#565f89"),
-  dimmer: chalk.hex("#3b4261"),
-  success: chalk.hex("#9ece6a"),
-  warn: chalk.hex("#e0af68"),
-  error: chalk.hex("#f7768e"),
-  white: chalk.hex("#c0caf5"),
-  userBubble: chalk.hex("#414868"),
-  bold: chalk.hex("#c0caf5").bold,
+  primary: chalk.hex("#e82429"),
+  primaryBold: chalk.hex("#e82429").bold,
+  accent: chalk.hex("#f25a5e"),
+  text: chalk.hex("#d4d4d4"),
+  warm: chalk.hex("#e8a86d"),
+  muted: chalk.hex("#a0a0a0"),
+  secondary: chalk.hex("#707070"),
+  dim: chalk.hex("#606060"),
+  dimmer: chalk.hex("#404040"),
+  success: chalk.hex("#6ec86a"),
+  warn: chalk.hex("#e8a86d"),
+  error: chalk.hex("#ff6b6b"),
+  white: chalk.hex("#d4d4d4"),
+  pureWhite: chalk.hex("#ffffff"),
+  pureWhiteBold: chalk.hex("#ffffff").bold,
+  userBubble: chalk.hex("#3a3a3a"),
+  bold: chalk.hex("#d4d4d4").bold,
 };
 
 /** Menu box text styles (no background — inherits terminal default). Border uses `#536878` (`C.secondary`). */
@@ -37,13 +38,16 @@ export const MenuBox = {
 };
 
 // --- ASCII art ---
-export const CANVAS_ASCII = `
-  ██████   ██████   ████████   █████ █████  ██████    █████
- ███▒▒███ ▒▒▒▒▒███ ▒▒███▒▒███ ▒▒███ ▒▒███  ▒▒▒▒▒███  ███▒▒
-▒███ ▒▒▒   ███████  ▒███ ▒███  ▒███  ▒███   ███████ ▒▒█████
-▒███  ███ ███▒▒███  ▒███ ▒███  ▒▒███ ███   ███▒▒███  ▒▒▒▒███
-▒▒██████ ▒▒████████ ████ █████  ▒▒█████   ▒▒████████ ██████
- ▒▒▒▒▒▒   ▒▒▒▒▒▒▒▒ ▒▒▒▒ ▒▒▒▒▒    ▒▒▒▒▒     ▒▒▒▒▒▒▒▒ ▒▒▒▒▒▒  `;
+export const CANVAS_TEXT = [
+  "  ██████   ██████   ████████   █████ █████  ██████    █████",
+  " ███▒▒███ ▒▒▒▒▒███ ▒▒███▒▒███ ▒▒███ ▒▒███  ▒▒▒▒▒███  ███▒▒",
+  "▒███ ▒▒▒   ███████  ▒███ ▒███  ▒███  ▒███   ███████ ▒▒█████",
+  "▒███  ███ ███▒▒███  ▒███ ▒███  ▒▒███ ███   ███▒▒███  ▒▒▒▒███",
+  "▒▒██████ ▒▒████████ ████ █████  ▒▒█████   ▒▒████████ ██████",
+  " ▒▒▒▒▒▒   ▒▒▒▒▒▒▒▒ ▒▒▒▒ ▒▒▒▒▒    ▒▒▒▒▒     ▒▒▒▒▒▒▒▒ ▒▒▒▒▒▒",
+];
+
+export const CANVAS_ASCII = CANVAS_TEXT.join("\n");
 
 /**
  * Screen buffer — collects lines, then flushes all at once.

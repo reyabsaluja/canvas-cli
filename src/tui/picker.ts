@@ -14,12 +14,12 @@ import {
 import { USER_ABORT_EXIT_CODE } from "./chat-shell-exit.js";
 
 const P = {
-  active: chalk.hex("#80a6f7"),
-  activeBold: chalk.hex("#80a6f7").bold,
-  white: chalk.hex("#e0e0e0"),
-  whiteBold: chalk.hex("#e0e0e0").bold,
-  dim: chalk.hex("#888888"),
-  dimmer: chalk.hex("#555555"),
+  active: chalk.hex("#e82429"),
+  activeBold: chalk.hex("#e82429").bold,
+  white: chalk.hex("#d4d4d4"),
+  whiteBold: chalk.hex("#d4d4d4").bold,
+  dim: chalk.hex("#808080"),
+  dimmer: chalk.hex("#505050"),
 };
 
 export interface PickerItem {
