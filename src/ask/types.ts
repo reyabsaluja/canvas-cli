@@ -12,6 +12,7 @@ export interface WorkspaceAnswer {
 export interface AnswerSource {
   title: string;
   kind: string;
+  section?: string | null;
   excerpt: string | null;
 }
 

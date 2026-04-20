@@ -32,7 +32,7 @@ export type WorkspaceLifecycleState =
 export interface ChatMessage {
   role: "user" | "assistant" | "system" | "tool";
   content: string;
-  sources?: Array<{ title: string; kind: string }>;
+  sources?: Array<{ title: string; kind: string; section?: string | null }>;
   confidence?: string;
   bulletPoints?: string[];
   toolAction?: string;

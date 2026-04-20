@@ -63,6 +63,30 @@ export interface PageIndexEntry {
   hasBody: boolean;
 }
 
+export interface AnnouncementIndexEntry {
+  id: number;
+  title: string;
+  postedAt: string | null;
+  htmlUrl: string;
+  userName: string | null;
+  hasMessage: boolean;
+  messageFileLinkCount: number;
+}
+
+export interface DiscussionIndexEntry {
+  id: number;
+  title: string;
+  postedAt: string | null;
+  lastReplyAt: string | null;
+  htmlUrl: string;
+  userName: string | null;
+  hasMessage: boolean;
+  threadEntryCount: number;
+  participantCount: number;
+  messageFileLinkCount: number;
+  replyFileLinkCount: number;
+}
+
 export type SyllabusCandidateSource =
   | "syllabus_body"
   | "file"
@@ -87,7 +111,8 @@ export type AttachmentSourceType =
   | "syllabus_file"
   | "important_file"
   | "assignment_linked"
-  | "module_linked";
+  | "module_linked"
+  | "page_linked";
 
 export interface DownloadedAttachmentEntry {
   sourceType: AttachmentSourceType;
@@ -137,6 +162,8 @@ export interface IngestionResult {
   modules: ModuleIndexEntry[];
   files: FileIndexEntry[];
   pages: PageIndexEntry[];
+  announcements?: AnnouncementIndexEntry[];
+  discussions?: DiscussionIndexEntry[];
   syllabusCandidates: SyllabusCandidate[];
   attachments: DownloadedAttachmentEntry[];
   lectures: LectureIndexEntry[];

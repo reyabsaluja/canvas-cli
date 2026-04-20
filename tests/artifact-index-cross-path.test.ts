@@ -117,7 +117,21 @@ function createCourseCache(coursePath: string): CourseCache {
   return {
     courseId: 17,
     coursePath,
-    assignments: [],
+    assignments: [
+      {
+        id: 42,
+        name: "Lab 4",
+        dueAt: null,
+        unlockAt: null,
+        lockAt: null,
+        pointsPossible: 100,
+        gradingType: "points",
+        submissionTypes: ["online_upload"],
+        htmlUrl: "https://canvas.example/lab-4",
+        hasDescription: true,
+        descriptionLinkCount: 0,
+      },
+    ],
     modules: [
       {
         id: 8,
@@ -192,7 +206,7 @@ function createCourseCache(coursePath: string): CourseCache {
       courseCode: "ECE243H1",
       refresh: false,
       counts: {
-        assignments: 0,
+        assignments: 1,
         modules: 1,
         moduleItems: 2,
         files: 1,
@@ -274,6 +288,9 @@ function createEnrichment(): EnrichmentSummary {
 }
 
 async function seedCourseExtractedFiles(coursePath: string): Promise<void> {
+  await fs.mkdir(path.join(coursePath, "extracted", "assignments"), {
+    recursive: true,
+  });
   await fs.mkdir(path.join(coursePath, "extracted", "pages"), {
     recursive: true,
   });
@@ -288,6 +305,11 @@ async function seedCourseExtractedFiles(coursePath: string): Promise<void> {
   await fs.writeFile(
     path.join(coursePath, "extracted", "front-page.txt"),
     "Front page reminder about upcoming labs.\n",
+    "utf-8"
+  );
+  await fs.writeFile(
+    path.join(coursePath, "extracted", "assignments", "42.txt"),
+    "Assignment summary with submission rules and grading breakdown.\n",
     "utf-8"
   );
   await fs.writeFile(
@@ -373,6 +395,14 @@ test("artifact index keeps ask, course search, workspace chat, and overview alig
     const overviewAttachment = bundle.extractedTexts.find(
       (entry) => entry.source === "[attachment] lab4-spec.pdf"
     );
+    const overviewAssignment = bundle.extractedTexts.find(
+      (entry) => entry.source === "[assignment] Lab 4"
+    );
+    assert.ok(overviewAssignment);
+    assert.equal(
+      overviewAssignment?.selectionReason,
+      "ingested assignment instructions"
+    );
     assert.ok(overviewAttachment);
     assert.equal(overviewAttachment?.artifactId, courseMatches[0]?.artifact.id);
     assert.match(overviewAttachment?.content ?? "", /waveform screenshot/);
@@ -451,9 +481,13 @@ test("artifact index invalidation propagates updated workspace and course conten
     }
 
     const bundle = await buildContextBundle(detail, enrichment, cache);
+    const overviewAssignment = bundle.extractedTexts.find(
+      (entry) => entry.source === "[assignment] Lab 4"
+    );
     const overviewAttachment = bundle.extractedTexts.find(
       (entry) => entry.source === "[attachment] lab4-spec.pdf"
     );
+    assert.match(overviewAssignment?.content ?? "", /submission rules/);
     assert.match(overviewAttachment?.content ?? "", /timing diagram/);
   });
 });

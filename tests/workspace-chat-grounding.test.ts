@@ -21,6 +21,8 @@ import {
   shouldContinueToolLoopAfterGateRead,
   shouldRecoverFromToolLoop,
 } from "../src/tui/chat-agent.js";
+import { buildSystemPrompt } from "../src/tui/chat-agent/prompt.js";
+import { buildChatTools } from "../src/tui/chat-agent/tool-defs.js";
 import { createChatContext, hydrateConversationHistory } from "../src/tui/services.js";
 import {
   readWorkspaceKnowledgeArtifactById,
@@ -270,7 +272,7 @@ test("workspace retrieval gate prefers workup, then direct reads, then prior mem
     });
     assert.deepEqual(fromSearch, {
       action: "read_artifact",
-      reason: "top_workspace_match_needs_read",
+      reason: "top_knowledge_match_needs_read",
       artifactId: directDocumentMatch!.artifact.id,
     });
 
@@ -448,8 +450,62 @@ test("workspace retrieval gate skips a recently failed direct-read artifact and 
 
     assert.deepEqual(decision, {
       action: "read_artifact",
-      reason: "top_workspace_match_needs_read",
+      reason: "top_knowledge_match_needs_read",
       artifactId: nextMatch.artifact.id,
+    });
+  });
+});
+
+test("workspace retrieval gate can promote a course artifact when workspace context is weaker", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "attachments"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "attachments", "lab4-spec.pdf.txt"),
+      "Use signed overflow detection when you explain the ALU behavior.\n",
+      "utf-8"
+    );
+
+    const cache = createCourseCache(coursePath);
+    cache.attachments.push({
+      sourceType: "assignment_linked",
+      canvasFileId: 99,
+      originalFilename: "lab4-spec.pdf",
+      localPath: "attachments/lab4-spec.pdf",
+      contentType: "application/pdf",
+      size: 1024,
+      downloadUrl: "https://canvas.example/files/99/download",
+      reason: "linked from assignment",
+      status: "downloaded",
+    });
+
+    const matches = await searchWorkspaceKnowledge(
+      loaded,
+      cache,
+      "signed overflow detection",
+      3
+    );
+    assert.equal(matches[0]?.artifact.scope, "course");
+
+    const decision = await decideWorkspaceRetrieval({
+      question: "Explain signed overflow detection in detail.",
+      runState: {
+        observations: [],
+        readArtifactIds: [],
+        stepCount: 0,
+      },
+      loaded,
+      cache,
+    });
+
+    assert.deepEqual(decision, {
+      action: "read_artifact",
+      reason: "top_knowledge_match_needs_read",
+      artifactId: matches[0]!.artifact.id,
     });
   });
 });
@@ -959,7 +1015,7 @@ test("workspace retrieval gate ignores weak remembered course evidence when the 
 
     assert.deepEqual(decision, {
       action: "let_model_decide",
-      reason: "weak_workspace_match",
+      reason: "weak_knowledge_match",
     });
   });
 });
@@ -1091,6 +1147,7 @@ test("workspace answer verification derives sources and confidence deterministic
               title: "docs/reference.txt",
               kind: "extracted",
               excerpt: "The waveform must show stall cycles around the branch hazard.",
+              sectionLabel: "Branch hazard walkthrough",
             },
           ],
         },
@@ -1099,6 +1156,58 @@ test("workspace answer verification derives sources and confidence deterministic
       loaded,
     });
     assert.equal(verifiedFromSearchOnly.confidence, "medium");
+    assert.deepEqual(verifiedFromSearchOnly.sources, [
+      {
+        title: "docs/reference.txt",
+        kind: "extracted",
+        section: "Branch hazard walkthrough",
+        excerpt: "The waveform must show stall cycles around the branch hazard.",
+      },
+    ]);
+
+    const verifiedFromMultipleSections = verifyWorkspaceAnswer({
+      question: "What do the assignment sections say about submission and due date?",
+      answer: "Submit a PDF, and the report is due on April 10.",
+      observations: [
+        {
+          tool: "search_workspace",
+          status: "ok",
+          summary: "Found assignment matches for submission and due date.",
+          artifacts: [
+            {
+              artifactId: "artifact-submission",
+              title: "assignment.md",
+              kind: "assignment",
+              excerpt: "Submit a single PDF report through Canvas.",
+              sectionLabel: "Submission format",
+            },
+            {
+              artifactId: "artifact-due",
+              title: "assignment.md",
+              kind: "assignment",
+              excerpt: "The report is due on April 10 at 11:59 PM.",
+              sectionLabel: "Due date",
+            },
+          ],
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.deepEqual(verifiedFromMultipleSections.sources, [
+      {
+        title: "assignment.md",
+        kind: "assignment",
+        section: "Submission format",
+        excerpt: "Submit a single PDF report through Canvas.",
+      },
+      {
+        title: "assignment.md",
+        kind: "assignment",
+        section: "Due date",
+        excerpt: "The report is due on April 10 at 11:59 PM.",
+      },
+    ]);
 
     const verifiedFromMixedEvidence = verifyWorkspaceAnswer({
       question: "Explain the branch hazard requirement in detail.",
@@ -2104,6 +2213,40 @@ test("workspace chat dedupes reordered course searches within a single turn", as
   });
 });
 
+test("chat agent prompt and tool definitions teach search-then-read behavior", async () => {
+  await withTempDir(async (tempDir) => {
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      { cache, client: null, config: null, courseId: 17 }
+    );
+
+    const prompt = buildSystemPrompt(ctx);
+    assert.match(
+      prompt,
+      /Treat search_workspace and search_course as discovery tools only/i
+    );
+    assert.match(prompt, /follow a search with read_file/i);
+    assert.match(
+      prompt,
+      /If prior tool memory already names candidate sources from a relevant search, do not search again first/i
+    );
+
+    const tools = buildChatTools({ cache, client: null });
+    const workspaceSearch = tools.find((tool) => tool.name === "search_workspace");
+    const courseSearch = tools.find((tool) => tool.name === "search_course");
+    const readFile = tools.find((tool) => tool.name === "read_file");
+
+    assert.match(workspaceSearch?.description ?? "", /Discovery-only search/i);
+    assert.match(workspaceSearch?.description ?? "", /call read_file/i);
+    assert.match(courseSearch?.description ?? "", /Discovery-only search/i);
+    assert.match(courseSearch?.description ?? "", /download_course_file/i);
+    assert.match(readFile?.description ?? "", /grounding tool/i);
+  });
+});
+
 test("workspace chat dedupes repeated failed open actions within a single turn", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
@@ -2134,6 +2277,62 @@ test("workspace chat dedupes repeated failed open actions within a single turn",
     assert.equal(secondAttempt.deduped, true);
     assert.equal(secondAttempt.result.observation.status, "not_found");
     assert.equal(secondAttempt.result.modelText, firstAttempt.result.modelText);
+  });
+});
+
+test("search tools add model-only guidance to follow discovery with a grounded read", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "pages"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "pages", "lab4-brief.txt"),
+      "The lab brief explains saturating add mode and signed overflow detection.\n",
+      "utf-8"
+    );
+
+    const cache = createCourseCache(coursePath);
+    cache.pages = [
+      {
+        pageId: "lab4-brief",
+        title: "Lab 4 Brief",
+        htmlUrl: null,
+        updatedAt: null,
+        hasBody: true,
+      },
+    ];
+
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      { cache, client: null, config: null, courseId: 17 }
+    );
+
+    const workspaceSearch = await executeToolCallForTurn(
+      new Map(),
+      "search_workspace",
+      { query: "branch hazard" },
+      ctx
+    );
+    assert.match(workspaceSearch.result.modelText, /discovery breadcrumbs only/i);
+    assert.match(workspaceSearch.result.modelText, /call read_file/i);
+    assert.doesNotMatch(
+      workspaceSearch.result.uiText,
+      /discovery breadcrumbs only/i
+    );
+
+    const courseSearch = await executeToolCallForTurn(
+      new Map(),
+      "search_course",
+      { query: "saturating add mode" },
+      ctx
+    );
+    assert.match(courseSearch.result.modelText, /discovery breadcrumbs only/i);
+    assert.match(courseSearch.result.modelText, /call read_file/i);
+    assert.doesNotMatch(courseSearch.result.uiText, /discovery breadcrumbs only/i);
   });
 });
 

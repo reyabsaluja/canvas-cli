@@ -105,6 +105,14 @@ export function buildBannerLines(options: {
 export function renderChatFrame(
   options: RenderChatFrameOptions
 ): { chatScrollOffset: number; maxScroll: number } {
+  const stickyRows = buildStickyBottomRows(
+    options.placeholder,
+    options.inputBuffer,
+    options.runtime.scopeLabel,
+    options.runtime.statusLabel,
+    options.modelLabel
+  );
+
   const buf = createBuffer();
   const { cols, rows } = getTermSize();
   const contentWidth = Math.min(cols - 4, 100);
@@ -190,15 +198,7 @@ export function renderChatFrame(
   );
 
   buf.flush(currentStickyRows, chatScrollOffset);
-  writeStickyBottom(
-    buildStickyBottomRows(
-      options.placeholder,
-      options.inputBuffer,
-      options.runtime.scopeLabel,
-      options.runtime.statusLabel,
-      options.modelLabel
-    )
-  );
+  writeStickyBottom(stickyRows);
   writeAutocompleteOverlay(overlayRows);
 
   return { chatScrollOffset, maxScroll };
@@ -297,16 +297,16 @@ function buildAutocompleteOverlayRows(
       0,
       Math.min(pinSelected - Math.floor(maxShow / 2), pinMatches.length - maxShow)
     );
-    const pinIndex = inputBuffer.search(/\/pin/i);
+    const pinIndex = inputBuffer.search(/@/);
     const indent = " ".repeat(Math.max(0, pinIndex + 1));
     const firstRow = lastRowAboveInput - maxShow + 1;
     for (let index = 0; index < maxShow; index++) {
       const pin = pinMatches[start + index]!;
       const selected = start + index === pinSelected;
       const pointer = selected ? C.bold("❯ ") : "  ";
-      const label = selected ? C.bold(pin.label) : C.text(pin.label);
+      const title = selected ? C.bold(pin.name) : C.text(pin.name);
       overlayRows[firstRow + index - clearStartRow] = fitToRow(
-        `${indent}${pointer}${label}  ${C.dim(pin.name)}`
+        `${indent}${pointer}${title}${pin.detail ? `  ${C.dim(pin.detail)}` : ""}`
       );
     }
     return overlayRows;
@@ -339,7 +339,7 @@ function buildStickyBottomRows(
   modelLabel: string
 ): string[] {
   const { cols, rows: termRows } = getTermSize();
-  const boxWidth = Math.max(24, cols - 4);
+  const boxWidth = Math.max(24, cols - 5);
   const promptStr = "> ";
   const promptLen = promptStr.length;
   const firstLineWidth = Math.max(1, boxWidth - 2 - promptLen);
@@ -392,7 +392,7 @@ function buildStickyBottomRows(
       const w = isFirstVisible ? firstLineWidth : contLineWidth;
       const hasCursor = chunk.endsWith("█");
       const rawText = hasCursor ? chunk.slice(0, -1) : chunk;
-      const colored = rawText.replace(/\/pin\s+\S+/g, (match) => C.warm(match));
+      const colored = rawText.replace(/@\S+/g, (match) => C.warm(match));
       const display = hasCursor ? colored + cursor : colored;
       const padded = padTo(display, w);
       if (isFirstVisible) {
@@ -578,7 +578,10 @@ export function getRenderedMessageLines(
       if (message.sources?.length) {
         lines.push("");
         for (const source of message.sources) {
-          lines.push(`  ${C.dimmer(`[${source.kind}]`)} ${C.dim(source.title)}`);
+          const label = source.section
+            ? `${source.title} — ${source.section}`
+            : source.title;
+          lines.push(`  ${C.dimmer(`[${source.kind}]`)} ${C.dim(label)}`);
         }
       }
       break;

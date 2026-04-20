@@ -194,13 +194,18 @@ const COURSE_ARTIFACT_KINDS: ArtifactKind[] = [
   "module",
   "file",
   "page",
+  "announcement",
+  "discussion",
   "attachment",
   "syllabus",
   "front_page",
 ];
 
 const COURSE_READABLE_KINDS: ArtifactKind[] = [
+  "assignment",
   "page",
+  "announcement",
+  "discussion",
   "attachment",
   "syllabus",
   "front_page",

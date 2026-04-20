@@ -147,14 +147,11 @@ function resolveSources(
   const seen = new Set<string>();
   const addChunk = (chunk: ContentChunk | undefined): void => {
     if (!chunk) return;
-    const refId = getChunkReferenceId(chunk);
-    if (seen.has(refId)) return;
-    seen.add(refId);
-    resolved.push({
-      title: formatSourceTitle(chunk),
-      kind: chunk.kind,
-      excerpt: chunk.excerpt ?? buildExcerpt(chunk.text),
-    });
+    const source = buildAnswerSourceFromChunk(chunk);
+    const key = `${source.kind}:${source.title}:${source.section ?? ""}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    resolved.push(source);
   };
 
   for (const sourceId of sourceIds) {
@@ -169,11 +166,20 @@ function resolveSources(
           ? ((source as Record<string, unknown>).title as string)
           : "";
       const match = context.find((chunk) => {
-        const sourceTitle = formatSourceTitle(chunk);
+        const sourceTitle = formatLegacySourceTitle(chunk);
+        const chunkSection = normalizeSourceSection(chunk.section);
+        const sourceSection =
+          typeof (source as Record<string, unknown>).section === "string"
+            ? ((source as Record<string, unknown>).section as string).trim()
+            : "";
         return (
           chunk.source === title ||
           sourceTitle === title ||
-          `${chunk.source} / ${chunk.section}` === title
+          `${chunk.source} / ${chunk.section}` === title ||
+          (chunkSection !== null &&
+            title === chunk.source &&
+            sourceSection.length > 0 &&
+            sourceSection === chunkSection)
         );
       });
       addChunk(match);
@@ -186,18 +192,27 @@ function resolveSources(
 function buildFallbackSources(
   context: ContentChunk[]
 ): WorkspaceAnswer["sources"] {
-  return context.slice(0, 3).map((chunk) => ({
-    title: formatSourceTitle(chunk),
-    kind: chunk.kind,
-    excerpt: chunk.excerpt ?? buildExcerpt(chunk.text),
-  }));
+  return context.slice(0, 3).map((chunk) => buildAnswerSourceFromChunk(chunk));
 }
 
-function formatSourceTitle(chunk: ContentChunk): string {
-  if (!chunk.section || chunk.section === "Full text" || chunk.section === "Top") {
+function buildAnswerSourceFromChunk(
+  chunk: ContentChunk
+): WorkspaceAnswer["sources"][number] {
+  const section = normalizeSourceSection(chunk.section);
+  return {
+    title: chunk.source,
+    kind: chunk.kind,
+    ...(section ? { section } : {}),
+    excerpt: chunk.excerpt ?? buildExcerpt(chunk.text),
+  };
+}
+
+function formatLegacySourceTitle(chunk: ContentChunk): string {
+  const section = normalizeSourceSection(chunk.section);
+  if (!section) {
     return chunk.source;
   }
-  return `${chunk.source} — ${chunk.section}`;
+  return `${chunk.source} — ${section}`;
 }
 
 function getChunkReferenceId(chunk: ContentChunk): string {
@@ -216,4 +231,12 @@ function buildExcerpt(text: string): string {
   const cleaned = text.replace(/\s+/g, " ").trim();
   if (cleaned.length <= 140) return cleaned;
   return `${cleaned.slice(0, 137)}...`;
+}
+
+function normalizeSourceSection(value: string | null | undefined): string | null {
+  const normalized = (value ?? "").trim();
+  if (!normalized || normalized === "Full text" || normalized === "Top") {
+    return null;
+  }
+  return normalized;
 }

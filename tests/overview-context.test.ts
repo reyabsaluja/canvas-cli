@@ -24,6 +24,9 @@ test("overview context selects shared course artifacts with explicit priorities 
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
     const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "assignments"), {
+      recursive: true,
+    });
     await fs.mkdir(path.join(coursePath, "extracted", "pages"), {
       recursive: true,
     });
@@ -38,6 +41,11 @@ test("overview context selects shared course artifacts with explicit priorities 
     await fs.writeFile(
       path.join(coursePath, "extracted", "front-page.txt"),
       "Front page reminder about upcoming labs.\n",
+      "utf-8"
+    );
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "assignments", "42.txt"),
+      "Assignment summary with submission rules and the grading breakdown.\n",
       "utf-8"
     );
     await fs.writeFile(
@@ -106,7 +114,21 @@ test("overview context selects shared course artifacts with explicit priorities 
       {
         courseId: 17,
         coursePath,
-        assignments: [],
+        assignments: [
+          {
+            id: 42,
+            name: "Lab 4",
+            dueAt: null,
+            unlockAt: null,
+            lockAt: null,
+            pointsPossible: 100,
+            gradingType: "points",
+            submissionTypes: ["online_upload"],
+            htmlUrl: "https://canvas.example/lab-4",
+            hasDescription: true,
+            descriptionLinkCount: 0,
+          },
+        ],
         modules: [],
         files: [],
         pages: [
@@ -140,7 +162,7 @@ test("overview context selects shared course artifacts with explicit priorities 
           courseCode: "ECE243H1",
           refresh: false,
           counts: {
-            assignments: 0,
+            assignments: 1,
             modules: 0,
             moduleItems: 0,
             files: 0,
@@ -158,6 +180,7 @@ test("overview context selects shared course artifacts with explicit priorities 
       bundle.extractedTexts.map((entry) => entry.source),
       [
         "[syllabus] Course syllabus",
+        "[assignment] Lab 4",
         "[attachment] lab4-spec.pdf",
         "[page] Lab Brief",
         "[front_page] Course front page",
@@ -167,11 +190,22 @@ test("overview context selects shared course artifacts with explicit priorities 
       bundle.extractedTexts.map((entry) => entry.selectionReason),
       [
         "course syllabus",
+        "ingested assignment instructions",
         "enrichment-related attachment",
         "enrichment-related page",
         "course front page",
       ]
     );
-    assert.match(bundle.extractedTexts[1]?.content ?? "", /waveform screenshot/);
+    const assignmentSource = bundle.extractedTexts.find(
+      (entry) => entry.source === "[assignment] Lab 4"
+    );
+    const attachmentSource = bundle.extractedTexts.find(
+      (entry) => entry.source === "[attachment] lab4-spec.pdf"
+    );
+    assert.match(
+      assignmentSource?.content ?? "",
+      /submission rules and the grading breakdown/
+    );
+    assert.match(attachmentSource?.content ?? "", /waveform screenshot/);
   });
 });

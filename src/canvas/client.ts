@@ -94,7 +94,7 @@ export class CanvasClient {
     courseId: number,
     assignmentId: number
   ): Promise<CanvasAssignmentDetail> {
-    const url = `${this.baseUrl}/courses/${courseId}/assignments/${assignmentId}?include[]=submission`;
+    const url = `${this.baseUrl}/courses/${courseId}/assignments/${assignmentId}?include[]=submission&include[]=rubric`;
     return this.fetchOne<CanvasAssignmentDetail>(url);
   }
 

@@ -27,9 +27,9 @@ test("createKeyParser buffers split mouse sequences until complete", () => {
 
 test("pin overlay indentation follows the visible input tail", () => {
   const boxWidth = 18;
-  const input = "This is a long prompt that ends with /pin plan";
+  const input = "This is a long prompt that ends with @plan";
   const visible = getVisibleInputSegment(input, boxWidth).text;
 
-  assert.ok(visible.includes("/pin"));
-  assert.equal(getPinOverlayIndent(input, boxWidth), 1 + visible.indexOf("/pin"));
+  assert.ok(visible.includes("@"));
+  assert.equal(getPinOverlayIndent(input, boxWidth), 1 + visible.indexOf("@"));
 });

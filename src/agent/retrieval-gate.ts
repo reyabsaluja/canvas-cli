@@ -78,7 +78,7 @@ export async function decideWorkspaceRetrieval(
     shouldPromoteTopMatch(question, match.score)
   );
   if (promotedMatches.length === 0) {
-    return { action: "let_model_decide", reason: "weak_workspace_match" };
+    return { action: "let_model_decide", reason: "weak_knowledge_match" };
   }
 
   const reusableArtifactIds = selectReusableReadArtifactIds(
@@ -106,7 +106,7 @@ export async function decideWorkspaceRetrieval(
 
   return {
     action: "read_artifact",
-    reason: "top_workspace_match_needs_read",
+    reason: "top_knowledge_match_needs_read",
     artifactId: topMatch.artifact.id,
   };
 }

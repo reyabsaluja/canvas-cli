@@ -198,6 +198,7 @@ test("buildToolPromptMessages keeps relevant search breadcrumbs alongside ground
   assert.match(latestMessage, /docs\/reference\.txt/);
   assert.match(latestMessage, /docs\/walkthrough\.txt/);
   assert.doesNotMatch(latestMessage, /docs\/resistor-table\.txt/);
+  assert.doesNotMatch(latestMessage, /Unresolved next step/i);
 });
 
 test("buildToolPromptMessages prefers viable breadcrumbs over already-failed artifacts", () => {
@@ -264,6 +265,44 @@ test("buildToolPromptMessages prefers viable breadcrumbs over already-failed art
     latestMessage,
     /search_workspace \[ok\][^\n]*Sources: docs\/notes\.txt/i
   );
+});
+
+test("buildToolPromptMessages turns search breadcrumbs into an explicit next step when no grounded read exists", () => {
+  const promptMessages = buildToolPromptMessages(
+    [],
+    "Explain the branch hazard walkthrough in detail.",
+    {
+      observations: [
+        {
+          tool: "search_workspace",
+          status: "ok",
+          summary: 'Found 2 relevant workspace matches for "branch hazard walkthrough".',
+          artifacts: [
+            {
+              artifactId: "artifact-1",
+              title: "docs/walkthrough.txt",
+              kind: "extracted",
+              excerpt: "The walkthrough explains each branch hazard stall step-by-step.",
+            },
+            {
+              artifactId: "artifact-2",
+              title: "docs/reference.txt",
+              kind: "extracted",
+              excerpt: "The waveform must show stall cycles around the branch hazard.",
+            },
+          ],
+        },
+      ],
+      readArtifactIds: [],
+      stepCount: 1,
+    }
+  );
+
+  const latestMessage = promptMessages.at(-1)?.content ?? "";
+  assert.match(latestMessage, /Unresolved next step:/);
+  assert.match(latestMessage, /read_file/i);
+  assert.match(latestMessage, /docs\/walkthrough\.txt/);
+  assert.match(latestMessage, /before running another search or answering from snippets/i);
 });
 
 test("buildToolPromptMessages prefers question-relevant failed searches over newer unrelated failures", () => {

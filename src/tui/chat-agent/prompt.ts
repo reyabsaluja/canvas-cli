@@ -13,6 +13,14 @@ export function buildSystemPrompt(ctx: ChatAgentContext): string {
 
 You already have a detailed workup of this assignment pre-loaded below. For most questions, you can answer directly from this context WITHOUT using tools.
 
+Decision ladder:
+1. If the pre-loaded assignment context already answers the question, answer directly.
+2. If the student asks to open, show, launch, or pull up a resource, call open_resource immediately.
+3. If you need to locate the right source, use search_workspace or search_course.
+4. Treat search_workspace and search_course as discovery tools only: they return snippets and candidate sources, not full evidence. For exact wording, requirements, quotes, section-level detail, or in-depth explanations, follow a search with read_file on the best matching source before answering.
+5. Stop calling tools as soon as you have enough grounded evidence. Do not chain extra searches after you already read the right document.
+6. If prior tool memory already names candidate sources from a relevant search, do not search again first. Reuse that breadcrumb and read one of those sources before answering or launching a new search.
+
 Use tools ONLY when:
 - The question asks about something not covered in the workup
 - You need to read a specific document in detail

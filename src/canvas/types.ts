@@ -49,6 +49,7 @@ export interface CanvasAssignmentDetail extends CanvasAssignment {
   grading_type: string;
   submission_types: string[];
   allowed_extensions: string[] | null;
+  rubric?: CanvasRubricCriterion[] | null;
   attachments?: Array<{
     id: number;
     display_name: string;
@@ -57,6 +58,22 @@ export interface CanvasAssignmentDetail extends CanvasAssignment {
     content_type: string;
     size: number;
   }>;
+}
+
+export interface CanvasRubricCriterion {
+  id: string | number;
+  description: string;
+  long_description?: string | null;
+  points: number | null;
+  criterion_use_range?: boolean;
+  ratings?: CanvasRubricRating[] | null;
+}
+
+export interface CanvasRubricRating {
+  id?: string | number;
+  description: string;
+  long_description?: string | null;
+  points?: number | null;
 }
 
 /** Course with syllabus body included. */

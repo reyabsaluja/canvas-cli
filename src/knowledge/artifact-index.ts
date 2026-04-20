@@ -4,7 +4,10 @@ import path from "node:path";
 import type { LoadedWorkspace } from "../ask/types.js";
 import type { CourseCache } from "../enrich/cache-loader.js";
 import {
+  getExtractedAssignmentPath,
+  getExtractedAnnouncementPath,
   getExtractedAttachmentPath,
+  getExtractedDiscussionPath,
   getExtractedFrontPagePath,
   getExtractedPagePath,
   getExtractedSyllabusPath,
@@ -17,6 +20,8 @@ export type ArtifactKind =
   | "module"
   | "file"
   | "page"
+  | "announcement"
+  | "discussion"
   | "attachment"
   | "syllabus"
   | "front_page"
@@ -99,8 +104,23 @@ export async function getCourseArtifactSetKey(
   const extractedPathSignatures = await Promise.all([
     getFileSignature(getExtractedSyllabusPath(cache.coursePath)),
     getFileSignature(getExtractedFrontPagePath(cache.coursePath)),
+    ...cache.assignments.map((assignment) =>
+      getFileSignature(
+        getExtractedAssignmentPath(cache.coursePath, assignment.id)
+      )
+    ),
     ...cache.pages.map((page) =>
       getFileSignature(getExtractedPagePath(cache.coursePath, page.pageId))
+    ),
+    ...(cache.announcements ?? []).map((announcement) =>
+      getFileSignature(
+        getExtractedAnnouncementPath(cache.coursePath, announcement.id)
+      )
+    ),
+    ...(cache.discussions ?? []).map((discussion) =>
+      getFileSignature(
+        getExtractedDiscussionPath(cache.coursePath, discussion.id)
+      )
     ),
     ...cache.attachments.map((attachment) =>
       getFileSignature(
@@ -118,10 +138,14 @@ export async function getCourseArtifactSetKey(
         id: assignment.id,
         name: assignment.name,
         dueAt: assignment.dueAt,
+        unlockAt: assignment.unlockAt,
+        lockAt: assignment.lockAt,
         pointsPossible: assignment.pointsPossible,
         gradingType: assignment.gradingType,
         submissionTypes: assignment.submissionTypes,
+        htmlUrl: assignment.htmlUrl,
         hasDescription: assignment.hasDescription,
+        descriptionLinkCount: assignment.descriptionLinkCount,
       })),
       modules: cache.modules.map((module) => ({
         id: module.id,
@@ -150,6 +174,26 @@ export async function getCourseArtifactSetKey(
         title: page.title,
         updatedAt: page.updatedAt,
         hasBody: page.hasBody,
+      })),
+      announcements: (cache.announcements ?? []).map((announcement) => ({
+        id: announcement.id,
+        title: announcement.title,
+        postedAt: announcement.postedAt,
+        htmlUrl: announcement.htmlUrl,
+        hasMessage: announcement.hasMessage,
+        messageFileLinkCount: announcement.messageFileLinkCount,
+      })),
+      discussions: (cache.discussions ?? []).map((discussion) => ({
+        id: discussion.id,
+        title: discussion.title,
+        postedAt: discussion.postedAt,
+        lastReplyAt: discussion.lastReplyAt,
+        htmlUrl: discussion.htmlUrl,
+        hasMessage: discussion.hasMessage,
+        threadEntryCount: discussion.threadEntryCount,
+        participantCount: discussion.participantCount,
+        messageFileLinkCount: discussion.messageFileLinkCount,
+        replyFileLinkCount: discussion.replyFileLinkCount,
       })),
       attachments: cache.attachments.map((attachment) => ({
         canvasFileId: attachment.canvasFileId,
@@ -476,26 +520,41 @@ async function addCourseArtifacts(
   loaders: Map<string, () => Promise<string | null>>
 ): Promise<void> {
   for (const assignment of cache.assignments) {
-    const body = [
+    const assignmentPath = getExtractedAssignmentPath(
+      cache.coursePath,
+      assignment.id
+    );
+    const fallbackText = [
       assignment.name,
       assignment.dueAt ?? "no due date",
+      assignment.pointsPossible !== null
+        ? `${assignment.pointsPossible} points`
+        : "points not specified",
       assignment.gradingType,
       assignment.submissionTypes.join(" "),
     ].join(" ");
-    const artifact = createArtifact({
-      id: `course:assignment:${assignment.id}`,
-      scope: "course",
-      kind: "assignment",
-      title: assignment.name,
-      source: assignment.name,
-      location: "assignment",
-      body,
-      scoreBoost: 1,
-      metadata: { assignmentId: assignment.id },
-    });
-    registerArtifact(artifact);
-    registerSection(
-      createSectionFromText(artifact, "Metadata", body, artifact.scoreBoost)
+    await registerCourseTextArtifact(
+      {
+        id: `course:assignment:${assignment.id}`,
+        kind: "assignment",
+        title: assignment.name,
+        source: assignment.name,
+        location: "assignment",
+        fallbackText,
+        contentPath: assignmentPath,
+        scoreBoost: 1.05,
+        metadata: {
+          assignmentId: assignment.id,
+          dueAt: assignment.dueAt,
+          pointsPossible: assignment.pointsPossible,
+          gradingType: assignment.gradingType,
+          submissionTypes: assignment.submissionTypes,
+        },
+      },
+      registerArtifact,
+      registerSection,
+      contentCache,
+      loaders
     );
   }
 
@@ -592,6 +651,65 @@ async function addCourseArtifacts(
         contentPath: pagePath,
         scoreBoost: 1,
         metadata: { pageId: page.pageId },
+      },
+      registerArtifact,
+      registerSection,
+      contentCache,
+      loaders
+    );
+  }
+
+  for (const announcement of cache.announcements ?? []) {
+    const announcementPath = getExtractedAnnouncementPath(
+      cache.coursePath,
+      announcement.id
+    );
+    await registerCourseTextArtifact(
+      {
+        id: `course:announcement:${announcement.id}`,
+        kind: "announcement",
+        title: announcement.title,
+        source: announcement.title,
+        location: "announcement",
+        fallbackText: announcement.title,
+        contentPath: announcementPath,
+        scoreBoost: 1,
+        metadata: {
+          announcementId: announcement.id,
+          postedAt: announcement.postedAt,
+        },
+        skipIfMissingContent: true,
+      },
+      registerArtifact,
+      registerSection,
+      contentCache,
+      loaders
+    );
+  }
+
+  for (const discussion of cache.discussions ?? []) {
+    const discussionPath = getExtractedDiscussionPath(
+      cache.coursePath,
+      discussion.id
+    );
+    await registerCourseTextArtifact(
+      {
+        id: `course:discussion:${discussion.id}`,
+        kind: "discussion",
+        title: discussion.title,
+        source: discussion.title,
+        location: "discussion",
+        fallbackText: discussion.title,
+        contentPath: discussionPath,
+        scoreBoost: 1,
+        metadata: {
+          discussionId: discussion.id,
+          postedAt: discussion.postedAt,
+          lastReplyAt: discussion.lastReplyAt,
+          participantCount: discussion.participantCount,
+          threadEntryCount: discussion.threadEntryCount,
+        },
+        skipIfMissingContent: true,
       },
       registerArtifact,
       registerSection,
