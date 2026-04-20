@@ -127,7 +127,7 @@ When you have enough information, respond with your answer directly (no tool cal
     if (ctx.cache.lectures.length > 30) {
       parts.push(`- ... and ${ctx.cache.lectures.length - 30} more`);
     }
-    parts.push(`\nWhen the student asks what lectures to review, recommend from this list and offer to open them.`);
+    parts.push(`\nIMPORTANT: When the student asks about lectures, topics to review, study materials, or preparation — answer DIRECTLY from the assignment context above (overview, action plan, relevant resources, constraints) combined with this lecture list. Do NOT read plan.md or call any tools — you already have all the information. Match lecture titles to the assignment topics and recommend specific lectures. Offer to open them with open_resource.`);
   }
 
   return parts.join("\n");
