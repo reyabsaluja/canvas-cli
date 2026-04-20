@@ -57,7 +57,7 @@ export async function launchApp(): Promise<void> {
         modelLabel: services.aiConfig?.model ?? "no model",
         bannerRenderer: shellContext.bannerRenderer,
         extraHelpCommands: shellContext.extraHelpCommands,
-        pinOptions: shellContext.pinOptions,
+        getPinOptions: shellContext.getPinOptions,
         getOpenOptions: shellContext.getOpenOptions,
         onClear: shellContext.onClear,
         resolvePinContent: shellContext.resolvePinContent,

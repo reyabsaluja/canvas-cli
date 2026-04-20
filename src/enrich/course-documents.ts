@@ -20,6 +20,42 @@ export function getExtractedPagePath(
   );
 }
 
+export function getExtractedAssignmentPath(
+  coursePath: string,
+  assignmentId: number
+): string {
+  return path.join(
+    coursePath,
+    "extracted",
+    "assignments",
+    `${sanitizeDocumentSegment(String(assignmentId))}.txt`
+  );
+}
+
+export function getExtractedAnnouncementPath(
+  coursePath: string,
+  announcementId: number
+): string {
+  return path.join(
+    coursePath,
+    "extracted",
+    "announcements",
+    `${sanitizeDocumentSegment(String(announcementId))}.txt`
+  );
+}
+
+export function getExtractedDiscussionPath(
+  coursePath: string,
+  discussionId: number
+): string {
+  return path.join(
+    coursePath,
+    "extracted",
+    "discussions",
+    `${sanitizeDocumentSegment(String(discussionId))}.txt`
+  );
+}
+
 export function getExtractedAttachmentPath(
   coursePath: string,
   localPath: string

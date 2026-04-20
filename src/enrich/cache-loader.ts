@@ -6,6 +6,8 @@ import type {
   ModuleIndexEntry,
   FileIndexEntry,
   PageIndexEntry,
+  AnnouncementIndexEntry,
+  DiscussionIndexEntry,
   SyllabusCandidate,
   DownloadedAttachmentEntry,
   LectureIndexEntry,
@@ -22,6 +24,8 @@ export interface CourseCache {
   modules: ModuleIndexEntry[];
   files: FileIndexEntry[];
   pages: PageIndexEntry[];
+  announcements?: AnnouncementIndexEntry[];
+  discussions?: DiscussionIndexEntry[];
   syllabusCandidates: SyllabusCandidate[];
   attachments: DownloadedAttachmentEntry[];
   lectures: LectureIndexEntry[];
@@ -51,6 +55,8 @@ export async function loadCourseCache(
       modules,
       files,
       pages,
+      announcements,
+      discussions,
       syllabusCandidates,
       attachments,
       lectures,
@@ -61,6 +67,8 @@ export async function loadCourseCache(
         readJsonSafe<ModuleIndexEntry[]>(path.join(coursePath, "modules.json"), []),
         readJsonSafe<FileIndexEntry[]>(path.join(coursePath, "files.json"), []),
         readJsonSafe<PageIndexEntry[]>(path.join(coursePath, "pages.json"), []),
+        readJsonSafe<AnnouncementIndexEntry[]>(path.join(coursePath, "announcements.json"), []),
+        readJsonSafe<DiscussionIndexEntry[]>(path.join(coursePath, "discussions.json"), []),
         readJsonSafe<SyllabusCandidate[]>(path.join(coursePath, "syllabus-candidates.json"), []),
         readJsonSafe<DownloadedAttachmentEntry[]>(path.join(coursePath, "attachments.json"), []),
         readJsonSafe<LectureIndexEntry[]>(path.join(coursePath, "lectures.json"), []),
@@ -74,6 +82,8 @@ export async function loadCourseCache(
       modules,
       files,
       pages,
+      announcements,
+      discussions,
       syllabusCandidates,
       attachments,
       lectures,

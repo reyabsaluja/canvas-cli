@@ -12,7 +12,10 @@ import type { SelectedAttachment } from "./attachment-selection.js";
 import type { CanvasAssignment } from "../canvas/types.js";
 import { extractLinkedFiles } from "../workspace/attachments.js";
 import { makeCourseSlug, getCoursePath } from "./slug.js";
-import { fetchCourseContent } from "./fetch-course-content.js";
+import {
+  fetchCourseContent,
+  type RawDiscussionThread,
+} from "./fetch-course-content.js";
 import { mapWithConcurrency } from "./concurrency.js";
 import { normalizeCourseContent } from "./normalize-content.js";
 import { identifySyllabusCandidates } from "./syllabus-heuristics.js";
@@ -49,7 +52,15 @@ export async function ingestCourse(
   const raw = await fetchCourseContent(client, course.id);
 
   // Step 2: Normalize
-  const { courseMeta, assignments, modules, files, pages } =
+  const {
+    courseMeta,
+    assignments,
+    modules,
+    files,
+    pages,
+    announcements,
+    discussions,
+  } =
     normalizeCourseContent(raw);
 
   // Count module items
@@ -82,10 +93,22 @@ export async function ingestCourse(
     [...heuristicAttachments, ...moduleAttachments]
   );
 
+  // Step 5c: Download files linked in fetched Canvas pages, front page,
+  // syllabus, announcements, and discussion threads.
+  const htmlLinkedAttachments = selectHtmlLinkedFiles(
+    raw.fetchedPages,
+    raw.frontPageBody,
+    courseMeta.syllabusBody,
+    raw.announcements,
+    raw.discussionThreads,
+    [...heuristicAttachments, ...moduleAttachments, ...descriptionAttachments]
+  );
+
   const allSelected = [
     ...heuristicAttachments,
     ...moduleAttachments,
     ...descriptionAttachments,
+    ...htmlLinkedAttachments,
   ];
 
   // Step 6: Download all attachments
@@ -139,12 +162,17 @@ export async function ingestCourse(
     modules,
     files,
     pages,
+    announcements,
+    discussions,
     syllabusCandidates,
     attachmentResults,
     lectures,
     ingestion,
+    raw.assignments,
     raw.frontPageBody,
-    raw.fetchedPages
+    raw.fetchedPages,
+    raw.announcements,
+    raw.discussionThreads
   );
 
   return {
@@ -153,6 +181,8 @@ export async function ingestCourse(
     modules,
     files,
     pages,
+    announcements,
+    discussions,
     syllabusCandidates,
     attachments: attachmentResults,
     lectures,
@@ -287,6 +317,77 @@ function selectDescriptionLinkedFiles(
         contentType: null,
         size: null,
         subfolder: "assignments",
+      });
+    }
+  }
+
+  return selected;
+}
+
+/**
+ * Extract files linked in fetched Canvas page bodies, front page, syllabus,
+ * and announcements. Pages like "Labs" or announcement posts often contain
+ * direct download links to worksheets, handouts, and other course materials.
+ */
+function selectHtmlLinkedFiles(
+  fetchedPages: Array<{ slug: string; title: string; body: string }>,
+  frontPageBody: string | null,
+  syllabusBody: string | null,
+  announcements: Array<{ title: string; message: string | null }>,
+  discussionThreads: RawDiscussionThread[],
+  alreadySelected: SelectedAttachment[]
+): SelectedAttachment[] {
+  const selected: SelectedAttachment[] = [];
+  const alreadyUrls = new Set(alreadySelected.map((a) => a.downloadUrl));
+
+  const htmlSources: Array<{ title: string; body: string }> = [
+    ...fetchedPages,
+  ];
+  if (frontPageBody) {
+    htmlSources.push({ title: "Front Page", body: frontPageBody });
+  }
+  if (syllabusBody) {
+    htmlSources.push({ title: "Syllabus", body: syllabusBody });
+  }
+  for (const announcement of announcements) {
+    if (!announcement.message) continue;
+    htmlSources.push({
+      title: `Announcement: ${announcement.title}`,
+      body: announcement.message,
+    });
+  }
+  for (const thread of discussionThreads) {
+    if (thread.topic.message) {
+      htmlSources.push({
+        title: `Discussion: ${thread.topic.title}`,
+        body: thread.topic.message,
+      });
+    }
+    for (const entry of thread.entries) {
+      if (!entry.message) continue;
+      const author = entry.user_name ?? `User ${entry.user_id}`;
+      htmlSources.push({
+        title: `Discussion reply in "${thread.topic.title}" by ${author}`,
+        body: entry.message,
+      });
+    }
+  }
+
+  for (const source of htmlSources) {
+    const linked = extractLinkedFiles(source.body);
+    for (const file of linked) {
+      if (alreadyUrls.has(file.downloadUrl)) continue;
+      alreadyUrls.add(file.downloadUrl);
+
+      selected.push({
+        sourceType: "page_linked",
+        fileId: null,
+        filename: file.title,
+        downloadUrl: file.downloadUrl,
+        reason: `linked in "${source.title}"`,
+        contentType: null,
+        size: null,
+        subfolder: "pages",
       });
     }
   }

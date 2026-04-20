@@ -35,7 +35,6 @@ export const COMMANDS: CommandDefinition[] = [
   { name: "/resources", description: "Show key resources", scopes: ["workspace"] },
   { name: "/evidence", description: "Show confirmed vs inferred sources", scopes: ["workspace"] },
   { name: "/status", description: "Show workspace status", scopes: ["workspace"] },
-  { name: "/pin", description: "Attach a file to your next prompt", scopes: ["workspace"] },
   {
     name: "/clear",
     description: "Clear this chat and reset the current context",

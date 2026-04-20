@@ -5,6 +5,8 @@ import type {
   ModuleIndexEntry,
   FileIndexEntry,
   PageIndexEntry,
+  AnnouncementIndexEntry,
+  DiscussionIndexEntry,
 } from "./types.js";
 import { extractLinkedFiles } from "../workspace/attachments.js";
 
@@ -17,6 +19,8 @@ export function normalizeCourseContent(raw: RawCourseContent): {
   modules: ModuleIndexEntry[];
   files: FileIndexEntry[];
   pages: PageIndexEntry[];
+  announcements: AnnouncementIndexEntry[];
+  discussions: DiscussionIndexEntry[];
 } {
   const courseMeta: CourseMetadata = {
     id: raw.courseDetail.id,
@@ -79,13 +83,89 @@ export function normalizeCourseContent(raw: RawCourseContent): {
     folderId: f.folder_id,
   }));
 
-  const pages: PageIndexEntry[] = raw.pages.map((p) => ({
-    pageId: p.url,
-    title: p.title,
-    htmlUrl: p.html_url,
-    updatedAt: p.updated_at,
-    hasBody: !!p.body,
-  }));
+  const pagesById = new Map<string, PageIndexEntry>();
+  for (const page of raw.pages) {
+    pagesById.set(page.url, {
+      pageId: page.url,
+      title: page.title,
+      htmlUrl: page.html_url,
+      updatedAt: page.updated_at,
+      hasBody: !!page.body,
+    });
+  }
 
-  return { courseMeta, assignments, modules, files, pages };
+  const courseHtmlUrl = raw.courseDetail.html_url?.replace(/\/$/, "") ?? null;
+  for (const fetchedPage of raw.fetchedPages) {
+    const existing = pagesById.get(fetchedPage.slug);
+    pagesById.set(fetchedPage.slug, {
+      pageId: fetchedPage.slug,
+      title: existing?.title ?? fetchedPage.title,
+      htmlUrl:
+        existing?.htmlUrl ??
+        (courseHtmlUrl
+          ? `${courseHtmlUrl}/pages/${encodeURIComponent(fetchedPage.slug)}`
+          : null),
+      updatedAt: existing?.updatedAt ?? null,
+      hasBody: true,
+    });
+  }
+
+  const pages = Array.from(pagesById.values());
+
+  const announcements: AnnouncementIndexEntry[] = raw.announcements.map(
+    (announcement) => ({
+      id: announcement.id,
+      title: announcement.title,
+      postedAt: announcement.posted_at,
+      htmlUrl: announcement.html_url,
+      userName: announcement.user_name,
+      hasMessage:
+        typeof announcement.message === "string" &&
+        announcement.message.length > 0,
+      messageFileLinkCount:
+        typeof announcement.message === "string"
+          ? extractLinkedFiles(announcement.message).length
+          : 0,
+    })
+  );
+
+  const threadByTopicId = new Map(
+    raw.discussionThreads.map((thread) => [thread.topic.id, thread])
+  );
+  const discussions: DiscussionIndexEntry[] = raw.discussions.map((topic) => {
+    const thread = threadByTopicId.get(topic.id);
+    const replyFileLinkCount = (thread?.entries ?? []).reduce((count, entry) => {
+      if (typeof entry.message !== "string") {
+        return count;
+      }
+      return count + extractLinkedFiles(entry.message).length;
+    }, 0);
+
+    return {
+      id: topic.id,
+      title: topic.title,
+      postedAt: topic.posted_at,
+      lastReplyAt: topic.last_reply_at,
+      htmlUrl: topic.html_url,
+      userName: topic.user_name,
+      hasMessage: typeof topic.message === "string" && topic.message.length > 0,
+      threadEntryCount: thread?.entries.length ?? 0,
+      participantCount: thread?.participantCount ?? 0,
+      messageFileLinkCount:
+        typeof topic.message === "string"
+          ? extractLinkedFiles(topic.message).length
+          : 0,
+      replyFileLinkCount,
+    };
+  });
+
+  return {
+    courseMeta,
+    assignments,
+    modules,
+    files,
+    pages,
+    announcements,
+    discussions,
+  };
 }

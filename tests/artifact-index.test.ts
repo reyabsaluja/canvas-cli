@@ -41,6 +41,12 @@ test("artifact index builds a shared course and workspace graph", async () => {
     await fs.mkdir(path.join(coursePath, "extracted", "pages"), {
       recursive: true,
     });
+    await fs.mkdir(path.join(coursePath, "extracted", "announcements"), {
+      recursive: true,
+    });
+    await fs.mkdir(path.join(coursePath, "extracted", "discussions"), {
+      recursive: true,
+    });
     await fs.mkdir(path.join(coursePath, "extracted", "attachments"), {
       recursive: true,
     });
@@ -56,6 +62,16 @@ test("artifact index builds a shared course and workspace graph", async () => {
     await fs.writeFile(
       path.join(coursePath, "extracted", "pages", "lab-brief.txt"),
       "Pipeline timing is explained in this lab brief.\n",
+      "utf-8"
+    );
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "announcements", "77.txt"),
+      "# Exam update\n\nThe final exam keeps the waveform analysis requirement.\n",
+      "utf-8"
+    );
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "discussions", "88.txt"),
+      "# Lab 4 Q&A\n\nSigned overflow detection is required in the ALU explanation.\n",
       "utf-8"
     );
     await fs.writeFile(
@@ -143,6 +159,32 @@ test("artifact index builds a shared course and workspace graph", async () => {
           hasBody: true,
         },
       ],
+      announcements: [
+        {
+          id: 77,
+          title: "Exam update",
+          postedAt: "2026-04-03T08:00:00.000Z",
+          htmlUrl: "https://canvas.example/courses/17/discussion_topics/77",
+          userName: "Prof. Ada",
+          hasMessage: true,
+          messageFileLinkCount: 0,
+        },
+      ],
+      discussions: [
+        {
+          id: 88,
+          title: "Lab 4 Q&A",
+          postedAt: "2026-04-04T09:00:00.000Z",
+          lastReplyAt: "2026-04-04T10:00:00.000Z",
+          htmlUrl: "https://canvas.example/courses/17/discussion_topics/88",
+          userName: "Prof. Ada",
+          hasMessage: true,
+          threadEntryCount: 2,
+          participantCount: 3,
+          messageFileLinkCount: 0,
+          replyFileLinkCount: 1,
+        },
+      ],
       syllabusCandidates: [],
       attachments: [
         {
@@ -222,6 +264,20 @@ test("artifact index builds a shared course and workspace graph", async () => {
     });
     assert.equal(attachmentResult[0]?.artifact.title, "lab4-spec.pdf");
 
+    const announcementResult = searchArtifacts(index, "final exam waveform", {
+      scope: "course",
+      kinds: ["announcement"],
+      limit: 1,
+    });
+    assert.equal(announcementResult[0]?.artifact.title, "Exam update");
+
+    const discussionResult = searchArtifacts(index, "signed overflow detection", {
+      scope: "course",
+      kinds: ["discussion"],
+      limit: 1,
+    });
+    assert.equal(discussionResult[0]?.artifact.title, "Lab 4 Q&A");
+
     const workspaceResult = searchArtifactSections(index, "branch hazard", {
       scope: "workspace",
       kinds: ["extracted", "notes"],
@@ -237,6 +293,18 @@ test("artifact index builds a shared course and workspace graph", async () => {
       "course:attachment:attachments/lab4-spec.pdf:lab4-spec.pdf"
     );
     assert.match(attachmentText ?? "", /waveform screenshot/);
+
+    const announcementText = await readArtifactContent(
+      index,
+      "course:announcement:77"
+    );
+    assert.match(announcementText ?? "", /final exam/);
+
+    const discussionText = await readArtifactContent(
+      index,
+      "course:discussion:88"
+    );
+    assert.match(discussionText ?? "", /Signed overflow detection/);
 
     const workupText = await readArtifactContent(index, "workspace:workup:workup.json");
     assert.match(workupText ?? "", /pipeline timing/);

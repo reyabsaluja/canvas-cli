@@ -63,7 +63,7 @@ export function extractInlinePins(
   options: ShellPinOption[]
 ): ExtractedPins {
   const queries: string[] = [];
-  const cleanInput = input.replace(/\/pin\s+(\S+)/g, (_match, query: string) => {
+  const cleanInput = input.replace(/@(\S+)/g, (_match, query: string) => {
     queries.push(query);
     return " ";
   });

@@ -4,7 +4,7 @@ import type { ChatAgentContext } from "./types.js";
 const SEARCH_WORKSPACE_TOOL: ToolDefinition = {
   name: "search_workspace",
   description:
-    "Search the workspace for content relevant to a query. Returns the most relevant sections from assignment.md, workup.json, plan.md, and extracted documents.",
+    "Discovery-only search across the workspace and ingested course knowledge. Returns relevant snippets and source names, not the full document text. Use it to find the best source, then call read_file for exact wording, requirements, quotes, or detailed answers.",
   parameters: {
     type: "object",
     properties: {
@@ -17,7 +17,7 @@ const SEARCH_WORKSPACE_TOOL: ToolDefinition = {
 const READ_FILE_TOOL: ToolDefinition = {
   name: "read_file",
   description:
-    "Read a file from the workspace or ingested course cache. Supports PDFs, text, HTML, ZIP. Use for reading extracted documents, assignment files, or downloaded course materials.",
+    "Read the full extracted text of a specific workspace or course artifact. This is the grounding tool to use after search when you need exact details, requirements, or citations. Supports PDFs, text, HTML, and ZIP-backed extracted files.",
   parameters: {
     type: "object",
     properties: {
@@ -45,7 +45,7 @@ const LIST_FILES_TOOL: ToolDefinition = {
 const SEARCH_COURSE_TOOL: ToolDefinition = {
   name: "search_course",
   description:
-    "Search the course structure — modules, module items, and file index. Use when you need to find specific course materials, documents, or content not in the workspace.",
+    "Discovery-only search of the course cache — modules, pages, assignments, announcements, discussions, attachments, and file index entries. Returns candidate matches, not full document text. After finding the right item, use read_file for readable artifacts or download_course_file for undownloaded course files.",
   parameters: {
     type: "object",
     properties: {

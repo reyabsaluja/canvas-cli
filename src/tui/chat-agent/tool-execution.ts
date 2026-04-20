@@ -212,9 +212,11 @@ async function searchWorkspace(
         title: match.artifact.title,
         kind: match.artifact.kind,
         excerpt: match.section.excerpt,
+        sectionIds: [match.section.id],
+        sectionLabel: normalizeSourceSectionLabel(match.section.section),
       })),
     },
-    modelText: rendered,
+    modelText: `${rendered}\n${buildWorkspaceSearchGuidance(relevant)}`,
     uiText: rendered,
   };
 }
@@ -261,7 +263,7 @@ async function searchCourse(
         excerpt: artifact.excerpt,
       })),
     },
-    modelText: uiText,
+    modelText: `${uiText}\n${buildCourseSearchGuidance(filteredResult.matches, Boolean(ctx.client))}`,
     uiText,
   };
 }
@@ -652,6 +654,18 @@ function normalizeToolInput(value: unknown): string {
   return String(value ?? "");
 }
 
+function normalizeSourceSectionLabel(value: string | null | undefined): string | null {
+  const normalized = (value ?? "").trim();
+  if (
+    normalized.length === 0 ||
+    normalized === "Full text" ||
+    normalized === "Top"
+  ) {
+    return null;
+  }
+  return normalized;
+}
+
 function toArtifactRef(artifact: {
   id: string;
   title: string;
@@ -878,6 +892,104 @@ function buildSemanticTurnToolAliasKeys(
   return [...buildSemanticLookupAliases(target)].map(
     (alias) => `semantic:${name}:${alias}`
   );
+}
+
+function buildWorkspaceSearchGuidance(
+  matches: Array<{ artifact: ArtifactRecord }>
+): string {
+  const readableTitles = [...new Set(
+    matches
+      .map((match) => match.artifact.title.trim())
+      .filter((title) => title.length > 0)
+  )].slice(0, 3);
+
+  const guidance = [
+    "These search results are discovery breadcrumbs only; the snippets may be incomplete.",
+    "If the student wants exact wording, requirements, quotes, or an in-depth explanation, call read_file on the best matching source before answering.",
+  ];
+
+  if (readableTitles.length === 1) {
+    guidance.push(`Best next step: call read_file with "${readableTitles[0]}".`);
+  } else if (readableTitles.length > 1) {
+    guidance.push(
+      `Best next step: call read_file on the strongest match, such as ${joinQuotedTitles(readableTitles)}.`
+    );
+  }
+
+  return guidance.join(" ");
+}
+
+function buildCourseSearchGuidance(
+  matches: Array<{ artifact: ArtifactRecord }>,
+  canDownloadCourseFile: boolean
+): string {
+  const readableTitles = [...new Set(
+    matches
+      .filter((match) => isReadableCourseArtifactKind(match.artifact.kind))
+      .map((match) => match.artifact.title.trim())
+      .filter((title) => title.length > 0)
+  )].slice(0, 3);
+  const downloadableTitles = [...new Set(
+    matches
+      .filter((match) => match.artifact.kind === "file")
+      .map((match) => match.artifact.title.trim())
+      .filter((title) => title.length > 0)
+  )].slice(0, 2);
+
+  const guidance = [
+    "These course results are discovery breadcrumbs only; they are not the full source text.",
+    "For exact wording, requirements, quotes, or in-depth explanations, do not answer from these snippets alone.",
+  ];
+
+  if (readableTitles.length === 1) {
+    guidance.push(`Best next step: call read_file with "${readableTitles[0]}".`);
+  } else if (readableTitles.length > 1) {
+    guidance.push(
+      `Best next step: call read_file on the strongest readable match, such as ${joinQuotedTitles(readableTitles)}.`
+    );
+  }
+
+  if (canDownloadCourseFile && downloadableTitles.length === 1) {
+    guidance.push(
+      `If the key result is an undownloaded course file, call download_course_file with "${downloadableTitles[0]}".`
+    );
+  } else if (canDownloadCourseFile && downloadableTitles.length > 1) {
+    guidance.push(
+      `If the key result is an undownloaded course file, call download_course_file with the best file title, such as ${joinQuotedTitles(downloadableTitles)}.`
+    );
+  }
+
+  return guidance.join(" ");
+}
+
+function isReadableCourseArtifactKind(kind: string): boolean {
+  return (
+    kind === "assignment" ||
+    kind === "page" ||
+    kind === "announcement" ||
+    kind === "discussion" ||
+    kind === "attachment" ||
+    kind === "syllabus" ||
+    kind === "front_page"
+  );
+}
+
+function joinQuotedTitles(titles: string[]): string {
+  if (titles.length === 0) {
+    return "";
+  }
+
+  if (titles.length === 1) {
+    return `"${titles[0]}"`;
+  }
+
+  if (titles.length === 2) {
+    return `"${titles[0]}" or "${titles[1]}"`;
+  }
+
+  const head = titles.slice(0, -1).map((title) => `"${title}"`).join(", ");
+  const tail = titles[titles.length - 1];
+  return `${head}, or "${tail}"`;
 }
 
 function findSemanticTurnToolCacheHit(

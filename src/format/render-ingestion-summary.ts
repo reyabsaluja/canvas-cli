@@ -36,6 +36,16 @@ export function renderIngestionSummary(result: IngestionResult): string {
   } else {
     lines.push(`  ${chalk.dim("-")} pages ${chalk.dim("(API not accessible)")}`);
   }
+  if ((result.announcements?.length ?? 0) > 0) {
+    lines.push(
+      `  ${chalk.dim("-")} ${result.announcements?.length ?? 0} announcements`
+    );
+  }
+  if ((result.discussions?.length ?? 0) > 0) {
+    lines.push(
+      `  ${chalk.dim("-")} ${result.discussions?.length ?? 0} discussions`
+    );
+  }
 
   // Syllabus candidates
   if (result.syllabusCandidates.length > 0) {
@@ -108,6 +118,8 @@ export function renderIngestionJson(result: IngestionResult): object {
   return {
     ingestion: result.ingestion,
     coursePath: result.coursePath,
+    announcements: result.announcements ?? [],
+    discussions: result.discussions ?? [],
     syllabusCandidates: result.syllabusCandidates,
     attachments: result.attachments.map((a) => ({
       filename: a.originalFilename,

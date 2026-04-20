@@ -217,6 +217,69 @@ test("workspace chat tools resolve search, reads, and listings through the share
   });
 });
 
+test("searchWorkspaceKnowledge can surface ingested course documents when they best answer the query", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const workspace = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "attachments"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "attachments", "lab4-spec.pdf.txt"),
+      "Use signed overflow detection when you explain the ALU behavior.\n",
+      "utf-8"
+    );
+
+    const cache = createCourseCache(coursePath);
+    const matches = await searchWorkspaceKnowledge(
+      workspace,
+      cache,
+      "signed overflow detection",
+      3
+    );
+
+    assert.equal(matches[0]?.artifact.scope, "course");
+    assert.equal(matches[0]?.artifact.kind, "attachment");
+    assert.equal(matches[0]?.artifact.title, "lab4-spec.pdf");
+    assert.match(matches[0]?.preview ?? "", /signed overflow detection/i);
+  });
+});
+
+test("searchWorkspaceKnowledge keeps workspace evidence ahead of near-tie course matches", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const workspace = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "attachments"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "attachments", "lab4-spec.pdf.txt"),
+      "The waveform must show stall cycles around the branch hazard.\n",
+      "utf-8"
+    );
+
+    const cache = createCourseCache(coursePath);
+    const matches = await searchWorkspaceKnowledge(
+      workspace,
+      cache,
+      "branch hazard",
+      3
+    );
+
+    assert.equal(matches[0]?.artifact.scope, "workspace");
+    assert.equal(matches[0]?.artifact.title, "docs/reference.txt");
+    assert.ok(
+      matches.some(
+        (match) =>
+          match.artifact.scope === "course" &&
+          match.artifact.title === "lab4-spec.pdf"
+      )
+    );
+  });
+});
+
 test("registerDownloadedCourseAttachment makes new downloads visible to workspace chat", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();

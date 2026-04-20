@@ -36,7 +36,8 @@ export function renderWorkspaceAnswer(wa: WorkspaceAnswer): string {
       const excerpt = src.excerpt
         ? chalk.dim(` — "${truncate(src.excerpt, 60)}"`)
         : "";
-      lines.push(`  ${chalk.dim("-")} ${src.title} ${chalk.dim(`[${src.kind}]`)}${excerpt}`);
+      const label = src.section ? `${src.title} — ${src.section}` : src.title;
+      lines.push(`  ${chalk.dim("-")} ${label} ${chalk.dim(`[${src.kind}]`)}${excerpt}`);
     }
     lines.push("");
   }

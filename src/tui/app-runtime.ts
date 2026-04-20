@@ -32,7 +32,7 @@ import {
   resolveWorkspacePinContent,
 } from "./app-workspace-content.js";
 import { workspaceExists } from "./app-navigation.js";
-import type { ShellContext, ShellRuntimeApi } from "./app-types.js";
+import type { ShellContext, ShellPinOption, ShellRuntimeApi } from "./app-types.js";
 import {
   buildShellOpenOptions,
   collectOpenableResources,
@@ -123,6 +123,7 @@ export async function createShellContext(
     let assignments: Assignment[] = [];
     let cache = null as Awaited<ReturnType<typeof loadCourseCache>>;
     let openOptions = [] as ReturnType<typeof buildShellOpenOptions>;
+    let pinOptions: ShellPinOption[] = [];
     let hydrationPromise: Promise<void> | null = null;
     const session = await loadOrCreateChatSession(scope, {
       title: course.name,
@@ -160,11 +161,14 @@ export async function createShellContext(
           ]);
           assignments = nextAssignments;
           cache = nextCache;
-          openOptions = nextCache
-            ? buildShellOpenOptions(
-                await collectOpenableResources({ cache: nextCache })
-              )
-            : [];
+          if (nextCache) {
+            const openResources = await collectOpenableResources({ cache: nextCache });
+            openOptions = buildShellOpenOptions(openResources);
+            pinOptions = buildWorkspacePinOptions(openResources);
+          } else {
+            openOptions = [];
+            pinOptions = [];
+          }
 
           if (runtime) {
             const upcoming = nextAssignments.filter(
@@ -233,6 +237,8 @@ export async function createShellContext(
         placeholder: "Ask about this course, or use /assignments",
       },
       getOpenOptions: () => openOptions,
+      getPinOptions: () => pinOptions,
+      resolvePinContent: async (pin) => resolveWorkspacePinContent(pin),
       onClear: async () => {
         await hydrateCourseData();
         return buildCourseIntroMessages(course, assignments, cache !== null);
@@ -300,7 +306,7 @@ async function loadOrCreateWorkspaceShell(
         content: "Open another course or workspace to continue.",
       }),
       extraHelpCommands: [],
-      pinOptions: [],
+      getPinOptions: () => [],
       resolvePinContent: async () => null,
     };
   }
@@ -316,9 +322,8 @@ async function loadOrCreateWorkspaceShell(
   };
   const course = courseId ? getCourseById(services, courseId) : null;
   const cache = course ? await loadCourseCache(course.courseCode, course.id) : null;
-  const openOptions = buildShellOpenOptions(
-    await collectOpenableResources({ loaded, cache })
-  );
+  const openResources = await collectOpenableResources({ loaded, cache });
+  const openOptions = buildShellOpenOptions(openResources);
   const lifecycleState = getWorkspaceLifecycleState(
     loaded.preparedAt,
     loaded.workspaceState,
@@ -383,8 +388,8 @@ async function loadOrCreateWorkspaceShell(
       }
       return nextMessages;
     },
-    pinOptions: await buildWorkspacePinOptions(loaded, cache),
-    resolvePinContent: async (pin) => resolveWorkspacePinContent(loaded, cache, pin),
+    getPinOptions: () => buildWorkspacePinOptions(openResources),
+    resolvePinContent: async (pin) => resolveWorkspacePinContent(pin),
     onAsk: async (input, callbacks) => {
       if (!services.aiConfig || !chatContext) {
         return {

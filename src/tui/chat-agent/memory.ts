@@ -19,6 +19,7 @@ const MAX_CONVERSATION_MESSAGES = 12;
 const MAX_CONVERSATION_CHARS = 80000;
 const MAX_TOOL_MEMORY_CHARS = 2400;
 const MAX_TOOL_MEMORY_DETAIL_CHARS = 220;
+const MAX_NEXT_STEP_SOURCES = 3;
 
 export function buildToolPromptMessages(
   history: ChatAgentConversationEntry[],
@@ -155,6 +156,11 @@ function buildToolRuntimeMemory(
     lines.push(parts.join(" "));
   }
 
+  const nextStep = buildNextToolStep(selected);
+  if (nextStep) {
+    lines.push(nextStep);
+  }
+
   lines.push("Only call a tool if you still need new evidence beyond this memory.");
 
   const rendered = lines.join("\n");
@@ -203,6 +209,43 @@ function selectToolMemoryObservations(
     }
   }
   return combined;
+}
+
+function buildNextToolStep(observations: Observation[]): string | null {
+  const grounded = observations.some(
+    (observation) => observation.status === "ok" && observation.content?.trim()
+  );
+  if (grounded) {
+    return null;
+  }
+
+  const candidateTitles = [
+    ...new Set(
+      observations
+        .filter(
+          (observation) =>
+            observation.status === "ok" &&
+            (observation.tool === "search_workspace" ||
+              observation.tool === "search_course")
+        )
+        .flatMap((observation) => observation.artifacts)
+        .map((artifact) => artifact.title.trim())
+        .filter((title) => title.length > 0)
+    ),
+  ].slice(0, MAX_NEXT_STEP_SOURCES);
+
+  if (candidateTitles.length === 0) {
+    return null;
+  }
+
+  const candidates =
+    candidateTitles.length === 1
+      ? `"${candidateTitles[0]}"`
+      : candidateTitles
+          .map((title) => `"${title}"`)
+          .join(", ");
+
+  return `Unresolved next step: you already found candidate sources but do not have grounded text yet. Reuse those breadcrumbs and call read_file on ${candidates} before running another search or answering from snippets.`;
 }
 
 function selectRecentFailedToolObservations(

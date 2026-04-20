@@ -55,6 +55,10 @@ interface ArtifactLookupCandidate {
   score: number;
 }
 
+const WORKSPACE_SEARCH_LOOKAHEAD_MULTIPLIER = 4;
+const MIN_WORKSPACE_SEARCH_CANDIDATES = 12;
+const WORKSPACE_SCOPE_TIE_BREAK_DELTA = 0.2;
+
 const WORKSPACE_READABLE_KINDS: ArtifactKind[] = [
   "assignment",
   "plan",
@@ -64,7 +68,10 @@ const WORKSPACE_READABLE_KINDS: ArtifactKind[] = [
 ];
 
 const COURSE_READABLE_KINDS: ArtifactKind[] = [
+  "assignment",
   "page",
+  "announcement",
+  "discussion",
   "attachment",
   "syllabus",
   "front_page",
@@ -86,11 +93,14 @@ export async function searchWorkspaceKnowledge(
 
   const index = await loadArtifactIndex({ workspace, cache });
   const ranked = searchArtifactSections(index, trimmed, {
-    scope: "workspace",
-    limit,
+    kinds: CHAT_READABLE_KINDS,
+    limit: Math.max(
+      limit * WORKSPACE_SEARCH_LOOKAHEAD_MULTIPLIER,
+      MIN_WORKSPACE_SEARCH_CANDIDATES
+    ),
   });
 
-  return ranked
+  const matches = ranked
     .map(({ section, score }) => {
       const artifact = index.artifactsById.get(section.artifactId);
       if (!artifact) return null;
@@ -102,7 +112,10 @@ export async function searchWorkspaceKnowledge(
         preview: section.text.slice(0, 2000),
       };
     })
-    .filter((match): match is WorkspaceChatSearchMatch => Boolean(match));
+    .filter((match): match is WorkspaceChatSearchMatch => Boolean(match))
+    .sort(compareSearchMatches);
+
+  return selectDiverseSearchMatches(matches, limit);
 }
 
 export async function readWorkspaceKnowledgeArtifact(
@@ -336,6 +349,64 @@ function buildSearchHeader(
       ? formatArtifactLabel(artifact)
       : `${formatArtifactLabel(artifact)} — ${section.section}`;
   return `--- ${sectionLabel} ---`;
+}
+
+function compareSearchMatches(
+  left: WorkspaceChatSearchMatch,
+  right: WorkspaceChatSearchMatch
+): number {
+  const scoreDelta = right.score - left.score;
+  if (Math.abs(scoreDelta) > WORKSPACE_SCOPE_TIE_BREAK_DELTA) {
+    return scoreDelta;
+  }
+  if (left.artifact.scope !== right.artifact.scope) {
+    return left.artifact.scope === "workspace" ? -1 : 1;
+  }
+  if (right.score !== left.score) {
+    return right.score - left.score;
+  }
+  if (left.header !== right.header) {
+    return left.header.localeCompare(right.header);
+  }
+  return left.section.id.localeCompare(right.section.id);
+}
+
+function selectDiverseSearchMatches(
+  matches: WorkspaceChatSearchMatch[],
+  limit: number
+): WorkspaceChatSearchMatch[] {
+  if (matches.length <= limit) {
+    return matches;
+  }
+
+  const selected: WorkspaceChatSearchMatch[] = [];
+  const selectedSectionIds = new Set<string>();
+  const selectedArtifactIds = new Set<string>();
+
+  for (const match of matches) {
+    if (selected.length >= limit) {
+      return selected;
+    }
+    if (selectedArtifactIds.has(match.artifact.id)) {
+      continue;
+    }
+    selected.push(match);
+    selectedArtifactIds.add(match.artifact.id);
+    selectedSectionIds.add(match.section.id);
+  }
+
+  for (const match of matches) {
+    if (selected.length >= limit) {
+      break;
+    }
+    if (selectedSectionIds.has(match.section.id)) {
+      continue;
+    }
+    selected.push(match);
+    selectedSectionIds.add(match.section.id);
+  }
+
+  return selected;
 }
 
 function createFileEntry(artifact: ArtifactRecord): WorkspaceChatFileEntry {

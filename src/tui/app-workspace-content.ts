@@ -1,17 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { loadCourseCache } from "../enrich/cache-loader.js";
-import {
-  loadWorkspace,
-  readWorkspaceExtractedFile,
-} from "../ask/load-workspace.js";
 import type { Assignment, Course } from "../domain/models.js";
 import type { LoadedWorkspace } from "../ask/types.js";
 import type { AssignmentWorkup } from "../work/types.js";
 import type { ChatMessage } from "./chat-state.js";
 import { formatDueCompact } from "./services.js";
 import type { ShellPinOption } from "./app-types.js";
-import { getExtractedAttachmentPath } from "../enrich/course-documents.js";
 import { extractFileText } from "../extract/extract-text.js";
 
 export function formatWorkspaceStatusLabel(
@@ -99,132 +93,36 @@ export function buildWorkspaceIntroMessages(
   return messages;
 }
 
-export async function buildWorkspacePinOptions(
-  loaded: Awaited<ReturnType<typeof loadWorkspace>>,
-  cache: Awaited<ReturnType<typeof loadCourseCache>>
-): Promise<ShellPinOption[]> {
+export function buildWorkspacePinOptions(
+  openResources: Array<{ title: string; kind: string; targetType: string; target: string }>
+): ShellPinOption[] {
   const options: ShellPinOption[] = [];
-  const addOption = (option: ShellPinOption): void => {
-    if (!options.some((existing) => existing.label === option.label)) {
-      options.push(option);
-    }
-  };
+  const seenLabels = new Set<string>();
 
-  for (const extracted of loaded.extractedFiles) {
-    addOption({
-      name: extracted.name,
-      label: toPinLabel(extracted.name),
+  for (const resource of openResources) {
+    if (resource.targetType !== "file") continue;
+    const label = toPinLabel(resource.title);
+    if (!label || seenLabels.has(label)) continue;
+    seenLabels.add(label);
+    options.push({
+      name: resource.title,
+      label,
+      detail: resource.kind,
+      filePath: resource.target,
     });
   }
-  const [attachmentFiles, resourceFiles] = await Promise.all([
-    listWorkspacePinFiles(loaded.path, "attachments"),
-    listWorkspacePinFiles(loaded.path, "resources"),
-  ]);
-  for (const file of attachmentFiles) {
-    addOption({
-      name: file,
-      label: toPinLabel(file),
-      workspaceRelativePath: file,
-    });
-  }
-  for (const file of resourceFiles) {
-    addOption({
-      name: file,
-      label: toPinLabel(file),
-      workspaceRelativePath: file,
-    });
-  }
-  if (cache) {
-    for (const attachment of cache.attachments) {
-      if (attachment.status !== "downloaded" && attachment.status !== "skipped") {
-        continue;
-      }
-      addOption({
-        name: attachment.originalFilename,
-        label: toPinLabel(attachment.localPath || attachment.originalFilename),
-        localPath: attachment.localPath,
-      });
-    }
-  }
-  if (loaded.assignmentMd) addOption({ name: "assignment.md", label: "assignment" });
-  if (loaded.planMd) addOption({ name: "plan.md", label: "plan" });
-  if (loaded.notesMd) addOption({ name: "notes.md", label: "notes" });
-  if (loaded.workupJson) addOption({ name: "workup.json", label: "workup" });
+
   return options;
 }
 
 export async function resolveWorkspacePinContent(
-  loaded: Awaited<ReturnType<typeof loadWorkspace>>,
-  cache: Awaited<ReturnType<typeof loadCourseCache>>,
   pin: ShellPinOption
 ): Promise<string | null> {
-  for (const extracted of loaded.extractedFiles) {
-    if (extracted.name === pin.name || extracted.name.includes(pin.label)) {
-      const content = await readWorkspaceExtractedFile(loaded, extracted);
-      return content ? content.slice(0, 15000) : null;
-    }
-  }
-  if (pin.workspaceRelativePath) {
-    const workspaceFilePath = path.join(loaded.path, pin.workspaceRelativePath);
-    const content = await readWorkspacePinFile(workspaceFilePath);
+  if (pin.filePath) {
+    const content = await readWorkspacePinFile(pin.filePath);
     return content ? content.slice(0, 15000) : null;
-  }
-  if (pin.localPath && cache) {
-    const extractedPath = getExtractedAttachmentPath(cache.coursePath, pin.localPath);
-    const extracted = await readSafe(extractedPath);
-    if (extracted) {
-      return extracted.slice(0, 15000);
-    }
-    const fallbackPath = path.join(cache.coursePath, pin.localPath);
-    const content = await readWorkspacePinFile(fallbackPath);
-    return content ? content.slice(0, 15000) : null;
-  }
-  if (pin.name === "assignment.md" && loaded.assignmentMd) {
-    return loaded.assignmentMd.slice(0, 15000);
-  }
-  if (pin.name === "plan.md" && loaded.planMd) {
-    return loaded.planMd.slice(0, 15000);
-  }
-  if (pin.name === "notes.md" && loaded.notesMd) {
-    return loaded.notesMd.slice(0, 15000);
-  }
-  if (pin.name === "workup.json" && loaded.workupJson) {
-    return JSON.stringify(loaded.workupJson, null, 2).slice(0, 15000);
   }
   return null;
-}
-
-async function listWorkspacePinFiles(
-  workspacePath: string,
-  relativeDir: string
-): Promise<string[]> {
-  const root = path.join(workspacePath, relativeDir);
-  try {
-    const entries: string[] = [];
-    await walkWorkspacePinFiles(root, relativeDir, entries);
-    return entries.sort((a, b) => a.localeCompare(b));
-  } catch {
-    return [];
-  }
-}
-
-async function walkWorkspacePinFiles(
-  absoluteDir: string,
-  relativeDir: string,
-  entries: string[]
-): Promise<void> {
-  const children = await fs.readdir(absoluteDir, { withFileTypes: true });
-  for (const child of children) {
-    const childAbsolute = path.join(absoluteDir, child.name);
-    const childRelative = path.join(relativeDir, child.name);
-    if (child.isDirectory()) {
-      await walkWorkspacePinFiles(childAbsolute, childRelative, entries);
-      continue;
-    }
-    if (child.isFile()) {
-      entries.push(childRelative);
-    }
-  }
 }
 
 async function readWorkspacePinFile(filePath: string): Promise<string | null> {

@@ -10,6 +10,7 @@ export interface ArtifactRef {
   kind: string;
   excerpt?: string | null;
   sectionIds?: string[];
+  sectionLabel?: string | null;
 }
 
 export interface Observation {

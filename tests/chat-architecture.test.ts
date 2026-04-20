@@ -754,16 +754,13 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
 
     assert.ok(globalCommands.includes("/manage-courses"));
     assert.ok(globalCommands.includes("/clear"));
-    assert.ok(!globalCommands.includes("/pin"));
     assert.ok(!globalCommands.includes("/overview"));
     assert.ok(courseCommands.includes("/manage-courses"));
     assert.ok(courseCommands.includes("/clear"));
     assert.ok(courseCommands.includes("/assignments"));
-    assert.ok(!courseCommands.includes("/pin"));
     assert.ok(!courseCommands.includes("/overview"));
     assert.ok(workspaceCommands.includes("/manage-courses"));
     assert.ok(workspaceCommands.includes("/clear"));
-    assert.ok(workspaceCommands.includes("/pin"));
     assert.ok(workspaceCommands.includes("/overview"));
 
     assert.equal(resolveCommand(COMMANDS, "/reqs")?.name, "/requirements");
@@ -801,7 +798,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     ];
 
     const extracted = extractInlinePins(
-      "compare /pin assignment against /pin lab4_spec before I submit",
+      "compare @assignment against @lab4_spec before I submit",
       options
     );
     const merged = mergePinOptions(
@@ -1971,118 +1968,65 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
         "utf-8"
       );
 
-      const content = await resolveWorkspacePinContent(
-        {
-          path: "/tmp/ws",
-          sessionSlug: "ws",
-          assignmentId: 42,
-          assignmentName: "Lab 4",
-          courseId: 17,
-          courseName: "ECE243",
-          courseCode: "ECE243H1",
-          preparedAt: null,
-          workspaceState: "ready",
-          assignmentMd: null,
-          planMd: null,
-          notesMd: null,
-          workupJson: null,
-          extractedFiles: [],
-          extractedFileCache: new Map(),
-        },
-        {
-          courseId: 17,
-          coursePath,
-          assignments: [],
-          modules: [],
-          files: [],
-          pages: [],
-          syllabusCandidates: [],
-          attachments: [
-            {
-              originalFilename: "lab4-spec.pdf",
-              localPath: "attachments/modules/lab4-spec.pdf",
-              status: "downloaded",
-              reason: "",
-            },
-          ],
-          ingestion: { ingestedAt: "2026-03-29T10:00:00.000Z" },
-        } as any,
-        {
-          name: "lab4-spec.pdf",
-          label: "lab4_spec",
-          localPath: "attachments/modules/lab4-spec.pdf",
-        }
+      const extractedFilePath = path.join(
+        coursePath,
+        "extracted",
+        "attachments",
+        "modules",
+        "lab4-spec.pdf.txt"
       );
+      const content = await resolveWorkspacePinContent({
+        name: "lab4-spec.pdf",
+        label: "lab4_spec",
+        filePath: extractedFilePath,
+      });
 
       assert.match(content ?? "", /Pinned cached attachment text/);
     });
   });
 
-  await t.test("workspace pinning includes workspace attachments and resources", async () => {
+  await t.test("workspace pinning builds options from open resources and resolves content", async () => {
     await withTempCwd(async (tempDir) => {
       const workspacePath = path.join(tempDir, "workspace");
-      await fs.mkdir(path.join(workspacePath, "attachments", "modules"), {
-        recursive: true,
-      });
-      await fs.mkdir(path.join(workspacePath, "resources"), {
-        recursive: true,
-      });
-      await fs.writeFile(
-        path.join(workspacePath, "attachments", "modules", "lab4-spec.pdf"),
-        "fake-pdf",
-        "utf-8"
-      );
+      await fs.mkdir(path.join(workspacePath, "resources"), { recursive: true });
       await fs.writeFile(
         path.join(workspacePath, "resources", "starter.txt"),
         "starter resource text",
         "utf-8"
       );
 
-      const loaded = {
-        path: workspacePath,
-        sessionSlug: "ws",
-        assignmentId: 42,
-        assignmentName: "Lab 4",
-        courseId: 17,
-        courseName: "ECE243",
-        courseCode: "ECE243H1",
-        preparedAt: null,
-        workspaceState: "ready",
-        assignmentMd: "# Assignment",
-        planMd: null,
-        notesMd: "# Notes",
-        workupJson: null,
-        extractedFiles: [],
-        extractedFileCache: new Map(),
-      };
-
-      const options = await buildWorkspacePinOptions(loaded as any, null as any);
-
-      assert.ok(
-        options.some(
-          (option) =>
-            option.name === "attachments/modules/lab4-spec.pdf" &&
-            option.workspaceRelativePath === "attachments/modules/lab4-spec.pdf"
-        )
-      );
-      assert.ok(
-        options.some(
-          (option) =>
-            option.name === "resources/starter.txt" &&
-            option.workspaceRelativePath === "resources/starter.txt"
-        )
-      );
-      assert.ok(options.some((option) => option.label === "notes"));
-
-      const resourceContent = await resolveWorkspacePinContent(
-        loaded as any,
-        null as any,
+      const openResources = [
         {
-          name: "resources/starter.txt",
-          label: "resources_starter",
-          workspaceRelativePath: "resources/starter.txt",
-        }
-      );
+          title: "lab4-spec.pdf",
+          kind: "downloaded attachment",
+          targetType: "file" as const,
+          target: path.join(workspacePath, "resources", "starter.txt"),
+        },
+        {
+          title: "notes.md",
+          kind: "workspace file",
+          targetType: "file" as const,
+          target: path.join(workspacePath, "notes.md"),
+        },
+        {
+          title: "Canvas Module Page",
+          kind: "module item",
+          targetType: "url" as const,
+          target: "https://canvas.example.com/pages/123",
+        },
+      ];
+
+      const options = buildWorkspacePinOptions(openResources);
+
+      assert.ok(options.some((option) => option.name === "lab4-spec.pdf"));
+      assert.ok(options.some((option) => option.name === "notes.md"));
+      assert.ok(!options.some((option) => option.name === "Canvas Module Page"));
+
+      const resourceContent = await resolveWorkspacePinContent({
+        name: "starter.txt",
+        label: "starter",
+        filePath: path.join(workspacePath, "resources", "starter.txt"),
+      });
 
       assert.match(resourceContent ?? "", /starter resource text/);
     });

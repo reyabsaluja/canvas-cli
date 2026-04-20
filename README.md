@@ -190,7 +190,7 @@ Workspace scope:
 | `/evidence` | Show confirmed vs inferred sources |
 | `/status` | Show workspace status |
 | `/open` | Open a workspace or course resource by name |
-| `/pin` | Attach a workspace file or cached attachment to your next prompt |
+| `@<resource>` | Attach a workspace file or cached attachment to your next prompt |
 | `/clear` | Clear the current chat and reset context |
 | `/refresh` | Refresh the workspace from the latest course cache |
 | `/manage-courses` | Add, remove, or rename configured courses |

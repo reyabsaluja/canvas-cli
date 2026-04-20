@@ -29,6 +29,8 @@ export type ShellResult =
 export interface ShellPinOption {
   name: string;
   label: string;
+  detail?: string;
+  filePath?: string;
   localPath?: string;
   workspaceRelativePath?: string;
 }
@@ -45,7 +47,7 @@ export interface ShellContext {
   runtime: ScopeRuntime;
   bannerRenderer?: (buf: { push(line?: string): void }) => void;
   extraHelpCommands?: Array<{ cmd: string; desc: string }>;
-  pinOptions?: ShellPinOption[];
+  getPinOptions?: () => ShellPinOption[];
   getOpenOptions?: () => ShellOpenOption[];
   onClear?: () => Promise<ChatMessage[]>;
   resolvePinContent?: (pin: ShellPinOption) => Promise<string | null>;
@@ -66,7 +68,7 @@ export interface ShellContext {
   ) => Promise<{
     content: string;
     bulletPoints?: string[];
-    sources?: Array<{ title: string; kind: string }>;
+    sources?: Array<{ title: string; kind: string; section?: string | null }>;
     confidence?: string;
   }>;
 }

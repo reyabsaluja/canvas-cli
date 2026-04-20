@@ -56,6 +56,8 @@ interface CourseArtifactLookup {
   readableArtifacts: ArtifactRecord[];
   syllabus: ArtifactRecord | null;
   frontPage: ArtifactRecord | null;
+  assignmentsById: Map<number, ArtifactRecord>;
+  assignmentsByTitle: Map<string, ArtifactRecord>;
   attachmentsByLocalPath: Map<string, ArtifactRecord>;
   attachmentsByTitle: Map<string, ArtifactRecord>;
   pagesById: Map<string, ArtifactRecord>;
@@ -211,6 +213,15 @@ function selectOverviewArtifactCandidates(
 
   addCandidate(lookup.syllabus, 120, "course syllabus");
 
+  const currentAssignment = resolveCurrentAssignmentArtifact(lookup, detail);
+  if (currentAssignment && shouldPreferAssignmentArtifact(detail, enrichment)) {
+    addCandidate(
+      currentAssignment,
+      116,
+      "ingested assignment instructions"
+    );
+  }
+
   for (const attachment of detail.attachments) {
     addCandidate(
       lookup.attachmentsByTitle.get(normalizeLookupKey(attachment.displayName)),
@@ -303,6 +314,8 @@ function buildCourseArtifactLookup(artifactIndex: ArtifactIndex): CourseArtifact
       OVERVIEW_SOURCE_KINDS.includes(artifact.kind)
   );
 
+  const assignmentsById = new Map<number, ArtifactRecord>();
+  const assignmentsByTitle = new Map<string, ArtifactRecord>();
   const attachmentsByLocalPath = new Map<string, ArtifactRecord>();
   const attachmentsByTitle = new Map<string, ArtifactRecord>();
   const pagesById = new Map<string, ArtifactRecord>();
@@ -310,7 +323,25 @@ function buildCourseArtifactLookup(artifactIndex: ArtifactIndex): CourseArtifact
   let syllabus: ArtifactRecord | null = null;
   let frontPage: ArtifactRecord | null = null;
 
-  for (const artifact of readableArtifacts) {
+  for (const artifact of artifactIndex.artifacts) {
+    if (artifact.scope !== "course") continue;
+
+    if (artifact.kind === "assignment") {
+      const assignmentId =
+        typeof artifact.metadata.assignmentId === "number"
+          ? artifact.metadata.assignmentId
+          : null;
+      if (assignmentId !== null) {
+        assignmentsById.set(assignmentId, artifact);
+      }
+      assignmentsByTitle.set(normalizeLookupKey(artifact.title), artifact);
+      continue;
+    }
+
+    if (!OVERVIEW_SOURCE_KINDS.includes(artifact.kind)) {
+      continue;
+    }
+
     if (artifact.kind === "syllabus") {
       syllabus = artifact;
       continue;
@@ -348,11 +379,43 @@ function buildCourseArtifactLookup(artifactIndex: ArtifactIndex): CourseArtifact
     readableArtifacts,
     syllabus,
     frontPage,
+    assignmentsById,
+    assignmentsByTitle,
     attachmentsByLocalPath,
     attachmentsByTitle,
     pagesById,
     pagesByTitle,
   };
+}
+
+function resolveCurrentAssignmentArtifact(
+  lookup: CourseArtifactLookup,
+  detail: AssignmentDetail
+): ArtifactRecord | null {
+  return (
+    lookup.assignmentsById.get(detail.id) ??
+    lookup.assignmentsByTitle.get(normalizeLookupKey(detail.name)) ??
+    null
+  );
+}
+
+function shouldPreferAssignmentArtifact(
+  detail: AssignmentDetail,
+  enrichment: EnrichmentSummary | null
+): boolean {
+  if (!detail.description || detail.description.trim().length < 120) {
+    return true;
+  }
+
+  if (!detail.dueAt) {
+    return true;
+  }
+
+  if (!detail.submissionTypes || detail.submissionTypes.length === 0) {
+    return true;
+  }
+
+  return enrichment?.flags.hasWeakCanvasDescription ?? false;
 }
 
 function buildModuleStructure(cache: CourseCache): string | null {

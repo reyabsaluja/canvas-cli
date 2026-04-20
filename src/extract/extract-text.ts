@@ -114,12 +114,18 @@ export async function extractZip(
             chunks.push(chunk as Buffer);
           }
           const buffer = Buffer.concat(chunks);
-          const data = await pdfParse(buffer);
-          const text = data.text?.trim() ?? "";
-          if (text.length > 0) {
-            const truncated = text.slice(0, MAX_ZIP_FILE_TEXT);
-            textContents.push({ name: entry.filename, content: truncated });
-            totalText += truncated.length;
+          const origLog = console.log;
+          console.log = () => {};
+          try {
+            const data = await pdfParse(buffer);
+            const text = data.text?.trim() ?? "";
+            if (text.length > 0) {
+              const truncated = text.slice(0, MAX_ZIP_FILE_TEXT);
+              textContents.push({ name: entry.filename, content: truncated });
+              totalText += truncated.length;
+            }
+          } finally {
+            console.log = origLog;
           }
         } catch {
           // Skip unreadable PDFs
@@ -157,9 +163,15 @@ export async function extractZip(
 
 async function extractPdf(filePath: string): Promise<string> {
   const buffer = await fs.readFile(filePath);
-  const data = await pdfParse(buffer);
-  const text = data.text?.trim() ?? "";
-  return text.slice(0, MAX_TEXT) || "[Could not extract text from PDF]";
+  const origLog = console.log;
+  console.log = () => {};
+  try {
+    const data = await pdfParse(buffer);
+    const text = data.text?.trim() ?? "";
+    return text.slice(0, MAX_TEXT) || "[Could not extract text from PDF]";
+  } finally {
+    console.log = origLog;
+  }
 }
 
 async function extractPlainText(filePath: string): Promise<string> {

@@ -3,7 +3,10 @@
  * Handles the common elements found in Canvas assignment descriptions
  * without pulling in a heavy dependency.
  */
-export function htmlToText(html: string): string {
+export function htmlToText(
+  html: string,
+  options?: { baseUrl?: string | null }
+): string {
   let text = html;
 
   // Normalize line endings
@@ -32,9 +35,10 @@ export function htmlToText(html: string): string {
     (_match, href, content) => {
       const label = stripTags(content).trim();
       if (!href || href.startsWith("javascript:")) return label;
+      const resolvedHref = resolveHref(href, options?.baseUrl ?? null);
       // If label is the URL itself, just show it once
-      if (label === href) return href;
-      return `${label} (${href})`;
+      if (label === resolvedHref) return resolvedHref;
+      return `${label} (${resolvedHref})`;
     }
   );
 
@@ -77,6 +81,15 @@ export function htmlToText(html: string): string {
 
 function stripTags(html: string): string {
   return html.replace(/<[^>]*>/g, "");
+}
+
+function resolveHref(href: string, baseUrl: string | null): string {
+  if (!baseUrl) return href;
+  try {
+    return new URL(href, baseUrl).toString();
+  } catch {
+    return href;
+  }
 }
 
 export function decodeEntities(text: string): string {

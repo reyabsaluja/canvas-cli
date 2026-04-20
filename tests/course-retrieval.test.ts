@@ -30,7 +30,21 @@ function makeCourseCache(coursePath: string): CourseCache {
   return {
     courseId: 17,
     coursePath,
-    assignments: [],
+    assignments: [
+      {
+        id: 42,
+        name: "Lab 4",
+        dueAt: "2026-04-18T23:59:00.000Z",
+        unlockAt: null,
+        lockAt: null,
+        pointsPossible: 100,
+        gradingType: "points",
+        submissionTypes: ["online_upload"],
+        htmlUrl: "https://canvas.example/courses/17/assignments/42",
+        hasDescription: true,
+        descriptionLinkCount: 1,
+      },
+    ],
     modules: [
       {
         id: 8,
@@ -82,6 +96,21 @@ function makeCourseCache(coursePath: string): CourseCache {
         hasBody: true,
       },
     ],
+    discussions: [
+      {
+        id: 88,
+        title: "Lab 4 Q&A",
+        postedAt: "2026-04-04T09:00:00.000Z",
+        lastReplyAt: "2026-04-04T10:00:00.000Z",
+        htmlUrl: "https://canvas.example/courses/17/discussion_topics/88",
+        userName: "Prof. Ada",
+        hasMessage: true,
+        threadEntryCount: 2,
+        participantCount: 3,
+        messageFileLinkCount: 0,
+        replyFileLinkCount: 1,
+      },
+    ],
     syllabusCandidates: [],
     attachments: [
       {
@@ -116,7 +145,7 @@ function makeCourseCache(coursePath: string): CourseCache {
       courseCode: "ECE243H1",
       refresh: false,
       counts: {
-        assignments: 0,
+        assignments: 1,
         modules: 1,
         moduleItems: 2,
         files: 1,
@@ -135,10 +164,16 @@ test("course retrieval helpers search and read through the shared artifact index
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
     const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "assignments"), {
+      recursive: true,
+    });
     await fs.mkdir(path.join(coursePath, "extracted", "pages"), {
       recursive: true,
     });
     await fs.mkdir(path.join(coursePath, "extracted", "attachments"), {
+      recursive: true,
+    });
+    await fs.mkdir(path.join(coursePath, "extracted", "discussions"), {
       recursive: true,
     });
     await fs.writeFile(
@@ -148,7 +183,7 @@ test("course retrieval helpers search and read through the shared artifact index
     );
     await fs.writeFile(
       path.join(coursePath, "extracted", "attachments", "lab4-spec.pdf.txt"),
-      "Deliverables include a waveform screenshot and a short analysis.\n",
+      "The specification requires a waveform screenshot and a short analysis.\n",
       "utf-8"
     );
     await fs.writeFile(
@@ -160,13 +195,42 @@ test("course retrieval helpers search and read through the shared artifact index
       ].join("\n"),
       "utf-8"
     );
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "assignments", "42.txt"),
+      [
+        "# Lab 4",
+        "",
+        "Due: 2026-04-18T23:59:00.000Z",
+        "Points: 100",
+        "Submission types: online_upload",
+        "",
+        "## Description",
+        "",
+        "Deliverables include a waveform screenshot and a short analysis.",
+      ].join("\n"),
+      "utf-8"
+    );
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "discussions", "88.txt"),
+      [
+        "# Lab 4 Q&A",
+        "",
+        "## Topic",
+        "",
+        "Clarifications about saturating add mode and signed overflow detection.",
+        "",
+        "## Replies",
+        "",
+        "### Prof. Ada — 2026-04-04T10:00:00.000Z",
+        "",
+        "Use signed overflow detection when you explain the ALU behavior.",
+      ].join("\n"),
+      "utf-8"
+    );
 
     const cache = makeCourseCache(coursePath);
 
-    const attachmentMatches = await searchCourseArtifacts(
-      cache,
-      "waveform screenshot"
-    );
+    const attachmentMatches = await searchCourseArtifacts(cache, "specification requires");
     assert.equal(attachmentMatches[0]?.artifact.title, "lab4-spec.pdf");
 
     const pageMatches = await searchCourseArtifacts(cache, "pipeline timing");
@@ -183,6 +247,28 @@ test("course retrieval helpers search and read through the shared artifact index
     assert.equal(directDocument.status, "ok");
     if (directDocument.status === "ok") {
       assert.match(directDocument.document.content, /waveform screenshot/);
+    }
+
+    const assignmentDocument = await readCourseDocument(cache, "Lab 4");
+    assert.equal(assignmentDocument.status, "ok");
+    if (assignmentDocument.status === "ok") {
+      assert.equal(assignmentDocument.document.artifact.kind, "assignment");
+      assert.match(assignmentDocument.document.content, /Submission types: online_upload/);
+      assert.match(assignmentDocument.document.content, /waveform screenshot/);
+    }
+
+    const discussionMatches = await searchCourseArtifacts(
+      cache,
+      "signed overflow detection"
+    );
+    assert.equal(discussionMatches[0]?.artifact.kind, "discussion");
+    assert.equal(discussionMatches[0]?.artifact.title, "Lab 4 Q&A");
+
+    const discussionDocument = await readCourseDocument(cache, "Lab 4 Q&A");
+    assert.equal(discussionDocument.status, "ok");
+    if (discussionDocument.status === "ok") {
+      assert.equal(discussionDocument.document.artifact.kind, "discussion");
+      assert.match(discussionDocument.document.content, /signed overflow detection/);
     }
   });
 });

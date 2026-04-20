@@ -20,7 +20,6 @@ import type {
 import {
   extractInlinePins,
   mergePinOptions,
-  resolvePinReferences,
 } from "./pins.js";
 import type { OpenableResource } from "./open-resources.js";
 import { searchOpenableResources } from "./open-resources.js";
@@ -61,7 +60,7 @@ export interface ChatShellOptions<TExit> {
   modelLabel: string;
   bannerRenderer?: (buf: { push(line?: string): void }) => void;
   extraHelpCommands?: Array<{ cmd: string; desc: string }>;
-  pinOptions?: ShellPinOption[];
+  getPinOptions?: () => ShellPinOption[];
   getOpenOptions?: () => ShellOpenOption[];
   onClear?: () => Promise<ChatMessage[]>;
   resolvePinContent?: (pin: ShellPinOption) => Promise<string | null>;
@@ -418,10 +417,10 @@ export async function runChatShell<TExit>(
     let pinMatches: ShellPinOption[] = [];
     if (activePinPartial !== null) {
       if (!activePinPartial) {
-        pinMatches = options.pinOptions ?? [];
+        pinMatches = options.getPinOptions?.() ?? [];
       } else {
         const loweredPartial = activePinPartial.toLowerCase();
-        pinMatches = (options.pinOptions ?? []).filter((pin) =>
+        pinMatches = (options.getPinOptions?.() ?? []).filter((pin) =>
           pin.label.includes(loweredPartial)
         );
       }
@@ -650,7 +649,7 @@ export async function runChatShell<TExit>(
     }
 
     async function handlePrompt(input: string): Promise<void> {
-      const extractedPins = extractInlinePins(input, options.pinOptions ?? []);
+      const extractedPins = extractInlinePins(input, options.getPinOptions?.() ?? []);
       if (extractedPins.missing.length > 0 || extractedPins.ambiguous.length > 0) {
         const lines: string[] = [];
         if (extractedPins.missing.length > 0) {
@@ -668,7 +667,7 @@ export async function runChatShell<TExit>(
               .join(", ")}.`
           );
         }
-        lines.push("Use `/pin` to list available files, then try again.");
+        lines.push("Use `@` to see available files, then try again.");
         await appendPersistedMessage({
           role: "system",
           content: lines.join("\n"),
@@ -878,129 +877,6 @@ export async function runChatShell<TExit>(
         return;
       }
 
-      if (commandName === "/pin") {
-        const pinCommand = resolveCommand(options.commands, commandName);
-        if (
-          !pinCommand ||
-          !pinCommand.scopes.includes(options.runtime.scope.type)
-        ) {
-          await appendPersistedMessage({
-            role: "system",
-            content: `${commandName} is only available in ${formatScopeTargets(
-              pinCommand?.scopes ?? ["workspace"]
-            )}.`,
-          });
-          render();
-          return;
-        }
-
-        const availablePins = options.pinOptions ?? [];
-        const pinArgs = args.split(/\s+/).filter(Boolean);
-        const requested = pinArgs[0]?.toLowerCase() ?? "";
-
-        if (availablePins.length === 0) {
-          await appendPersistedMessage({
-            role: "system",
-            content: "No pinnable files are available in this workspace yet.",
-          });
-          render();
-          return;
-        }
-
-        if (pinArgs.length === 0 || requested === "list") {
-          const lines = [
-            "Available pins",
-            "",
-            ...availablePins.map(
-              (pin) => `• \`${pin.label}\` — ${pin.name}`
-            ),
-          ];
-          if (pendingPins.length > 0) {
-            lines.push(
-              "",
-              `Queued for your next prompt: ${pendingPins
-                .map((pin) => `\`${pin.label}\``)
-                .join(", ")}`
-            );
-          }
-          lines.push(
-            "",
-            "Use `/pin <label>` to queue a file for your next prompt.",
-            "Use `/pin clear` to remove queued pins."
-          );
-          await appendPersistedMessage({
-            role: "assistant",
-            content: lines.join("\n"),
-          });
-          render();
-          return;
-        }
-
-        if (requested === "clear" || requested === "reset") {
-          pendingPins = [];
-          await appendPersistedMessage({
-            role: "assistant",
-            content: "Cleared queued pins for the next prompt.",
-          });
-          render();
-          return;
-        }
-
-        const firstPinResolution = resolvePinReferences([requested], availablePins);
-        const remainingText = pinArgs.slice(1).join(" ").trim();
-
-        if (firstPinResolution.resolved.length === 1 && remainingText) {
-          pendingPins = mergePinOptions(pendingPins, firstPinResolution.resolved);
-          await handlePrompt(`${remainingText}`);
-          render();
-          return;
-        }
-
-        const resolution = resolvePinReferences(pinArgs, availablePins);
-        pendingPins = mergePinOptions(pendingPins, resolution.resolved);
-
-        const lines: string[] = [];
-        if (resolution.resolved.length > 0) {
-          lines.push(
-            `Queued for your next prompt: ${resolution.resolved
-              .map((pin) => `\`${pin.label}\``)
-              .join(", ")}.`
-          );
-        }
-        if (resolution.missing.length > 0) {
-          lines.push(
-            `No pinnable file matched: ${resolution.missing
-              .map((label) => `\`${label}\``)
-              .join(", ")}.`
-          );
-        }
-        for (const item of resolution.ambiguous) {
-          lines.push(
-            `Pin \`${item.query}\` is ambiguous. Matches: ${item.matches
-              .slice(0, 5)
-              .map((match) => `\`${match.label}\``)
-              .join(", ")}.`
-          );
-        }
-
-        if (pendingPins.length > 0) {
-          lines.push(
-            `Queued pins now: ${pendingPins
-              .map((pin) => `\`${pin.label}\``)
-              .join(", ")}.`
-          );
-          lines.push("Send your question when you're ready.");
-        } else if (lines.length === 0) {
-          lines.push("Nothing was queued. Use `/pin` to see available files.");
-        }
-
-        await appendPersistedMessage({
-          role: resolution.resolved.length > 0 ? "assistant" : "system",
-          content: lines.join("\n"),
-        });
-        render();
-        return;
-      }
 
       const resolvedCommand = resolveCommand(options.commands, commandName);
       if (!resolvedCommand) {
@@ -1108,14 +984,14 @@ export async function runChatShell<TExit>(
         }
 
         if (inputState.activePinPartial !== null) {
-          const isComplete = (options.pinOptions ?? []).some(
+          const isComplete = (options.getPinOptions?.() ?? []).some(
             (pin) => pin.label === inputState.activePinPartial
           );
           if (!isComplete && inputState.pinMatches.length > 0) {
             const selected = inputState.pinMatches[pinSelected]!;
             inputBuffer = inputBuffer.replace(
-              /\/pin(\s+\S*)?$/,
-              `/pin ${selected.label}`
+              /@\S*$/,
+              `@${selected.label}`
             );
             pinSelected = 0;
             renderAfterInputMutation(true, getInputState());
@@ -1243,8 +1119,8 @@ export async function runChatShell<TExit>(
         if (inputState.pinMatches.length > 0) {
           const selected = inputState.pinMatches[pinSelected]!;
           inputBuffer = inputBuffer.replace(
-            /\/pin(\s+\S*)?$/,
-            `/pin ${selected.label}`
+            /@\S*$/,
+            `@${selected.label}`
           );
           pinSelected = 0;
           renderAfterInputMutation(true, getInputState());

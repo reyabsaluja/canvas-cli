@@ -3,13 +3,15 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import type { LoadedWorkspace } from "../src/ask/types.js";
+import type { ContentChunk, LoadedWorkspace } from "../src/ask/types.js";
 import { parseWorkspaceAnswerResponse } from "../src/ask/answer.js";
+import { renderWorkspaceAnswer } from "../src/ask/render.js";
 import {
   buildWorkspaceRetrievalContext,
   retrieveRelevant,
 } from "../src/ask/retrieve.js";
 import { clearArtifactIndexCache } from "../src/knowledge/artifact-index.js";
+import { stripAnsi } from "../src/tui/screen.js";
 
 async function withTempDir(
   fn: (tempDir: string) => Promise<void>
@@ -139,4 +141,40 @@ test("workspace answer parsing resolves source ids back to canonical sources", a
     assert.match(answer.sources[0]?.excerpt ?? "", /branch hazard/);
     assert.equal(answer.confidence, "high");
   });
+});
+
+test("workspace answers preserve and render section-level source labels", () => {
+  const context: ContentChunk[] = [
+    {
+      source: "assignment.md",
+      section: "Requirements",
+      text: "Include a waveform screenshot and a short analysis.",
+      excerpt: "Include a waveform screenshot and a short analysis.",
+      kind: "assignment",
+      sectionId: "assignment-section-1",
+    },
+  ];
+
+  const answer = parseWorkspaceAnswerResponse(
+    "What should I include?",
+    JSON.stringify({
+      answer: "Include a waveform screenshot and a short analysis.",
+      bullet_points: ["Submit both items together."],
+      source_ids: ["ref:assignment-section-1"],
+      confidence: "high",
+    }),
+    context
+  );
+
+  assert.deepEqual(answer.sources, [
+    {
+      title: "assignment.md",
+      kind: "assignment",
+      section: "Requirements",
+      excerpt: "Include a waveform screenshot and a short analysis.",
+    },
+  ]);
+
+  const rendered = stripAnsi(renderWorkspaceAnswer(answer));
+  assert.match(rendered, /assignment\.md — Requirements \[assignment\]/);
 });

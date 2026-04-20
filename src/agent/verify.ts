@@ -88,7 +88,8 @@ function collectSources(
       continue;
     }
     for (const artifact of observation.artifacts) {
-      const key = `${artifact.kind}:${artifact.title}`;
+      const section = normalizeSourceSection(artifact.sectionLabel);
+      const key = `${artifact.kind}:${artifact.title}:${section ?? ""}`;
       if (seen.has(key)) {
         continue;
       }
@@ -96,6 +97,7 @@ function collectSources(
       resolved.push({
         title: artifact.title,
         kind: artifact.kind,
+        ...(section ? { section } : {}),
         excerpt: artifact.excerpt ?? buildExcerpt(observation.content ?? observation.summary),
       });
     }
@@ -170,4 +172,12 @@ function buildExcerpt(value: string | undefined): string | null {
     return cleaned;
   }
   return `${cleaned.slice(0, 157)}...`;
+}
+
+function normalizeSourceSection(value: string | null | undefined): string | null {
+  const normalized = (value ?? "").trim();
+  if (!normalized || normalized === "Full text" || normalized === "Top") {
+    return null;
+  }
+  return normalized;
 }

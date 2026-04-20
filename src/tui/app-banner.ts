@@ -79,7 +79,7 @@ function renderInfoBox(
   const systemSummary = formatSystemSummary();
   const toolAgentSummary = "9 tools · 2 agents";
 
-  const boxInner = Math.min(termCols - 4, 98);
+  const boxInner = Math.min(termCols - 5, 98);
 
   function pushMenuRow(core: string): void {
     const width = stripAnsi(core).length;
