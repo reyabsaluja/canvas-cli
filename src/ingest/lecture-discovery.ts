@@ -63,12 +63,77 @@ function parseHtmlLinks(html: string): Array<{ text: string; href: string }> {
 
 const NAV_NOISE_RE = /\b(home|syllabus|modules|assignments?|grades|people|announcements?|discussions?|quizzes?|settings|files|outcomes|rubrics?|collaborations?|conferences?|pages)\b/i;
 
+function extractRowText(html: string): string {
+  return html
+    .replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, "")
+    .replace(/<img\b[^>]*>/gi, "")
+    .replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractTopicFromRowText(rowText: string, linkText: string): string | undefined {
+  const cleaned = rowText
+    .replace(new RegExp(linkText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "")
+    .replace(/\b\d{1,2}\/\d{1,2}(\/\d{2,4})?\b/g, "")
+    .replace(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}/gi, "")
+    .replace(/\b\d{1,2}\s+(january|february|march|april|may|june|july|august|september|october|november|december)/gi, "")
+    .replace(/\b\d{1,2}(am|pm)\b/gi, "")
+    .replace(/\b\d{1,2}:\d{2}\b/g, "")
+    .replace(/\b(noon|midnight)\b/gi, "")
+    .replace(/\b(mon|tue|wed|thu|fri|sat|sun)\w*\b/gi, "")
+    .replace(/\bnotes?:?\b/gi, "")
+    .replace(/\bvideo:?\b/gi, "")
+    .replace(/\brecording:?\b/gi, "")
+    .replace(/\blecture\s*#?\s*\d*/gi, "")
+    .replace(/[|·•–—,]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (cleaned.length >= 5 && cleaned.length <= 200) {
+    return cleaned;
+  }
+  return undefined;
+}
+
+const TABLE_ROW_REGEX = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
+
 function extractAllLinksAsLectures(
   html: string,
   source: string
 ): LectureIndexEntry[] {
-  const links = parseHtmlLinks(html);
   const entries: LectureIndexEntry[] = [];
+
+  const hasTable = /<table\b/i.test(html);
+  if (hasTable) {
+    let rowMatch;
+    while ((rowMatch = TABLE_ROW_REGEX.exec(html)) !== null) {
+      const rowHtml = rowMatch[1]!;
+      const rowLinks = parseHtmlLinks(rowHtml);
+      if (rowLinks.length === 0) continue;
+
+      const rowText = extractRowText(rowHtml);
+
+      for (const link of rowLinks) {
+        if (!link.text || link.text.length < 3) continue;
+        if (NAV_NOISE_RE.test(link.text) && link.text.split(/\s+/).length <= 2) continue;
+        const topic = extractTopicFromRowText(rowText, link.text);
+        entries.push({
+          title: link.text,
+          url: link.href,
+          contentType: classifyContentType(link.href, link.text),
+          source,
+          lectureNumber: extractLectureNumber(rowText) ?? extractLectureNumber(link.text),
+          topic,
+        });
+      }
+    }
+    TABLE_ROW_REGEX.lastIndex = 0;
+    if (entries.length > 0) return entries;
+  }
+
+  const links = parseHtmlLinks(html);
   for (const link of links) {
     if (!link.text || link.text.length < 3) continue;
     if (NAV_NOISE_RE.test(link.text) && link.text.split(/\s+/).length <= 2) continue;
@@ -200,6 +265,18 @@ export function discoverLectures(
       source: "page index",
       lectureNumber: extractLectureNumber(page.title),
     });
+  }
+
+  const topicByLectureNum = new Map<number, string>();
+  for (const entry of entries) {
+    if (entry.topic && entry.lectureNumber !== null && !topicByLectureNum.has(entry.lectureNumber)) {
+      topicByLectureNum.set(entry.lectureNumber, entry.topic);
+    }
+  }
+  for (const entry of entries) {
+    if (!entry.topic && entry.lectureNumber !== null) {
+      entry.topic = topicByLectureNum.get(entry.lectureNumber);
+    }
   }
 
   entries.sort((a, b) => {
