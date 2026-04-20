@@ -62,21 +62,12 @@ export function buildGlobalIntroMessages(
 export function buildCourseIntroMessages(
   course: Course,
   assignments: Assignment[],
-  hasCache: boolean
+  _hasCache: boolean
 ): ChatMessage[] {
-  const lines = [
-    `You are in ${course.name}.`,
-    "",
-    "Ask about assignments in this course, or use `/assignments`, `/files`, and `/modules`.",
-    hasCache
-      ? "Course cache is available for deeper questions."
-      : "Course cache is not ready yet. Open an assignment workspace for richer detail.",
-  ];
-  if (assignments.length > 0) {
-    lines.push("", "**Upcoming work**");
-    for (const assignment of assignments.slice(0, 5)) {
-      lines.push(`• ${assignment.name} — ${formatDueCompact(assignment.dueAt)}`);
-    }
+  if (assignments.length === 0) return [];
+  const lines = ["**Upcoming work**"];
+  for (const assignment of assignments.slice(0, 5)) {
+    lines.push(`• ${assignment.name} — ${formatDueCompact(assignment.dueAt)}`);
   }
   return [{ role: "assistant", content: lines.join("\n") }];
 }

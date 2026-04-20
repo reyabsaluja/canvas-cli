@@ -82,13 +82,24 @@ export function buildBannerLines(options: {
     return lines;
   }
 
-  const subtitle = options.runtime.subtitle
-    ? `  ${statusBarGrey(options.runtime.subtitle)}`
-    : "";
-  const status = options.runtime.statusLabel
-    ? `  ${C.warn(options.runtime.statusLabel)}`
-    : "";
-  return [`  ${C.bold(options.runtime.title)}${subtitle}${status}`];
+  const { cols } = getTermSize();
+  const title = options.runtime.title;
+  const subtitle = options.runtime.subtitle ?? "";
+
+  const left = C.pureWhiteBold(title) + (subtitle ? "  " + statusBarGrey(subtitle) : "");
+  const leftPlain = title + (subtitle ? "  " + subtitle : "");
+
+  const rightText = options.runtime.statusLabel?.replace(/^Status:\s*/, "") ?? "";
+  const right = rightText ? statusBarGrey(rightText) : "";
+  const rightPlain = rightText;
+
+  const gap = Math.max(2, cols - 4 - leftPlain.length - rightPlain.length);
+  const headerLine = "  " + left + " ".repeat(gap) + right;
+
+  const dividerWidth = Math.max(24, cols - 4);
+  const divider = "  " + C.dimmer("─".repeat(dividerWidth));
+
+  return [headerLine, divider];
 }
 
 export function renderChatFrame(

@@ -149,7 +149,7 @@ export async function createShellContext(
       hydrationPromise = (async () => {
         const runtime = api?.runtime;
         if (runtime) {
-          setCourseStatus(runtime, "Status: loading course data");
+          setCourseStatus(runtime, "loading…");
           api.render();
         }
 
@@ -167,10 +167,11 @@ export async function createShellContext(
             : [];
 
           if (runtime) {
-            setCourseStatus(
-              runtime,
-              nextCache ? "Status: course data ready" : "Status: assignments ready"
-            );
+            const assignCount = nextAssignments.length;
+            const readyLabel = assignCount > 0
+              ? `${assignCount} assignment${assignCount !== 1 ? "s" : ""}`
+              : "ready";
+            setCourseStatus(runtime, readyLabel);
           }
 
           if (api && shouldPostHydrationMessage) {
@@ -189,7 +190,7 @@ export async function createShellContext(
           }
         } catch (error) {
           if (runtime) {
-            setCourseStatus(runtime, "Status: course data unavailable");
+            setCourseStatus(runtime, "unavailable");
           }
           if (api && shouldPostHydrationMessage) {
             const message = `Course data could not finish loading: ${
@@ -218,7 +219,7 @@ export async function createShellContext(
         title: course.name,
         subtitle: course.courseCode,
         scopeLabel: `Course: ${course.name}`,
-        statusLabel: "Status: loading course data",
+        statusLabel: "loading…",
         placeholder: "Ask about this course, or use /assignments",
       },
       getOpenOptions: () => openOptions,
