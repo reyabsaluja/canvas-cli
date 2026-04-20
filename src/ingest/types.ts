@@ -107,6 +107,7 @@ export interface LectureIndexEntry {
   contentType: "video" | "slides" | "page" | "unknown";
   source: string;
   lectureNumber: number | null;
+  topic?: string;
 }
 
 export interface IngestionMeta {

@@ -117,17 +117,32 @@ When you have enough information, respond with your answer directly (no tool cal
     }
   }
 
+  if (ctx.cache && ctx.cache.modules.length > 0) {
+    parts.push(`\nCourse module structure (maps lecture numbers to topics):`);
+    for (const mod of ctx.cache.modules) {
+      const lecItems = mod.items.filter((item) =>
+        /\blec(?:ture)?|slides?|video/i.test(item.title) || item.type === "File"
+      );
+      if (lecItems.length > 0 || /\blec/i.test(mod.name)) {
+        const itemList = lecItems.slice(0, 5).map((item) => item.title).join(", ");
+        parts.push(`- ${mod.name}${itemList ? `: ${itemList}` : ""}`);
+      }
+    }
+  }
+
   if (ctx.cache && ctx.cache.lectures.length > 0) {
     const lectureTitles = ctx.cache.lectures.slice(0, 30);
     parts.push(`\nCourse lectures (use open_resource to open for the user):`);
     for (const lecture of lectureTitles) {
       const type = lecture.contentType !== "unknown" ? ` [${lecture.contentType}]` : "";
-      parts.push(`- ${lecture.title}${type}`);
+      const topic = lecture.topic ? ` — ${lecture.topic}` : "";
+      const num = lecture.lectureNumber !== null ? ` (Lecture ${lecture.lectureNumber})` : "";
+      parts.push(`- ${lecture.title}${num}${type}${topic}`);
     }
     if (ctx.cache.lectures.length > 30) {
       parts.push(`- ... and ${ctx.cache.lectures.length - 30} more`);
     }
-    parts.push(`\nIMPORTANT: When the student asks about lectures, topics to review, study materials, or preparation — answer DIRECTLY from the assignment context above (overview, action plan, relevant resources, constraints) combined with this lecture list. Do NOT read plan.md or call any tools — you already have all the information. Match lecture titles to the assignment topics and recommend specific lectures. Offer to open them with open_resource.`);
+    parts.push(`\nIMPORTANT: When the student asks about lectures, topics to review, or preparation — answer DIRECTLY from the assignment context above combined with this lecture list and module structure. Use the MODULE NAMES to understand what each lecture covers (e.g. if a module is named "LEC05 - Polling and Timers" then Lecture 5 covers polling and timers). Do NOT hallucinate lecture descriptions — if you cannot determine what a lecture covers from the module name or title, say so honestly. Do NOT read plan.md or call any tools for lecture questions. Offer to open relevant lectures with open_resource.`);
   }
 
   return parts.join("\n");
