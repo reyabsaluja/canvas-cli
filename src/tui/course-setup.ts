@@ -1,5 +1,4 @@
 import chalk from "chalk";
-import readline from "node:readline";
 import { hideCursor, showCursor, createBuffer, clearScreen, getTermSize, padAnsiToWidth, stripAnsi, CANVAS_TEXT, C } from "./screen.js";
 import { USER_ABORT_EXIT_CODE } from "./chat-shell-exit.js";
 import type { Course } from "../domain/models.js";
@@ -244,24 +243,50 @@ export async function promptRenames(
 ): Promise<UserCourse[]> {
   const result: UserCourse[] = [];
 
-  clearScreen();
-  showCursor();
-  console.log("");
-  console.log(C.bold("  Rename your courses"));
-  console.log(C.dim("  Give them short names, or press enter to keep the original"));
-  console.log("");
-
-  for (const course of selected) {
+  for (let idx = 0; idx < selected.length; idx++) {
+    const course = selected[idx]!;
     const displayLabel = course.courseCode || course.name;
     const fullName = course.courseCode !== course.name ? course.name : "";
 
-    console.log(
-      C.text(`  ${displayLabel}`) +
-        (fullName ? C.dim(` — ${fullName}`) : "")
-    );
+    clearScreen();
+    showCursor();
+
+    const { cols } = getTermSize();
+    const cardWidth = Math.min(cols - 6, 70);
+    const innerWidth = cardWidth - 2;
+    const border = C.secondary;
+
+    console.log("");
+    for (const line of CANVAS_TEXT) {
+      const lineWidth = stripAnsi(line).length;
+      const pad = Math.max(0, Math.floor((cols - lineWidth) / 2));
+      console.log(" ".repeat(pad) + C.primary(line));
+    }
+    console.log("");
+
+    console.log(C.bold("  Rename your courses"));
+    console.log(C.dim("  Give them short names, or press enter to keep the original"));
+    console.log("");
+
+    for (const done of result) {
+      console.log(
+        "  " + C.success("✓ ") + C.success(done.displayName) +
+        (done.originalCode !== done.displayName ? C.dim(` ← ${done.originalCode}`) : "")
+      );
+    }
+    if (result.length > 0) console.log("");
+
+    console.log(C.dim(`  Course ${idx + 1} of ${selected.length}`));
+    console.log("");
+
+    console.log(border("  ┌" + "─".repeat(cardWidth) + "┐"));
+    const courseInfo = C.bold(displayLabel) + (fullName ? C.dim(` — ${fullName}`) : "");
+    console.log(`  ${border("│")} ${padAnsiToWidth(courseInfo, innerWidth)} ${border("│")}`);
+    console.log(border("  └" + "─".repeat(cardWidth) + "┘"));
+    console.log("");
 
     const newName = await promptLine(
-      C.dim("  new name (enter to keep): ")
+      "  " + C.primary("❯ ") + C.dim("new name: ")
     );
 
     result.push({
@@ -270,12 +295,29 @@ export async function promptRenames(
       originalName: course.name,
       displayName: newName.trim() || displayLabel,
     });
-
-    console.log(
-      C.dim(`  → `) + C.success(result[result.length - 1]!.displayName)
-    );
-    console.log("");
   }
+
+  clearScreen();
+  showCursor();
+  const { cols } = getTermSize();
+
+  console.log("");
+  for (const line of CANVAS_TEXT) {
+    const lineWidth = stripAnsi(line).length;
+    const pad = Math.max(0, Math.floor((cols - lineWidth) / 2));
+    console.log(" ".repeat(pad) + C.primary(line));
+  }
+  console.log("");
+  console.log(C.bold("  Courses renamed"));
+  console.log("");
+  for (const done of result) {
+    console.log(
+      "  " + C.success("✓ ") + C.success(done.displayName) +
+      (done.originalCode !== done.displayName ? C.dim(` ← ${done.originalCode}`) : "")
+    );
+  }
+  console.log("");
+  await sleep(1200);
 
   return result;
 }
@@ -423,12 +465,33 @@ export async function runCourseManagement(
       if (course) {
         clearScreen();
         showCursor();
+
+        const { cols } = getTermSize();
+        const cardWidth = Math.min(cols - 6, 70);
+        const innerWidth = cardWidth - 2;
+        const border = C.secondary;
+
         console.log("");
-        console.log(
-          C.text(`  Current name: ${course.displayName}`) +
-            C.dim(` (${course.originalCode})`)
+        for (const line of CANVAS_TEXT) {
+          const lineWidth = stripAnsi(line).length;
+          const pad = Math.max(0, Math.floor((cols - lineWidth) / 2));
+          console.log(" ".repeat(pad) + C.primary(line));
+        }
+        console.log("");
+
+        console.log(C.bold("  Rename course"));
+        console.log("");
+
+        console.log(border("  ┌" + "─".repeat(cardWidth) + "┐"));
+        const courseInfo = C.bold(course.displayName) +
+          (course.originalCode !== course.displayName ? C.dim(` (${course.originalCode})`) : "");
+        console.log(`  ${border("│")} ${padAnsiToWidth(courseInfo, innerWidth)} ${border("│")}`);
+        console.log(border("  └" + "─".repeat(cardWidth) + "┘"));
+        console.log("");
+
+        const newName = await promptLine(
+          "  " + C.primary("❯ ") + C.dim("new name: ")
         );
-        const newName = await promptLine(C.dim("  New name: "));
 
         if (newName.trim()) {
           const updated: CourseConfig = {
@@ -439,6 +502,22 @@ export async function runCourseManagement(
             ),
           };
           await saveCourseConfig(updated);
+
+          clearScreen();
+          console.log("");
+          for (const line of CANVAS_TEXT) {
+            const lineWidth = stripAnsi(line).length;
+            const pad = Math.max(0, Math.floor((cols - lineWidth) / 2));
+            console.log(" ".repeat(pad) + C.primary(line));
+          }
+          console.log("");
+          console.log(
+            "  " + C.success("✓ ") +
+            C.text("Renamed to ") + C.success(newName.trim())
+          );
+          console.log("");
+          await sleep(1200);
+
           return updated;
         }
       }
@@ -454,21 +533,58 @@ export async function runCourseManagement(
 
 function promptLine(prompt: string): Promise<string> {
   return new Promise((resolve) => {
-    // Ensure stdin is in the right state for readline
-    if (process.stdin.isPaused()) {
-      process.stdin.resume();
-    }
+    let value = "";
+    const stdin = process.stdin;
 
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-      terminal: true,
-    });
+    if (stdin.isPaused()) stdin.resume();
+    stdin.setRawMode(true);
+    stdin.setEncoding("utf8");
+    hideCursor();
 
-    rl.question(prompt, (answer) => {
-      rl.close();
-      resolve(answer);
-    });
+    const redraw = (): void => {
+      const line = prompt + C.pureWhite(value) + C.pureWhite("█");
+      process.stdout.write(`\r\x1B[2K${line}`);
+    };
+
+    redraw();
+
+    const onData = (key: string): void => {
+      if (key === "\r" || key === "\n") {
+        stdin.removeListener("data", onData);
+        stdin.setRawMode(false);
+        stdin.pause();
+        showCursor();
+        const line = prompt + C.pureWhite(value);
+        process.stdout.write(`\r\x1B[2K${line}\n`);
+        resolve(value);
+        return;
+      }
+
+      if (key === "\x03") {
+        stdin.removeListener("data", onData);
+        stdin.setRawMode(false);
+        showCursor();
+        process.exit(USER_ABORT_EXIT_CODE);
+      }
+
+      if (key === "\x7F" || key === "\b") {
+        if (value.length > 0) {
+          value = value.slice(0, -1);
+          redraw();
+        }
+        return;
+      }
+
+      if (key === "\x1B") return;
+      if (key.startsWith("\x1B[")) return;
+
+      if (key.length === 1 && key >= " ") {
+        value += key;
+        redraw();
+      }
+    };
+
+    stdin.on("data", onData);
   });
 }
 
