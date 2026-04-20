@@ -42,7 +42,7 @@ export interface WorkspaceLifecycleOptions {
   client: CanvasClient;
   config: Config;
   cachePolicy: WorkspaceCachePolicy;
-  onProgress?: (phase: string) => void;
+  onProgress?: (phase: string, content?: string) => void;
   onStateChange?: (
     state: WorkspaceLifecycleCheckpoint,
     lastError?: string | null
@@ -121,7 +121,7 @@ export async function runWorkspaceLifecycle(
       cache,
       options.client,
       options.config,
-      (phase) => onProgress(phase)
+      (phase, content) => onProgress(phase, content)
     );
 
     onProgress(progressLabels.create);
@@ -148,7 +148,7 @@ export async function runWorkspaceLifecycle(
 async function resolveWorkspaceCache(
   options: WorkspaceLifecycleOptions,
   progressLabels: WorkspaceLifecycleProgressLabels,
-  onProgress: (phase: string) => void,
+  onProgress: (phase: string, content?: string) => void,
   setState: (
     state: WorkspaceLifecycleCheckpoint,
     lastError?: string | null

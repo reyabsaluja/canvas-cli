@@ -7,6 +7,7 @@ import {
   createChatContext,
   fetchAssignments,
   fetchUpcomingAssignments,
+  formatDueCompact,
   getCourseById,
   getRecentWorkspaces,
   getUnavailableConfiguredCourses,
@@ -149,7 +150,6 @@ export async function createShellContext(
       hydrationPromise = (async () => {
         const runtime = api?.runtime;
         if (runtime) {
-          setCourseStatus(runtime, "loading…");
           api.render();
         }
 
@@ -167,11 +167,21 @@ export async function createShellContext(
             : [];
 
           if (runtime) {
-            const assignCount = nextAssignments.length;
-            const readyLabel = assignCount > 0
-              ? `${assignCount} assignment${assignCount !== 1 ? "s" : ""}`
-              : "ready";
-            setCourseStatus(runtime, readyLabel);
+            const upcoming = nextAssignments.filter(
+              (a) => a.dueAt && !a.submitted && new Date(a.dueAt).getTime() > Date.now()
+            );
+            if (upcoming.length > 0) {
+              const nearest = upcoming.reduce((a, b) =>
+                new Date(a.dueAt!).getTime() < new Date(b.dueAt!).getTime() ? a : b
+              );
+              setCourseStatus(runtime, `next due: ${formatDueCompact(nearest.dueAt)}`);
+            } else {
+              const count = nextAssignments.length;
+              setCourseStatus(
+                runtime,
+                count > 0 ? `${count} assignment${count !== 1 ? "s" : ""}` : undefined
+              );
+            }
           }
 
           if (api && shouldPostHydrationMessage) {
@@ -219,7 +229,7 @@ export async function createShellContext(
         title: course.name,
         subtitle: course.courseCode,
         scopeLabel: `Course: ${course.name}`,
-        statusLabel: "loading…",
+        statusLabel: undefined,
         placeholder: "Ask about this course, or use /assignments",
       },
       getOpenOptions: () => openOptions,

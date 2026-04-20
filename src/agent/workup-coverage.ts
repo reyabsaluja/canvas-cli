@@ -4,6 +4,7 @@ export type WorkupCoverageKind =
   | "constraints"
   | "overview"
   | "plan"
+  | "resources"
   | null;
 
 export function workupExplicitlySupportsQuestion(
@@ -41,6 +42,14 @@ export function workupExplicitlySupportsQuestion(
     );
   }
 
+  if (coverage === "resources") {
+    return (
+      hasNonEmptyArray(workup.relevantResources ?? workup.relevant_resources) ||
+      hasNonEmptyArray(workup.actionPlan ?? workup.action_plan) ||
+      (typeof workup.overview === "string" && workup.overview.trim().length > 0)
+    );
+  }
+
   return false;
 }
 
@@ -63,6 +72,10 @@ export function classifyWorkupCoverage(question: string): WorkupCoverageKind {
 
   if (/\b(overvi?ew|summary|goal|purpose|expected|what is this assignment about|what is this about)\b/i.test(question)) {
     return "overview";
+  }
+
+  if (/\b(lecture|review|study|prepare|topic|concept|material|resource)\b/i.test(question)) {
+    return "resources";
   }
 
   return null;

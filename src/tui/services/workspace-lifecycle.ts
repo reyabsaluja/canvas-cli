@@ -53,7 +53,7 @@ export async function openWorkspace(
   services: AppServices,
   course: Course,
   assignmentTarget: AssignmentTarget,
-  onProgress: (stage: string) => void
+  onProgress: (stage: string, content?: string) => void
 ): Promise<WorkspaceOpenResult> {
   onProgress("checking existing workspaces");
   const existingWorkspacePath = await findExistingWorkspacePath(
@@ -122,7 +122,7 @@ export async function refreshWorkspace(
   services: AppServices,
   course: Course,
   assignmentTarget: AssignmentTarget,
-  onProgress: (stage: string) => void
+  onProgress: (stage: string, content?: string) => void
 ): Promise<WorkspaceOpenResult> {
   onProgress("resolving assignment");
   const detail = await resolveAssignmentDetail(services, course, assignmentTarget);
@@ -176,7 +176,7 @@ export async function getRecentWorkspaces(): Promise<
 async function loadExistingWorkspaceResult(
   workspacePath: string,
   course: Course,
-  onProgress: (stage: string) => void
+  onProgress: (stage: string, content?: string) => void
 ): Promise<WorkspaceOpenResult> {
   onProgress("loading workspace");
   const loaded = await loadWorkspace(workspacePath);

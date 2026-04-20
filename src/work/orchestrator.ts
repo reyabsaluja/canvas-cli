@@ -62,7 +62,7 @@ export async function runInvestigation(
   cache: CourseCache,
   client: CanvasClient,
   config: Config,
-  onProgress: (phase: string) => void
+  onProgress: (phase: string, content?: string) => void
 ): Promise<InvestigationResult> {
   const state = createInvestigationState(detail, course);
 
@@ -104,6 +104,7 @@ export async function runInvestigation(
 
       const result = await executeToolDetailed(name, input, toolCtx);
       appendObservation(state.runState, result.observation);
+      onProgress(`${name}${label ? ` (${label})` : ""}`, result.modelText);
       return result.modelText;
     },
     undefined,

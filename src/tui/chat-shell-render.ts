@@ -439,6 +439,7 @@ function buildStickyBottomRows(
 function writeStickyBottom(rows: string[]): void {
   const { rows: totalRows, cols } = getTermSize();
   const screenSizeKey = `${totalRows}:${cols}`;
+  const prevLen = lastStickyBottomRows?.length ?? 0;
   if (
     lastStickyBottomScreenSize !== screenSizeKey ||
     !lastStickyBottomRows ||
@@ -450,6 +451,17 @@ function writeStickyBottom(rows: string[]): void {
 
   const startRow = totalRows - rows.length + 1;
   const writes: string[] = [];
+
+  if (prevLen > 0 && prevLen !== rows.length) {
+    const oldStartRow = totalRows - prevLen + 1;
+    const clearEnd = Math.min(oldStartRow + prevLen, startRow);
+    for (let r = oldStartRow; r < clearEnd; r++) {
+      if (r >= 1 && r <= totalRows) {
+        writes.push(`\x1B[${r};1H\x1B[2K`);
+      }
+    }
+    invalidateScreenRows(oldStartRow, clearEnd - 1);
+  }
   for (let index = 0; index < rows.length; index++) {
     if (lastStickyBottomRows?.[index] === rows[index]) {
       continue;

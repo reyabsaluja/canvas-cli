@@ -15,7 +15,8 @@ import {
 import { listChatSessions } from "./chat-sessions.js";
 import type { AppScope, ChatSessionSummary } from "./chat-state.js";
 import type { Course, Assignment } from "../domain/models.js";
-import { clearScreen, C } from "./screen.js";
+import chalk from "chalk";
+import { clearScreen, C, getTermSize, stripAnsi, hideCursor, showCursor, createBuffer, CANVAS_TEXT } from "./screen.js";
 import { loadWorkspace } from "../ask/load-workspace.js";
 import { matchAssignments } from "../domain/matching.js";
 
@@ -273,21 +274,19 @@ export async function openAssignmentScope(
   const course = getCourseById(services, courseId);
   if (!course) return null;
 
-  clearScreen();
-  console.log("");
-  console.log(C.bold(`  ${assignmentTarget.name}`));
-  console.log(C.dim(`  ${course.name}`));
-  console.log("");
+  const progress = new IngestionProgressRenderer(assignmentTarget.name, course.name);
+  progress.start();
 
   try {
     const result = await openWorkspace(
       services,
       course,
       assignmentTarget,
-      (stage) => {
-        console.log(`  ${C.dim("›")} ${C.dim(stage)}`);
+      (stage, content) => {
+        progress.addStep(stage, content);
       }
     );
+    progress.stop();
     return {
       type: "workspace",
       workspacePath: result.workspacePath,
@@ -295,8 +294,12 @@ export async function openAssignmentScope(
       assignmentId: result.loaded.assignmentId,
     };
   } catch (error) {
+    progress.stop();
+    clearScreen();
+    showCursor();
+    console.log("");
     console.error(
-      C.error(`\n  Failed: ${error instanceof Error ? error.message : "unknown"}`)
+      C.error(`  Failed: ${error instanceof Error ? error.message : "unknown"}`)
     );
     console.log(C.dim("\n  Press any key to continue..."));
     await waitForKey();
@@ -313,21 +316,22 @@ export async function refreshWorkspaceScope(
   const course = getCourseById(services, courseId);
   if (!course) return fallbackScope;
 
-  clearScreen();
-  console.log("");
-  console.log(C.bold(`  Refreshing ${assignmentTarget.name}`));
-  console.log(C.dim(`  ${course.name}`));
-  console.log("");
+  const progress = new IngestionProgressRenderer(
+    `Refreshing ${assignmentTarget.name}`,
+    course.name
+  );
+  progress.start();
 
   try {
     const refreshed = await refreshWorkspace(
       services,
       course,
       assignmentTarget,
-      (stage) => {
-        console.log(`  ${C.dim("›")} ${C.dim(stage)}`);
+      (stage, content) => {
+        progress.addStep(stage, content);
       }
     );
+    progress.stop();
     return {
       type: "workspace",
       workspacePath: refreshed.workspacePath,
@@ -335,9 +339,13 @@ export async function refreshWorkspaceScope(
       assignmentId: refreshed.loaded.assignmentId,
     };
   } catch (error) {
+    progress.stop();
+    clearScreen();
+    showCursor();
+    console.log("");
     console.error(
       C.error(
-        `\n  Refresh failed: ${error instanceof Error ? error.message : "unknown"}`
+        `  Refresh failed: ${error instanceof Error ? error.message : "unknown"}`
       )
     );
     console.log(C.dim("\n  Press any key to continue..."));
@@ -357,6 +365,258 @@ export async function workspaceExists(workspacePath: string): Promise<boolean> {
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const SHIMMER_COLORS = [
+  chalk.hex("#6e1114"),
+  chalk.hex("#8c1618"),
+  chalk.hex("#ab1b1e"),
+  chalk.hex("#c92023"),
+  chalk.hex("#e82429"),
+  chalk.hex("#f25a5e"),
+  chalk.hex("#f78e90"),
+  chalk.hex("#f25a5e"),
+  chalk.hex("#e82429"),
+  chalk.hex("#c92023"),
+  chalk.hex("#ab1b1e"),
+  chalk.hex("#8c1618"),
+];
+const toolActionColor = chalk.hex("#e8a86d").bold;
+const toolTargetGreen = chalk.hex("#6ec86a");
+const spinnerColor = chalk.hex("#e82429");
+
+interface IngestionStep {
+  action: string;
+  target: string;
+  content?: string;
+  completedAt?: number;
+  stageKey: string;
+}
+
+const CONTENT_PREVIEW_LINES = 8;
+
+function parseStage(stage: string): { action: string; target: string } {
+  const toolMatch = stage.match(/^(\w+)\s*\((.+)\)$/);
+  if (toolMatch) {
+    return { action: toolMatch[1]!, target: toolMatch[2]! };
+  }
+  const parts = stage.split(" ");
+  if (parts.length >= 2) {
+    return { action: parts[0]!, target: parts.slice(1).join(" ") };
+  }
+  return { action: stage, target: "" };
+}
+
+function wrapPlain(text: string, maxWidth: number): string[] {
+  if (maxWidth <= 0) return [text];
+  const words = text.split(/\s+/);
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    if (!word) continue;
+    if (word.length > maxWidth) {
+      if (current) { lines.push(current); current = ""; }
+      for (let i = 0; i < word.length; i += maxWidth) lines.push(word.slice(i, i + maxWidth));
+      continue;
+    }
+    if (current.length + word.length + 1 > maxWidth) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = current ? `${current} ${word}` : word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length > 0 ? lines : [""];
+}
+
+function formatElapsed(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remaining = seconds % 60;
+  return `${minutes}m${remaining}s`;
+}
+
+class IngestionProgressRenderer {
+  private title: string;
+  private subtitle: string;
+  private steps: IngestionStep[] = [];
+  private expandedSteps = new Set<number>();
+  private frame = 0;
+  private shimmerFrame = 0;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private startTime: number;
+  private scrollOffset = 0;
+
+  constructor(title: string, subtitle: string) {
+    this.title = title;
+    this.subtitle = subtitle;
+    this.startTime = Date.now();
+  }
+
+  start(): void {
+    this.startTime = Date.now();
+    hideCursor();
+    this.render();
+    this.timer = setInterval(() => {
+      this.frame = (this.frame + 1) % SPINNER_FRAMES.length;
+      this.shimmerFrame = (this.shimmerFrame + 1) % SHIMMER_COLORS.length;
+      this.render();
+    }, 80);
+
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", this.onKey);
+  }
+
+  stop(): void {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+    process.stdin.removeListener("data", this.onKey);
+    try { process.stdin.setRawMode(false); } catch {}
+    try { process.stdin.pause(); } catch {}
+    showCursor();
+  }
+
+  addStep(stage: string, content?: string): void {
+    const now = Date.now();
+    const { action, target } = parseStage(stage);
+    const stageKey = stage;
+
+    if (content !== undefined) {
+      let existing: IngestionStep | undefined;
+      for (let i = this.steps.length - 1; i >= 0; i--) {
+        if (this.steps[i]!.stageKey === stageKey) { existing = this.steps[i]; break; }
+      }
+      if (existing) {
+        existing.content = content;
+        existing.completedAt = now;
+        this.render();
+        return;
+      }
+    }
+
+    if (this.steps.length > 0) {
+      const last = this.steps[this.steps.length - 1]!;
+      if (!last.completedAt) last.completedAt = now;
+    }
+    this.steps.push({ action, target, content, stageKey });
+    this.render();
+  }
+
+  private onKey = (key: string): void => {
+    if (key === "\x0F") {
+      let lastWithContent = -1;
+      for (let i = this.steps.length - 1; i >= 0; i--) {
+        if (this.steps[i]!.content) { lastWithContent = i; break; }
+      }
+      if (lastWithContent >= 0) {
+        if (this.expandedSteps.has(lastWithContent)) {
+          this.expandedSteps.delete(lastWithContent);
+        } else {
+          this.expandedSteps.add(lastWithContent);
+        }
+        this.render();
+      }
+    }
+    if (key === "\x1B[A" || key === "\x10") {
+      this.scrollOffset = Math.min(this.scrollOffset + 3, 9999);
+      this.render();
+    }
+    if (key === "\x1B[B" || key === "\x0E") {
+      this.scrollOffset = Math.max(this.scrollOffset - 3, 0);
+      this.render();
+    }
+  };
+
+  private render(): void {
+    const buf = createBuffer();
+    const { cols, rows } = getTermSize();
+    const contentWidth = Math.max(24, cols - 8);
+    const marker = C.success("│");
+    const dimMarker = C.dim("│");
+    const elapsed = formatElapsed(Date.now() - this.startTime);
+
+    const allLines: string[] = [];
+
+    allLines.push("");
+
+    const dividerWidth = Math.max(24, cols - 4);
+    const titleLeft = C.pureWhiteBold(this.title) + "  " + C.secondary(this.subtitle);
+    const titleRight = C.secondary(elapsed);
+    const titleLeftPlain = stripAnsi(this.title) + "  " + this.subtitle;
+    const titleGap = Math.max(2, dividerWidth - titleLeftPlain.length - elapsed.length);
+    allLines.push("  " + titleLeft + " ".repeat(titleGap) + titleRight);
+    allLines.push("  " + C.dimmer("─".repeat(dividerWidth)));
+
+    for (let i = 0; i < this.steps.length; i++) {
+      const step = this.steps[i]!;
+      const isDone = step.completedAt !== undefined;
+      const bar = isDone ? dimMarker : marker;
+
+      allLines.push("");
+      if (!isDone) {
+        allLines.push(
+          `  ${bar} ${toolActionColor(step.action)} ${toolTargetGreen(step.target)}`
+        );
+      } else {
+        allLines.push(
+          `  ${bar} ${C.dim(step.action)} ${C.dim(step.target)}`
+        );
+      }
+
+      if (step.content) {
+        const expanded = this.expandedSteps.has(i);
+        const rawLines = step.content.split("\n").flatMap((l) => wrapPlain(l, contentWidth));
+        const showLines = expanded ? rawLines : rawLines.slice(0, CONTENT_PREVIEW_LINES);
+        const remaining = expanded ? 0 : Math.max(0, rawLines.length - CONTENT_PREVIEW_LINES);
+
+        allLines.push("");
+        for (const line of showLines) {
+          allLines.push(`  ${isDone ? dimMarker : marker} ${isDone ? C.dim(line) : chalk.white(line)}`);
+        }
+        if (remaining > 0) {
+          allLines.push(
+            `  ${isDone ? dimMarker : marker} ${C.dim(`... (${remaining} more lines, `)}${C.dimmer("ctrl+o")}${C.dim(" to expand)")}`
+          );
+        }
+      }
+    }
+
+    allLines.push("");
+
+    const lastStep = this.steps[this.steps.length - 1];
+    const isActive = lastStep && !lastStep.completedAt;
+    const verbText = isActive ? `${lastStep.action}...` : "Preparing...";
+    let shimmer = "";
+    for (let j = 0; j < verbText.length; j++) {
+      const colorIndex = (this.shimmerFrame + j) % SHIMMER_COLORS.length;
+      shimmer += SHIMMER_COLORS[colorIndex]!(verbText[j]!);
+    }
+    const spinnerLine = isActive
+      ? `  ${spinnerColor(SPINNER_FRAMES[this.frame]!)} ${shimmer}  ${C.secondary("(esc to interrupt)")}`
+      : `  ${spinnerColor(SPINNER_FRAMES[this.frame]!)} ${shimmer}`;
+    allLines.push(spinnerLine);
+
+    const maxVisible = rows - 1;
+    const totalLines = allLines.length;
+    if (totalLines <= maxVisible) {
+      for (const line of allLines) buf.push(line);
+    } else {
+      const maxScroll = Math.max(0, totalLines - maxVisible);
+      this.scrollOffset = Math.min(this.scrollOffset, maxScroll);
+      const end = totalLines - this.scrollOffset;
+      const start = Math.max(0, end - maxVisible);
+      for (let i = start; i < end; i++) buf.push(allLines[i]!);
+    }
+
+    buf.flush();
+  }
 }
 
 export function waitForKey(): Promise<void> {
