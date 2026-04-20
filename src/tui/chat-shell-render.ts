@@ -14,27 +14,30 @@ import type {
 } from "./chat-state.js";
 import type { ShellOpenOption, ShellPinOption } from "./app-types.js";
 
-const userBubbleBg = chalk.bgHex("#3a445d");
-const userBoxBg = chalk.bgHex("#303030");
-const userBarColor = chalk.hex("#7aa2f7");
-const commandBg = chalk.bgHex("#2a2d35");
-const inputBorderColor = chalk.hex("#555555");
-const inputPromptColor = chalk.hex("#7aa2f7");
-const inputPlaceholderFg = chalk.hex("#8b95a8");
-const toolActionColor = chalk.hex("#e0af68").bold;
-const toolTargetGreen = chalk.hex("#9ece6a");
-const toolTargetRed = chalk.hex("#f7768e");
-const statusBarGrey = chalk.hex("#9ca3af");
+const userBubbleBg = chalk.bgHex("#3a3a3a");
+const userBoxBg = chalk.bgHex("#2a2a2a");
+const userBarColor = chalk.hex("#e82429");
+const commandBg = chalk.bgHex("#2a2a2a");
+const inputBorderColor = chalk.hex("#505050");
+const inputPromptColor = chalk.hex("#e82429");
+const inputPlaceholderFg = chalk.hex("#808080");
+const toolActionColor = chalk.hex("#e8a86d").bold;
+const toolTargetGreen = chalk.hex("#6ec86a");
+const toolTargetRed = chalk.hex("#ff6b6b");
+const statusBarGrey = chalk.hex("#808080");
 let lastStickyBottomRows: string[] | null = null;
 let lastStickyBottomScreenSize = "";
 let lastOverlayRows: string[] | null = null;
 let lastOverlayStartRow = -1;
 let lastOverlayScreenSize = "";
 
-export const STICKY_BOTTOM_ROWS = 4;
+const BASE_STICKY_ROWS = 4;
+let currentStickyRows = BASE_STICKY_ROWS;
+export function getStickyBottomRows(): number { return currentStickyRows; }
+export const STICKY_BOTTOM_ROWS = BASE_STICKY_ROWS;
 const CHAT_GAP_ROWS = 2;
 const MAX_OVERLAY_ROWS = 8;
-export const MAIN_VIEW_BOTTOM_RESERVE = STICKY_BOTTOM_ROWS + CHAT_GAP_ROWS;
+export const MAIN_VIEW_BOTTOM_RESERVE = BASE_STICKY_ROWS + CHAT_GAP_ROWS;
 
 export interface RenderChatFrameOptions {
   runtime: ScopeRuntime;
@@ -107,7 +110,7 @@ export function renderChatFrame(
     options.isProcessing && options.currentSpinnerLine
       ? ["", `  ${options.currentSpinnerLine}`]
       : [];
-  const maxContent = Math.max(1, rows - MAIN_VIEW_BOTTOM_RESERVE);
+  const maxContent = Math.max(1, rows - currentStickyRows - CHAT_GAP_ROWS);
   const baseContentHeight =
     baseHeaderLines.length +
     olderHintLines.length +
@@ -175,7 +178,7 @@ export function renderChatFrame(
       spinnerLines.length
   );
 
-  buf.flush(STICKY_BOTTOM_ROWS, chatScrollOffset);
+  buf.flush(currentStickyRows, chatScrollOffset);
   writeStickyBottom(
     buildStickyBottomRows(
       options.placeholder,
@@ -235,7 +238,7 @@ function buildAutocompleteOverlayRows(
 ): string[] | null {
   const { cols, rows } = getTermSize();
   const maxVisibleCols = Math.max(1, cols - 1);
-  const lastRowAboveInput = rows - STICKY_BOTTOM_ROWS;
+  const lastRowAboveInput = rows - currentStickyRows;
   if (lastRowAboveInput < 1) return null;
   const hasOverlay =
     openMatches.length > 0 || pinMatches.length > 0 || slashMatches.length > 0;
@@ -324,10 +327,12 @@ function buildStickyBottomRows(
   runtimeStatus: string | undefined,
   modelLabel: string
 ): string[] {
-  const { cols } = getTermSize();
+  const { cols, rows: termRows } = getTermSize();
   const boxWidth = Math.max(24, cols - 4);
-  const promptPrefix = "> ";
-  const innerWidth = Math.max(1, boxWidth - 2 - promptPrefix.length);
+  const promptStr = "> ";
+  const promptLen = promptStr.length;
+  const firstLineWidth = Math.max(1, boxWidth - 2 - promptLen);
+  const contLineWidth = Math.max(1, boxWidth - 2);
   const cursor = chalk.white("█");
   const fitToRow = (value: string) => {
     const visible = stripAnsi(value).length;
@@ -336,25 +341,55 @@ function buildStickyBottomRows(
     }
     return value;
   };
+  const b = inputBorderColor;
+  const padTo = (text: string, width: number) => {
+    const visible = stripAnsi(text).length;
+    return text + " ".repeat(Math.max(0, width - visible));
+  };
 
-  let displayText: string;
+  const contentRows: string[] = [];
+
   if (!inputBuffer) {
-    const maxPlaceholder = Math.max(0, innerWidth - 1);
+    const maxPlaceholder = Math.max(0, firstLineWidth - 1);
     const trimmed =
       placeholder.length > maxPlaceholder && maxPlaceholder > 3
         ? placeholder.slice(0, maxPlaceholder - 3) + "..."
         : placeholder.slice(0, maxPlaceholder);
     const styled = inputPlaceholderFg(trimmed);
-    const remaining = Math.max(
-      0,
-      innerWidth - stripAnsi(cursor + styled).length
-    );
-    displayText = cursor + styled + " ".repeat(remaining);
+    const displayText = padTo(cursor + styled, firstLineWidth);
+    contentRows.push(`  ${b("│")} ${inputPromptColor(">")} ${displayText} ${b("│")}`);
   } else {
-    const colored = inputBuffer.replace(/\/pin\s+\S+/g, (match) => C.warm(match));
-    const visible = stripAnsi(colored + cursor).length;
-    const remaining = Math.max(0, innerWidth - visible);
-    displayText = colored + cursor + " ".repeat(remaining);
+    const textWithCursor = inputBuffer + "█";
+    const chunks: string[] = [];
+    let remaining = textWithCursor;
+    let isFirst = true;
+    while (remaining.length > 0) {
+      const w = isFirst ? firstLineWidth : contLineWidth;
+      chunks.push(remaining.slice(0, w));
+      remaining = remaining.slice(w);
+      isFirst = false;
+    }
+
+    const maxInputLines = Math.max(1, Math.floor((termRows - 3) / 2));
+    const visibleChunks = chunks.length > maxInputLines
+      ? chunks.slice(chunks.length - maxInputLines)
+      : chunks;
+
+    for (let i = 0; i < visibleChunks.length; i++) {
+      const chunk = visibleChunks[i]!;
+      const isFirstVisible = i === 0 && visibleChunks === chunks;
+      const w = isFirstVisible ? firstLineWidth : contLineWidth;
+      const hasCursor = chunk.endsWith("█");
+      const rawText = hasCursor ? chunk.slice(0, -1) : chunk;
+      const colored = rawText.replace(/\/pin\s+\S+/g, (match) => C.warm(match));
+      const display = hasCursor ? colored + cursor : colored;
+      const padded = padTo(display, w);
+      if (isFirstVisible) {
+        contentRows.push(`  ${b("│")} ${inputPromptColor(">")} ${padded} ${b("│")}`);
+      } else {
+        contentRows.push(`  ${b("│")} ${padded} ${b("│")}`);
+      }
+    }
   }
 
   let left = runtimeStatus ? `${leftStatus} · ${runtimeStatus}` : leftStatus;
@@ -376,17 +411,18 @@ function buildStickyBottomRows(
     " ".repeat(gap) +
     statusBarGrey(right);
 
-  const b = inputBorderColor;
   const topBorder = `  ${b("╭" + "─".repeat(boxWidth) + "╮")}`;
-  const contentLine = `  ${b("│")} ${inputPromptColor(">")} ${displayText} ${b("│")}`;
   const botBorder = `  ${b("╰" + "─".repeat(boxWidth) + "╯")}`;
 
-  return [
+  const result = [
     fitToRow(topBorder),
-    fitToRow(contentLine),
+    ...contentRows.map(fitToRow),
     fitToRow(botBorder),
     fitToRow(statusLine),
   ];
+
+  currentStickyRows = result.length;
+  return result;
 }
 
 function writeStickyBottom(rows: string[]): void {
@@ -401,7 +437,7 @@ function writeStickyBottom(rows: string[]): void {
     lastStickyBottomScreenSize = screenSizeKey;
   }
 
-  const startRow = totalRows - STICKY_BOTTOM_ROWS + 1;
+  const startRow = totalRows - rows.length + 1;
   const writes: string[] = [];
   for (let index = 0; index < rows.length; index++) {
     if (lastStickyBottomRows?.[index] === rows[index]) {
@@ -429,7 +465,7 @@ function writeAutocompleteOverlay(rows: string[] | null): void {
     return;
   }
 
-  const startRow = Math.max(1, totalRows - STICKY_BOTTOM_ROWS - rows.length + 1);
+  const startRow = Math.max(1, totalRows - currentStickyRows - rows.length + 1);
   if (
     lastOverlayScreenSize !== screenSizeKey ||
     lastOverlayStartRow !== startRow ||
@@ -526,7 +562,7 @@ export function getRenderedMessageLines(
     }
     case "system": {
       const isElapsedSummary = /^(Worked|Thought|Studied|Read|Analyzed|Explored|Reviewed) for \d/.test(message.content);
-      const systemColor = isElapsedSummary ? chalk.hex("#959595") : chalk.white;
+      const systemColor = isElapsedSummary ? chalk.hex("#707070") : chalk.white;
       wrapLines(message.content, maxWidth).forEach((line) => {
         lines.push(`  ${systemColor(line)}`);
       });

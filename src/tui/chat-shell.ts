@@ -98,20 +98,20 @@ const PAST_TENSE: Record<string, string> = {
   Exploring: "Explored",
   Reviewing: "Reviewed",
 };
-const spinnerColor = chalk.hex("#7aa2f7");
+const spinnerColor = chalk.hex("#e82429");
 const SHIMMER_COLORS = [
-  chalk.hex("#3d5178"),
-  chalk.hex("#4e6a9b"),
-  chalk.hex("#5f7cb8"),
-  chalk.hex("#6c8fd8"),
-  chalk.hex("#7aa2f7"),
-  chalk.hex("#92b4ff"),
-  chalk.hex("#b0caff"),
-  chalk.hex("#92b4ff"),
-  chalk.hex("#7aa2f7"),
-  chalk.hex("#6c8fd8"),
-  chalk.hex("#5f7cb8"),
-  chalk.hex("#4e6a9b"),
+  chalk.hex("#6e1114"),
+  chalk.hex("#8c1618"),
+  chalk.hex("#ab1b1e"),
+  chalk.hex("#c92023"),
+  chalk.hex("#e82429"),
+  chalk.hex("#f25a5e"),
+  chalk.hex("#f78e90"),
+  chalk.hex("#f25a5e"),
+  chalk.hex("#e82429"),
+  chalk.hex("#c92023"),
+  chalk.hex("#ab1b1e"),
+  chalk.hex("#8c1618"),
 ];
 
 function buildShimmerText(text: string, frame: number): string {

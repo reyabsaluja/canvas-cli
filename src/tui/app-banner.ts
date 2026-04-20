@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { cpus, totalmem } from "node:os";
 import {
-  CANVAS_ASCII,
+  CANVAS_TEXT,
   C,
   MenuBox,
   getTermSize,
@@ -400,7 +400,7 @@ function colorizeCell(
       return palette.text(paddedPlain);
     }
     case "sectionHeader":
-      return palette.primaryBold(paddedPlain);
+      return C.pureWhiteBold(paddedPlain);
     case "desc":
       return palette.secondary(paddedPlain);
     case "dim":
@@ -420,12 +420,12 @@ function colorizeCmdCell(
   const palette = onMenuBox ? infoPalMenu : infoPalDefault;
   switch (style) {
     case "header":
-      return palette.primaryBold(paddedPlain);
+      return C.pureWhiteBold(paddedPlain);
     case "cmd": {
       const slashMatch = paddedPlain.match(/^(\/\S+)(\s+)(.*)/);
       if (slashMatch) {
         return (
-          palette.primary(slashMatch[1]!) +
+          C.pureWhite(slashMatch[1]!) +
           palette.fill(slashMatch[2]!) +
           palette.secondary(slashMatch[3]!)
         );
@@ -460,8 +460,8 @@ function renderCenteredAscii(
   termCols: number,
   buf: { push(line: string): void } = { push: (line) => console.log(line) }
 ): void {
-  const artLines = CANVAS_ASCII.split("\n").filter((line) => line.trim());
-  const artWidth = Math.max(...artLines.map((line) => line.length));
+  const textLines = CANVAS_TEXT;
+  const textWidth = Math.max(...textLines.map((l) => l.length));
 
   if (termCols < MIN_ART_WIDTH) {
     const simple = "  canvas";
@@ -470,9 +470,9 @@ function renderCenteredAscii(
     return;
   }
 
-  for (const line of artLines) {
-    const padding = Math.max(0, Math.floor((termCols - artWidth) / 2));
-    buf.push(" ".repeat(padding) + C.primary(line));
+  for (const line of textLines) {
+    const pad = Math.max(0, Math.floor((termCols - textWidth) / 2));
+    buf.push(" ".repeat(pad) + C.primary(line));
   }
 }
 
