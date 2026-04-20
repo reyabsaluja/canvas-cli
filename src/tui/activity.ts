@@ -17,20 +17,20 @@ const WORKING_VERBS = [
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 const toolBg = chalk.bgHex("#1e2030");
-const spinnerColor = chalk.hex("#dac894");
+const spinnerColor = chalk.hex("#7aa2f7");
 const SHIMMER_COLORS = [
-  chalk.hex("#6b5f47"),
-  chalk.hex("#8a7a5e"),
-  chalk.hex("#a99575"),
-  chalk.hex("#c8b08c"),
-  chalk.hex("#dac894"),
-  chalk.hex("#e8dbb0"),
-  chalk.hex("#f5efd0"),
-  chalk.hex("#e8dbb0"),
-  chalk.hex("#dac894"),
-  chalk.hex("#c8b08c"),
-  chalk.hex("#a99575"),
-  chalk.hex("#8a7a5e"),
+  chalk.hex("#3d5178"),
+  chalk.hex("#4e6a9b"),
+  chalk.hex("#5f7cb8"),
+  chalk.hex("#6c8fd8"),
+  chalk.hex("#7aa2f7"),
+  chalk.hex("#92b4ff"),
+  chalk.hex("#b0caff"),
+  chalk.hex("#92b4ff"),
+  chalk.hex("#7aa2f7"),
+  chalk.hex("#6c8fd8"),
+  chalk.hex("#5f7cb8"),
+  chalk.hex("#4e6a9b"),
 ];
 
 function buildShimmerText(text: string, frame: number): string {

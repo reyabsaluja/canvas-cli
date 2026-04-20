@@ -15,7 +15,11 @@ import type {
 import type { ShellOpenOption, ShellPinOption } from "./app-types.js";
 
 const userBubbleBg = chalk.bgHex("#3a445d");
-const inputBg = userBubbleBg;
+const userBoxBg = chalk.bgHex("#303030");
+const userBarColor = chalk.hex("#7aa2f7");
+const commandBg = chalk.bgHex("#2a2d35");
+const inputBorderColor = chalk.hex("#555555");
+const inputPromptColor = chalk.hex("#7aa2f7");
 const inputPlaceholderFg = chalk.hex("#8b95a8");
 const toolActionColor = chalk.hex("#e0af68").bold;
 const toolTargetGreen = chalk.hex("#9ece6a");
@@ -321,15 +325,10 @@ function buildStickyBottomRows(
   modelLabel: string
 ): string[] {
   const { cols } = getTermSize();
-  const footerIndent = "  ";
-  const contentWidth = Math.min(cols - 4, 100);
-  const footerWidth = Math.max(
-    24,
-    Math.min(Math.max(contentWidth, cols - 8), cols - 4)
-  );
-  const innerWidth = Math.max(1, footerWidth - 2);
+  const boxWidth = Math.max(24, cols - 4);
+  const promptPrefix = "> ";
+  const innerWidth = Math.max(1, boxWidth - 2 - promptPrefix.length);
   const cursor = chalk.white("█");
-  const emptyLine = " ".repeat(footerWidth);
   const fitToRow = (value: string) => {
     const visible = stripAnsi(value).length;
     if (visible > cols - 1) {
@@ -361,26 +360,31 @@ function buildStickyBottomRows(
   let left = runtimeStatus ? `${leftStatus} · ${runtimeStatus}` : leftStatus;
   let right = modelLabel;
   const rightVisible = stripAnsi(right).length;
-  if (stripAnsi(left).length + rightVisible + 1 > footerWidth) {
-    const maxLeft = Math.max(0, footerWidth - rightVisible - 1);
+  if (stripAnsi(left).length + rightVisible + 1 > boxWidth) {
+    const maxLeft = Math.max(0, boxWidth - rightVisible - 1);
     left =
       maxLeft > 3 ? left.slice(0, maxLeft - 3) + "..." : left.slice(0, maxLeft);
   }
   const leftStyled = statusBarGrey(left);
   const gap = Math.max(
     0,
-    footerWidth - stripAnsi(leftStyled).length - rightVisible
+    boxWidth - stripAnsi(leftStyled).length - rightVisible
   );
   const statusLine =
-    footerIndent +
+    "  " +
     leftStyled +
     " ".repeat(gap) +
     statusBarGrey(right);
 
+  const b = inputBorderColor;
+  const topBorder = `  ${b("╭" + "─".repeat(boxWidth) + "╮")}`;
+  const contentLine = `  ${b("│")} ${inputPromptColor(">")} ${displayText} ${b("│")}`;
+  const botBorder = `  ${b("╰" + "─".repeat(boxWidth) + "╯")}`;
+
   return [
-    fitToRow(`${footerIndent}${inputBg(emptyLine)}`),
-    fitToRow(`${footerIndent}${inputBg(` ${displayText} `)}`),
-    fitToRow(`${footerIndent}${inputBg(emptyLine)}`),
+    fitToRow(topBorder),
+    fitToRow(contentLine),
+    fitToRow(botBorder),
     fitToRow(statusLine),
   ];
 }
@@ -478,27 +482,29 @@ export function getRenderedMessageLines(
     case "user": {
       const trimmed = message.content.trim();
       if (trimmed.startsWith("/")) {
-        const rendered = wrapLines(trimmed, Math.max(12, maxWidth - 4)).map((line) =>
-          `  ${C.bold(line)}`
-        );
+        const cmdBarWidth = Math.max(24, cols - 4);
+        const cmdInnerWidth = Math.max(1, cmdBarWidth - 2);
+        const rendered = wrapLines(trimmed, Math.max(12, cmdInnerWidth)).map((line) => {
+          const visible = stripAnsi(line).length;
+          const pad = " ".repeat(Math.max(0, cmdInnerWidth - visible));
+          return `  ${commandBg(` ${chalk.white.bold(line)}${pad} `)}`;
+        });
         cache.set(cacheKey, ["", ...rendered]);
         return ["", ...rendered];
       }
 
-      const indent = "  ";
-      const bubbleWidth = getTranscriptBlockWidth(maxWidth, cols);
-      const innerWidth = Math.max(1, bubbleWidth - 2);
+      const bar = userBarColor("█");
+      const boxWidth = Math.max(24, cols - 5);
+      const innerWidth = Math.max(1, boxWidth - 2);
       const wrappedLines = wrapLines(message.content, innerWidth);
-      const emptyLine = " ".repeat(bubbleWidth);
       const padInner = (line: string) => {
         const visible = stripAnsi(line).length;
         return line + " ".repeat(Math.max(0, innerWidth - visible));
       };
-      const rendered: string[] = [`${indent}${userBubbleBg(emptyLine)}`];
+      const rendered: string[] = [];
       for (const line of wrappedLines) {
-        rendered.push(`${indent}${userBubbleBg(` ${padInner(line)} `)}`);
+        rendered.push(`  ${bar}${userBoxBg(` ${chalk.white(padInner(line))} `)}`);
       }
-      rendered.push(`${indent}${userBubbleBg(emptyLine)}`);
       cache.set(cacheKey, ["", ...rendered]);
       return ["", ...rendered];
     }

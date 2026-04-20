@@ -40,6 +40,9 @@ export function renderGlobalBanner(
       ["/manage-courses", "add, remove, or rename the courses shown in canvas-cli"],
       ["/recent", "reopen a recent course or workspace session"],
       ["/open", "jump directly to a course or recent workspace by name"],
+      ["/radar", "show recent announcements and discussions across courses"],
+      ["/clear", "clear this chat and reset the current context"],
+      ["/quit", "exit canvas-cli"],
       ["/help", "full command list for the current scope"],
     ],
     cols,
@@ -160,15 +163,11 @@ function renderInfoBox(
     pushCommand(command);
   }
 
-  const statusRow = commandStarts.get("/open") ?? rightRows.length;
+  const openRow = commandStarts.get("/open") ?? rightRows.length;
   const systemRow = Math.max(
     leftRows.length,
     (commandStarts.get("/recent") ?? rightRows.length) - 1
   ) + 1;
-  const toolsRow = Math.max(
-    leftRows.length,
-    (commandStarts.get("/help") ?? rightRows.length) - 1
-  );
 
   pushLeft(formatInfoRow("school", school), "kvWarm");
   pushLeft(formatInfoRow("model", aiModelText), "kvWarm");
@@ -177,12 +176,12 @@ function renderInfoBox(
   pushLeft(formatInfoRow("workspaces", workspaceCount), "kvMuted");
   padLeftToRow(systemRow);
   pushLeft(formatInfoRow("system", systemSummary), "kvMuted");
-  padLeftToRow(toolsRow);
+  padLeftToRow(openRow);
   pushLeft(toolAgentSummary, "dim");
 
   if (displayCourses.length > 0) {
     pushLeft("", "empty");
-    padLeftToRow(statusRow);
+    padLeftToRow(openRow);
     pushLeft("Courses", "sectionHeader");
     const courseLines = wrapCommaList(
       displayCourses.slice(0, 5).map((course) => course.name || course.courseCode),
@@ -200,7 +199,7 @@ function renderInfoBox(
     const recentRow = Math.max(leftRows.length, rightRows.length - 3);
     padLeftToRow(recentRow);
     pushLeft("Recent Workspaces", "sectionHeader");
-    for (const workspace of recent) {
+    for (const workspace of recent.slice(0, 3)) {
       const name = truncPlain(workspace.name, leftW - 2);
       pushLeft(name, name ? "desc" : "empty");
     }
