@@ -101,13 +101,13 @@ export async function pickAssignmentScope(
   }
 
   const selected = await showPicker({
-    title: course.courseCode || course.name,
+    title: course.name,
     subtitle: `${assignments.length} assignments`,
     items: assignments.map((assignment) => ({
       label: assignment.name,
-      sublabel:
-        formatDueCompact(assignment.dueAt) +
-        (assignment.submitted ? " · submitted" : ""),
+      sublabel: formatDueCompact(assignment.dueAt),
+      description: assignment.submitted ? "submitted" : (assignment.dueAt ? formatDueCompact(assignment.dueAt) : "no due date"),
+      rightLabel: assignment.submitted ? "✓" : "",
       value: String(assignment.id),
       dimmed: assignment.submitted,
     })),
