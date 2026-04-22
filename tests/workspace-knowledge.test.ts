@@ -280,6 +280,125 @@ test("searchWorkspaceKnowledge keeps workspace evidence ahead of near-tie course
   });
 });
 
+test("searchWorkspaceKnowledge ranks specific course sections ahead of whole-document matches", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const workspace = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "assignments"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "assignments", "42.txt"),
+      [
+        "# Lab 4",
+        "",
+        "Due: 2026-04-18T23:59:00.000Z",
+        "",
+        "## Description",
+        "",
+        "Implement the datapath and explain the waveform.",
+        "",
+        "## Submission format",
+        "",
+        "Upload report.pdf and starter.zip together in Canvas.",
+        "",
+        "## Rubric",
+        "",
+        "### Overflow analysis",
+        "",
+        "Use signed overflow detection when you explain the ALU behavior.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache = createCourseCache(coursePath);
+    cache.assignments = [
+      {
+        id: 42,
+        name: "Lab 4",
+        dueAt: "2026-04-18T23:59:00.000Z",
+        unlockAt: null,
+        lockAt: null,
+        pointsPossible: 100,
+        gradingType: "points",
+        submissionTypes: ["online_upload"],
+        htmlUrl: "https://canvas.example/courses/17/assignments/42",
+        hasDescription: true,
+        descriptionLinkCount: 0,
+      },
+    ];
+
+    const matches = await searchWorkspaceKnowledge(
+      workspace,
+      cache,
+      "report pdf starter zip",
+      3
+    );
+
+    assert.equal(matches[0]?.artifact.scope, "course");
+    assert.equal(matches[0]?.artifact.kind, "assignment");
+    assert.equal(matches[0]?.artifact.title, "Lab 4");
+    assert.match(matches[0]?.header ?? "", /Submission format/);
+    assert.match(matches[0]?.preview ?? "", /starter\.zip together/);
+  });
+});
+
+test("searchWorkspaceKnowledge prefers exact section headings over noisy longer sections", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const workspace = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "assignments"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "assignments", "42.txt"),
+      [
+        "# Lab 4",
+        "",
+        "## Description",
+        "",
+        Array.from({ length: 40 }, () => "submission format guidance").join(" "),
+        "",
+        "## Submission format",
+        "",
+        "Upload report.pdf and starter.zip together in Canvas.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache = createCourseCache(coursePath);
+    cache.assignments = [
+      {
+        id: 42,
+        name: "Lab 4",
+        dueAt: "2026-04-18T23:59:00.000Z",
+        unlockAt: null,
+        lockAt: null,
+        pointsPossible: 100,
+        gradingType: "points",
+        submissionTypes: ["online_upload"],
+        htmlUrl: "https://canvas.example/courses/17/assignments/42",
+        hasDescription: true,
+        descriptionLinkCount: 0,
+      },
+    ];
+
+    const matches = await searchWorkspaceKnowledge(
+      workspace,
+      cache,
+      "submission format",
+      3
+    );
+
+    assert.equal(matches[0]?.artifact.scope, "course");
+    assert.equal(matches[0]?.artifact.kind, "assignment");
+    assert.match(matches[0]?.header ?? "", /Submission format/);
+    assert.match(matches[0]?.preview ?? "", /report\.pdf and starter\.zip/i);
+  });
+});
+
 test("registerDownloadedCourseAttachment makes new downloads visible to workspace chat", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();

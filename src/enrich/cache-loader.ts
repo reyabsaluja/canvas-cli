@@ -8,6 +8,7 @@ import type {
   PageIndexEntry,
   AnnouncementIndexEntry,
   DiscussionIndexEntry,
+  ExternalLinkIndexEntry,
   SyllabusCandidate,
   DownloadedAttachmentEntry,
   LectureIndexEntry,
@@ -26,6 +27,7 @@ export interface CourseCache {
   pages: PageIndexEntry[];
   announcements?: AnnouncementIndexEntry[];
   discussions?: DiscussionIndexEntry[];
+  externalLinks?: ExternalLinkIndexEntry[];
   syllabusCandidates: SyllabusCandidate[];
   attachments: DownloadedAttachmentEntry[];
   lectures: LectureIndexEntry[];
@@ -57,6 +59,7 @@ export async function loadCourseCache(
       pages,
       announcements,
       discussions,
+      externalLinks,
       syllabusCandidates,
       attachments,
       lectures,
@@ -69,6 +72,7 @@ export async function loadCourseCache(
         readJsonSafe<PageIndexEntry[]>(path.join(coursePath, "pages.json"), []),
         readJsonSafe<AnnouncementIndexEntry[]>(path.join(coursePath, "announcements.json"), []),
         readJsonSafe<DiscussionIndexEntry[]>(path.join(coursePath, "discussions.json"), []),
+        readJsonSafe<ExternalLinkIndexEntry[]>(path.join(coursePath, "external-links.json"), []),
         readJsonSafe<SyllabusCandidate[]>(path.join(coursePath, "syllabus-candidates.json"), []),
         readJsonSafe<DownloadedAttachmentEntry[]>(path.join(coursePath, "attachments.json"), []),
         readJsonSafe<LectureIndexEntry[]>(path.join(coursePath, "lectures.json"), []),
@@ -84,6 +88,7 @@ export async function loadCourseCache(
       pages,
       announcements,
       discussions,
+      externalLinks,
       syllabusCandidates,
       attachments,
       lectures,

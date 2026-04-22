@@ -70,6 +70,7 @@ export interface ShellContext {
     bulletPoints?: string[];
     sources?: Array<{ title: string; kind: string; section?: string | null }>;
     confidence?: string;
+    verificationNote?: string | null;
   }>;
 }
 

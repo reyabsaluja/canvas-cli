@@ -1,5 +1,6 @@
 import type { Observation } from "../../agent/observation.js";
 import type { RunState } from "../../agent/run-state.js";
+import { questionNeedsMultipleSources } from "../../agent/question-intent.js";
 import { cleanInlineText } from "./shared.js";
 import type {
   ChatAgentConversationEntry,
@@ -156,7 +157,7 @@ function buildToolRuntimeMemory(
     lines.push(parts.join(" "));
   }
 
-  const nextStep = buildNextToolStep(selected);
+  const nextStep = buildNextToolStep(question, selected);
   if (nextStep) {
     lines.push(nextStep);
   }
@@ -192,11 +193,15 @@ function selectToolMemoryObservations(
   ).map((observation) =>
     pruneSearchBreadcrumbArtifacts(observation, excludedBreadcrumbArtifactIds)
   );
-  if (selected.length === 0 && searchBreadcrumbs.length === 0) {
+  const recentFailures = selectRecentFailedToolObservations(question, observations);
+  if (
+    selected.length === 0 &&
+    searchBreadcrumbs.length === 0 &&
+    recentFailures.length === 0
+  ) {
     return [];
   }
 
-  const recentFailures = selectRecentFailedToolObservations(question, observations);
   const combined = [...selected];
   for (const observation of searchBreadcrumbs) {
     if (!combined.includes(observation)) {
@@ -211,14 +216,16 @@ function selectToolMemoryObservations(
   return combined;
 }
 
-function buildNextToolStep(observations: Observation[]): string | null {
-  const grounded = observations.some(
-    (observation) => observation.status === "ok" && observation.content?.trim()
+function buildNextToolStep(
+  question: string,
+  observations: Observation[]
+): string | null {
+  const groundedArtifactIds = new Set(
+    observations
+      .filter((observation) => observation.status === "ok" && observation.content?.trim())
+      .flatMap((observation) => observation.artifacts)
+      .map((artifact) => artifact.artifactId)
   );
-  if (grounded) {
-    return null;
-  }
-
   const candidateTitles = [
     ...new Set(
       observations
@@ -234,8 +241,33 @@ function buildNextToolStep(observations: Observation[]): string | null {
     ),
   ].slice(0, MAX_NEXT_STEP_SOURCES);
 
+  const needsMultipleSources = questionNeedsMultipleSources(question);
+  if (groundedArtifactIds.size > 0) {
+    if (!needsMultipleSources || groundedArtifactIds.size > 1) {
+      return null;
+    }
+    if (candidateTitles.length === 0) {
+      return buildFailureRecoveryNextStep(observations, {
+        needsMultipleSources,
+        hasGroundedRead: true,
+      });
+    }
+
+    const candidates =
+      candidateTitles.length === 1
+        ? `"${candidateTitles[0]}"`
+        : candidateTitles
+            .map((title) => `"${title}"`)
+            .join(", ");
+
+    return `Unresolved next step: this question needs a comparison across sources, and you only have one grounded read so far. Reuse the breadcrumb and call read_file on ${candidates} before concluding or launching another search.`;
+  }
+
   if (candidateTitles.length === 0) {
-    return null;
+    return buildFailureRecoveryNextStep(observations, {
+      needsMultipleSources,
+      hasGroundedRead: false,
+    });
   }
 
   const candidates =
@@ -246,6 +278,42 @@ function buildNextToolStep(observations: Observation[]): string | null {
           .join(", ");
 
   return `Unresolved next step: you already found candidate sources but do not have grounded text yet. Reuse those breadcrumbs and call read_file on ${candidates} before running another search or answering from snippets.`;
+}
+
+function buildFailureRecoveryNextStep(
+  observations: Observation[],
+  options: {
+    needsMultipleSources: boolean;
+    hasGroundedRead: boolean;
+  }
+): string | null {
+  const latestFailure = [...observations]
+    .reverse()
+    .find(
+      (observation) =>
+        observation.status !== "ok" &&
+        (observation.tool === "read_file" ||
+          observation.tool === "download_course_file" ||
+          observation.tool === "search_workspace" ||
+          observation.tool === "search_course")
+    );
+  if (!latestFailure) {
+    return null;
+  }
+
+  const comparisonSuffix =
+    options.needsMultipleSources && options.hasGroundedRead
+      ? " before concluding the comparison."
+      : ".";
+
+  if (
+    latestFailure.tool === "read_file" ||
+    latestFailure.tool === "download_course_file"
+  ) {
+    return `Unresolved next step: the last read failed. Change tactics instead of retrying the same target. Use list_files to find the exact available filename or title, or run a more specific search to relocate the right source${comparisonSuffix}`;
+  }
+
+  return `Unresolved next step: the last search came up empty. Change tactics instead of repeating the same query. Try a more specific filename or title search, or use list_files to inspect what is actually available${comparisonSuffix}`;
 }
 
 function selectRecentFailedToolObservations(

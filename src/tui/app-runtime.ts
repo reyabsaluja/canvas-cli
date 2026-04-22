@@ -232,6 +232,7 @@ export async function createShellContext(
         scope,
         title: course.name,
         subtitle: course.courseCode,
+        description: course.publicDescription ?? undefined,
         scopeLabel: `Course: ${course.name}`,
         statusLabel: undefined,
         placeholder: "Ask about this course, or use /assignments",
@@ -416,6 +417,7 @@ async function loadOrCreateWorkspaceShell(
         bulletPoints: answer.bulletPoints,
         sources: answer.sources,
         confidence: answer.confidence,
+        verificationNote: answer.verificationNote,
       };
     },
   };

@@ -14,6 +14,7 @@ export interface CanvasCourse {
     start_at: string | null;
     end_at: string | null;
   };
+  public_description?: string | null;
   enrollments?: Array<{
     enrollment_state: string;
     type: string;

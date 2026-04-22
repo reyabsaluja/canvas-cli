@@ -22,6 +22,7 @@ import { identifySyllabusCandidates } from "./syllabus-heuristics.js";
 import { selectAttachments } from "./attachment-selection.js";
 import { downloadSelectedAttachments } from "./attachment-download.js";
 import { discoverLectures } from "./lecture-discovery.js";
+import { captureExternalCourseLinks } from "./external-link-capture.js";
 import { writeIngestionArtifacts } from "./storage.js";
 import path from "node:path";
 
@@ -104,6 +105,20 @@ export async function ingestCourse(
     [...heuristicAttachments, ...moduleAttachments, ...descriptionAttachments]
   );
 
+  const capturedExternalLinks = await captureExternalCourseLinks({
+    courseId: course.id,
+    courseHtmlUrl: courseMeta.htmlUrl,
+    modules,
+    assignments: raw.assignments,
+    frontPageBody: raw.frontPageBody,
+    fetchedPages: raw.fetchedPages,
+    syllabusBody: courseMeta.syllabusBody,
+    announcements: raw.announcements,
+    discussionThreads: raw.discussionThreads,
+    config,
+  });
+  const externalLinks = capturedExternalLinks.map((capture) => capture.entry);
+
   const allSelected = [
     ...heuristicAttachments,
     ...moduleAttachments,
@@ -164,6 +179,7 @@ export async function ingestCourse(
     pages,
     announcements,
     discussions,
+    externalLinks,
     syllabusCandidates,
     attachmentResults,
     lectures,
@@ -172,7 +188,8 @@ export async function ingestCourse(
     raw.frontPageBody,
     raw.fetchedPages,
     raw.announcements,
-    raw.discussionThreads
+    raw.discussionThreads,
+    capturedExternalLinks
   );
 
   return {
@@ -183,6 +200,7 @@ export async function ingestCourse(
     pages,
     announcements,
     discussions,
+    externalLinks,
     syllabusCandidates,
     attachments: attachmentResults,
     lectures,

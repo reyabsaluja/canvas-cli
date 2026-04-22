@@ -17,6 +17,7 @@ export function normalizeCourse(raw: CanvasCourse): Course {
     name: raw.name ?? "",
     courseCode: raw.course_code ?? "",
     termName: raw.term?.name ?? null,
+    publicDescription: raw.public_description?.trim() || null,
     isCurrent: isCourseRelevant(raw),
   };
 }

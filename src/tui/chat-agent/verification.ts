@@ -1,4 +1,5 @@
 import type { Observation } from "../../agent/observation.js";
+import { questionNeedsMultipleSources } from "../../agent/question-intent.js";
 import {
   isGroundedContentObservation,
   scoreObservationRelevance,
@@ -244,9 +245,24 @@ export function shouldRecoverFromToolLoop(
 }
 
 export function shouldContinueToolLoopAfterGateRead(
-  observation: Observation
+  question: string,
+  observation: Observation,
+  allObservations: Observation[] = [observation]
 ): boolean {
-  return !isGroundedContentObservation(observation);
+  if (!isGroundedContentObservation(observation)) {
+    return true;
+  }
+
+  if (!questionNeedsMultipleSources(question)) {
+    return false;
+  }
+
+  const relevantGrounded = selectRelevantObservations(
+    allObservations.filter((entry) => isGroundedContentObservation(entry)),
+    question,
+    2
+  );
+  return relevantGrounded.length < 2;
 }
 
 export function selectArtifactSupportObservations(
@@ -270,9 +286,6 @@ export function finalizeAnswerText(answer: string, missing: string[]): string {
   const trimmed = answer.trim();
   if (!trimmed) {
     return "I wasn't able to find a clear answer.";
-  }
-  if (missing.includes("source")) {
-    return `${trimmed}\n\nI may be missing an exact source for part of this answer, so treat it as tentative.`;
   }
   return trimmed;
 }

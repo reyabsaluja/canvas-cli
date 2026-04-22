@@ -114,6 +114,93 @@ test("workspace retrieval uses shared artifact ranking and metadata", async () =
   });
 });
 
+test("workspace retrieval prefers exact section headings over noisier repeated body mentions", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const workspacePath = path.join(tempDir, "workspace");
+    await fs.mkdir(path.join(workspacePath, "extracted", "docs"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(workspacePath, "assignment.md"),
+      [
+        "# Assignment",
+        "",
+        "## Description",
+        "",
+        Array.from({ length: 40 }, () => "due date reminder").join(" "),
+        "",
+        "## Due date",
+        "",
+        "The report is due on April 10 at 11:59 PM.",
+      ].join("\n"),
+      "utf-8"
+    );
+    await fs.writeFile(
+      path.join(workspacePath, "plan.md"),
+      "# Plan\nCapture the waveform before writing the analysis.\n",
+      "utf-8"
+    );
+    await fs.writeFile(
+      path.join(workspacePath, "notes.md"),
+      "# Notes\nWatch for repeated stall cycles.\n",
+      "utf-8"
+    );
+    await fs.writeFile(
+      path.join(workspacePath, "workup.json"),
+      JSON.stringify(
+        {
+          overview: "Use the extracted reference and assignment brief together.",
+          deliverables: ["Waveform screenshot", "Short analysis"],
+        },
+        null,
+        2
+      ) + "\n",
+      "utf-8"
+    );
+    await fs.writeFile(
+      path.join(workspacePath, "extracted", "docs", "reference.txt"),
+      "The waveform must show stall cycles around the branch hazard before the pipeline recovers.\n",
+      "utf-8"
+    );
+
+    const workspace: LoadedWorkspace = {
+      path: workspacePath,
+      sessionSlug: "lab-4",
+      assignmentId: 42,
+      assignmentName: "Lab 4",
+      courseId: 17,
+      courseName: "ECE243",
+      courseCode: "ECE243H1",
+      preparedAt: "2026-04-02T09:00:00.000Z",
+      workspaceState: "ready",
+      assignmentMd: await fs.readFile(
+        path.join(workspacePath, "assignment.md"),
+        "utf-8"
+      ),
+      planMd: await fs.readFile(path.join(workspacePath, "plan.md"), "utf-8"),
+      notesMd: await fs.readFile(path.join(workspacePath, "notes.md"), "utf-8"),
+      workupJson: JSON.parse(
+        await fs.readFile(path.join(workspacePath, "workup.json"), "utf-8")
+      ) as Record<string, unknown>,
+      extractedFiles: [
+        {
+          name: "docs/reference.txt",
+          relativePath: path.join("extracted", "docs", "reference.txt"),
+        },
+      ],
+      extractedFileCache: new Map<string, string>(),
+    };
+
+    const retrievalContext = await buildWorkspaceRetrievalContext(workspace);
+    const relevant = retrieveRelevant("due date", retrievalContext, 3);
+
+    assert.equal(relevant[0]?.source, "assignment.md");
+    assert.equal(relevant[0]?.section, "Due date");
+    assert.match(relevant[0]?.text ?? "", /April 10 at 11:59 PM/);
+  });
+});
+
 test("workspace answer parsing resolves source ids back to canonical sources", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
@@ -174,7 +261,33 @@ test("workspace answers preserve and render section-level source labels", () => 
       excerpt: "Include a waveform screenshot and a short analysis.",
     },
   ]);
+  assert.equal(answer.verificationNote, null);
 
   const rendered = stripAnsi(renderWorkspaceAnswer(answer));
   assert.match(rendered, /assignment\.md — Requirements \[assignment\]/);
+});
+
+test("workspace answer rendering shows verification notes separately from the answer body", () => {
+  const rendered = stripAnsi(
+    renderWorkspaceAnswer({
+      question: "What does the branch hazard section mention?",
+      answer: "It mentions the branch hazard section.",
+      bulletPoints: [],
+      sources: [
+        {
+          title: "docs/reference.txt",
+          kind: "extracted",
+          section: "Branch hazard walkthrough",
+          excerpt: "The waveform must show stall cycles around the branch hazard.",
+        },
+      ],
+      confidence: "medium",
+      verificationNote:
+        "This answer is based on matched search evidence, not a full document read. Use the cited source for exact wording.",
+    })
+  );
+
+  assert.match(rendered, /Grounding/);
+  assert.match(rendered, /matched search evidence, not a full document read/i);
+  assert.match(rendered, /docs\/reference\.txt — Branch hazard walkthrough \[extracted\]/);
 });

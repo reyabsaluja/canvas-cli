@@ -8,6 +8,7 @@ import {
   getExtractedAnnouncementPath,
   getExtractedAttachmentPath,
   getExtractedDiscussionPath,
+  getExtractedExternalLinkPath,
   getExtractedFrontPagePath,
   getExtractedPagePath,
   getExtractedSyllabusPath,
@@ -22,6 +23,7 @@ export type ArtifactKind =
   | "page"
   | "announcement"
   | "discussion"
+  | "external_link"
   | "attachment"
   | "syllabus"
   | "front_page"
@@ -122,6 +124,11 @@ export async function getCourseArtifactSetKey(
         getExtractedDiscussionPath(cache.coursePath, discussion.id)
       )
     ),
+    ...(cache.externalLinks ?? []).map((externalLink) =>
+      getFileSignature(
+        getExtractedExternalLinkPath(cache.coursePath, externalLink.id)
+      )
+    ),
     ...cache.attachments.map((attachment) =>
       getFileSignature(
         getExtractedAttachmentPath(cache.coursePath, attachment.localPath)
@@ -194,6 +201,15 @@ export async function getCourseArtifactSetKey(
         participantCount: discussion.participantCount,
         messageFileLinkCount: discussion.messageFileLinkCount,
         replyFileLinkCount: discussion.replyFileLinkCount,
+      })),
+      externalLinks: (cache.externalLinks ?? []).map((externalLink) => ({
+        id: externalLink.id,
+        title: externalLink.title,
+        url: externalLink.url,
+        resolvedUrl: externalLink.resolvedUrl,
+        sourceCount: externalLink.sourceCount,
+        contentType: externalLink.contentType,
+        contentStatus: externalLink.contentStatus,
       })),
       attachments: cache.attachments.map((attachment) => ({
         canvasFileId: attachment.canvasFileId,
@@ -370,7 +386,8 @@ export function searchArtifactSections(
     limit?: number;
   }
 ): RankedArtifactSection[] {
-  const queryTokens = tokenize(query);
+  const normalizedQuery = normalizeText(query);
+  const queryTokens = tokenize(normalizedQuery);
   if (queryTokens.length === 0) return [];
 
   const allowedKinds = options?.kinds ? new Set(options.kinds) : null;
@@ -400,9 +417,31 @@ export function searchArtifactSections(
   const scored = sections
     .map((section) => {
       const tokenSet = new Set(section.tokens);
+      const sectionLabel = normalizeText(section.section);
+      const sectionLabelTokens = tokenize(section.section);
+      const sourceLabel = normalizeText(section.source);
+      const sourceLabelTokens = tokenize(section.source);
+      const hasSpecificSectionLabel = isSpecificSectionLabel(section.section);
       let score = 0;
+      let matchedSectionLabelTokens = 0;
+      let matchedSourceLabelTokens = 0;
+
+      if (hasSpecificSectionLabel && sectionLabel.includes(normalizedQuery)) {
+        score += 14;
+      }
+      if (sourceLabel.includes(normalizedQuery)) {
+        score += 6;
+      }
 
       for (const token of queryTokens) {
+        if (hasSpecificSectionLabel && sectionLabelTokens.includes(token)) {
+          score += 4;
+          matchedSectionLabelTokens += 1;
+        }
+        if (sourceLabelTokens.includes(token)) {
+          score += 2;
+          matchedSourceLabelTokens += 1;
+        }
         if (!tokenSet.has(token)) continue;
 
         const termFrequency = section.tokens.filter(
@@ -419,6 +458,16 @@ export function searchArtifactSections(
           ((termFrequency * 2.5) / (termFrequency + 1.5 * normalization));
       }
 
+      if (
+        hasSpecificSectionLabel &&
+        matchedSectionLabelTokens === queryTokens.length
+      ) {
+        score += 8;
+      }
+      if (matchedSourceLabelTokens === queryTokens.length) {
+        score += 4;
+      }
+
       score *= section.scoreBoost;
       return { section, score };
     })
@@ -426,6 +475,9 @@ export function searchArtifactSections(
 
   scored.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
+    if (a.section.text.length !== b.section.text.length) {
+      return a.section.text.length - b.section.text.length;
+    }
     if (a.section.source !== b.section.source) {
       return a.section.source.localeCompare(b.section.source);
     }
@@ -718,6 +770,42 @@ async function addCourseArtifacts(
     );
   }
 
+  for (const externalLink of cache.externalLinks ?? []) {
+    const externalLinkPath = getExtractedExternalLinkPath(
+      cache.coursePath,
+      externalLink.id
+    );
+    await registerCourseTextArtifact(
+      {
+        id: `course:external_link:${externalLink.id}`,
+        kind: "external_link",
+        title: externalLink.title,
+        source: externalLink.title,
+        location: externalLink.resolvedUrl ?? externalLink.url,
+        fallbackText: [
+          externalLink.url,
+          externalLink.resolvedUrl ?? "",
+          ...externalLink.sources,
+        ]
+          .filter((value) => value.length > 0)
+          .join(" "),
+        contentPath: externalLinkPath,
+        scoreBoost: 1.02,
+        metadata: {
+          url: externalLink.url,
+          resolvedUrl: externalLink.resolvedUrl,
+          sourceCount: externalLink.sourceCount,
+          contentStatus: externalLink.contentStatus,
+        },
+        skipIfMissingContent: true,
+      },
+      registerArtifact,
+      registerSection,
+      contentCache,
+      loaders
+    );
+  }
+
   for (const attachment of cache.attachments) {
     const extractedPath = getExtractedAttachmentPath(
       cache.coursePath,
@@ -914,14 +1002,14 @@ async function registerCourseTextArtifact(
   contentCache.set(artifact.id, content);
   loaders.set(artifact.id, loader);
 
-  registerSection(
-    createSectionFromText(
-      artifact,
-      content ? "Full text" : "Summary",
-      body,
-      artifact.scoreBoost
-    )
-  );
+  for (const section of buildCourseTextSections(
+    artifact,
+    body,
+    content ? "Full text" : "Summary",
+    artifact.scoreBoost
+  )) {
+    registerSection(section);
+  }
 }
 
 function registerWorkspaceMarkdownArtifact(
@@ -1154,6 +1242,129 @@ function splitMarkdownIntoSections(
   return sections;
 }
 
+function buildCourseTextSections(
+  artifact: ArtifactRecord,
+  text: string,
+  fallbackSection: string,
+  scoreBoost: number
+): ArtifactSection[] {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    return [];
+  }
+
+  const markdownSections = splitMarkdownIntoSections(artifact, trimmed, scoreBoost);
+  if (markdownSections.length > 1) {
+    return expandLongSections(
+      normalizeRedundantCourseSectionLabels(
+        artifact,
+        markdownSections,
+        fallbackSection,
+        scoreBoost
+      ),
+      scoreBoost
+    );
+  }
+
+  if (markdownSections.length === 1) {
+    const [onlySection] = normalizeRedundantCourseSectionLabels(
+      artifact,
+      markdownSections,
+      fallbackSection,
+      scoreBoost
+    );
+    if (onlySection && onlySection.section !== "Top") {
+      return expandLongSections([onlySection], scoreBoost);
+    }
+  }
+
+  if (trimmed.length > 3000) {
+    return splitByParagraphs(trimmed, 2500).map((part, index) =>
+      createSectionFromText(
+        artifact,
+        index === 0 ? fallbackSection : `${fallbackSection} (Part ${index + 1})`,
+        part,
+        scoreBoost
+      )
+    );
+  }
+
+  return [createSectionFromText(artifact, fallbackSection, trimmed, scoreBoost)];
+}
+
+function normalizeRedundantCourseSectionLabels(
+  artifact: ArtifactRecord,
+  sections: ArtifactSection[],
+  fallbackSection: string,
+  scoreBoost: number
+): ArtifactSection[] {
+  const normalizedTitle = normalizeText(artifact.title);
+  return sections.map((section) => {
+    if (normalizeText(section.section) !== normalizedTitle) {
+      return section;
+    }
+    return createSectionFromText(
+      artifact,
+      fallbackSection,
+      section.text,
+      scoreBoost
+    );
+  });
+}
+
+function expandLongSections(
+  sections: ArtifactSection[],
+  scoreBoost: number
+): ArtifactSection[] {
+  const expanded: ArtifactSection[] = [];
+
+  for (const section of sections) {
+    if (section.text.length <= 3000) {
+      expanded.push(section);
+      continue;
+    }
+
+    const parts = splitByParagraphs(section.text, 2500);
+    if (parts.length <= 1) {
+      expanded.push(section);
+      continue;
+    }
+
+    for (let index = 0; index < parts.length; index += 1) {
+      expanded.push(
+        createSectionFromText(
+          {
+            ...sectionToArtifact(section),
+            scoreBoost,
+          },
+          `${section.section} (Part ${index + 1})`,
+          parts[index] ?? "",
+          scoreBoost
+        )
+      );
+    }
+  }
+
+  return expanded;
+}
+
+function sectionToArtifact(section: ArtifactSection): ArtifactRecord {
+  return {
+    id: section.artifactId,
+    scope: section.scope,
+    kind: section.kind,
+    title: section.source,
+    source: section.source,
+    location: section.source,
+    excerpt: section.excerpt,
+    searchText: normalizeText(section.text),
+    titleTokens: tokenize(section.source),
+    bodyTokens: section.tokens,
+    metadata: {},
+    scoreBoost: section.scoreBoost,
+  };
+}
+
 function splitByParagraphs(text: string, maxChunkLength: number): string[] {
   const paragraphs = text.split(/\n\n+/);
   const chunks: string[] = [];
@@ -1200,6 +1411,11 @@ function buildExcerpt(text: string): string {
 
 function normalizeText(value: string): string {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function isSpecificSectionLabel(value: string): boolean {
+  const normalized = normalizeText(value);
+  return normalized.length > 0 && normalized !== "full text" && normalized !== "top";
 }
 
 function tokenize(value: string): string[] {

@@ -7,6 +7,7 @@ export interface WorkspaceAnswer {
   bulletPoints: string[];
   sources: AnswerSource[];
   confidence: "high" | "medium" | "low";
+  verificationNote?: string | null;
 }
 
 export interface AnswerSource {

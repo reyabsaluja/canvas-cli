@@ -34,6 +34,7 @@ export interface ChatMessage {
   content: string;
   sources?: Array<{ title: string; kind: string; section?: string | null }>;
   confidence?: string;
+  verificationNote?: string | null;
   bulletPoints?: string[];
   toolAction?: string;
   toolTarget?: string;
@@ -86,6 +87,7 @@ export interface ScopeRuntime {
   scope: AppScope;
   title: string;
   subtitle?: string;
+  description?: string;
   scopeLabel: string;
   statusLabel?: string;
   placeholder?: string;

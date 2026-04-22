@@ -198,7 +198,54 @@ test("buildToolPromptMessages keeps relevant search breadcrumbs alongside ground
   assert.match(latestMessage, /docs\/reference\.txt/);
   assert.match(latestMessage, /docs\/walkthrough\.txt/);
   assert.doesNotMatch(latestMessage, /docs\/resistor-table\.txt/);
-  assert.doesNotMatch(latestMessage, /Unresolved next step/i);
+  assert.match(latestMessage, /Unresolved next step:/i);
+  assert.match(latestMessage, /comparison across sources/i);
+  assert.match(latestMessage, /read_file/i);
+});
+
+test("buildToolPromptMessages does not force a second read for ordinary single-source questions", () => {
+  const promptMessages = buildToolPromptMessages(
+    [],
+    "Explain the branch hazard requirement in detail.",
+    {
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read docs/reference.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-1",
+              title: "docs/reference.txt",
+              kind: "extracted",
+              excerpt: "The waveform must show stall cycles around the branch hazard.",
+            },
+          ],
+          content: "The waveform must show stall cycles around the branch hazard.",
+        },
+        {
+          tool: "search_workspace",
+          status: "ok",
+          summary: 'Found 1 relevant workspace match for "branch hazard walkthrough".',
+          artifacts: [
+            {
+              artifactId: "artifact-2",
+              title: "docs/walkthrough.txt",
+              kind: "extracted",
+              excerpt: "The walkthrough explains each branch hazard stall step-by-step.",
+            },
+          ],
+        },
+      ],
+      readArtifactIds: ["artifact-1"],
+      stepCount: 2,
+    }
+  );
+
+  const latestMessage = promptMessages.at(-1)?.content ?? "";
+  assert.match(latestMessage, /docs\/reference\.txt/);
+  assert.match(latestMessage, /docs\/walkthrough\.txt/);
+  assert.doesNotMatch(latestMessage, /Unresolved next step:/i);
 });
 
 test("buildToolPromptMessages prefers viable breadcrumbs over already-failed artifacts", () => {
@@ -303,6 +350,60 @@ test("buildToolPromptMessages turns search breadcrumbs into an explicit next ste
   assert.match(latestMessage, /read_file/i);
   assert.match(latestMessage, /docs\/walkthrough\.txt/);
   assert.match(latestMessage, /before running another search or answering from snippets/i);
+});
+
+test("buildToolPromptMessages turns failed reads into explicit recovery guidance", () => {
+  const promptMessages = buildToolPromptMessages(
+    [],
+    "Explain the branch hazard walkthrough in detail.",
+    {
+      observations: [
+        {
+          tool: "read_file",
+          status: "not_found",
+          summary:
+            'File "branch-hazard-walkthrough.pdf" not found. Use list_files to see available files.',
+          artifacts: [],
+        },
+      ],
+      readArtifactIds: [],
+      stepCount: 1,
+    }
+  );
+
+  const latestMessage = promptMessages.at(-1)?.content ?? "";
+  assert.match(latestMessage, /Unresolved next step:/i);
+  assert.match(latestMessage, /last read failed/i);
+  assert.match(latestMessage, /change tactics/i);
+  assert.match(latestMessage, /list_files/i);
+  assert.match(latestMessage, /more specific search/i);
+});
+
+test("buildToolPromptMessages turns failed searches into explicit recovery guidance", () => {
+  const promptMessages = buildToolPromptMessages(
+    [],
+    "Explain the branch hazard walkthrough in detail.",
+    {
+      observations: [
+        {
+          tool: "search_workspace",
+          status: "not_found",
+          summary:
+            'No relevant workspace content found for "branch hazard walkthrough".',
+          artifacts: [],
+        },
+      ],
+      readArtifactIds: [],
+      stepCount: 1,
+    }
+  );
+
+  const latestMessage = promptMessages.at(-1)?.content ?? "";
+  assert.match(latestMessage, /Unresolved next step:/i);
+  assert.match(latestMessage, /last search came up empty/i);
+  assert.match(latestMessage, /change tactics/i);
+  assert.match(latestMessage, /list_files/i);
+  assert.match(latestMessage, /filename or title search/i);
 });
 
 test("buildToolPromptMessages prefers question-relevant failed searches over newer unrelated failures", () => {

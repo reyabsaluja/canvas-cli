@@ -9,6 +9,7 @@ import {
   isGroundedContentObservation,
   scoreObservationRelevance,
 } from "./observation-relevance.js";
+import { questionNeedsMultipleSources } from "./question-intent.js";
 import { hasReadArtifact } from "./run-state.js";
 import { searchWorkspaceKnowledge } from "../tui/workspace-knowledge.js";
 
@@ -32,6 +33,7 @@ export async function decideWorkspaceRetrieval(
   input: RetrievalGateInput
 ): Promise<RetrievalDecision> {
   const question = input.question.trim();
+  const needsMultipleSources = questionNeedsMultipleSources(question);
   if (!question) {
     return { action: "let_model_decide", reason: "empty_question" };
   }
@@ -48,7 +50,10 @@ export async function decideWorkspaceRetrieval(
     question,
     input.runState
   );
-  if (reusableMemoryArtifactIds.length > 0) {
+  if (
+    reusableMemoryArtifactIds.length > 0 &&
+    (!needsMultipleSources || reusableMemoryArtifactIds.length > 1)
+  ) {
     return {
       action: "answer_from_memory",
       reason: "already_read_relevant_artifact",
@@ -63,7 +68,10 @@ export async function decideWorkspaceRetrieval(
   if (eagerDiscoveredArtifactId) {
     return {
       action: "read_artifact",
-      reason: "already_discovered_relevant_artifact",
+      reason:
+        needsMultipleSources && reusableMemoryArtifactIds.length > 0
+          ? "comparison_question_needs_second_source"
+          : "already_discovered_relevant_artifact",
       artifactId: eagerDiscoveredArtifactId,
     };
   }
@@ -87,7 +95,10 @@ export async function decideWorkspaceRetrieval(
     input.runState
   );
 
-  if (reusableArtifactIds.length > 0) {
+  if (
+    reusableArtifactIds.length > 0 &&
+    (!needsMultipleSources || reusableArtifactIds.length > 1)
+  ) {
     return {
       action: "answer_from_memory",
       reason: "already_read_relevant_artifact",
@@ -99,6 +110,40 @@ export async function decideWorkspaceRetrieval(
     promotedMatches,
     input.runState
   );
+  if (
+    needsMultipleSources &&
+    unreadRetryableMatches.length > 0 &&
+    (reusableMemoryArtifactIds.length > 0 || reusableArtifactIds.length > 0)
+  ) {
+    const complementaryMatch = selectPreferredWorkspaceMatch(
+      question,
+      unreadRetryableMatches
+    );
+    if (complementaryMatch) {
+      return {
+        action: "read_artifact",
+        reason: "comparison_question_needs_second_source",
+        artifactId: complementaryMatch.artifact.id,
+      };
+    }
+  }
+
+  if (reusableMemoryArtifactIds.length > 0) {
+    return {
+      action: "answer_from_memory",
+      reason: "already_read_relevant_artifact",
+      sourceArtifactIds: reusableMemoryArtifactIds,
+    };
+  }
+
+  if (reusableArtifactIds.length > 0) {
+    return {
+      action: "answer_from_memory",
+      reason: "already_read_relevant_artifact",
+      sourceArtifactIds: reusableArtifactIds,
+    };
+  }
+
   const topMatch = selectPreferredWorkspaceMatch(question, unreadRetryableMatches);
   if (!topMatch) {
     return { action: "let_model_decide", reason: "recent_artifact_read_failed" };

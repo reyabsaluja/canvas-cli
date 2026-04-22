@@ -3,6 +3,7 @@ export interface Course {
   name: string;
   courseCode: string;
   termName: string | null;
+  publicDescription: string | null;
   isCurrent: boolean;
 }
 
