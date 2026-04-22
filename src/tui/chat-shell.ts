@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import { C, getTermSize, stripAnsi } from "./screen.js";
+import { formatAIError } from "../ai/provider.js";
 import type { Observation } from "../agent/observation.js";
 import type {
   ChatMessage,
@@ -828,9 +829,24 @@ export async function runChatShell<TExit>(
       } catch (error) {
         flushPendingStreamDelta();
         stopSpinner();
+        if (streamingStarted) {
+          if (streamedText.trim()) {
+            messages[messages.length - 1] = {
+              role: "assistant",
+              content: streamedText.trim(),
+            };
+            markTranscriptDirty(messages.length - 1);
+            persistence.schedule();
+          } else {
+            messages.pop();
+            markTranscriptDirty(messages.length);
+          }
+          streamingStarted = false;
+          streamedText = "";
+        }
         await appendPersistedMessage({
           role: "system",
-          content: `Error: ${error instanceof Error ? error.message : "unknown"}`,
+          content: `Error: ${formatAIError(error)}`,
         });
       }
 
