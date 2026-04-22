@@ -1,4 +1,5 @@
-import { generateText, streamText, tool, jsonSchema, stepCountIs } from "ai";
+import { generateText, streamText, tool, jsonSchema, stepCountIs, RetryError } from "ai";
+import { APICallError } from "@ai-sdk/provider";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
@@ -249,12 +250,16 @@ export async function streamWithTools(
     } as any);
   }
 
+  let capturedStreamError: unknown = null;
   const result = streamText({
     model: getModel(config),
     system: systemPrompt,
     messages: messages as any,
     tools: aiTools,
     stopWhen: stepCountIs(maxSteps),
+    onError: ({ error }: { error: unknown }) => {
+      capturedStreamError = error;
+    },
   } as any);
 
   // Consume the fullStream to get text deltas.
@@ -273,19 +278,62 @@ export async function streamWithTools(
           schedulePendingTextFlush();
         }
       }
-      // "error" parts indicate stream-level errors
       if (part.type === "error") {
-        console.error("Stream error:", (part as any).error);
+        const streamErr = (part as any).error;
+        throw streamErr instanceof Error ? streamErr : new Error(formatAIError(streamErr));
       }
     }
   } catch (err) {
     flushPendingTextDelta(true);
-    // If streaming fails partway, return whatever text we got
     if (!fullText) {
       throw err;
     }
   }
 
   flushPendingTextDelta(true);
+  if (capturedStreamError && !fullText) {
+    throw capturedStreamError;
+  }
   return fullText;
+}
+
+export function formatAIError(error: unknown): string {
+  const apiError = findAPICallError(error);
+  if (apiError) {
+    const status = apiError.statusCode;
+    if (status === 429) return "Rate limited by the AI provider. Wait a moment and try again.";
+    if (status === 401 || status === 403) return "Authentication failed. Check your API key.";
+    if (status === 404) return "Model not found. Check your AI_MODEL setting.";
+    if (status === 400) return "Bad request sent to AI provider. The prompt may be too long.";
+    if (status === 503 || status === 502) return "AI provider is temporarily unavailable. Try again shortly.";
+    if (status && status >= 500) return `AI provider returned server error (${status}). Try again shortly.`;
+    if (status) return `AI provider returned error ${status}.`;
+    return "Failed to reach the AI provider. Check your network connection.";
+  }
+
+  if (error instanceof Error) {
+    if (error.message.includes("fetch failed") || error.message.includes("ECONNREFUSED")) {
+      return "Failed to reach the AI provider. Check your network connection.";
+    }
+    const msg = error.message;
+    if (msg.length > 200) return msg.slice(0, 200) + "...";
+    return msg;
+  }
+
+  return "An unknown error occurred.";
+}
+
+function findAPICallError(error: unknown): APICallError | null {
+  if (APICallError.isInstance(error)) return error as APICallError;
+  if (RetryError.isInstance(error)) {
+    const retry = error as RetryError;
+    if (APICallError.isInstance(retry.lastError)) return retry.lastError as APICallError;
+    for (const inner of retry.errors) {
+      if (APICallError.isInstance(inner)) return inner as APICallError;
+    }
+  }
+  if (error instanceof Error && error.cause) {
+    return findAPICallError(error.cause);
+  }
+  return null;
 }

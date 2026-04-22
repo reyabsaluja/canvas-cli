@@ -610,8 +610,13 @@ export function getRenderedMessageLines(
       break;
     }
     case "system": {
+      const isError = message.content.startsWith("Error:");
       const isElapsedSummary = /^(Worked|Thought|Studied|Read|Analyzed|Explored|Reviewed) for \d/.test(message.content);
-      const systemColor = isElapsedSummary ? chalk.hex("#707070") : chalk.white;
+      const systemColor = isError
+        ? chalk.hex("#ff6b6b")
+        : isElapsedSummary
+          ? chalk.hex("#707070")
+          : chalk.white;
       wrapLines(message.content, maxWidth).forEach((line) => {
         lines.push(`  ${systemColor(line)}`);
       });
