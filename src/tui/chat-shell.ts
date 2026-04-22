@@ -67,8 +67,9 @@ export interface ChatShellOptions<TExit> {
   onAsk: (input: string, callbacks: AskCallbacks) => Promise<{
     content: string;
     bulletPoints?: string[];
-    sources?: Array<{ title: string; kind: string }>;
+    sources?: Array<{ title: string; kind: string; section?: string | null }>;
     confidence?: string;
+    verificationNote?: string | null;
   }>;
   onCommand: (
     command: string,
@@ -803,6 +804,7 @@ export async function runChatShell<TExit>(
             bulletPoints: final.bulletPoints,
             sources: final.sources,
             confidence: final.confidence,
+            verificationNote: final.verificationNote,
           };
           markTranscriptDirty(messages.length - 1);
         } else {
@@ -812,6 +814,7 @@ export async function runChatShell<TExit>(
             bulletPoints: final.bulletPoints,
             sources: final.sources,
             confidence: final.confidence,
+            verificationNote: final.verificationNote,
           });
           markTranscriptDirty(messages.length - 1);
         }

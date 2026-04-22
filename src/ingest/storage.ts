@@ -6,6 +6,7 @@ import {
   getExtractedAnnouncementPath,
   getExtractedAttachmentPath,
   getExtractedDiscussionPath,
+  getExtractedExternalLinkPath,
   getExtractedPagePath,
 } from "../enrich/course-documents.js";
 import type {
@@ -21,12 +22,14 @@ import type {
   PageIndexEntry,
   AnnouncementIndexEntry,
   DiscussionIndexEntry,
+  ExternalLinkIndexEntry,
   SyllabusCandidate,
   DownloadedAttachmentEntry,
   LectureIndexEntry,
   IngestionMeta,
 } from "./types.js";
 import { htmlToText } from "../format/html-to-text.js";
+import type { CapturedExternalLink } from "./external-link-capture.js";
 
 /**
  * Write all ingestion artifacts to the course directory.
@@ -41,6 +44,7 @@ export async function writeIngestionArtifacts(
   pages: PageIndexEntry[],
   announcements: AnnouncementIndexEntry[],
   discussions: DiscussionIndexEntry[],
+  externalLinks: ExternalLinkIndexEntry[],
   syllabusCandidates: SyllabusCandidate[],
   attachments: DownloadedAttachmentEntry[],
   lectures: LectureIndexEntry[],
@@ -53,8 +57,10 @@ export async function writeIngestionArtifacts(
     title: string;
     message: string | null;
     posted_at: string | null;
+    html_url?: string | null;
   }>,
-  rawDiscussionThreads?: RawDiscussionThread[]
+  rawDiscussionThreads?: RawDiscussionThread[],
+  capturedExternalLinks?: CapturedExternalLink[]
 ): Promise<void> {
   // Ensure directory structure
   await fs.mkdir(path.join(coursePath, "extracted"), { recursive: true });
@@ -69,6 +75,7 @@ export async function writeIngestionArtifacts(
     ["pages.json", pages],
     ["announcements.json", announcements],
     ["discussions.json", discussions],
+    ["external-links.json", externalLinks],
     ["syllabus-candidates.json", syllabusCandidates],
     ["attachments.json", attachments],
     ["lectures.json", lectures],
@@ -86,7 +93,9 @@ export async function writeIngestionArtifacts(
     const htmlPath = path.join(coursePath, "extracted", "syllabus-body.html");
     await writeAtomic(htmlPath, courseMeta.syllabusBody);
 
-    const textContent = htmlToText(courseMeta.syllabusBody);
+    const textContent = htmlToText(courseMeta.syllabusBody, {
+      baseUrl: courseMeta.htmlUrl,
+    });
     const txtPath = path.join(coursePath, "extracted", "syllabus-body.txt");
     await writeAtomic(txtPath, textContent + "\n");
   }
@@ -117,7 +126,9 @@ export async function writeIngestionArtifacts(
     );
     await writeAtomic(
       path.join(coursePath, "extracted", "front-page.txt"),
-      htmlToText(frontPageBody) + "\n"
+      htmlToText(frontPageBody, {
+        baseUrl: courseMeta.htmlUrl,
+      }) + "\n"
     );
   }
 
@@ -127,9 +138,12 @@ export async function writeIngestionArtifacts(
     await fs.mkdir(pagesDir, { recursive: true });
     for (const page of fetchedPages) {
       const pageTextPath = getExtractedPagePath(coursePath, page.slug);
+      const pageUrl = courseMeta.htmlUrl
+        ? `${courseMeta.htmlUrl.replace(/\/$/, "")}/pages/${encodeURIComponent(page.slug)}`
+        : null;
       await writeAtomic(
         pageTextPath,
-        `# ${page.title}\n\n${htmlToText(page.body)}\n`
+        `# ${page.title}\n\n${htmlToText(page.body, { baseUrl: pageUrl })}\n`
       );
     }
   }
@@ -146,7 +160,9 @@ export async function writeIngestionArtifacts(
       const content =
         `# ${announcement.title}\n\n` +
         postedAt +
-        `${htmlToText(announcement.message)}\n`;
+        `${htmlToText(announcement.message, {
+          baseUrl: announcement.html_url ?? courseMeta.htmlUrl,
+        })}\n`;
       await writeAtomic(
         getExtractedAnnouncementPath(coursePath, announcement.id),
         content
@@ -162,6 +178,18 @@ export async function writeIngestionArtifacts(
       await writeAtomic(
         getExtractedDiscussionPath(coursePath, thread.topic.id),
         formatDiscussionThreadText(thread)
+      );
+    }
+  }
+
+  if (capturedExternalLinks && capturedExternalLinks.length > 0) {
+    await fs.mkdir(path.join(coursePath, "extracted", "external-links"), {
+      recursive: true,
+    });
+    for (const capture of capturedExternalLinks) {
+      await writeAtomic(
+        getExtractedExternalLinkPath(coursePath, capture.entry.id),
+        capture.text
       );
     }
   }

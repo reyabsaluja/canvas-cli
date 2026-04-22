@@ -294,6 +294,58 @@ test("course retrieval preserves missing extracted text guidance", async () => {
   });
 });
 
+test("course retrieval surfaces captured external course resources", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "external-links"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "external-links", "shared-spec.txt"),
+      [
+        "# Shared Lab Spec",
+        "",
+        "Source URL: https://public.example/shared-spec",
+        "Capture status: captured",
+        "",
+        "## Captured content",
+        "",
+        "Use signed overflow detection for the ALU and include the waveform evidence.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache = makeCourseCache(coursePath);
+    cache.externalLinks = [
+      {
+        id: "shared-spec",
+        title: "Shared Lab Spec",
+        url: "https://public.example/shared-spec",
+        resolvedUrl: "https://public.example/shared-spec",
+        sourceCount: 2,
+        sources: [
+          'assignment "Homework 1" description',
+          'module "Week 4" item "Shared Lab Spec"',
+        ],
+        contentType: "text/html; charset=utf-8",
+        contentStatus: "captured",
+      },
+    ];
+
+    const matches = await searchCourseArtifacts(cache, "signed overflow detection");
+    assert.equal(matches[0]?.artifact.kind, "external_link");
+    assert.equal(matches[0]?.artifact.title, "Shared Lab Spec");
+
+    const document = await readCourseDocument(cache, "Shared Lab Spec");
+    assert.equal(document.status, "ok");
+    if (document.status === "ok") {
+      assert.equal(document.document.artifact.kind, "external_link");
+      assert.match(document.document.content, /waveform evidence/);
+    }
+  });
+});
+
 test("course search rendering uses structured search results from the shared artifact index", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();

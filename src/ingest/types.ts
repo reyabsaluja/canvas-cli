@@ -87,6 +87,19 @@ export interface DiscussionIndexEntry {
   replyFileLinkCount: number;
 }
 
+export type ExternalLinkContentStatus = "captured" | "metadata_only" | "failed";
+
+export interface ExternalLinkIndexEntry {
+  id: string;
+  title: string;
+  url: string;
+  resolvedUrl: string | null;
+  sourceCount: number;
+  sources: string[];
+  contentType: string | null;
+  contentStatus: ExternalLinkContentStatus;
+}
+
 export type SyllabusCandidateSource =
   | "syllabus_body"
   | "file"
@@ -164,6 +177,7 @@ export interface IngestionResult {
   pages: PageIndexEntry[];
   announcements?: AnnouncementIndexEntry[];
   discussions?: DiscussionIndexEntry[];
+  externalLinks?: ExternalLinkIndexEntry[];
   syllabusCandidates: SyllabusCandidate[];
   attachments: DownloadedAttachmentEntry[];
   lectures: LectureIndexEntry[];

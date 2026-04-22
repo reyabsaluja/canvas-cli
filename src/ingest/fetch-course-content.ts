@@ -33,7 +33,7 @@ export interface RawCourseContent {
   discussionThreads: RawDiscussionThread[];
   /** Front page (home page) HTML body, if accessible. */
   frontPageBody: string | null;
-  /** Individual page bodies fetched from discovered same-course Canvas links. */
+  /** Individual page bodies fetched from the Pages index and discovered same-course Canvas links. */
   fetchedPages: Array<{ slug: string; title: string; body: string }>;
   warnings: string[];
 }
@@ -154,11 +154,31 @@ export async function fetchCourseContent(
 
   const seenSlugs = new Set<string>();
   const pendingSlugs: string[] = [];
+  const fetchedPagesBySlug = new Map<
+    string,
+    { slug: string; title: string; body: string }
+  >();
 
   const enqueueSlug = (slug: string | null | undefined): void => {
-    if (!slug || seenSlugs.has(slug)) return;
+    if (!slug || seenSlugs.has(slug) || fetchedPagesBySlug.has(slug)) return;
     seenSlugs.add(slug);
     pendingSlugs.push(slug);
+  };
+
+  const rememberFetchedPage = (
+    slug: string | null | undefined,
+    title: string | null | undefined,
+    body: string | null | undefined
+  ): void => {
+    if (!slug || !body || fetchedPagesBySlug.has(slug)) {
+      return;
+    }
+    fetchedPagesBySlug.set(slug, {
+      slug,
+      title: title ?? slug,
+      body,
+    });
+    enqueueLinkedPageSlugs(body);
   };
 
   const enqueueLinkedPageSlugs = (html: string | null | undefined): void => {
@@ -168,9 +188,14 @@ export async function fetchCourseContent(
     }
   };
 
-  // Seed the crawl from explicit module pages, then expand through every HTML
-  // surface we can already access. This recovers page hubs linked from
+  // Seed the crawl from every page listed in the Pages index, explicit module
+  // pages, then expand through every HTML surface we can already access. This
+  // recovers unlinked course pages in addition to page hubs linked from
   // assignments, the syllabus, announcements, and other pages.
+  for (const page of pages) {
+    rememberFetchedPage(page.url, page.title, page.body ?? null);
+    enqueueSlug(page.url);
+  }
   for (const mod of modules) {
     for (const item of mod.items) {
       if (item.type === "Page") {
@@ -196,11 +221,6 @@ export async function fetchCourseContent(
     }
   }
 
-  const fetchedPagesBySlug = new Map<
-    string,
-    { slug: string; title: string; body: string }
-  >();
-
   while (pendingSlugs.length > 0) {
     const batch = pendingSlugs.splice(0, pendingSlugs.length);
     const batchResults = await mapWithConcurrency(
@@ -216,9 +236,8 @@ export async function fetchCourseContent(
     );
 
     for (const page of batchResults) {
-      if (!page || fetchedPagesBySlug.has(page.slug)) continue;
-      fetchedPagesBySlug.set(page.slug, page);
-      enqueueLinkedPageSlugs(page.body);
+      if (!page) continue;
+      rememberFetchedPage(page.slug, page.title, page.body);
     }
   }
 

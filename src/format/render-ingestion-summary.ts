@@ -46,6 +46,11 @@ export function renderIngestionSummary(result: IngestionResult): string {
       `  ${chalk.dim("-")} ${result.discussions?.length ?? 0} discussions`
     );
   }
+  if ((result.externalLinks?.length ?? 0) > 0) {
+    lines.push(
+      `  ${chalk.dim("-")} ${result.externalLinks?.length ?? 0} external resources`
+    );
+  }
 
   // Syllabus candidates
   if (result.syllabusCandidates.length > 0) {
@@ -120,6 +125,7 @@ export function renderIngestionJson(result: IngestionResult): object {
     coursePath: result.coursePath,
     announcements: result.announcements ?? [],
     discussions: result.discussions ?? [],
+    externalLinks: result.externalLinks ?? [],
     syllabusCandidates: result.syllabusCandidates,
     attachments: result.attachments.map((a) => ({
       filename: a.originalFilename,

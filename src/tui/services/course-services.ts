@@ -65,6 +65,7 @@ export function getDisplayCourseAvailability(
       name: configuredCourse.displayName,
       courseCode: configuredCourse.originalCode,
       termName: original.termName,
+      publicDescription: original.publicDescription,
       isCurrent: original.isCurrent,
     });
   }

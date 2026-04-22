@@ -72,6 +72,7 @@ const COURSE_READABLE_KINDS: ArtifactKind[] = [
   "page",
   "announcement",
   "discussion",
+  "external_link",
   "attachment",
   "syllabus",
   "front_page",

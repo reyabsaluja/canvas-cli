@@ -105,6 +105,93 @@ test("fetchCourseContent uses bounded concurrency for module items and page bodi
   assert.ok(maxPageRequests <= 4);
 });
 
+test("ingestCourse captures page bodies from the Pages index even when no other surface links them", async () => {
+  await withTempCwd(async () => {
+    const course: Course = {
+      id: 17,
+      name: "ECE243",
+      courseCode: "ECE243H1",
+      termName: "Winter 2026",
+      isCurrent: true,
+    };
+
+    const client = {
+      async getCourseDetail() {
+        return {
+          id: course.id,
+          name: course.name,
+          course_code: course.courseCode,
+          syllabus_body: null,
+          start_at: null,
+          end_at: null,
+          term: null,
+          html_url: "https://canvas.example/courses/17",
+        };
+      },
+      async getAssignments() {
+        return [];
+      },
+      async getModulesSafe() {
+        return [];
+      },
+      async getModuleItemsSafe() {
+        return [];
+      },
+      async getFilesSafe() {
+        return [];
+      },
+      async getPagesSafe() {
+        return [
+          {
+            page_id: 11,
+            url: "course-schedule",
+            title: "Course Schedule",
+            html_url: "https://canvas.example/courses/17/pages/course-schedule",
+            updated_at: "2026-04-01T12:00:00.000Z",
+          },
+        ];
+      },
+      async getAnnouncementsSafe() {
+        return [];
+      },
+      async getFrontPageSafe() {
+        return null;
+      },
+      async getPageBySlugSafe(_courseId: number, slug: string) {
+        if (slug !== "course-schedule") {
+          return null;
+        }
+        return {
+          title: "Course Schedule",
+          body:
+            "<h2>Weeks 9-10</h2><p>Lab 4 demo happens in week 10.</p>",
+          url: slug,
+        };
+      },
+    } as any;
+
+    const result = await ingestCourse(
+      course,
+      client,
+      {
+        baseUrl: "https://canvas.example/api/v1",
+        accessToken: "token",
+      },
+      { refresh: false }
+    );
+
+    assert.deepEqual(result.pages.map((page) => page.pageId), ["course-schedule"]);
+
+    const pageExtract = await fs.readFile(
+      path.join(result.coursePath, "extracted", "pages", "course-schedule.txt"),
+      "utf-8"
+    );
+    assert.match(pageExtract, /^# Course Schedule/m);
+    assert.match(pageExtract, /Weeks 9-10/);
+    assert.match(pageExtract, /Lab 4 demo happens in week 10\./);
+  });
+});
+
 test("ingestCourse crawls announcement and linked-page content into the cache", async () => {
   await withTempCwd(async () => {
     const course: Course = {
@@ -263,7 +350,19 @@ test("ingestCourse crawls announcement and linked-page content into the cache", 
         "utf-8"
       );
       assert.match(announcementExtract, /Midterm update/);
-      assert.match(announcementExtract, /Announcement hub/);
+      assert.match(
+        announcementExtract,
+        /Announcement hub \(https:\/\/canvas\.example\/courses\/17\/pages\/announcement-hub\)/
+      );
+
+      const fetchedPageExtract = await fs.readFile(
+        path.join(result.coursePath, "extracted", "pages", "assignment-hub.txt"),
+        "utf-8"
+      );
+      assert.match(
+        fetchedPageExtract,
+        /deep reference \(https:\/\/canvas\.example\/courses\/17\/pages\/deep-reference\)/
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -667,6 +766,332 @@ test("ingestCourse captures discussion thread clarifications and linked resource
         discussionExtract,
         /overflow follow-up \(https:\/\/canvas\.example\/courses\/17\/pages\/overflow-followup\)/
       );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+test("ingestCourse captures external resources linked from course content and module tools", async () => {
+  await withTempCwd(async () => {
+    const course: Course = {
+      id: 17,
+      name: "ECE243",
+      courseCode: "ECE243H1",
+      termName: "Winter 2026",
+      isCurrent: true,
+    };
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const headers =
+        init?.headers instanceof Headers
+          ? init.headers
+          : new Headers((init?.headers as Record<string, string> | undefined) ?? {});
+
+      if (url === "https://canvas.example/courses/17/external_tools/launch") {
+        assert.equal(headers.get("Authorization"), "Bearer token");
+        return new Response(null, {
+          status: 302,
+          headers: {
+            location: "https://public.example/shared-spec",
+          },
+        });
+      }
+
+      if (url === "https://public.example/shared-spec") {
+        assert.equal(headers.get("Authorization"), null);
+        return new Response(
+          [
+            "<html>",
+            "<head>",
+            "<title>Shared Lab Spec</title>",
+            '<meta name="description" content="Shared ALU instructions.">',
+            "</head>",
+            "<body>",
+            "<h1>Shared Lab Spec</h1>",
+            "<p>Use signed overflow detection for the ALU.</p>",
+            "</body>",
+            "</html>",
+          ].join(""),
+          {
+            status: 200,
+            headers: {
+              "content-type": "text/html; charset=utf-8",
+            },
+          }
+        );
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    };
+
+    try {
+      const client = {
+        async getCourseDetail() {
+          return {
+            id: course.id,
+            name: course.name,
+            course_code: course.courseCode,
+            syllabus_body: null,
+            start_at: null,
+            end_at: null,
+            term: null,
+            html_url: "https://canvas.example/courses/17",
+          };
+        },
+        async getAssignments() {
+          return [
+            {
+              id: 1,
+              name: "Homework 1",
+              due_at: null,
+              html_url: "https://canvas.example/courses/17/assignments/1",
+              course_id: course.id,
+              has_submitted_submissions: false,
+              description:
+                '<p>Read the <a href="https://public.example/shared-spec">shared lab spec</a>.</p>',
+            },
+          ];
+        },
+        async getModulesSafe() {
+          return [
+            {
+              id: 9,
+              name: "Week 4",
+              position: 1,
+              items_count: 1,
+              items_url: "",
+            },
+          ];
+        },
+        async getModuleItemsSafe() {
+          return [
+            {
+              id: 91,
+              title: "Shared Lab Spec",
+              type: "ExternalTool",
+              position: 1,
+              html_url: "https://canvas.example/courses/17/external_tools/launch",
+            },
+          ];
+        },
+        async getFilesSafe() {
+          return [];
+        },
+        async getPagesSafe() {
+          return [];
+        },
+        async getAnnouncementsSafe() {
+          return [];
+        },
+        async getDiscussionTopicsSafe() {
+          return [];
+        },
+        async getFrontPageSafe() {
+          return null;
+        },
+        async getPageBySlugSafe() {
+          return null;
+        },
+      } as any;
+
+      const result = await ingestCourse(
+        course,
+        client,
+        {
+          baseUrl: "https://canvas.example/api/v1",
+          accessToken: "token",
+        },
+        { refresh: false }
+      );
+
+      assert.equal(result.externalLinks?.length, 1);
+      assert.equal(result.externalLinks?.[0]?.title, "Shared Lab Spec");
+      assert.equal(
+        result.externalLinks?.[0]?.resolvedUrl,
+        "https://public.example/shared-spec"
+      );
+      assert.equal(result.externalLinks?.[0]?.contentStatus, "captured");
+      assert.equal(result.externalLinks?.[0]?.sourceCount, 2);
+
+      const externalLinks = JSON.parse(
+        await fs.readFile(
+          path.join(result.coursePath, "external-links.json"),
+          "utf-8"
+        )
+      ) as Array<{ title: string; sourceCount: number }>;
+      assert.equal(externalLinks[0]?.title, "Shared Lab Spec");
+      assert.equal(externalLinks[0]?.sourceCount, 2);
+
+      const externalExtract = await fs.readFile(
+        path.join(
+          result.coursePath,
+          "extracted",
+          "external-links",
+          `${result.externalLinks?.[0]?.id}.txt`
+        ),
+        "utf-8"
+      );
+      assert.match(externalExtract, /Use signed overflow detection for the ALU/);
+      assert.match(externalExtract, /assignment "Homework 1" description/);
+      assert.match(externalExtract, /module "Week 4" item "Shared Lab Spec"/);
+      assert.match(externalExtract, /Source URL: https:\/\/public\.example\/shared-spec/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+test("ingestCourse exports shared Google Docs links to readable text", async () => {
+  await withTempCwd(async () => {
+    const course: Course = {
+      id: 17,
+      name: "ECE243",
+      courseCode: "ECE243H1",
+      termName: "Winter 2026",
+      isCurrent: true,
+    };
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const headers =
+        init?.headers instanceof Headers
+          ? init.headers
+          : new Headers((init?.headers as Record<string, string> | undefined) ?? {});
+
+      if (
+        url ===
+        "https://docs.google.com/document/d/abc123/edit?usp=sharing"
+      ) {
+        assert.equal(headers.get("Authorization"), null);
+        return new Response(
+          [
+            "<html>",
+            "<head><title>Lab 4 Shared Notes - Google Docs</title></head>",
+            "<body>",
+            "<div>Google Docs viewer shell</div>",
+            "</body>",
+            "</html>",
+          ].join(""),
+          {
+            status: 200,
+            headers: {
+              "content-type": "text/html; charset=utf-8",
+            },
+          }
+        );
+      }
+
+      if (
+        url ===
+        "https://docs.google.com/document/d/abc123/export?format=txt"
+      ) {
+        assert.equal(headers.get("Authorization"), null);
+        return new Response(
+          [
+            "Lab 4 Shared Notes",
+            "",
+            "Use the provided starter code.",
+            "Document the overflow edge case in your analysis.",
+          ].join("\n"),
+          {
+            status: 200,
+            headers: {
+              "content-type": "text/plain; charset=utf-8",
+            },
+          }
+        );
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    };
+
+    try {
+      const client = {
+        async getCourseDetail() {
+          return {
+            id: course.id,
+            name: course.name,
+            course_code: course.courseCode,
+            syllabus_body: null,
+            start_at: null,
+            end_at: null,
+            term: null,
+            html_url: "https://canvas.example/courses/17",
+          };
+        },
+        async getAssignments() {
+          return [
+            {
+              id: 1,
+              name: "Homework 1",
+              due_at: null,
+              html_url: "https://canvas.example/courses/17/assignments/1",
+              course_id: course.id,
+              has_submitted_submissions: false,
+              description:
+                '<p>Read the <a href="https://docs.google.com/document/d/abc123/edit?usp=sharing">shared notes</a>.</p>',
+            },
+          ];
+        },
+        async getModulesSafe() {
+          return [];
+        },
+        async getModuleItemsSafe() {
+          return [];
+        },
+        async getFilesSafe() {
+          return [];
+        },
+        async getPagesSafe() {
+          return [];
+        },
+        async getAnnouncementsSafe() {
+          return [];
+        },
+        async getDiscussionTopicsSafe() {
+          return [];
+        },
+        async getFrontPageSafe() {
+          return null;
+        },
+        async getPageBySlugSafe() {
+          return null;
+        },
+      } as any;
+
+      const result = await ingestCourse(
+        course,
+        client,
+        {
+          baseUrl: "https://canvas.example/api/v1",
+          accessToken: "token",
+        },
+        { refresh: false }
+      );
+
+      assert.equal(result.externalLinks?.length, 1);
+      assert.equal(result.externalLinks?.[0]?.contentStatus, "captured");
+
+      const externalExtract = await fs.readFile(
+        path.join(
+          result.coursePath,
+          "extracted",
+          "external-links",
+          `${result.externalLinks?.[0]?.id}.txt`
+        ),
+        "utf-8"
+      );
+      assert.match(externalExtract, /Lab 4 Shared Notes/);
+      assert.match(externalExtract, /Use the provided starter code\./);
+      assert.match(
+        externalExtract,
+        /Document the overflow edge case in your analysis\./
+      );
+      assert.doesNotMatch(externalExtract, /Google Docs viewer shell/);
     } finally {
       globalThis.fetch = originalFetch;
     }

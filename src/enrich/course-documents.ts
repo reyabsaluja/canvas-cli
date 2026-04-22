@@ -56,6 +56,18 @@ export function getExtractedDiscussionPath(
   );
 }
 
+export function getExtractedExternalLinkPath(
+  coursePath: string,
+  externalLinkId: string
+): string {
+  return path.join(
+    coursePath,
+    "extracted",
+    "external-links",
+    `${sanitizeDocumentSegment(externalLinkId)}.txt`
+  );
+}
+
 export function getExtractedAttachmentPath(
   coursePath: string,
   localPath: string

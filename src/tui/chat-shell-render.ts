@@ -85,11 +85,27 @@ export function buildBannerLines(options: {
   const { cols } = getTermSize();
   const title = options.runtime.title;
   const subtitle = options.runtime.subtitle ?? "";
+  const description = options.runtime.description ?? "";
 
   const left = C.pureWhiteBold(title) + (subtitle ? "  " + statusBarGrey(subtitle) : "");
   const leftPlain = title + (subtitle ? "  " + subtitle : "");
 
-  const rightText = options.runtime.statusLabel?.replace(/^Status:\s*/, "") ?? "";
+  const statusText = options.runtime.statusLabel?.replace(/^Status:\s*/, "") ?? "";
+  const maxRightWidth = Math.max(0, cols - 4 - leftPlain.length - 4);
+  let rightText = "";
+  if (description && maxRightWidth >= 12) {
+    rightText = description.length > maxRightWidth
+      ? description.slice(0, maxRightWidth - 3) + "..."
+      : description;
+    if (statusText) {
+      const combined = `${rightText} · ${statusText}`;
+      rightText = combined.length > maxRightWidth
+        ? rightText
+        : combined;
+    }
+  } else {
+    rightText = statusText;
+  }
   const right = rightText ? statusBarGrey(rightText) : "";
   const rightPlain = rightText;
 
@@ -575,6 +591,13 @@ export function getRenderedMessageLines(
           lines.push(`  ${C.dim("•")} ${chalk.white(point)}`);
         }
       }
+      if (message.verificationNote) {
+        lines.push("");
+        lines.push(`  ${chalk.hex("#d9a441").bold("Grounding")}`);
+        wrapLines(message.verificationNote, Math.max(12, maxWidth - 2)).forEach((line) => {
+          lines.push(`  ${chalk.hex("#d9a441")(line)}`);
+        });
+      }
       if (message.sources?.length) {
         lines.push("");
         for (const source of message.sources) {
@@ -662,37 +685,35 @@ function renderWrappedContent(content: string, lines: string[], maxWidth: number
     }
     const headingMatch = trimmed.match(/^(#{1,4})\s+(.+)/);
     if (headingMatch) {
+      const { plain } = parseAndStripFormatting(headingMatch[2]!);
       lines.push("");
-      lines.push(`  ${C.bold(applyInlineFormatting(headingMatch[2]!))}`);
+      lines.push(`  ${chalk.white.bold(plain)}`);
       continue;
     }
     const bulletMatch = trimmed.match(/^[*\-•]\s+(.+)/);
     if (bulletMatch) {
-      const text = applyInlineFormatting(bulletMatch[1]!);
-      wrapLines(stripAnsi(text), maxWidth - 6).forEach((wrapped, index) => {
+      formatAndWrap(bulletMatch[1]!, maxWidth - 6).forEach((wrapped, index) => {
         lines.push(
           index === 0
-            ? `  ${C.dim("•")} ${applyInlineFormatting(wrapped)}`
-            : `    ${applyInlineFormatting(wrapped)}`
+            ? `  ${C.dim("•")} ${wrapped}`
+            : `    ${wrapped}`
         );
       });
       continue;
     }
     const numbered = trimmed.match(/^(\d+)\.\s+(.+)/);
     if (numbered) {
-      wrapLines(stripAnsi(numbered[2]!), maxWidth - 6).forEach((wrapped, index) => {
+      formatAndWrap(numbered[2]!, maxWidth - 6).forEach((wrapped, index) => {
         lines.push(
           index === 0
-            ? `  ${C.bold(numbered[1]! + ".")} ${applyInlineFormatting(
-                wrapped
-              )}`
-            : `      ${applyInlineFormatting(wrapped)}`
+            ? `  ${C.bold(numbered[1]! + ".")} ${wrapped}`
+            : `      ${wrapped}`
         );
       });
       continue;
     }
-    wrapLines(stripAnsi(trimmed), maxWidth - 2).forEach((wrapped) => {
-      lines.push(`  ${applyInlineFormatting(wrapped)}`);
+    formatAndWrap(trimmed, maxWidth - 2).forEach((wrapped) => {
+      lines.push(`  ${wrapped}`);
     });
   }
 }
@@ -737,6 +758,129 @@ function applyInlineFormatting(text: string): string {
     (_match, inner) => chalk.white.italic(inner)
   );
   return result === text ? chalk.white(text) : result;
+}
+
+interface InlineRange {
+  start: number;
+  end: number;
+  style: "bold" | "italic" | "code";
+}
+
+function parseAndStripFormatting(text: string): {
+  plain: string;
+  ranges: InlineRange[];
+} {
+  const ranges: InlineRange[] = [];
+  let plain = "";
+  let i = 0;
+
+  while (i < text.length) {
+    if (text[i] === "*" && text[i + 1] === "*") {
+      const close = text.indexOf("**", i + 2);
+      if (close !== -1) {
+        const start = plain.length;
+        plain += text.slice(i + 2, close);
+        ranges.push({ start, end: plain.length, style: "bold" });
+        i = close + 2;
+        continue;
+      }
+    }
+    if (text[i] === "_" && text[i + 1] === "_") {
+      const close = text.indexOf("__", i + 2);
+      if (close !== -1) {
+        const start = plain.length;
+        plain += text.slice(i + 2, close);
+        ranges.push({ start, end: plain.length, style: "bold" });
+        i = close + 2;
+        continue;
+      }
+    }
+    if (text[i] === "`") {
+      const close = text.indexOf("`", i + 1);
+      if (close !== -1) {
+        const start = plain.length;
+        plain += text.slice(i + 1, close);
+        ranges.push({ start, end: plain.length, style: "code" });
+        i = close + 1;
+        continue;
+      }
+    }
+    if (text[i] === "*" && text[i + 1] !== "*") {
+      const close = text.indexOf("*", i + 1);
+      if (close !== -1 && text[close + 1] !== "*") {
+        const start = plain.length;
+        plain += text.slice(i + 1, close);
+        ranges.push({ start, end: plain.length, style: "italic" });
+        i = close + 1;
+        continue;
+      }
+    }
+    plain += text[i];
+    i++;
+  }
+
+  return { plain, ranges };
+}
+
+function applyFormattingRanges(
+  line: string,
+  lineStart: number,
+  ranges: InlineRange[]
+): string {
+  if (ranges.length === 0) return chalk.white(line);
+
+  let result = "";
+  let i = 0;
+
+  while (i < line.length) {
+    const pos = lineStart + i;
+    const range = ranges.find((r) => pos >= r.start && pos < r.end);
+
+    if (range) {
+      let j = i;
+      while (j < line.length && lineStart + j < range.end) j++;
+      const segment = line.slice(i, j);
+      switch (range.style) {
+        case "bold":
+          result += chalk.white.bold(segment);
+          break;
+        case "italic":
+          result += chalk.white.italic(segment);
+          break;
+        case "code":
+          result += C.warm(segment);
+          break;
+      }
+      i = j;
+    } else {
+      let j = i + 1;
+      while (j < line.length) {
+        if (ranges.some((r) => lineStart + j >= r.start && lineStart + j < r.end))
+          break;
+        j++;
+      }
+      result += chalk.white(line.slice(i, j));
+      i = j;
+    }
+  }
+
+  return result || chalk.white(line);
+}
+
+function formatAndWrap(text: string, maxWidth: number): string[] {
+  const { plain, ranges } = parseAndStripFormatting(stripAnsi(text));
+  const wrapped = wrapLines(plain, maxWidth);
+
+  if (ranges.length === 0) {
+    return wrapped.map((line) => chalk.white(line));
+  }
+
+  let charOffset = 0;
+  return wrapped.map((line) => {
+    const formatted = applyFormattingRanges(line, charOffset, ranges);
+    charOffset += line.length + 1;
+    return formatted;
+  });
 }
 
 function wrapLines(text: string, maxWidth: number): string[] {

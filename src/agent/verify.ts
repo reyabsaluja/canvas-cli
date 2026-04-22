@@ -1,6 +1,7 @@
 import type { AnswerSource } from "../ask/types.js";
 import type { LoadedWorkspace } from "../ask/types.js";
 import type { Observation } from "./observation.js";
+import { questionExplicitlyComparesSources } from "./question-intent.js";
 import { workupExplicitlySupportsQuestion } from "./workup-coverage.js";
 import {
   isGroundedContentObservation,
@@ -12,6 +13,7 @@ export interface VerificationResult {
   confidence: "high" | "medium" | "low";
   sources: AnswerSource[];
   missing: string[];
+  note: string | null;
 }
 
 export interface VerifyWorkspaceAnswerInput {
@@ -40,6 +42,10 @@ export function verifyWorkspaceAnswer(
   const hasCitationCapableObservation = input.observations.some((observation) =>
     canObservationProduceCitation(observation)
   );
+  const expectsComparisonEvidence = questionExplicitlyComparesSources(
+    input.question
+  );
+  const hasEnoughComparisonSources = !expectsComparisonEvidence || sources.length >= 2;
 
   if (!trimmedAnswer) {
     missing.push("answer");
@@ -55,20 +61,92 @@ export function verifyWorkspaceAnswer(
   const workupSupportsQuestion = !input.usedWorkup
     ? false
     : workupExplicitlySupportsQuestion(input.question, input.loaded.workupJson);
-  const confidence = hasDirectReadInEvidence
+  const baseConfidence = hasDirectReadInEvidence
     ? "high"
     : sources.length > 0
       ? input.usedWorkup && !workupSupportsQuestion
         ? "low"
         : "medium"
       : "low";
+  const confidence = applyComparisonEvidenceConfidenceCap(baseConfidence, {
+    expectsComparisonEvidence,
+    hasEnoughComparisonSources,
+    hasDirectReadInEvidence,
+  });
+  const note = buildVerificationNote({
+    missing,
+    sources,
+    usedWorkup: input.usedWorkup,
+    workupSupportsQuestion,
+    hasDirectReadInEvidence,
+    hasCitationCapableObservation,
+    expectsComparisonEvidence,
+    hasEnoughComparisonSources,
+  });
 
   return {
     ok: missing.length === 0,
     confidence,
     sources,
     missing,
+    note,
   };
+}
+
+function buildVerificationNote(input: {
+  missing: string[];
+  sources: AnswerSource[];
+  usedWorkup: boolean;
+  workupSupportsQuestion: boolean;
+  hasDirectReadInEvidence: boolean;
+  hasCitationCapableObservation: boolean;
+  expectsComparisonEvidence: boolean;
+  hasEnoughComparisonSources: boolean;
+}): string | null {
+  if (input.missing.includes("source")) {
+    return "This answer is tentative because I do not have a reliable, citable source for it yet.";
+  }
+
+  if (input.expectsComparisonEvidence && !input.hasEnoughComparisonSources) {
+    return input.hasDirectReadInEvidence
+      ? "This answer may be incomplete because the question compares multiple sources, but I only grounded it in one cited source so far."
+      : "This answer is tentative because the question compares multiple sources, but I do not have grounded evidence from both sides yet.";
+  }
+
+  if (input.hasDirectReadInEvidence) {
+    return null;
+  }
+
+  if (input.usedWorkup) {
+    return input.workupSupportsQuestion
+      ? "This answer is based on the pre-loaded workup summary rather than a fresh document read."
+      : "This answer is tentative because the pre-loaded workup does not explicitly cover this question.";
+  }
+
+  if (input.sources.length > 0 && input.hasCitationCapableObservation) {
+    return "This answer is based on matched search evidence, not a full document read. Use the cited source for exact wording.";
+  }
+
+  return null;
+}
+
+function applyComparisonEvidenceConfidenceCap(
+  confidence: "high" | "medium" | "low",
+  input: {
+    expectsComparisonEvidence: boolean;
+    hasEnoughComparisonSources: boolean;
+    hasDirectReadInEvidence: boolean;
+  }
+): "high" | "medium" | "low" {
+  if (!input.expectsComparisonEvidence || input.hasEnoughComparisonSources) {
+    return confidence;
+  }
+
+  if (!input.hasDirectReadInEvidence) {
+    return "low";
+  }
+
+  return confidence === "high" ? "medium" : confidence;
 }
 
 function collectSources(

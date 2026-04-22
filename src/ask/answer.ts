@@ -84,6 +84,7 @@ export function parseWorkspaceAnswerResponse(
           bulletPoints: [],
           sources: fallbackSources,
           confidence: "low",
+          verificationNote: null,
         };
       }
     } else {
@@ -93,6 +94,7 @@ export function parseWorkspaceAnswerResponse(
         bulletPoints: [],
         sources: fallbackSources,
         confidence: "low",
+        verificationNote: null,
       };
     }
   }
@@ -120,7 +122,14 @@ export function parseWorkspaceAnswerResponse(
     ? (obj.confidence as "high" | "medium" | "low")
     : "medium";
 
-  return { question, answer, bulletPoints, sources, confidence };
+  return {
+    question,
+    answer,
+    bulletPoints,
+    sources,
+    confidence,
+    verificationNote: null,
+  };
 }
 
 function stripMarkdownFence(raw: string): string {

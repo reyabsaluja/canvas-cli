@@ -101,7 +101,13 @@ export async function runChatAgent(
       color: toolResult.observation.status === "ok" ? "green" : "red",
       observation: toolResult.observation,
     });
-    if (shouldContinueToolLoopAfterGateRead(toolResult.observation)) {
+    if (
+      shouldContinueToolLoopAfterGateRead(
+        question,
+        toolResult.observation,
+        ctx.runState.observations
+      )
+    ) {
       ({
         fullText,
         supportingObservations,
@@ -166,6 +172,7 @@ export async function runChatAgent(
     bulletPoints: [],
     sources: verification.sources,
     confidence: verification.confidence,
+    verificationNote: verification.note,
   };
 }
 

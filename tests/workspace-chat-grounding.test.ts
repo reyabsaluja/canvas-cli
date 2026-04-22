@@ -915,6 +915,62 @@ test("workspace retrieval gate reuses remembered workspace discoveries before re
   });
 });
 
+test("workspace retrieval gate reads a second source for comparison questions before answering from one grounded read", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+
+    const decision = await decideWorkspaceRetrieval({
+      question: "Compare the branch hazard walkthrough to the reference.",
+      runState: {
+        observations: [
+          {
+            tool: "read_file",
+            status: "ok",
+            summary: "Read docs/reference.txt.",
+            artifacts: [
+              {
+                artifactId: "artifact-reference",
+                title: "docs/reference.txt",
+                kind: "extracted",
+                excerpt:
+                  "The branch hazard requirement is to show the stall cycles clearly in the waveform.",
+              },
+            ],
+            content:
+              "The branch hazard requirement is to show the stall cycles clearly in the waveform.",
+          },
+          {
+            tool: "search_workspace",
+            status: "ok",
+            summary: 'Found 1 relevant workspace match for "branch hazard walkthrough".',
+            artifacts: [
+              {
+                artifactId: "artifact-walkthrough",
+                title: "docs/walkthrough.txt",
+                kind: "extracted",
+                excerpt:
+                  "The walkthrough explains each branch hazard stall step-by-step.",
+              },
+            ],
+          },
+        ],
+        readArtifactIds: ["artifact-reference"],
+        stepCount: 2,
+      },
+      loaded,
+      cache,
+    });
+
+    assert.deepEqual(decision, {
+      action: "read_artifact",
+      reason: "comparison_question_needs_second_source",
+      artifactId: "artifact-walkthrough",
+    });
+  });
+});
+
 test("workspace retrieval gate prefers grounded memory over later discovered artifacts", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
@@ -1050,6 +1106,7 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.equal(verifiedFromRead.ok, true);
     assert.equal(verifiedFromRead.confidence, "high");
     assert.equal(verifiedFromRead.sources[0]?.title, "docs/reference.txt");
+    assert.equal(verifiedFromRead.note, null);
 
     const verifiedFromDownload = verifyWorkspaceAnswer({
       question: "What does the downloaded brief say about the waveform?",
@@ -1076,6 +1133,7 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.equal(verifiedFromDownload.ok, true);
     assert.equal(verifiedFromDownload.confidence, "high");
     assert.equal(verifiedFromDownload.sources[0]?.title, "lab4-brief.txt");
+    assert.equal(verifiedFromDownload.note, null);
 
     const verifiedFromWorkup = verifyWorkspaceAnswer({
       question: "What do I need to submit?",
@@ -1087,6 +1145,10 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.equal(verifiedFromWorkup.ok, true);
     assert.equal(verifiedFromWorkup.confidence, "medium");
     assert.equal(verifiedFromWorkup.sources[0]?.title, "workup.json");
+    assert.equal(
+      verifiedFromWorkup.note,
+      "This answer is based on the pre-loaded workup summary rather than a fresh document read."
+    );
 
     const verifiedFromMissingText = verifyWorkspaceAnswer({
       question: "What does the spec say about the waveform screenshot?",
@@ -1113,6 +1175,10 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.equal(verifiedFromMissingText.confidence, "low");
     assert.deepEqual(verifiedFromMissingText.sources, []);
     assert.deepEqual(verifiedFromMissingText.missing, ["source"]);
+    assert.equal(
+      verifiedFromMissingText.note,
+      "This answer is tentative because I do not have a reliable, citable source for it yet."
+    );
 
     const verifiedFromActionOnlyTool = verifyWorkspaceAnswer({
       question: "List the files I have available.",
@@ -1132,6 +1198,7 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.equal(verifiedFromActionOnlyTool.confidence, "low");
     assert.deepEqual(verifiedFromActionOnlyTool.sources, []);
     assert.deepEqual(verifiedFromActionOnlyTool.missing, []);
+    assert.equal(verifiedFromActionOnlyTool.note, null);
 
     const verifiedFromSearchOnly = verifyWorkspaceAnswer({
       question: "What does the branch hazard section mention?",
@@ -1164,6 +1231,10 @@ test("workspace answer verification derives sources and confidence deterministic
         excerpt: "The waveform must show stall cycles around the branch hazard.",
       },
     ]);
+    assert.equal(
+      verifiedFromSearchOnly.note,
+      "This answer is based on matched search evidence, not a full document read. Use the cited source for exact wording."
+    );
 
     const verifiedFromMultipleSections = verifyWorkspaceAnswer({
       question: "What do the assignment sections say about submission and due date?",
@@ -1252,6 +1323,7 @@ test("workspace answer verification derives sources and confidence deterministic
         excerpt: "The waveform must show stall cycles around the branch hazard.",
       },
     ]);
+    assert.equal(verifiedFromMixedEvidence.note, null);
 
     const verifiedFromMixedGroundedReads = verifyWorkspaceAnswer({
       question: "Explain the branch hazard requirement in detail.",
@@ -1341,6 +1413,10 @@ test("workspace answer verification derives sources and confidence deterministic
         excerpt: "The waveform must show stall cycles around the branch hazard.",
       },
     ]);
+    assert.equal(
+      verifiedFromIrrelevantGroundedButRelevantSearch.note,
+      "This answer is based on matched search evidence, not a full document read. Use the cited source for exact wording."
+    );
 
     const verifiedFromUnsupportedWorkup = verifyWorkspaceAnswer({
       question: "Explain the branch hazard requirement in detail.",
@@ -1350,6 +1426,79 @@ test("workspace answer verification derives sources and confidence deterministic
       loaded,
     });
     assert.equal(verifiedFromUnsupportedWorkup.confidence, "low");
+    assert.equal(
+      verifiedFromUnsupportedWorkup.note,
+      "This answer is tentative because the pre-loaded workup does not explicitly cover this question."
+    );
+
+    const verifiedComparisonFromSingleRead = verifyWorkspaceAnswer({
+      question: "Compare the branch hazard walkthrough to the reference.",
+      answer: "The walkthrough and reference both describe the same stall behavior.",
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read docs/reference.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-compare-1",
+              title: "docs/reference.txt",
+              kind: "extracted",
+              excerpt: "The waveform must show stall cycles around the branch hazard.",
+            },
+          ],
+          content: "The waveform must show stall cycles around the branch hazard.",
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedComparisonFromSingleRead.confidence, "medium");
+    assert.equal(
+      verifiedComparisonFromSingleRead.note,
+      "This answer may be incomplete because the question compares multiple sources, but I only grounded it in one cited source so far."
+    );
+
+    const verifiedComparisonFromTwoReads = verifyWorkspaceAnswer({
+      question: "Compare the branch hazard walkthrough to the reference.",
+      answer: "Both the walkthrough and the reference describe the same stall behavior, but the walkthrough is more step-by-step.",
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read docs/reference.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-compare-1",
+              title: "docs/reference.txt",
+              kind: "extracted",
+              excerpt: "The waveform must show stall cycles around the branch hazard.",
+              sectionLabel: "Reference",
+            },
+          ],
+          content: "The waveform must show stall cycles around the branch hazard.",
+        },
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read docs/walkthrough.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-compare-2",
+              title: "docs/walkthrough.txt",
+              kind: "extracted",
+              excerpt: "The walkthrough explains each branch hazard stall step-by-step.",
+              sectionLabel: "Walkthrough",
+            },
+          ],
+          content: "The walkthrough explains each branch hazard stall step-by-step.",
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedComparisonFromTwoReads.confidence, "high");
+    assert.equal(verifiedComparisonFromTwoReads.note, null);
   });
 });
 
@@ -1998,38 +2147,90 @@ test("tool-loop recovery prefers reading a discovered artifact and skips prior f
   );
 });
 
-test("failed gate reads fall back to the normal tool loop, but grounded gate reads do not", () => {
+test("failed gate reads fall back to the normal tool loop, and comparison questions keep going until a second source is grounded", () => {
   assert.equal(
-    shouldContinueToolLoopAfterGateRead({
-      tool: "read_file",
-      status: "missing_text",
-      summary: "Matched lab4-brief.txt, but readable text is missing.",
-      artifacts: [
-        {
-          artifactId: "artifact-1",
-          title: "lab4-brief.txt",
-          kind: "attachment",
-        },
-      ],
-    }),
+    shouldContinueToolLoopAfterGateRead(
+      "Explain the branch hazard requirement in detail.",
+      {
+        tool: "read_file",
+        status: "missing_text",
+        summary: "Matched lab4-brief.txt, but readable text is missing.",
+        artifacts: [
+          {
+            artifactId: "artifact-1",
+            title: "lab4-brief.txt",
+            kind: "attachment",
+          },
+        ],
+      }
+    ),
     true
   );
 
   assert.equal(
-    shouldContinueToolLoopAfterGateRead({
-      tool: "read_file",
-      status: "ok",
-      summary: "Read docs/reference.txt.",
-      artifacts: [
-        {
-          artifactId: "artifact-2",
-          title: "docs/reference.txt",
-          kind: "extracted",
-          excerpt: "Grounded detail.",
-        },
-      ],
-      content: "Grounded detail.",
-    }),
+    shouldContinueToolLoopAfterGateRead(
+      "Explain the branch hazard requirement in detail.",
+      {
+        tool: "read_file",
+        status: "ok",
+        summary: "Read docs/reference.txt.",
+        artifacts: [
+          {
+            artifactId: "artifact-2",
+            title: "docs/reference.txt",
+            kind: "extracted",
+            excerpt: "Grounded detail.",
+          },
+        ],
+        content: "Grounded detail.",
+      }
+    ),
+    false
+  );
+
+  const firstComparisonRead: Observation = {
+    tool: "read_file",
+    status: "ok",
+    summary: "Read docs/reference.txt.",
+    artifacts: [
+      {
+        artifactId: "artifact-reference",
+        title: "docs/reference.txt",
+        kind: "extracted",
+        excerpt: "The branch hazard reference shows the required stall cycles.",
+      },
+    ],
+    content: "The branch hazard reference shows the required stall cycles.",
+  };
+  assert.equal(
+    shouldContinueToolLoopAfterGateRead(
+      "Compare the branch hazard walkthrough to the reference.",
+      firstComparisonRead,
+      [firstComparisonRead]
+    ),
+    true
+  );
+
+  const secondComparisonRead: Observation = {
+    tool: "read_file",
+    status: "ok",
+    summary: "Read docs/walkthrough.txt.",
+    artifacts: [
+      {
+        artifactId: "artifact-walkthrough",
+        title: "docs/walkthrough.txt",
+        kind: "extracted",
+        excerpt: "The branch hazard walkthrough explains each stall step in order.",
+      },
+    ],
+    content: "The branch hazard walkthrough explains each stall step in order.",
+  };
+  assert.equal(
+    shouldContinueToolLoopAfterGateRead(
+      "Compare the branch hazard walkthrough to the reference.",
+      secondComparisonRead,
+      [firstComparisonRead, secondComparisonRead]
+    ),
     false
   );
 });
@@ -2231,19 +2432,36 @@ test("chat agent prompt and tool definitions teach search-then-read behavior", a
     assert.match(prompt, /follow a search with read_file/i);
     assert.match(
       prompt,
+      /For compare, changed, agree\/disagree, or conflict questions, do not stop after one source/i
+    );
+    assert.match(
+      prompt,
       /If prior tool memory already names candidate sources from a relevant search, do not search again first/i
+    );
+    assert.match(
+      prompt,
+      /If a read or search just failed, do not repeat the same tool call with the same target/i
     );
 
     const tools = buildChatTools({ cache, client: null });
     const workspaceSearch = tools.find((tool) => tool.name === "search_workspace");
     const courseSearch = tools.find((tool) => tool.name === "search_course");
     const readFile = tools.find((tool) => tool.name === "read_file");
+    const listFiles = tools.find((tool) => tool.name === "list_files");
 
     assert.match(workspaceSearch?.description ?? "", /Discovery-only search/i);
     assert.match(workspaceSearch?.description ?? "", /call read_file/i);
+    assert.match(
+      workspaceSearch?.description ?? "",
+      /best two candidate sources/i
+    );
     assert.match(courseSearch?.description ?? "", /Discovery-only search/i);
     assert.match(courseSearch?.description ?? "", /download_course_file/i);
+    assert.match(courseSearch?.description ?? "", /best two course sources/i);
     assert.match(readFile?.description ?? "", /grounding tool/i);
+    assert.match(readFile?.description ?? "", /read each relevant source/i);
+    assert.match(listFiles?.description ?? "", /failed or ambiguous read\/open/i);
+    assert.match(listFiles?.description ?? "", /search came up empty/i);
   });
 });
 

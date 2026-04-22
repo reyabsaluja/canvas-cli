@@ -29,6 +29,14 @@ export function renderWorkspaceAnswer(wa: WorkspaceAnswer): string {
     lines.push("");
   }
 
+  if (wa.verificationNote) {
+    lines.push(chalk.bold("Grounding"));
+    for (const line of wa.verificationNote.split("\n")) {
+      lines.push(line ? `  ${chalk.yellow(line)}` : "");
+    }
+    lines.push("");
+  }
+
   // Sources
   if (wa.sources.length > 0) {
     lines.push(chalk.bold("Sources"));
