@@ -1,4 +1,4 @@
-import { getAIConfig } from "../ai/provider.js";
+import { getAIConfig, AI_PROVIDER_SETUP_HINT } from "../ai/provider.js";
 import { resolveWorkspace, listWorkspaces } from "../ask/resolve-workspace.js";
 import { loadWorkspace } from "../ask/load-workspace.js";
 import { loadCourseCache } from "../enrich/cache-loader.js";
@@ -23,7 +23,7 @@ export async function askCommand(
   const aiConfig = getAIConfig();
   if (!aiConfig) {
     console.error(
-      "Error: no AI provider key is configured.\nAdd ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY to your .env file."
+      `Error: no AI provider is configured.\n${AI_PROVIDER_SETUP_HINT}`
     );
     process.exit(1);
   }

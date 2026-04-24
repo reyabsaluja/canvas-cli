@@ -31,7 +31,7 @@ export async function generateAssignmentOverview(
   if (!aiConfig) {
     return {
       overview: null,
-      error: "AI overview unavailable: no ANTHROPIC_API_KEY configured",
+      error: "AI overview unavailable: no AI provider configured",
     };
   }
 
