@@ -637,6 +637,15 @@ function rankResource(
     }
   }
 
+  const hasTextMatch = score > 0 || matchedTokens > 0;
+  if (!hasTextMatch) {
+    return {
+      resource,
+      score: 0,
+      matchedTokens,
+    };
+  }
+
   if (matchedTokens === queryTokens.length) {
     score = Math.max(score, 260 + matchedTokens * 10);
   } else {
