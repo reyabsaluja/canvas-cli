@@ -224,6 +224,44 @@ test("handleOpenResourceQuery opens matching downloaded resources and reports am
   });
 });
 
+test("handleOpenResourceQuery does not open resources for unrelated queries", async () => {
+  await withTempDir(async (tempDir) => {
+    const workspacePath = path.join(tempDir, "workspace");
+    await fs.mkdir(workspacePath, { recursive: true });
+    await fs.writeFile(path.join(workspacePath, "assignment.md"), "# Assignment\n", "utf-8");
+
+    const loaded: LoadedWorkspace = {
+      path: workspacePath,
+      sessionSlug: "lab-4",
+      assignmentId: 42,
+      assignmentName: "Lab 4",
+      courseId: 17,
+      courseName: "ECE243",
+      courseCode: "ECE243H1",
+      preparedAt: null,
+      workspaceState: "ready",
+      assignmentMd: "# Assignment\n",
+      planMd: null,
+      notesMd: null,
+      workupJson: null,
+      extractedFiles: [],
+    };
+
+    const opened: string[] = [];
+    const result = await handleOpenResourceQuery(
+      "zyxwv qplm",
+      { loaded },
+      async (resource) => {
+        opened.push(resource.target);
+      }
+    );
+
+    assert.equal(result.status, "missing");
+    assert.deepEqual(opened, []);
+    assert.match(result.message, /No openable resource matched "zyxwv qplm"/);
+  });
+});
+
 test("handleOpenResourceQuery opens a zip entry PDF directly rather than the parent zip", async () => {
   await withTempDir(async (tempDir) => {
     const coursePath = path.join(tempDir, "course");
