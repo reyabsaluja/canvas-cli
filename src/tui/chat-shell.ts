@@ -33,6 +33,12 @@ import {
 } from "./chat-shell-render.js";
 import { ChatShellPersistence } from "./chat-shell-persistence.js";
 import { enterChatShell, leaveChatShell } from "./chat-shell-terminal.js";
+import { copyToClipboard } from "./clipboard.js";
+import {
+  formatConversationForCopy,
+  formatLastAssistantForCopy,
+  formatLastNForCopy,
+} from "./chat-copy.js";
 import { createSerialTaskQueue } from "./serial-task-queue.js";
 import { exitShellAborted } from "./chat-shell-exit.js";
 import { getActivePinPartial } from "./workspace-input.js";
@@ -637,6 +643,7 @@ export async function runChatShell<TExit>(
         "\x0F",
         "\x10",
         "\x0e",
+        "\x19",
         "\x1B[A",
         "\x1B[B",
         "\x1b[5~",
@@ -855,6 +862,57 @@ export async function runChatShell<TExit>(
       render();
     }
 
+    async function runCopy(arg: string): Promise<void> {
+      const lower = arg.toLowerCase();
+      let payload: string | null;
+      let label: string;
+      if (!lower) {
+        payload = formatLastAssistantForCopy(messages);
+        label = "last response";
+      } else if (lower === "all") {
+        payload = formatConversationForCopy(messages);
+        label = "full conversation";
+      } else {
+        const match = lower.match(/^last\s+(\d+)$/) ?? lower.match(/^(\d+)$/);
+        const n = match ? parseInt(match[1]!, 10) : NaN;
+        if (!Number.isFinite(n) || n <= 0) {
+          await appendPersistedMessage({
+            role: "system",
+            content: "Usage: /copy | /copy all | /copy last N",
+          });
+          render();
+          return;
+        }
+        payload = formatLastNForCopy(messages, n);
+        label = `last ${n} messages`;
+      }
+
+      if (!payload) {
+        await appendPersistedMessage({
+          role: "system",
+          content: "Nothing to copy yet.",
+        });
+        render();
+        return;
+      }
+
+      try {
+        await copyToClipboard(payload);
+        await appendPersistedMessage({
+          role: "system",
+          content: `Copied ${label} to clipboard (${payload.length.toLocaleString()} chars).`,
+        });
+      } catch (error) {
+        await appendPersistedMessage({
+          role: "system",
+          content: `Error: clipboard copy failed (${
+            error instanceof Error ? error.message : "unknown"
+          })`,
+        });
+      }
+      render();
+    }
+
     async function handleCommandInput(
       rawInput: string,
       commandName: string,
@@ -875,6 +933,11 @@ export async function runChatShell<TExit>(
           content: helpLines.join("\n"),
         });
         render();
+        return;
+      }
+
+      if (commandName === "/copy") {
+        await runCopy(args.trim());
         return;
       }
 
@@ -949,6 +1012,11 @@ export async function runChatShell<TExit>(
       if (key === "\x0F") {
         toolOutputExpanded = !toolOutputExpanded;
         render();
+        return;
+      }
+
+      if (key === "\x19") {
+        await runCopy("");
         return;
       }
 
