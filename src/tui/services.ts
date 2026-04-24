@@ -6,6 +6,7 @@ export type {
 } from "./services/types.js";
 
 export {
+  filterActionableUpcomingAssignments,
   fetchAssignments,
   fetchUpcomingAssignments,
   formatDueCompact,
