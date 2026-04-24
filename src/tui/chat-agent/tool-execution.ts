@@ -5,7 +5,8 @@ import type { ToolExecutionResult, ArtifactRef } from "../../agent/observation.j
 import { isGroundedContentObservation } from "../../agent/observation-relevance.js";
 import type { ArtifactRecord } from "../../knowledge/artifact-index.js";
 import { clearArtifactIndexCache } from "../../knowledge/artifact-index.js";
-import { extractFileText } from "../../extract/extract-text.js";
+import { extractSingleAttachment } from "../../ingest/attachment-extraction.js";
+import type { DownloadedAttachmentEntry } from "../../ingest/types.js";
 import { getExtractedAttachmentPath } from "../../enrich/course-documents.js";
 import { handleOpenResourceQuery } from "../open-resources.js";
 import { handleLectureQuery } from "../lecture-resources.js";
@@ -15,6 +16,7 @@ import {
 } from "../course-retrieval.js";
 import {
   listWorkspaceKnowledgeArtifacts,
+  persistCourseAttachmentUpdates,
   readWorkspaceKnowledgeArtifact,
   readWorkspaceKnowledgeArtifactById,
   registerDownloadedCourseAttachment,
@@ -550,10 +552,24 @@ async function downloadCourseFile(
     reason: `downloaded on demand from module item "${foundItem.title}"`,
     sourceType: "module_linked",
   });
-  const extracted = await extractAndPersistAttachmentText(
+
+  const registeredAttachment = ctx.cache.attachments.find(
+    (entry) => entry.localPath === relativeLocalPath
+  );
+  const unpackedEntries = await runAttachmentExtraction(
     ctx.cache.coursePath,
-    relativeLocalPath,
-    fileMeta.display_name
+    registeredAttachment ?? null
+  );
+  if (unpackedEntries.length > 0) {
+    await persistCourseAttachmentUpdates(ctx.cache);
+  } else {
+    // Text extraction may have produced a sidecar even without unpack.
+    clearArtifactIndexCache();
+  }
+
+  const extracted = await readExtractedSidecar(
+    ctx.cache.coursePath,
+    relativeLocalPath
   );
   if (extracted) {
     const artifactRef = createCourseAttachmentArtifactRef(
@@ -565,7 +581,10 @@ async function downloadCourseFile(
       observation: {
         tool: "download_course_file",
         status: "ok",
-        summary: `Downloaded and extracted ${fileMeta.display_name}.`,
+        summary:
+          unpackedEntries.length > 0
+            ? `Downloaded, extracted, and unpacked ${fileMeta.display_name} (${unpackedEntries.length} inner files).`
+            : `Downloaded and extracted ${fileMeta.display_name}.`,
         artifacts: [artifactRef],
         content: extracted,
       },
@@ -573,6 +592,26 @@ async function downloadCourseFile(
       uiText: extracted,
     };
   }
+
+  if (unpackedEntries.length > 0) {
+    const summary = `Downloaded and unpacked ${fileMeta.display_name} (${unpackedEntries.length} inner files). The zip itself has no text body; call read_file on a specific inner file by name.`;
+    return {
+      observation: {
+        tool: "download_course_file",
+        status: "ok",
+        summary,
+        artifacts: [
+          createCourseAttachmentArtifactRef(
+            relativeLocalPath,
+            fileMeta.display_name
+          ),
+        ],
+      },
+      modelText: summary,
+      uiText: summary,
+    };
+  }
+
   const message = `Downloaded "${fileMeta.display_name}", but extracted text is not available yet. Refresh the course cache to rebuild it.`;
   return {
     observation: {
@@ -714,28 +753,55 @@ async function recoverMissingAttachmentRead(
     return null;
   }
 
-  const extracted = await extractAndPersistAttachmentText(
+  const cachedAttachment =
+    ctx.cache.attachments.find((entry) => entry.localPath === localPath) ?? null;
+  const unpackedEntries = await runAttachmentExtraction(
     ctx.cache.coursePath,
-    localPath,
-    artifact.title
+    cachedAttachment
   );
-  if (!extracted) {
-    return null;
+  if (unpackedEntries.length > 0) {
+    await persistCourseAttachmentUpdates(ctx.cache);
+  } else {
+    clearArtifactIndexCache();
   }
 
-  return {
-    observation: {
-      tool,
-      status: "ok",
-      summary: `Recovered text from local attachment ${artifact.title}.`,
-      artifacts: [
-        createCourseAttachmentArtifactRef(localPath, artifact.title, extracted),
-      ],
-      content: extracted,
-    },
-    modelText: extracted,
-    uiText: extracted,
-  };
+  const extracted = await readExtractedSidecar(
+    ctx.cache.coursePath,
+    localPath
+  );
+  if (extracted) {
+    return {
+      observation: {
+        tool,
+        status: "ok",
+        summary: `Recovered text from local attachment ${artifact.title}.`,
+        artifacts: [
+          createCourseAttachmentArtifactRef(localPath, artifact.title, extracted),
+        ],
+        content: extracted,
+      },
+      modelText: extracted,
+      uiText: extracted,
+    };
+  }
+
+  if (unpackedEntries.length > 0) {
+    const summary = `Unpacked ${artifact.title} (${unpackedEntries.length} inner files). Call read_file on a specific inner file by name.`;
+    return {
+      observation: {
+        tool,
+        status: "ok",
+        summary,
+        artifacts: [
+          createCourseAttachmentArtifactRef(localPath, artifact.title),
+        ],
+      },
+      modelText: summary,
+      uiText: summary,
+    };
+  }
+
+  return null;
 }
 
 async function reuseCachedAttachmentContent(
@@ -772,50 +838,82 @@ async function reuseCachedAttachmentContent(
     };
   }
 
-  const extracted = await extractAndPersistAttachmentText(
+  const cachedAttachment =
+    cache.attachments.find((entry) => entry.localPath === localPath) ?? null;
+  const unpackedEntries = await runAttachmentExtraction(
     coursePath,
-    localPath,
-    originalFilename
+    cachedAttachment
   );
-  if (!extracted) {
-    return null;
+  if (unpackedEntries.length > 0) {
+    await persistCourseAttachmentUpdates(cache);
+  } else {
+    clearArtifactIndexCache();
   }
 
-  return {
-    observation: {
-      tool: "download_course_file",
-      status: "ok",
-      summary: `Recovered text from previously downloaded ${originalFilename}.`,
-      artifacts: [
-        createCourseAttachmentArtifactRef(localPath, originalFilename, extracted),
-      ],
-      content: extracted,
-    },
-    modelText: extracted,
-    uiText: extracted,
-  };
+  const extracted = await readExtractedSidecar(coursePath, localPath);
+  if (extracted) {
+    return {
+      observation: {
+        tool: "download_course_file",
+        status: "ok",
+        summary: `Recovered text from previously downloaded ${originalFilename}.`,
+        artifacts: [
+          createCourseAttachmentArtifactRef(localPath, originalFilename, extracted),
+        ],
+        content: extracted,
+      },
+      modelText: extracted,
+      uiText: extracted,
+    };
+  }
+
+  if (unpackedEntries.length > 0) {
+    const summary = `Unpacked ${originalFilename} (${unpackedEntries.length} inner files). The zip itself has no text body; call read_file on a specific inner file by name.`;
+    return {
+      observation: {
+        tool: "download_course_file",
+        status: "ok",
+        summary,
+        artifacts: [
+          createCourseAttachmentArtifactRef(localPath, originalFilename),
+        ],
+      },
+      modelText: summary,
+      uiText: summary,
+    };
+  }
+
+  return null;
 }
 
-async function extractAndPersistAttachmentText(
+/**
+ * Run the shared ingestion-style extraction pipeline on a single attachment.
+ * Handles text sidecar extraction and, for zips, per-entry unpack. Returns
+ * the zip entries that were unpacked (empty array for non-zips or when the
+ * attachment is missing). Falls back to just the sidecar if no attachment
+ * entry exists yet (e.g. a pre-cache backfill path).
+ */
+async function runAttachmentExtraction(
   coursePath: string,
-  localPath: string,
-  originalFilename: string
-): Promise<string | null> {
-  const absolutePath = path.join(coursePath, localPath);
+  attachment: DownloadedAttachmentEntry | null
+): Promise<Array<{ filename: string }>> {
+  if (!attachment) return [];
   try {
-    const extracted = await extractFileText(absolutePath, originalFilename);
-    if (!isReadableExtractedText(extracted)) {
-      return null;
-    }
-    const extractedPath = getExtractedAttachmentPath(coursePath, localPath);
-    await fs.mkdir(path.dirname(extractedPath), { recursive: true });
-    await fs.writeFile(
-      extractedPath,
-      extracted.endsWith("\n") ? extracted : `${extracted}\n`,
-      "utf-8"
-    );
-    clearArtifactIndexCache();
-    return extracted;
+    await extractSingleAttachment(coursePath, attachment);
+  } catch {
+    return [];
+  }
+  return attachment.zipEntries ?? [];
+}
+
+async function readExtractedSidecar(
+  coursePath: string,
+  localPath: string
+): Promise<string | null> {
+  const sidecar = getExtractedAttachmentPath(coursePath, localPath);
+  try {
+    const content = await fs.readFile(sidecar, "utf-8");
+    return isReadableExtractedText(content) ? content : null;
   } catch {
     return null;
   }

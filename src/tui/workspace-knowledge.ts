@@ -250,6 +250,20 @@ export async function registerDownloadedCourseAttachment(
   await persistCourseAttachments(cache);
 }
 
+/**
+ * Re-persist attachments.json after mutating entries in place (e.g. after
+ * on-demand zip unpacking populates zipEntries on an existing attachment).
+ * Invalidates the artifact index so the new entries become immediately
+ * addressable.
+ */
+export async function persistCourseAttachmentUpdates(
+  cache: CourseCache | null
+): Promise<void> {
+  if (!cache) return;
+  clearArtifactIndexCache();
+  await persistCourseAttachments(cache);
+}
+
 function findReadableArtifact(
   index: ArtifactIndex,
   query: string
