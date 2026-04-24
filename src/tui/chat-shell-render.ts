@@ -692,7 +692,7 @@ function renderWrappedContent(content: string, lines: string[], maxWidth: number
       continue;
     }
     if (/^[-*_]{3,}$/.test(trimmed) || trimmed === "***") {
-      lines.push(`  ${C.dimmer("─".repeat(Math.min(maxWidth - 4, 40)))}`);
+      lines.push(`  ${C.dimmer("─".repeat(Math.max(1, maxWidth - 2)))}`);
       continue;
     }
     const headingMatch = trimmed.match(/^(#{1,4})\s+(.+)/);
@@ -923,8 +923,10 @@ function applyInlineFormatting(text: string): string {
 interface InlineRange {
   start: number;
   end: number;
-  style: "bold" | "italic" | "code";
+  style: "bold" | "italic" | "code" | "link";
 }
+
+const BARE_URL_RE = /\bhttps?:\/\/[^\s<>()[\]{}'"`]+[^\s<>()[\]{}'"`.,;:!?]/;
 
 function parseAndStripFormatting(text: string): {
   plain: string;
@@ -935,6 +937,34 @@ function parseAndStripFormatting(text: string): {
   let i = 0;
 
   while (i < text.length) {
+    if (text[i] === "[") {
+      const closeBracket = text.indexOf("]", i + 1);
+      if (
+        closeBracket !== -1 &&
+        text[closeBracket + 1] === "("
+      ) {
+        const closeParen = text.indexOf(")", closeBracket + 2);
+        if (closeParen !== -1) {
+          const label = text.slice(i + 1, closeBracket);
+          const start = plain.length;
+          plain += label;
+          ranges.push({ start, end: plain.length, style: "link" });
+          i = closeParen + 1;
+          continue;
+        }
+      }
+    }
+    if (text[i] === "h" || text[i] === "H") {
+      const rest = text.slice(i);
+      const match = rest.match(BARE_URL_RE);
+      if (match && match.index === 0) {
+        const start = plain.length;
+        plain += match[0];
+        ranges.push({ start, end: plain.length, style: "link" });
+        i += match[0].length;
+        continue;
+      }
+    }
     if (text[i] === "*" && text[i + 1] === "*") {
       const close = text.indexOf("**", i + 2);
       if (close !== -1) {
@@ -1009,6 +1039,9 @@ function applyFormattingRanges(
           break;
         case "code":
           result += C.warm(segment);
+          break;
+        case "link":
+          result += C.secondary.underline(segment);
           break;
       }
       i = j;
