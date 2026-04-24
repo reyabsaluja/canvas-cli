@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { extractFileText } from "../extract/extract-text.js";
+import { extractFileText, unpackZipToDirectory } from "../extract/extract-text.js";
 import {
   getExtractedAssignmentPath,
   getExtractedAnnouncementPath,
@@ -8,6 +8,7 @@ import {
   getExtractedDiscussionPath,
   getExtractedExternalLinkPath,
   getExtractedPagePath,
+  getUnpackedZipDir,
 } from "../enrich/course-documents.js";
 import type {
   RawAssignmentRecord,
@@ -27,6 +28,7 @@ import type {
   DownloadedAttachmentEntry,
   LectureIndexEntry,
   IngestionMeta,
+  ZipAttachmentEntry,
 } from "./types.js";
 import { htmlToText } from "../format/html-to-text.js";
 import type { CapturedExternalLink } from "./external-link-capture.js";
@@ -65,6 +67,10 @@ export async function writeIngestionArtifacts(
   // Ensure directory structure
   await fs.mkdir(path.join(coursePath, "extracted"), { recursive: true });
   await fs.mkdir(path.join(coursePath, "attachments"), { recursive: true });
+
+  // Extract text and unpack zips before writing attachments.json so that
+  // zipEntries metadata is captured in the persisted attachment records.
+  await extractAttachmentContents(coursePath, attachments);
 
   // Write all JSON files atomically (write to temp then rename)
   const writes: Array<[string, unknown]> = [
@@ -193,7 +199,17 @@ export async function writeIngestionArtifacts(
       );
     }
   }
+}
 
+/**
+ * Extract text sidecars for every downloaded attachment. For zip attachments,
+ * also unpacks the zip so each inner file is individually addressable.
+ * Mutates attachment entries in place to record zip entry metadata.
+ */
+async function extractAttachmentContents(
+  coursePath: string,
+  attachments: DownloadedAttachmentEntry[]
+): Promise<void> {
   for (const attachment of attachments) {
     if (attachment.status !== "downloaded" && attachment.status !== "skipped") {
       continue;
@@ -205,15 +221,78 @@ export async function writeIngestionArtifacts(
     );
     try {
       const text = await extractFileText(fullPath, attachment.originalFilename);
-      if (!text || text.startsWith("[") || text.trim().length === 0) {
-        continue;
+      if (text && !text.startsWith("[") && text.trim().length > 0) {
+        await fs.mkdir(path.dirname(extractedPath), { recursive: true });
+        await writeAtomic(extractedPath, text.endsWith("\n") ? text : text + "\n");
       }
-      await fs.mkdir(path.dirname(extractedPath), { recursive: true });
-      await writeAtomic(extractedPath, text.endsWith("\n") ? text : text + "\n");
     } catch {
       // Extraction is best-effort; keep ingestion resilient if a file is unreadable.
     }
+
+    if (path.extname(attachment.originalFilename).toLowerCase() === ".zip") {
+      try {
+        attachment.zipEntries = await unpackAttachmentZip(coursePath, attachment);
+      } catch {
+        // Unpacking is best-effort.
+      }
+    }
   }
+}
+
+/**
+ * Unpack a zip attachment next to its original location and write per-entry
+ * text sidecars so inner PDFs/text files are individually searchable and openable.
+ */
+async function unpackAttachmentZip(
+  coursePath: string,
+  attachment: DownloadedAttachmentEntry
+): Promise<ZipAttachmentEntry[]> {
+  const zipAbsolutePath = path.join(coursePath, attachment.localPath);
+  const unpackDirAbsolute = getUnpackedZipDir(coursePath, attachment.localPath);
+  await fs.mkdir(unpackDirAbsolute, { recursive: true });
+
+  const unpackedEntries = await unpackZipToDirectory(
+    zipAbsolutePath,
+    unpackDirAbsolute
+  );
+
+  const entries: ZipAttachmentEntry[] = [];
+  for (const unpacked of unpackedEntries) {
+    const entryLocalPath = path.relative(coursePath, unpacked.absolutePath);
+    let extractedTextPath: string | null = null;
+
+    const innerExt = path.extname(unpacked.entryName).toLowerCase();
+    if (innerExt !== ".zip") {
+      try {
+        const filename = path.basename(unpacked.entryName);
+        const text = await extractFileText(unpacked.absolutePath, filename);
+        if (text && !text.startsWith("[") && text.trim().length > 0) {
+          const absoluteExtractedPath = getExtractedAttachmentPath(
+            coursePath,
+            entryLocalPath
+          );
+          await fs.mkdir(path.dirname(absoluteExtractedPath), { recursive: true });
+          await writeAtomic(
+            absoluteExtractedPath,
+            text.endsWith("\n") ? text : text + "\n"
+          );
+          extractedTextPath = path.relative(coursePath, absoluteExtractedPath);
+        }
+      } catch {
+        // Best-effort — leave extractedTextPath as null if extraction fails.
+      }
+    }
+
+    entries.push({
+      entryName: unpacked.entryName,
+      filename: path.basename(unpacked.entryName),
+      localPath: entryLocalPath,
+      extractedTextPath,
+      size: unpacked.size,
+    });
+  }
+
+  return entries;
 }
 
 /**

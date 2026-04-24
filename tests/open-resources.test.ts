@@ -223,3 +223,69 @@ test("handleOpenResourceQuery opens matching downloaded resources and reports am
     assert.match(ambiguousResult.message, /Multiple resources matched/);
   });
 });
+
+test("handleOpenResourceQuery opens a zip entry PDF directly rather than the parent zip", async () => {
+  await withTempDir(async (tempDir) => {
+    const coursePath = path.join(tempDir, "course");
+    const innerDir = path.join(
+      coursePath,
+      "attachments",
+      "reference",
+      "exams.zip.unpacked",
+      "2024"
+    );
+    await fs.mkdir(innerDir, { recursive: true });
+    const zipPath = path.join(coursePath, "attachments", "reference", "exams.zip");
+    const innerPdfPath = path.join(innerDir, "final_exam_2024.pdf");
+    await fs.writeFile(zipPath, "zip-bytes", "utf-8");
+    await fs.writeFile(innerPdfPath, "pdf-bytes", "utf-8");
+
+    const cache: CourseCache = {
+      courseId: 17,
+      coursePath,
+      assignments: [],
+      modules: [],
+      files: [],
+      pages: [],
+      syllabusCandidates: [],
+      attachments: [
+        {
+          sourceType: "important_file",
+          canvasFileId: 555,
+          originalFilename: "exams.zip",
+          localPath: "attachments/reference/exams.zip",
+          contentType: "application/zip",
+          size: 4096,
+          downloadUrl: "https://canvas.example/files/555",
+          reason: "past exam archive",
+          status: "downloaded",
+          zipEntries: [
+            {
+              entryName: "2024/final_exam_2024.pdf",
+              filename: "final_exam_2024.pdf",
+              localPath:
+                "attachments/reference/exams.zip.unpacked/2024/final_exam_2024.pdf",
+              extractedTextPath: null,
+              size: 2048,
+            },
+          ],
+        },
+      ],
+      lectures: [],
+      ingestion: null,
+    };
+
+    const opened: string[] = [];
+    const result = await handleOpenResourceQuery(
+      "final_exam_2024.pdf",
+      { cache },
+      async (resource) => {
+        opened.push(resource.target);
+      }
+    );
+
+    assert.equal(result.status, "opened");
+    assert.equal(opened[0], innerPdfPath);
+    assert.match(result.message, /Opened final_exam_2024\.pdf \(zip entry\)/);
+  });
+});

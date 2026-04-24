@@ -473,3 +473,120 @@ test("registerDownloadedCourseAttachment makes new downloads visible to workspac
     }
   });
 });
+
+test("zip entries are individually addressable through read and list", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const workspace = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+
+    const unpackedRoot = path.join(
+      coursePath,
+      "attachments",
+      "reference",
+      "exams.zip.unpacked"
+    );
+    await fs.mkdir(path.join(unpackedRoot, "2022"), { recursive: true });
+    await fs.mkdir(path.join(unpackedRoot, "2024"), { recursive: true });
+    await fs.writeFile(
+      path.join(unpackedRoot, "2022", "final_exam_2022.pdf"),
+      "stub",
+      "utf-8"
+    );
+    await fs.writeFile(
+      path.join(unpackedRoot, "2024", "final_exam_2024.pdf"),
+      "stub",
+      "utf-8"
+    );
+
+    const extractedRoot = path.join(
+      coursePath,
+      "extracted",
+      "attachments",
+      "reference",
+      "exams.zip.unpacked"
+    );
+    await fs.mkdir(path.join(extractedRoot, "2022"), { recursive: true });
+    await fs.mkdir(path.join(extractedRoot, "2024"), { recursive: true });
+    await fs.writeFile(
+      path.join(extractedRoot, "2022", "final_exam_2022.pdf.txt"),
+      "2022 final: register the ALU bypass logic.\n",
+      "utf-8"
+    );
+    await fs.writeFile(
+      path.join(extractedRoot, "2024", "final_exam_2024.pdf.txt"),
+      "2024 final: convert the Nios II datapath to Nios V.\n",
+      "utf-8"
+    );
+
+    const cache = createCourseCache(coursePath);
+    cache.attachments = [
+      {
+        sourceType: "important_file",
+        canvasFileId: 555,
+        originalFilename: "exams.zip",
+        localPath: "attachments/reference/exams.zip",
+        contentType: "application/zip",
+        size: 4096,
+        downloadUrl: "https://canvas.example/files/555/download",
+        reason: "past exam archive",
+        status: "downloaded",
+        zipEntries: [
+          {
+            entryName: "2022/final_exam_2022.pdf",
+            filename: "final_exam_2022.pdf",
+            localPath:
+              "attachments/reference/exams.zip.unpacked/2022/final_exam_2022.pdf",
+            extractedTextPath:
+              "extracted/attachments/reference/exams.zip.unpacked/2022/final_exam_2022.pdf.txt",
+            size: 2048,
+          },
+          {
+            entryName: "2024/final_exam_2024.pdf",
+            filename: "final_exam_2024.pdf",
+            localPath:
+              "attachments/reference/exams.zip.unpacked/2024/final_exam_2024.pdf",
+            extractedTextPath:
+              "extracted/attachments/reference/exams.zip.unpacked/2024/final_exam_2024.pdf.txt",
+            size: 2048,
+          },
+        ],
+      },
+    ];
+
+    const readResult = await readWorkspaceKnowledgeArtifact(
+      workspace,
+      cache,
+      "final_exam_2024.pdf",
+      30000
+    );
+    assert.equal(readResult.status, "ok");
+    if (readResult.status === "ok") {
+      assert.match(readResult.content, /Nios II datapath to Nios V/);
+      assert.equal(readResult.artifact.title, "final_exam_2024.pdf");
+    }
+
+    const otherRead = await readWorkspaceKnowledgeArtifact(
+      workspace,
+      cache,
+      "final_exam_2022.pdf",
+      30000
+    );
+    assert.equal(otherRead.status, "ok");
+    if (otherRead.status === "ok") {
+      assert.match(otherRead.content, /register the ALU bypass logic/);
+    }
+
+    const fileList = await listWorkspaceKnowledgeArtifacts(workspace, cache);
+    assert.ok(
+      fileList.courseDocuments.some(
+        (entry) => entry.label === "[attachment] final_exam_2024.pdf"
+      )
+    );
+    assert.ok(
+      fileList.courseDocuments.some(
+        (entry) => entry.label === "[attachment] exams.zip"
+      )
+    );
+  });
+});

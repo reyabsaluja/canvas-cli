@@ -244,6 +244,24 @@ export async function collectOpenableResources(
         normalizeDuplicateTitle(attachment.originalFilename),
         resource
       );
+
+      for (const zipEntry of attachment.zipEntries ?? []) {
+        const aliases = [
+          zipEntry.entryName,
+          zipEntry.filename,
+          attachment.originalFilename,
+          `inside ${attachment.originalFilename}`,
+        ];
+        push(
+          createFileResource(
+            `course-attachment:${attachment.localPath}:zip:${zipEntry.entryName}`,
+            zipEntry.filename,
+            "zip entry",
+            path.join(cache.coursePath, zipEntry.localPath),
+            aliases
+          )
+        );
+      }
     }
 
     for (const page of cache.pages) {
@@ -646,6 +664,8 @@ function resourceTypePriority(resource: OpenableResource): number {
     case "workspace attachment":
     case "workspace resource":
       return 30;
+    case "zip entry":
+      return 28;
     case "workspace file":
       return 24;
     case "page":

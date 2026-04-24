@@ -127,6 +127,19 @@ export type AttachmentSourceType =
   | "module_linked"
   | "page_linked";
 
+export interface ZipAttachmentEntry {
+  /** Path of the entry inside the zip, forward slashes, no leading slash. */
+  entryName: string;
+  /** Filename only (basename of entryName). */
+  filename: string;
+  /** Path to the unpacked file on disk, relative to the course directory. */
+  localPath: string;
+  /** Path to the extracted-text sidecar relative to the course directory, if any. */
+  extractedTextPath: string | null;
+  /** Uncompressed size in bytes. */
+  size: number;
+}
+
 export interface DownloadedAttachmentEntry {
   sourceType: AttachmentSourceType;
   canvasFileId: number | null;
@@ -137,6 +150,8 @@ export interface DownloadedAttachmentEntry {
   downloadUrl: string;
   reason: string;
   status: "downloaded" | "skipped" | "failed";
+  /** For zip attachments: the files unpacked out of the zip during ingestion. */
+  zipEntries?: ZipAttachmentEntry[];
 }
 
 export interface LectureIndexEntry {

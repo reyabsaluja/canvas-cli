@@ -134,6 +134,13 @@ export async function getCourseArtifactSetKey(
         getExtractedAttachmentPath(cache.coursePath, attachment.localPath)
       )
     ),
+    ...cache.attachments.flatMap((attachment) =>
+      (attachment.zipEntries ?? []).map((entry) =>
+        entry.extractedTextPath
+          ? getFileSignature(path.join(cache.coursePath, entry.extractedTextPath))
+          : Promise.resolve(`${entry.localPath}:no-extract`)
+      )
+    ),
   ]);
   return hashKey(
     "course",
@@ -220,6 +227,13 @@ export async function getCourseArtifactSetKey(
         status: attachment.status,
         sourceType: attachment.sourceType,
         reason: attachment.reason,
+        zipEntries: (attachment.zipEntries ?? []).map((entry) => ({
+          entryName: entry.entryName,
+          filename: entry.filename,
+          localPath: entry.localPath,
+          extractedTextPath: entry.extractedTextPath,
+          size: entry.size,
+        })),
       })),
       extractedPathSignatures,
     })
@@ -831,6 +845,39 @@ async function addCourseArtifacts(
       contentCache,
       loaders
     );
+
+    for (const zipEntry of attachment.zipEntries ?? []) {
+      if (!zipEntry.extractedTextPath) {
+        continue;
+      }
+      const entryContentPath = path.join(
+        cache.coursePath,
+        zipEntry.extractedTextPath
+      );
+      await registerCourseTextArtifact(
+        {
+          id: `course:attachment:${attachment.localPath}:zip:${zipEntry.entryName}`,
+          kind: "attachment",
+          title: zipEntry.filename,
+          source: zipEntry.filename,
+          location: zipEntry.localPath,
+          fallbackText: `Inside ${attachment.originalFilename}: ${zipEntry.entryName}`,
+          contentPath: entryContentPath,
+          scoreBoost: 1.05,
+          metadata: {
+            localPath: zipEntry.localPath,
+            status: attachment.status,
+            zipParent: attachment.localPath,
+            zipEntryName: zipEntry.entryName,
+          },
+          skipIfMissingContent: true,
+        },
+        registerArtifact,
+        registerSection,
+        contentCache,
+        loaders
+      );
+    }
   }
 }
 

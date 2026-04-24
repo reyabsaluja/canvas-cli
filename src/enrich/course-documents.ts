@@ -78,6 +78,17 @@ export function getExtractedAttachmentPath(
   return path.join(coursePath, "extracted", "attachments", `${relativeToAttachments}.txt`);
 }
 
+/**
+ * Directory where the contents of a zip attachment are unpacked during ingestion.
+ * Sits next to the original zip in attachments/<subfolder>/<zipname>.unpacked/.
+ */
+export function getUnpackedZipDir(
+  coursePath: string,
+  zipLocalPath: string
+): string {
+  return path.join(coursePath, `${zipLocalPath}.unpacked`);
+}
+
 function sanitizeDocumentSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/g, "_");
 }

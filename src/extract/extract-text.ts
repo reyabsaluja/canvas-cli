@@ -15,6 +15,20 @@ const MAX_TEXT = 30000;
 const MAX_ZIP_TEXT = 50000; // Higher limit for zips since they contain multiple files
 const MAX_ZIP_FILE_TEXT = 30000; // Per-file limit inside zips
 
+const TEXTUAL_ZIP_EXTENSIONS = new Set([
+  ".txt", ".md", ".csv", ".py", ".c", ".h", ".java", ".js",
+  ".ts", ".s", ".asm", ".html", ".htm", ".xml", ".json",
+]);
+
+export interface ZipUnpackEntry {
+  /** Path inside the zip (always forward slashes, no leading slash). */
+  entryName: string;
+  /** Absolute path where the entry was written on disk. */
+  absolutePath: string;
+  /** Uncompressed size in bytes (as reported by the zip). */
+  size: number;
+}
+
 /**
  * Extract text from a file by path and filename.
  * Returns extracted text or a descriptive message for unsupported formats.
@@ -54,6 +68,65 @@ export async function extractFileText(
 }
 
 /**
+ * Unpack every file entry in a zip to a destination directory.
+ * Preserves the zip's internal directory structure. Skips entries whose
+ * resolved path would escape destDir.
+ * Returns metadata for each unpacked entry (directories are not returned).
+ */
+export async function unpackZipToDirectory(
+  zipPath: string,
+  destDir: string
+): Promise<ZipUnpackEntry[]> {
+  const yauzl = require("yauzl-promise");
+  const zip = await yauzl.open(zipPath);
+  const results: ZipUnpackEntry[] = [];
+  const resolvedDest = path.resolve(destDir);
+
+  try {
+    for await (const entry of zip) {
+      const rawName = entry.filename as string;
+      if (rawName.endsWith("/")) continue;
+
+      const normalized = rawName.replace(/\\/g, "/").replace(/^\/+/, "");
+      if (!normalized || normalized.split("/").some((segment) => segment === "..")) {
+        continue;
+      }
+
+      const targetPath = path.resolve(destDir, normalized);
+      if (
+        targetPath !== resolvedDest &&
+        !targetPath.startsWith(resolvedDest + path.sep)
+      ) {
+        continue;
+      }
+
+      await fs.mkdir(path.dirname(targetPath), { recursive: true });
+
+      try {
+        const stream = await entry.openReadStream();
+        const chunks: Buffer[] = [];
+        for await (const chunk of stream) {
+          chunks.push(chunk as Buffer);
+        }
+        await fs.writeFile(targetPath, Buffer.concat(chunks));
+      } catch {
+        continue;
+      }
+
+      results.push({
+        entryName: normalized,
+        absolutePath: targetPath,
+        size: Number(entry.uncompressedSize ?? 0),
+      });
+    }
+  } finally {
+    await zip.close();
+  }
+
+  return results;
+}
+
+/**
  * Extract and list contents of a zip file.
  * Reads text-based files inside the zip and returns their content.
  * For PDFs inside the zip, extracts text. For other binary files, lists them.
@@ -80,10 +153,7 @@ export async function extractZip(
       if (totalText >= MAX_ZIP_TEXT) continue;
 
       const ext = path.extname(entry.filename).toLowerCase();
-      const isTextFile = [
-        ".txt", ".md", ".csv", ".py", ".c", ".h", ".java", ".js",
-        ".ts", ".s", ".asm", ".html", ".htm", ".xml", ".json",
-      ].includes(ext);
+      const isTextFile = TEXTUAL_ZIP_EXTENSIONS.has(ext);
 
       if (isTextFile) {
         try {
