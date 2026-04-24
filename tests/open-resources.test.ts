@@ -258,7 +258,72 @@ test("handleOpenResourceQuery does not open resources for unrelated queries", as
 
     assert.equal(result.status, "missing");
     assert.deepEqual(opened, []);
+    assert.equal(result.matches, undefined);
     assert.match(result.message, /No openable resource matched "zyxwv qplm"/);
+    assert.doesNotMatch(result.message, /Closest resources/);
+  });
+});
+
+test("handleOpenResourceQuery suggests close resources for typos without opening them", async () => {
+  await withTempDir(async (tempDir) => {
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "attachments"), { recursive: true });
+    const specPath = path.join(coursePath, "attachments", "lab4-spec.pdf");
+    const rubricPath = path.join(coursePath, "attachments", "lab4-rubric.pdf");
+    await fs.writeFile(specPath, "spec", "utf-8");
+    await fs.writeFile(rubricPath, "rubric", "utf-8");
+
+    const cache: CourseCache = {
+      courseId: 17,
+      coursePath,
+      assignments: [],
+      modules: [],
+      files: [],
+      pages: [],
+      syllabusCandidates: [],
+      attachments: [
+        {
+          sourceType: "important_file",
+          canvasFileId: 1,
+          originalFilename: "lab4-spec.pdf",
+          localPath: "attachments/lab4-spec.pdf",
+          contentType: "application/pdf",
+          size: 10,
+          downloadUrl: "https://canvas.example/files/1",
+          reason: "lab specification",
+          status: "downloaded",
+        },
+        {
+          sourceType: "important_file",
+          canvasFileId: 2,
+          originalFilename: "lab4-rubric.pdf",
+          localPath: "attachments/lab4-rubric.pdf",
+          contentType: "application/pdf",
+          size: 10,
+          downloadUrl: "https://canvas.example/files/2",
+          reason: "grading rubric",
+          status: "downloaded",
+        },
+      ],
+      lectures: [],
+      ingestion: null,
+    };
+
+    const opened: string[] = [];
+    const result = await handleOpenResourceQuery(
+      "labb specifcation",
+      { cache },
+      async (resource) => {
+        opened.push(resource.target);
+      }
+    );
+
+    assert.equal(result.status, "missing");
+    assert.deepEqual(opened, []);
+    assert.equal(result.matches?.[0]?.title, "lab4-spec.pdf");
+    assert.match(result.message, /Closest resources:/);
+    assert.match(result.message, /lab4-spec\.pdf/);
+    assert.doesNotMatch(result.message, /Opened/);
   });
 });
 
