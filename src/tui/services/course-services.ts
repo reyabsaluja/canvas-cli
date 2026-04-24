@@ -163,8 +163,30 @@ export async function fetchUpcomingAssignments(
   return sortByUrgency(
     allAssignments
       .flat()
-      .filter((assignment) => !assignment.submitted)
+      .filter((assignment) => isActionableUpcomingAssignment(assignment))
   ).slice(0, limit);
+}
+
+export function filterActionableUpcomingAssignments(
+  assignments: Assignment[],
+  now: Date = new Date()
+): Assignment[] {
+  return sortByUrgency(
+    assignments.filter((assignment) =>
+      isActionableUpcomingAssignment(assignment, now)
+    )
+  );
+}
+
+export function isActionableUpcomingAssignment(
+  assignment: Assignment,
+  now: Date = new Date()
+): boolean {
+  return (
+    !assignment.submitted &&
+    assignment.dueAt !== null &&
+    assignment.dueAt.getTime() > now.getTime()
+  );
 }
 
 /**

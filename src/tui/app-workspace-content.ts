@@ -4,7 +4,10 @@ import type { Assignment, Course } from "../domain/models.js";
 import type { LoadedWorkspace } from "../ask/types.js";
 import type { AssignmentWorkup } from "../work/types.js";
 import type { ChatMessage } from "./chat-state.js";
-import { formatDueCompact } from "./services.js";
+import {
+  filterActionableUpcomingAssignments,
+  formatDueCompact,
+} from "./services.js";
 import type { ShellPinOption } from "./app-types.js";
 import { extractFileText } from "../extract/extract-text.js";
 
@@ -32,6 +35,7 @@ export function buildGlobalIntroMessages(
   upcoming: Assignment[],
   unavailableCourses: Array<{ displayName: string; originalCode: string }>
 ): ChatMessage[] {
+  const actionableUpcoming = filterActionableUpcomingAssignments(upcoming);
   const lines: string[] = [];
   if (unavailableCourses.length > 0) {
     lines.push("**Unavailable courses**");
@@ -42,10 +46,10 @@ export function buildGlobalIntroMessages(
     }
     lines.push("Use `/manage-courses` to remove or rename outdated entries.");
   }
-  if (upcoming.length > 0) {
+  if (actionableUpcoming.length > 0) {
     if (lines.length > 0) lines.push("");
     lines.push("**Upcoming assignments**");
-    for (const assignment of upcoming.slice(0, 5)) {
+    for (const assignment of actionableUpcoming.slice(0, 5)) {
       lines.push(`• ${assignment.name} — ${assignment.courseName}`);
     }
   }
@@ -58,9 +62,10 @@ export function buildCourseIntroMessages(
   assignments: Assignment[],
   _hasCache: boolean
 ): ChatMessage[] {
-  if (assignments.length === 0) return [];
+  const actionableUpcoming = filterActionableUpcomingAssignments(assignments);
+  if (actionableUpcoming.length === 0) return [];
   const lines = ["**Upcoming work**"];
-  for (const assignment of assignments.slice(0, 5)) {
+  for (const assignment of actionableUpcoming.slice(0, 5)) {
     lines.push(`• ${assignment.name} — ${formatDueCompact(assignment.dueAt)}`);
   }
   return [{ role: "assistant", content: lines.join("\n") }];

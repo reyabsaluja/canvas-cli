@@ -6,6 +6,7 @@ import {
 import type { Assignment } from "../domain/models.js";
 import type { CourseCache } from "../enrich/cache-loader.js";
 import {
+  filterActionableUpcomingAssignments,
   getDisplayCourseAvailability,
   getDisplayCourses,
   type AppServices,
@@ -488,6 +489,8 @@ function buildGlobalSystemPrompt(
   const availability = getDisplayCourseAvailability(services);
   const courses = availability.available;
   const unavailableCourses = availability.unavailable;
+  const actionableUpcoming =
+    filterActionableUpcomingAssignments(upcomingAssignments);
   const lines: string[] = [
     "You are the global home assistant for canvas-cli.",
     "This scope is navigation-oriented. Help the user with cross-course questions, upcoming work, and where to go next.",
@@ -525,10 +528,10 @@ function buildGlobalSystemPrompt(
   }
 
   lines.push("", "Upcoming assignments:");
-  if (upcomingAssignments.length === 0) {
+  if (actionableUpcoming.length === 0) {
     lines.push("- No upcoming assignments found.");
   } else {
-    for (const assignment of upcomingAssignments.slice(0, 12)) {
+    for (const assignment of actionableUpcoming.slice(0, 12)) {
       lines.push(
         `- ${assignment.name} — ${assignment.courseName} — ${assignment.dueAt?.toISOString() ?? "no due date"}`
       );
@@ -655,8 +658,9 @@ function renderRecentWorkspaces(
 }
 
 function renderUpcomingAssignments(assignments: Assignment[]): string {
-  if (assignments.length === 0) return "No upcoming assignments found.";
-  return assignments
+  const actionableUpcoming = filterActionableUpcomingAssignments(assignments);
+  if (actionableUpcoming.length === 0) return "No upcoming assignments found.";
+  return actionableUpcoming
     .slice(0, 12)
     .map((assignment) => {
       const due = assignment.dueAt?.toISOString() ?? "no due date";
@@ -672,6 +676,8 @@ function searchGlobalHome(
   query: string
 ): string {
   const normalized = query.trim().toLowerCase();
+  const actionableUpcoming =
+    filterActionableUpcomingAssignments(upcomingAssignments);
   if (!normalized) {
     return "Enter a keyword to search courses, recent workspaces, and upcoming assignments.";
   }
@@ -693,7 +699,7 @@ function searchGlobalHome(
       lines.push(`[recent] ${workspace.name} — ${workspace.course}`);
     }
   }
-  for (const assignment of upcomingAssignments) {
+  for (const assignment of actionableUpcoming) {
     if (
       assignment.name.toLowerCase().includes(normalized) ||
       assignment.courseName.toLowerCase().includes(normalized)
