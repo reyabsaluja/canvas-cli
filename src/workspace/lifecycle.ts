@@ -10,7 +10,7 @@ import type { AssignmentWorkup, InvestigationState, WorkResult } from "../work/t
 import { createWorkWorkspace } from "./create.js";
 
 export const WORKSPACE_AI_REQUIRED_ERROR_MESSAGE =
-  "ANTHROPIC_API_KEY not set — cannot run assignment workup";
+  "AI provider not configured — cannot run assignment workup";
 
 export type WorkspaceCachePolicy =
   | "require_existing"

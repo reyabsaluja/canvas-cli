@@ -1,7 +1,7 @@
 import { CanvasClient } from "../canvas/client.js";
 import { loadConfig } from "../config/env.js";
 import { resolveAssignment } from "../domain/resolve-assignment.js";
-import { getAIConfig } from "../ai/provider.js";
+import { getAIConfig, AI_PROVIDER_SETUP_HINT } from "../ai/provider.js";
 import {
   MissingCourseCacheError,
   runWorkspaceLifecycle,
@@ -23,7 +23,7 @@ export async function workCommand(
   const aiConfig = getAIConfig();
   if (!aiConfig) {
     console.error(
-      "Error: ANTHROPIC_API_KEY is not set.\nThe work command requires AI. Add ANTHROPIC_API_KEY to your .env file."
+      `Error: no AI provider is configured.\nThe work command requires AI. ${AI_PROVIDER_SETUP_HINT}`
     );
     process.exit(1);
   }

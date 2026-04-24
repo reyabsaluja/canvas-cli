@@ -1,44 +1,111 @@
 import { generateText, streamText, tool, jsonSchema, stepCountIs, RetryError } from "ai";
 import { APICallError } from "@ai-sdk/provider";
+import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 
+export type AIProviderName = "anthropic" | "openai" | "google" | "bedrock";
+
 export interface AIProviderConfig {
-  provider: "anthropic" | "openai" | "google";
+  provider: AIProviderName;
   model: string;
 }
 
+export const AI_PROVIDER_SETUP_HINT =
+  "Set AI_PROVIDER to anthropic, openai, google/gemini, or bedrock and add the matching credentials to your .env file (see .env.example).";
+
+const DEFAULT_MODEL_BY_PROVIDER: Record<AIProviderName, string> = {
+  anthropic: "claude-sonnet-4-20250514",
+  openai: "gpt-4o",
+  google: "gemini-2.0-flash",
+  bedrock: "us.anthropic.claude-sonnet-4-20250514-v1:0",
+};
+
 /**
  * Detect which AI provider is configured from environment variables.
- * Checks in order: ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY.
+ * Honors AI_PROVIDER first, then falls back to legacy key-based detection.
  * Model can be overridden with AI_MODEL env var.
  */
 export function getAIConfig(): AIProviderConfig | null {
+  const providerOverride = normalizeAIProvider(process.env.AI_PROVIDER);
   const modelOverride = process.env.AI_MODEL;
+  const hasExplicitProvider =
+    typeof process.env.AI_PROVIDER === "string" && process.env.AI_PROVIDER.trim().length > 0;
+
+  if (hasExplicitProvider) {
+    if (!providerOverride) {
+      return null;
+    }
+    return getExplicitAIConfig(providerOverride, modelOverride);
+  }
 
   if (process.env.ANTHROPIC_API_KEY) {
-    return {
-      provider: "anthropic",
-      model: modelOverride ?? "claude-sonnet-4-20250514",
-    };
+    return buildAIConfig("anthropic", modelOverride);
   }
 
   if (process.env.OPENAI_API_KEY) {
-    return {
-      provider: "openai",
-      model: modelOverride ?? "gpt-4o",
-    };
+    return buildAIConfig("openai", modelOverride);
   }
 
   if (process.env.GOOGLE_API_KEY) {
-    return {
-      provider: "google",
-      model: modelOverride ?? "gemini-2.0-flash",
-    };
+    return buildAIConfig("google", modelOverride);
   }
 
   return null;
+}
+
+function normalizeAIProvider(value: string | undefined): AIProviderName | null {
+  const normalized = value?.trim().toLowerCase();
+  switch (normalized) {
+    case "anthropic":
+      return "anthropic";
+    case "openai":
+      return "openai";
+    case "google":
+    case "gemini":
+      return "google";
+    case "bedrock":
+    case "aws-bedrock":
+    case "amazon-bedrock":
+      return "bedrock";
+    default:
+      return null;
+  }
+}
+
+function buildAIConfig(
+  provider: AIProviderName,
+  modelOverride?: string
+): AIProviderConfig {
+  return {
+    provider,
+    model: modelOverride ?? DEFAULT_MODEL_BY_PROVIDER[provider],
+  };
+}
+
+function getExplicitAIConfig(
+  provider: AIProviderName,
+  modelOverride?: string
+): AIProviderConfig | null {
+  if (provider === "bedrock") {
+    return buildAIConfig(provider, modelOverride);
+  }
+
+  switch (provider) {
+    case "anthropic":
+      return process.env.ANTHROPIC_API_KEY
+        ? buildAIConfig(provider, modelOverride)
+        : null;
+    case "openai":
+      return process.env.OPENAI_API_KEY
+        ? buildAIConfig(provider, modelOverride)
+        : null;
+    case "google":
+      return process.env.GOOGLE_API_KEY
+        ? buildAIConfig(provider, modelOverride)
+        : null;
+  }
 }
 
 function getModel(config: AIProviderConfig) {
@@ -58,6 +125,16 @@ function getModel(config: AIProviderConfig) {
         apiKey: process.env.GOOGLE_API_KEY!,
       });
       return google(config.model);
+    }
+    case "bedrock": {
+      const bedrock = createAmazonBedrock({
+        apiKey: process.env.AWS_BEARER_TOKEN_BEDROCK,
+        region: process.env.AWS_REGION,
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        sessionToken: process.env.AWS_SESSION_TOKEN,
+      });
+      return bedrock(config.model);
     }
   }
 }
@@ -302,9 +379,16 @@ export function formatAIError(error: unknown): string {
   if (apiError) {
     const status = apiError.statusCode;
     if (status === 429) return "Rate limited by the AI provider. Wait a moment and try again.";
-    if (status === 401 || status === 403) return "Authentication failed. Check your API key.";
+    if (status === 401 || status === 403) {
+      return "Authentication failed. Check your API key or AWS credentials.";
+    }
     if (status === 404) return "Model not found. Check your AI_MODEL setting.";
-    if (status === 400) return "Bad request sent to AI provider. The prompt may be too long.";
+    if (status === 400) {
+      const detail = extractAPIErrorDetail(apiError);
+      return detail
+        ? `AI provider rejected the request: ${detail}`
+        : "Bad request sent to AI provider. Check your AI_MODEL setting and provider-specific request format.";
+    }
     if (status === 503 || status === 502) return "AI provider is temporarily unavailable. Try again shortly.";
     if (status && status >= 500) return `AI provider returned server error (${status}). Try again shortly.`;
     if (status) return `AI provider returned error ${status}.`;
@@ -336,4 +420,83 @@ function findAPICallError(error: unknown): APICallError | null {
     return findAPICallError(error.cause);
   }
   return null;
+}
+
+function extractAPIErrorDetail(apiError: APICallError): string | null {
+  const candidates = [
+    readErrorString(apiError.data),
+    readErrorString(parseJSON(apiError.responseBody)),
+    readErrorString(apiError.responseBody),
+    readErrorString(apiError.message),
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeErrorDetail(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
+}
+
+function parseJSON(value: string | undefined): unknown {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function readErrorString(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const preferredKeys = [
+    "message",
+    "error",
+    "detail",
+    "errorMessage",
+    "cause",
+  ];
+
+  for (const key of preferredKeys) {
+    const direct = record[key];
+    if (typeof direct === "string" && direct.trim()) {
+      return direct.trim();
+    }
+    if (direct && typeof direct === "object") {
+      const nested = readErrorString(direct);
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+
+  return null;
+}
+
+function normalizeErrorDetail(value: string | null): string | null {
+  if (!value) return null;
+
+  const singleLine = value.replace(/\s+/g, " ").trim();
+  if (!singleLine) return null;
+
+  const withoutPrefix = singleLine.replace(
+    /^(bad request|request failed|api call failed)[:\s-]*/i,
+    ""
+  );
+
+  const cleaned = withoutPrefix.trim();
+  if (!cleaned) return null;
+
+  return cleaned.length > 240 ? `${cleaned.slice(0, 240)}...` : cleaned;
 }

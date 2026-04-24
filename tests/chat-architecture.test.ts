@@ -1132,7 +1132,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
 
       await assert.rejects(
         openWorkspace(services, course, { id: null, name: "Lab 4" }, () => {}),
-        /ANTHROPIC_API_KEY not set/
+        /AI provider not configured/
       );
       assert.equal(assignmentCalls, 1);
       assert.equal(detailCalls, 1);
@@ -1237,7 +1237,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
 
       await assert.rejects(
         openWorkspace(services, course, { id: 42, name: "Lab 4" }, () => {}),
-        /ANTHROPIC_API_KEY not set/
+        /AI provider not configured/
       );
       assert.equal(assignmentCalls, 0);
       assert.equal(detailCalls, 1);
@@ -1357,7 +1357,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
 
       await assert.rejects(
         openWorkspace(services, course, { id: null, name: "Lab 4" }, () => {}),
-        /ANTHROPIC_API_KEY not set/
+        /AI provider not configured/
       );
       assert.equal(
         assignmentCalls,
@@ -1484,13 +1484,13 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
 
       await assert.rejects(
         openWorkspace(services, course, { id: 42, name: "Lab 4" }, () => {}),
-        /ANTHROPIC_API_KEY not set/
+        /AI provider not configured/
       );
 
       const meta = await loadWorkspaceSessionMeta(workspacePath);
       assert.ok(meta);
       assert.equal(meta?.workspaceState, "error");
-      assert.match(meta?.lastError ?? "", /ANTHROPIC_API_KEY not set/);
+      assert.match(meta?.lastError ?? "", /AI provider not configured/);
       assert.equal(meta?.preparedAt, undefined);
     });
   });
@@ -1620,7 +1620,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
 
       await assert.rejects(
         refreshWorkspace(services, course, { id: 42, name: "Lab 4" }, () => {}),
-        /ANTHROPIC_API_KEY not set/
+        /AI provider not configured/
       );
       assert.equal(
         assignmentCalls,
@@ -1753,12 +1753,12 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
         caught = error instanceof Error ? error : new Error(String(error));
       }
       assert.ok(caught);
-      assert.match(caught.message, /ANTHROPIC_API_KEY not set/);
+      assert.match(caught.message, /AI provider not configured/);
 
       const meta = await loadWorkspaceSessionMeta(workspacePath);
       assert.ok(meta);
       assert.equal(meta?.workspaceState, "error");
-      assert.match(meta?.lastError ?? "", /ANTHROPIC_API_KEY not set/);
+      assert.match(meta?.lastError ?? "", /AI provider not configured/);
       assert.equal(meta?.preparedAt, "2026-03-29T10:05:00.000Z");
     });
   });

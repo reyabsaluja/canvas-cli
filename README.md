@@ -23,7 +23,7 @@ Configure `.env` with:
 
 - `CANVAS_BASE_URL`
 - `CANVAS_ACCESS_TOKEN`
-- One optional AI provider key for smart features: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_API_KEY`
+- One optional AI provider configuration for smart features: set `AI_PROVIDER` plus matching credentials for Anthropic, OpenAI, Gemini/Google, or AWS Bedrock
 
 ## Commands
 
@@ -386,13 +386,13 @@ Next steps
 ```
 
 **Requirements:**
-- Set `ANTHROPIC_API_KEY` in your `.env` file
+- Configure an AI provider in your `.env` file (`AI_PROVIDER` plus the matching credentials)
 - Best results when the course has been ingested first (`canvas-cli ingest <course>`)
 
 **How it works:** The AI reads the actual course materials — including PDF instruction documents, the course syllabus, the module structure, and the full assignment list. It synthesizes a concrete summary of what the assignment requires. When the Canvas due date is missing, it cross-references the syllabus and schedule to find it.
 
 **Fallback behavior:**
-- Without `ANTHROPIC_API_KEY`: the `--smart` flag shows a subtle note that AI is unavailable; the rest of the command works normally
+- Without an AI provider configured: the `--smart` flag shows a subtle note that AI is unavailable; the rest of the command works normally
 - Without ingestion cache: AI still works but has less context; confidence will be lower
 - If the AI call fails: the deterministic output is still shown, with a failure note
 
@@ -453,7 +453,7 @@ canvas-cli work "Project" --id 1710240
 ```
 
 **Prerequisites:**
-- `ANTHROPIC_API_KEY` set in `.env`
+- An AI provider configured in `.env` (`AI_PROVIDER` plus the matching credentials)
 - Course ingested first: `canvas-cli ingest <course>`
 
 **What happens:**
@@ -521,7 +521,7 @@ Next steps:
 | `extracted/` | Extracted text from PDFs and documents | Refreshed |
 
 **How the agent works:**
-The investigation agent uses Anthropic tool calling with a bounded loop (max 10 iterations). It has tools to search modules, read downloaded PDFs, check the syllabus, and browse files. It decides what to investigate based on the assignment context and enrichment data. After investigation, a separate synthesis pass produces the structured workup.
+The investigation agent uses AI SDK tool calling with the configured provider and a bounded loop (max 10 iterations). It has tools to search modules, read downloaded PDFs, check the syllabus, and browse files. It decides what to investigate based on the assignment context and enrichment data. After investigation, a separate synthesis pass produces the structured workup.
 
 **The agent does NOT:**
 - Make new Canvas API calls (works from ingested cache)
@@ -544,7 +544,7 @@ canvas-cli ask "what should I focus on?" --debug
 ```
 
 **Prerequisites:**
-- `ANTHROPIC_API_KEY` set in `.env`
+- An AI provider configured in `.env` (`AI_PROVIDER` plus the matching credentials)
 - A workspace created by `canvas-cli work <assignment>`
 
 Example output:
