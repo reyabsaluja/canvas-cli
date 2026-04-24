@@ -40,6 +40,28 @@ interface RankedResource {
 
 type ResourceOpener = (resource: OpenableResource) => Promise<void>;
 
+const OPEN_MISS_SUGGESTION_LIMIT = 5;
+const MIN_OPEN_MISS_SUGGESTION_SCORE = 90;
+const GENERIC_RESOURCE_TOKENS = new Set([
+  "attachment",
+  "course",
+  "document",
+  "downloaded",
+  "extract",
+  "extracted",
+  "file",
+  "json",
+  "md",
+  "page",
+  "pdf",
+  "ppt",
+  "pptx",
+  "resource",
+  "txt",
+  "workspace",
+  "zip",
+]);
+
 export async function handleOpenResourceQuery(
   query: string,
   context: OpenResourceContext,
@@ -67,9 +89,15 @@ export async function handleOpenResourceQuery(
     resolved = { status: "unique", resource: resolved.matches[0]! };
   }
   if (resolved.status === "missing") {
+    const suggestions = suggestOpenableResources(
+      trimmed,
+      resources,
+      OPEN_MISS_SUGGESTION_LIMIT
+    );
     return {
       status: "missing",
-      message: `No openable resource matched "${trimmed}".\nUse /open list to browse available resources.`,
+      matches: suggestions.length > 0 ? suggestions : undefined,
+      message: formatMissingResourceMessage(trimmed, suggestions),
     };
   }
   if (resolved.status === "ambiguous") {
@@ -441,6 +469,25 @@ export function searchOpenableResources(
     .map((entry) => entry.resource);
 }
 
+function suggestOpenableResources(
+  query: string,
+  resources: OpenableResource[],
+  limit: number
+): OpenableResource[] {
+  const normalizedQuery = normalizeSearchText(query);
+  const queryTokens = tokenize(normalizedQuery);
+  if (!normalizedQuery || queryTokens.length === 0) {
+    return [];
+  }
+
+  return resources
+    .map((resource) => rankResourceSuggestion(queryTokens, normalizedQuery, resource))
+    .filter((entry) => entry.score >= MIN_OPEN_MISS_SUGGESTION_SCORE)
+    .sort(compareRankedResources)
+    .slice(0, limit)
+    .map((entry) => entry.resource);
+}
+
 export function resolveOpenableResource(
   query: string,
   resources: OpenableResource[]
@@ -667,6 +714,125 @@ function rankResource(
   };
 }
 
+function rankResourceSuggestion(
+  queryTokens: string[],
+  normalizedQuery: string,
+  resource: OpenableResource
+): RankedResource {
+  const normalizedTerms = resource.searchTerms.map(normalizeSearchText);
+  const candidateTokens = [
+    ...new Set(normalizedTerms.flatMap((term) => tokenize(term))),
+  ];
+  const strictRank = rankResource(queryTokens, normalizedQuery, resource);
+  let score = Math.min(strictRank.score, 260);
+  let matchedTokens = strictRank.matchedTokens;
+  let matchedSpecificTokens = queryTokens.filter(
+    (token) =>
+      !GENERIC_RESOURCE_TOKENS.has(token) && candidateTokens.includes(token)
+  ).length;
+
+  for (const queryToken of queryTokens) {
+    let bestTokenScore = 0;
+    let bestTokenSpecific = false;
+    for (const candidateToken of candidateTokens) {
+      const tokenScore = scoreTokenSimilarity(queryToken, candidateToken);
+      if (tokenScore > bestTokenScore) {
+        bestTokenScore = tokenScore;
+        bestTokenSpecific =
+          !GENERIC_RESOURCE_TOKENS.has(queryToken) &&
+          !GENERIC_RESOURCE_TOKENS.has(candidateToken);
+      }
+    }
+    if (bestTokenScore >= 45) {
+      score += bestTokenScore;
+      matchedTokens += 1;
+      if (bestTokenSpecific) {
+        matchedSpecificTokens += 1;
+      }
+    }
+  }
+
+  for (const term of normalizedTerms) {
+    if (!term) continue;
+    if (term.includes(normalizedQuery) || normalizedQuery.includes(term)) {
+      score += 45;
+      break;
+    }
+    const similarity = stringSimilarity(normalizedQuery, term);
+    if (similarity >= 0.7) {
+      score += Math.round(similarity * 70);
+      break;
+    }
+  }
+
+  if (matchedSpecificTokens === 0) {
+    score = 0;
+  }
+  if (score > 0) {
+    score += resourceTypePriority(resource);
+  }
+  if (matchedTokens < Math.min(2, queryTokens.length)) {
+    score = Math.min(score, 70);
+  }
+
+  return {
+    resource,
+    score,
+    matchedTokens,
+  };
+}
+
+function scoreTokenSimilarity(queryToken: string, candidateToken: string): number {
+  if (!queryToken || !candidateToken) return 0;
+  if (queryToken === candidateToken) return 100;
+
+  const shorter = queryToken.length <= candidateToken.length ? queryToken : candidateToken;
+  const longer = queryToken.length > candidateToken.length ? queryToken : candidateToken;
+  if (shorter.length >= 4 && longer.startsWith(shorter)) {
+    return 72;
+  }
+  if (shorter.length >= 4 && longer.includes(shorter)) {
+    return 58;
+  }
+
+  const similarity = stringSimilarity(queryToken, candidateToken);
+  if (similarity >= 0.8) return Math.round(similarity * 85);
+  if (Math.min(queryToken.length, candidateToken.length) >= 3 && similarity >= 0.72) {
+    return Math.round(similarity * 70);
+  }
+  return 0;
+}
+
+function stringSimilarity(a: string, b: string): number {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const maxLength = Math.max(a.length, b.length);
+  if (maxLength === 0) return 1;
+  return 1 - levenshteinDistance(a, b) / maxLength;
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  const current = Array.from({ length: b.length + 1 }, () => 0);
+
+  for (let i = 1; i <= a.length; i++) {
+    current[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const substitutionCost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        current[j - 1]! + 1,
+        previous[j]! + 1,
+        previous[j - 1]! + substitutionCost
+      );
+    }
+    for (let j = 0; j <= b.length; j++) {
+      previous[j] = current[j]!;
+    }
+  }
+
+  return previous[b.length]!;
+}
+
 function resourceTypePriority(resource: OpenableResource): number {
   switch (resource.kind) {
     case "downloaded attachment":
@@ -704,6 +870,24 @@ function compareRankedResources(a: RankedResource, b: RankedResource): number {
     return b.matchedTokens - a.matchedTokens;
   }
   return compareResources(a.resource, b.resource);
+}
+
+function formatMissingResourceMessage(
+  query: string,
+  suggestions: OpenableResource[]
+): string {
+  if (suggestions.length === 0) {
+    return `No openable resource matched "${query}".\nUse /open list to browse available resources.`;
+  }
+
+  return [
+    `No openable resource matched "${query}".`,
+    "",
+    "Closest resources:",
+    ...suggestions.map((resource) => `• ${formatResourceSummary(resource)}`),
+    "",
+    "Use /open <name> to open one of these, or /open list to browse available resources.",
+  ].join("\n");
 }
 
 function formatResourceList(resources: OpenableResource[]): string {

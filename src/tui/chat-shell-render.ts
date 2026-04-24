@@ -87,11 +87,18 @@ export function buildBannerLines(options: {
   const subtitle = options.runtime.subtitle ?? "";
   const description = options.runtime.description ?? "";
 
-  const left = C.pureWhiteBold(title) + (subtitle ? "  " + statusBarGrey(subtitle) : "");
-  const leftPlain = title + (subtitle ? "  " + subtitle : "");
+  const chip = C.primaryBold("▎");
+  const chipPlainWidth = 2; // "▎ "
+  const left =
+    chip +
+    " " +
+    C.pureWhiteBold(title) +
+    (subtitle ? "  " + statusBarGrey(subtitle) : "");
+  const leftPlainWidth =
+    chipPlainWidth + title.length + (subtitle ? 2 + subtitle.length : 0);
 
   const statusText = options.runtime.statusLabel?.replace(/^Status:\s*/, "") ?? "";
-  const maxRightWidth = Math.max(0, cols - 4 - leftPlain.length - 4);
+  const maxRightWidth = Math.max(0, cols - 4 - leftPlainWidth - 4);
   let rightText = "";
   if (description && maxRightWidth >= 12) {
     rightText = description.length > maxRightWidth
@@ -109,11 +116,15 @@ export function buildBannerLines(options: {
   const right = rightText ? statusBarGrey(rightText) : "";
   const rightPlain = rightText;
 
-  const gap = Math.max(2, cols - 4 - leftPlain.length - rightPlain.length);
+  const gap = Math.max(2, cols - 4 - leftPlainWidth - rightPlain.length);
   const headerLine = "  " + left + " ".repeat(gap) + right;
 
   const dividerWidth = Math.max(24, cols - 4);
-  const divider = "  " + C.dimmer("─".repeat(dividerWidth));
+  const accentWidth = Math.min(6, dividerWidth);
+  const divider =
+    "  " +
+    C.primary("─".repeat(accentWidth)) +
+    C.dimmer("─".repeat(dividerWidth - accentWidth));
 
   return [headerLine, divider];
 }
