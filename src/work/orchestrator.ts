@@ -126,7 +126,8 @@ export async function runInvestigation(
     enrichment,
     state,
     investigationSummary,
-    verification
+    verification,
+    { coursePath: cache.coursePath }
   );
 
   return { workup, state };
