@@ -692,6 +692,11 @@ function renderWrappedContent(content: string, lines: string[], maxWidth: number
   const rawLines = content.split("\n");
   for (let index = 0; index < rawLines.length; index++) {
     const line = rawLines[index]!;
+    const codeConsumed = tryRenderCodeBlock(rawLines, index, lines, maxWidth);
+    if (codeConsumed > 0) {
+      index += codeConsumed - 1;
+      continue;
+    }
     const trimmed = line.trim();
     if (!trimmed) {
       lines.push("");
@@ -739,6 +744,297 @@ function renderWrappedContent(content: string, lines: string[], maxWidth: number
       lines.push(`  ${wrapped}`);
     });
   }
+}
+
+const LANGUAGE_LABELS: Record<string, string> = {
+  js: "JavaScript",
+  jsx: "JavaScript",
+  javascript: "JavaScript",
+  ts: "TypeScript",
+  tsx: "TypeScript",
+  typescript: "TypeScript",
+  py: "Python",
+  python: "Python",
+  rb: "Ruby",
+  ruby: "Ruby",
+  go: "Go",
+  rs: "Rust",
+  rust: "Rust",
+  java: "Java",
+  kt: "Kotlin",
+  kotlin: "Kotlin",
+  swift: "Swift",
+  c: "C",
+  h: "C",
+  cpp: "C++",
+  cc: "C++",
+  cxx: "C++",
+  hpp: "C++",
+  cs: "C#",
+  csharp: "C#",
+  php: "PHP",
+  sh: "Shell",
+  bash: "Shell",
+  zsh: "Shell",
+  shell: "Shell",
+  ps1: "PowerShell",
+  powershell: "PowerShell",
+  sql: "SQL",
+  html: "HTML",
+  css: "CSS",
+  scss: "SCSS",
+  sass: "Sass",
+  less: "Less",
+  json: "JSON",
+  yaml: "YAML",
+  yml: "YAML",
+  toml: "TOML",
+  xml: "XML",
+  md: "Markdown",
+  markdown: "Markdown",
+  tex: "TeX",
+  latex: "LaTeX",
+  r: "R",
+  matlab: "MATLAB",
+  scala: "Scala",
+  lua: "Lua",
+  dart: "Dart",
+  elixir: "Elixir",
+  ex: "Elixir",
+  erlang: "Erlang",
+  clj: "Clojure",
+  clojure: "Clojure",
+  hs: "Haskell",
+  haskell: "Haskell",
+  ocaml: "OCaml",
+  fs: "F#",
+  fsharp: "F#",
+  vb: "Visual Basic",
+  pl: "Perl",
+  perl: "Perl",
+  asm: "Assembly",
+  s: "Assembly",
+  nasm: "Assembly",
+  riscv: "Assembly",
+  diff: "Diff",
+  patch: "Diff",
+  dockerfile: "Dockerfile",
+  makefile: "Makefile",
+  make: "Makefile",
+  cmake: "CMake",
+  nix: "Nix",
+  vim: "Vim",
+  graphql: "GraphQL",
+  proto: "Protobuf",
+  ini: "INI",
+  env: "Env",
+  txt: "Text",
+  text: "Text",
+  plaintext: "Text",
+};
+
+function matchFenceLine(line: string): { fence: string; lang: string } | null {
+  const match = line.match(/^(\s*)(`{3,}|~{3,})([^\s`~]*)\s*$/);
+  if (!match) return null;
+  return { fence: match[2]!, lang: (match[3] ?? "").trim().toLowerCase() };
+}
+
+function languageLabel(lang: string): string {
+  if (!lang) return "Code";
+  return LANGUAGE_LABELS[lang] ?? (lang.charAt(0).toUpperCase() + lang.slice(1));
+}
+
+function highlightCodeLine(line: string, lang: string): string {
+  if (!line) return "";
+  const base = chalk.hex("#d4d4d4");
+  const comment = chalk.hex("#6a9955");
+  const keyword = chalk.hex("#c586c0");
+  const type = chalk.hex("#4ec9b0");
+  const string = chalk.hex("#ce9178");
+  const number = chalk.hex("#b5cea8");
+  const fn = chalk.hex("#dcdcaa");
+  const property = chalk.hex("#9cdcfe");
+
+  const KEYWORDS: Record<string, Set<string>> = {
+    js: new Set(["const", "let", "var", "function", "return", "if", "else", "for", "while", "do", "switch", "case", "break", "continue", "new", "class", "extends", "import", "from", "export", "default", "async", "await", "try", "catch", "finally", "throw", "typeof", "instanceof", "in", "of", "null", "undefined", "true", "false", "this", "super", "yield", "static", "void", "delete"]),
+    ts: new Set(["const", "let", "var", "function", "return", "if", "else", "for", "while", "do", "switch", "case", "break", "continue", "new", "class", "extends", "implements", "import", "from", "export", "default", "async", "await", "try", "catch", "finally", "throw", "typeof", "instanceof", "in", "of", "null", "undefined", "true", "false", "this", "super", "yield", "static", "void", "delete", "interface", "type", "enum", "namespace", "public", "private", "protected", "readonly", "abstract", "as", "is", "keyof", "satisfies"]),
+    py: new Set(["def", "class", "return", "if", "elif", "else", "for", "while", "break", "continue", "import", "from", "as", "try", "except", "finally", "raise", "with", "pass", "lambda", "yield", "async", "await", "global", "nonlocal", "True", "False", "None", "and", "or", "not", "in", "is"]),
+    go: new Set(["func", "return", "if", "else", "for", "switch", "case", "break", "continue", "import", "package", "var", "const", "type", "struct", "interface", "map", "chan", "go", "defer", "select", "range", "nil", "true", "false"]),
+    rs: new Set(["fn", "let", "mut", "return", "if", "else", "for", "while", "loop", "match", "break", "continue", "use", "pub", "mod", "struct", "enum", "trait", "impl", "where", "as", "move", "async", "await", "self", "Self", "ref", "const", "static", "true", "false", "Some", "None", "Ok", "Err"]),
+    rb: new Set(["def", "end", "class", "module", "return", "if", "elsif", "else", "unless", "for", "while", "until", "do", "begin", "rescue", "ensure", "raise", "require", "yield", "true", "false", "nil", "self", "and", "or", "not", "then"]),
+    java: new Set(["public", "private", "protected", "class", "interface", "extends", "implements", "static", "final", "abstract", "void", "return", "if", "else", "for", "while", "do", "switch", "case", "break", "continue", "new", "this", "super", "try", "catch", "finally", "throw", "throws", "import", "package", "true", "false", "null", "instanceof"]),
+    sh: new Set(["if", "then", "else", "elif", "fi", "for", "while", "do", "done", "case", "esac", "function", "return", "in", "select", "until", "true", "false", "export", "local", "readonly"]),
+    sql: new Set(["select", "from", "where", "insert", "into", "values", "update", "set", "delete", "create", "table", "drop", "alter", "add", "column", "primary", "key", "foreign", "references", "join", "inner", "left", "right", "outer", "on", "group", "by", "order", "having", "limit", "offset", "distinct", "as", "and", "or", "not", "null", "is", "in", "like", "between", "exists", "union", "all", "case", "when", "then", "else", "end"]),
+    asm: new Set(["mov", "add", "sub", "mul", "div", "li", "la", "lw", "sw", "lb", "sb", "lh", "sh", "beq", "bne", "blt", "bgt", "ble", "bge", "bltu", "bgeu", "j", "jal", "jalr", "jr", "ret", "call", "push", "pop", "nop", "addi", "subi", "muli", "andi", "ori", "xori", "slli", "srli", "srai", "and", "or", "xor", "not", "neg", "slt", "slti", "sltu", "sltiu"]),
+  };
+
+  const aliases: Record<string, string> = {
+    jsx: "js", typescript: "ts", javascript: "js", tsx: "ts",
+    python: "py", ruby: "rb", rust: "rs", golang: "go",
+    bash: "sh", zsh: "sh", shell: "sh",
+    nasm: "asm", riscv: "asm", s: "asm",
+  };
+  const key = aliases[lang] ?? lang;
+  const keywords = KEYWORDS[key];
+
+  const isAsm = key === "asm";
+  const isPy = key === "py";
+  const isRb = key === "rb";
+  const isSh = key === "sh";
+
+  const tokens: Array<{ text: string; style: ((s: string) => string) | null }> = [];
+  let i = 0;
+  while (i < line.length) {
+    const ch = line[i]!;
+
+    if ((ch === "/" && line[i + 1] === "/") ||
+        ((isPy || isRb || isSh || isAsm) && ch === "#")) {
+      tokens.push({ text: line.slice(i), style: comment });
+      i = line.length;
+      continue;
+    }
+    if (ch === "/" && line[i + 1] === "*") {
+      const end = line.indexOf("*/", i + 2);
+      const stop = end === -1 ? line.length : end + 2;
+      tokens.push({ text: line.slice(i, stop), style: comment });
+      i = stop;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const quote = ch;
+      let j = i + 1;
+      while (j < line.length) {
+        if (line[j] === "\\" && j + 1 < line.length) { j += 2; continue; }
+        if (line[j] === quote) { j++; break; }
+        j++;
+      }
+      tokens.push({ text: line.slice(i, j), style: string });
+      i = j;
+      continue;
+    }
+    if (/[0-9]/.test(ch) && (i === 0 || !/[A-Za-z_]/.test(line[i - 1]!))) {
+      let j = i;
+      while (j < line.length && /[0-9a-fA-FxX._]/.test(line[j]!)) j++;
+      tokens.push({ text: line.slice(i, j), style: number });
+      i = j;
+      continue;
+    }
+    if (/[A-Za-z_$]/.test(ch)) {
+      let j = i;
+      while (j < line.length && /[A-Za-z0-9_$]/.test(line[j]!)) j++;
+      const word = line.slice(i, j);
+      let style: ((s: string) => string) | null = null;
+      if (keywords?.has(word)) {
+        style = keyword;
+      } else if (/^[A-Z]/.test(word)) {
+        style = type;
+      } else if (line[j] === "(") {
+        style = fn;
+      } else if (line[i - 1] === ".") {
+        style = property;
+      }
+      tokens.push({ text: word, style });
+      i = j;
+      continue;
+    }
+    let j = i;
+    while (j < line.length && !/[A-Za-z0-9_$"'`\s\/#]/.test(line[j]!)) j++;
+    if (j === i) j = i + 1;
+    tokens.push({ text: line.slice(i, j), style: null });
+    i = j;
+  }
+
+  return tokens.map((t) => (t.style ? t.style(t.text) : base(t.text))).join("");
+}
+
+function tryRenderCodeBlock(
+  rawLines: string[],
+  startIndex: number,
+  out: string[],
+  maxWidth: number
+): number {
+  const opener = matchFenceLine(rawLines[startIndex] ?? "");
+  if (!opener) return 0;
+  let end = startIndex + 1;
+  while (end < rawLines.length) {
+    const closer = matchFenceLine(rawLines[end] ?? "");
+    if (closer && closer.fence[0] === opener.fence[0] && closer.fence.length >= opener.fence.length && !closer.lang) {
+      break;
+    }
+    end++;
+  }
+  const codeLines = rawLines.slice(startIndex + 1, end);
+  const consumed = end < rawLines.length ? end - startIndex + 1 : rawLines.length - startIndex;
+
+  renderCodeBlock(codeLines, opener.lang, out, maxWidth);
+  return consumed;
+}
+
+function renderCodeBlock(
+  codeLines: string[],
+  lang: string,
+  out: string[],
+  maxWidth: number
+): void {
+  while (codeLines.length > 0 && codeLines[0]!.trim() === "") codeLines.shift();
+  while (codeLines.length > 0 && codeLines[codeLines.length - 1]!.trim() === "") codeLines.pop();
+
+  const boxWidth = Math.max(24, maxWidth);
+  const innerWidth = Math.max(8, boxWidth - 4);
+  const border = C.dimmer;
+  const gutter = C.dim;
+  const label = languageLabel(lang);
+
+  const wrapCodeLine = (text: string): string[] => {
+    if (text.length <= innerWidth) return [text];
+    const chunks: string[] = [];
+    for (let i = 0; i < text.length; i += innerWidth) {
+      chunks.push(text.slice(i, i + innerWidth));
+    }
+    return chunks;
+  };
+
+  const rendered: Array<{ num: string; content: string; contentVisible: number }> = [];
+  for (let i = 0; i < codeLines.length; i++) {
+    const raw = codeLines[i]!.replace(/\t/g, "  ");
+    const wrapped = wrapCodeLine(raw);
+    for (let j = 0; j < wrapped.length; j++) {
+      const chunk = wrapped[j]!;
+      rendered.push({
+        num: j === 0 ? String(i + 1) : "",
+        content: highlightCodeLine(chunk, lang),
+        contentVisible: chunk.length,
+      });
+    }
+  }
+
+  const gutterWidth = Math.max(2, String(codeLines.length).length);
+  const codeAreaWidth = Math.max(1, innerWidth - gutterWidth - 1);
+
+  const headerLabel = ` ${label} `;
+  const headerLabelVisible = headerLabel.length;
+  const remainingTop = Math.max(0, boxWidth - 2 - headerLabelVisible);
+  const top =
+    border("╭") +
+    border("─") +
+    C.muted(headerLabel) +
+    border("─".repeat(Math.max(0, remainingTop - 1))) +
+    border("╮");
+  const bot = border("╰" + "─".repeat(boxWidth - 2) + "╯");
+
+  out.push("");
+  out.push(`  ${top}`);
+
+  for (const row of rendered) {
+    const num = row.num.padStart(gutterWidth, " ");
+    const gutterText = gutter(num);
+    const contentPad = Math.max(0, codeAreaWidth - Math.min(row.contentVisible, codeAreaWidth));
+    const content = row.content + " ".repeat(contentPad);
+    const line = `${border("│")} ${gutterText} ${content} ${border("│")}`;
+    out.push(`  ${line}`);
+  }
+
+  out.push(`  ${bot}`);
 }
 
 function splitTableRow(line: string): string[] | null {
