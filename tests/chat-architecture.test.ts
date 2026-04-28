@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { stripAnsi } from "../src/tui/screen.js";
+import { stripAnsi, visibleWidth } from "../src/tui/screen.js";
 import {
   deleteChatSession,
   getChatSessionId,
@@ -226,6 +226,74 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     const rendered = stripAnsi(renderedLines.join("\n"));
     assert.match(rendered, /token0/);
     assert.match(rendered, /token27/);
+  });
+
+  await t.test("assistant code blocks keep borders inside the transcript width", async () => {
+    const lines = buildTranscriptLines({
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            "```",
+            "❌ MISTAKE 1: Using (y << 10) + x instead of (y << 10) + (x << 1)",
+            "FIX: Each pixel = 2 BYTES -> must multiply x by 2 as well!",
+            "```",
+          ].join("\n"),
+        },
+      ],
+      contentWidth: 72,
+      cols: 80,
+      expanded: false,
+    });
+
+    const codeLines = lines.filter((line) => stripAnsi(line).includes("│"));
+    assert.ok(codeLines.length > 0);
+    assert.ok(
+      codeLines.every((line) => visibleWidth(line) <= 74),
+      "expected code rows to fit inside content width plus transcript indent"
+    );
+    assert.ok(
+      codeLines.every((line) => stripAnsi(line).trimEnd().endsWith("│")),
+      "expected every code row to keep its right border"
+    );
+  });
+
+  await t.test("assistant diagram code blocks preserve fixed-width geometry", async () => {
+    const lines = buildTranscriptLines({
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            "```",
+            "+-------+-------------------------------+",
+            "| Cycle | Key Signals                   |",
+            "+-------+-------------------------------+",
+            "| 1     | AddrSel=1, MemRead, IRload    |",
+            "| 2     | ALU_A=0, ALU_B=001, PCwrite   |",
+            "+-------+-------------------------------+",
+            "```",
+          ].join("\n"),
+        },
+      ],
+      contentWidth: 46,
+      cols: 54,
+      expanded: false,
+    });
+
+    const rendered = lines.map(stripAnsi).join("\n");
+    assert.match(rendered, /\| 2\s+\| ALU_A=0/);
+    assert.doesNotMatch(rendered, /\n\s*│\s+\| ALU_A=0/);
+    assert.ok(
+      lines
+        .filter((line) => stripAnsi(line).includes("│"))
+        .every((line) => visibleWidth(line) <= 48)
+    );
+  });
+
+  await t.test("wide glyphs count as two columns in visible-width helpers", async () => {
+    assert.equal(visibleWidth("❌"), 2);
+    assert.equal(visibleWidth("✅"), 2);
+    assert.equal(visibleWidth("a❌b"), 4);
   });
 
   await t.test("persists and reopens scoped sessions", async () => {

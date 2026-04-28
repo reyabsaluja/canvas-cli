@@ -93,7 +93,7 @@ class ScreenBuffer {
 
     // Truncate lines to terminal width so they never wrap
     let rendered = this.lines.map((line) => {
-      const visible = stripAnsi(line).length;
+      const visible = visibleWidth(line);
       if (visible > maxVisibleCols) {
         return normalizeLine(truncateAnsiToWidth(line, maxVisibleCols));
       }
@@ -249,7 +249,43 @@ export function stripAnsi(str: string): string {
 }
 
 export function visibleWidth(str: string): number {
-  return stripAnsi(str).length;
+  let width = 0;
+  for (const char of stripAnsi(str)) {
+    width += charDisplayWidth(char);
+  }
+  return width;
+}
+
+function charDisplayWidth(char: string): number {
+  const code = char.codePointAt(0) ?? 0;
+  if (code === 0) return 0;
+  if (code < 32 || (code >= 0x7f && code < 0xa0)) return 0;
+  if (
+    (code >= 0x0300 && code <= 0x036f) ||
+    (code >= 0x1ab0 && code <= 0x1aff) ||
+    (code >= 0x1dc0 && code <= 0x1dff) ||
+    (code >= 0x20d0 && code <= 0x20ff) ||
+    (code >= 0xfe00 && code <= 0xfe0f)
+  ) {
+    return 0;
+  }
+  if (
+    (code >= 0x1100 && code <= 0x115f) ||
+    code === 0x2329 ||
+    code === 0x232a ||
+    (code >= 0x2e80 && code <= 0xa4cf && code !== 0x303f) ||
+    (code >= 0xac00 && code <= 0xd7a3) ||
+    (code >= 0xf900 && code <= 0xfaff) ||
+    (code >= 0xfe10 && code <= 0xfe19) ||
+    (code >= 0xfe30 && code <= 0xfe6f) ||
+    (code >= 0xff00 && code <= 0xff60) ||
+    (code >= 0xffe0 && code <= 0xffe6) ||
+    (code >= 0x2600 && code <= 0x27bf) ||
+    (code >= 0x1f000 && code <= 0x1faff)
+  ) {
+    return 2;
+  }
+  return 1;
 }
 
 /**
@@ -270,8 +306,13 @@ export function truncateAnsiToWidth(str: string, maxWidth: number): string {
         continue;
       }
     }
-    visible++;
-    i++;
+    const codePoint = str.codePointAt(i);
+    if (codePoint === undefined) break;
+    const char = String.fromCodePoint(codePoint);
+    const charWidth = charDisplayWidth(char);
+    if (visible + charWidth > maxWidth) break;
+    visible += charWidth;
+    i += char.length;
   }
 
   // Include any trailing ANSI reset sequences
