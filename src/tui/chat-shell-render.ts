@@ -6,6 +6,7 @@ import {
   invalidateScreenRows,
   stripAnsi,
   truncateAnsiToWidth,
+  visibleWidth,
 } from "./screen.js";
 import type {
   ChatMessage,
@@ -288,7 +289,7 @@ function buildAutocompleteOverlayRows(
     () => ""
   );
   const fitToRow = (value: string): string => {
-    const visible = stripAnsi(value).length;
+    const visible = visibleWidth(value);
     if (visible > maxVisibleCols) {
       return truncateAnsiToWidth(value, maxVisibleCols);
     }
@@ -373,7 +374,7 @@ function buildStickyBottomRows(
   const contLineWidth = Math.max(1, boxWidth - 2);
   const cursor = chalk.white("█");
   const fitToRow = (value: string) => {
-    const visible = stripAnsi(value).length;
+    const visible = visibleWidth(value);
     if (visible > cols - 1) {
       return truncateAnsiToWidth(value, cols - 1);
     }
@@ -381,7 +382,7 @@ function buildStickyBottomRows(
   };
   const b = inputBorderColor;
   const padTo = (text: string, width: number) => {
-    const visible = stripAnsi(text).length;
+    const visible = visibleWidth(text);
     return text + " ".repeat(Math.max(0, width - visible));
   };
 
@@ -432,8 +433,8 @@ function buildStickyBottomRows(
 
   let left = runtimeStatus ? `${leftStatus} · ${runtimeStatus}` : leftStatus;
   let right = modelLabel;
-  const rightVisible = stripAnsi(right).length;
-  if (stripAnsi(left).length + rightVisible + 1 > boxWidth) {
+  const rightVisible = visibleWidth(right);
+  if (visibleWidth(left) + rightVisible + 1 > boxWidth) {
     const maxLeft = Math.max(0, boxWidth - rightVisible - 1);
     left =
       maxLeft > 3 ? left.slice(0, maxLeft - 3) + "..." : left.slice(0, maxLeft);
@@ -441,7 +442,7 @@ function buildStickyBottomRows(
   const leftStyled = statusBarGrey(left);
   const gap = Math.max(
     0,
-    boxWidth - stripAnsi(leftStyled).length - rightVisible
+    boxWidth - visibleWidth(leftStyled) - rightVisible
   );
   const statusLine =
     "  " +
@@ -571,7 +572,7 @@ export function getRenderedMessageLines(
         const cmdBarWidth = Math.max(24, cols - 4);
         const cmdInnerWidth = Math.max(1, cmdBarWidth - 2);
         const rendered = wrapLines(trimmed, Math.max(12, cmdInnerWidth)).map((line) => {
-          const visible = stripAnsi(line).length;
+          const visible = visibleWidth(line);
           const pad = " ".repeat(Math.max(0, cmdInnerWidth - visible));
           return `  ${commandBg(` ${chalk.white.bold(line)}${pad} `)}`;
         });
@@ -584,7 +585,7 @@ export function getRenderedMessageLines(
       const innerWidth = Math.max(1, boxWidth - 2);
       const wrappedLines = wrapLines(message.content, innerWidth);
       const padInner = (line: string) => {
-        const visible = stripAnsi(line).length;
+        const visible = visibleWidth(line);
         return line + " ".repeat(Math.max(0, innerWidth - visible));
       };
       const rendered: string[] = [];
@@ -980,18 +981,19 @@ function renderCodeBlock(
   while (codeLines.length > 0 && codeLines[codeLines.length - 1]!.trim() === "") codeLines.pop();
 
   const boxWidth = Math.max(24, maxWidth);
-  const innerWidth = Math.max(8, boxWidth - 4);
   const border = C.dimmer;
   const gutter = C.dim;
   const label = languageLabel(lang);
+  const gutterWidth = Math.max(2, String(codeLines.length).length);
+  const codeAreaWidth = Math.max(1, boxWidth - gutterWidth - 5);
+  const preserveGeometry = shouldPreserveCodeGeometry(codeLines, lang);
 
   const wrapCodeLine = (text: string): string[] => {
-    if (text.length <= innerWidth) return [text];
-    const chunks: string[] = [];
-    for (let i = 0; i < text.length; i += innerWidth) {
-      chunks.push(text.slice(i, i + innerWidth));
+    if (visibleWidth(text) <= codeAreaWidth) return [text];
+    if (preserveGeometry) {
+      return [truncatePlainToDisplayWidth(text, codeAreaWidth)];
     }
-    return chunks;
+    return splitPlainToDisplayWidth(text, codeAreaWidth);
   };
 
   const rendered: Array<{ num: string; content: string; contentVisible: number }> = [];
@@ -1003,16 +1005,13 @@ function renderCodeBlock(
       rendered.push({
         num: j === 0 ? String(i + 1) : "",
         content: highlightCodeLine(chunk, lang),
-        contentVisible: chunk.length,
+        contentVisible: visibleWidth(chunk),
       });
     }
   }
 
-  const gutterWidth = Math.max(2, String(codeLines.length).length);
-  const codeAreaWidth = Math.max(1, innerWidth - gutterWidth - 1);
-
   const headerLabel = ` ${label} `;
-  const headerLabelVisible = headerLabel.length;
+  const headerLabelVisible = visibleWidth(headerLabel);
   const remainingTop = Math.max(0, boxWidth - 2 - headerLabelVisible);
   const top =
     border("╭") +
@@ -1035,6 +1034,57 @@ function renderCodeBlock(
   }
 
   out.push(`  ${bot}`);
+}
+
+function shouldPreserveCodeGeometry(codeLines: string[], lang: string): boolean {
+  const normalizedLang = lang.trim().toLowerCase();
+  if (normalizedLang && !["text", "txt", "plaintext", "md", "markdown"].includes(normalizedLang)) {
+    return false;
+  }
+
+  let structuralLines = 0;
+  let nonBlankLines = 0;
+  for (const line of codeLines) {
+    if (!line.trim()) continue;
+    nonBlankLines++;
+    if (/[┌┬┐├┼┤└┴┘│─╭╮╰╯═║╔╗╚╝+\-|<>←→↑↓↔=]{3,}/.test(line)) {
+      structuralLines++;
+    }
+  }
+
+  return nonBlankLines > 0 && structuralLines / nonBlankLines >= 0.25;
+}
+
+function splitPlainToDisplayWidth(text: string, maxWidth: number): string[] {
+  if (maxWidth <= 0) return [""];
+  const chunks: string[] = [];
+  let current = "";
+  let width = 0;
+
+  for (const char of text) {
+    const charWidth = visibleWidth(char);
+    if (width > 0 && width + charWidth > maxWidth) {
+      chunks.push(current);
+      current = "";
+      width = 0;
+    }
+    if (charWidth > maxWidth) {
+      chunks.push(truncatePlainToDisplayWidth(char, maxWidth));
+      continue;
+    }
+    current += char;
+    width += charWidth;
+  }
+
+  if (current || chunks.length === 0) chunks.push(current);
+  return chunks;
+}
+
+function truncatePlainToDisplayWidth(text: string, maxWidth: number): string {
+  if (maxWidth <= 0) return "";
+  if (visibleWidth(text) <= maxWidth) return text;
+  if (maxWidth <= 3) return truncateAnsiToWidth(text, maxWidth);
+  return truncateAnsiToWidth(text, maxWidth - 3).replace(/\s+$/, "") + "...";
 }
 
 function splitTableRow(line: string): string[] | null {
@@ -1092,13 +1142,13 @@ function renderMarkdownTable(
   const rowsParsed = rows.map((row) => row.map((cell) => parseAndStripFormatting(cell)));
 
   const naturalWidths = headerParsed.map((parsed, i) => {
-    let widest = parsed.plain.length;
+    let widest = visibleWidth(parsed.plain);
     for (const row of rowsParsed) {
       const cellPlain = row[i]?.plain ?? "";
       for (const piece of cellPlain.split(/\s+/)) {
-        widest = Math.max(widest, piece.length);
+        widest = Math.max(widest, visibleWidth(piece));
       }
-      widest = Math.max(widest, Math.min(cellPlain.length, 24));
+      widest = Math.max(widest, Math.min(visibleWidth(cellPlain), 24));
     }
     return Math.max(3, widest);
   });
@@ -1167,7 +1217,7 @@ function renderMarkdownTable(
         const styled = bold && cell && parsedCells[col]!.ranges.length === 0
           ? chalk.white.bold(plain)
           : styledBase;
-        const pad = " ".repeat(Math.max(0, colWidths[col]! - plain.length));
+        const pad = " ".repeat(Math.max(0, colWidths[col]! - visibleWidth(plain)));
         parts.push(` ${styled}${pad} `);
       }
       rendered.push(b("│") + parts.join(b("│")) + b("│"));
