@@ -3,32 +3,36 @@
 ## Prerequisites
 
 - Node.js with ESM support for the current toolchain
-- An npm environment capable of running `tsx` and `typescript`
+- Bun 1.3.11 or newer
 - Canvas API credentials in `.env`
 
 ## First-Time Setup
 
 ```bash
-npm install
+bun install
 cp .env.example .env
 ```
 
 ## Useful Commands
 
 ```bash
-npm run dev
-npm run typecheck
-npm run test
-npm run build
-npm run check
+bun run dev
+bun run typecheck
+bun run test
+bun run build
+bun run check
 ```
 
 ## Working Agreement
 
-- Use `npm run dev` while iterating on command or TUI behavior.
-- Use `npm run typecheck` before larger refactors.
-- Use `npm run test` for local regression coverage.
-- Use `npm run check` before merging structural or behavior changes.
+- Use `bun run dev` while iterating on command or TUI behavior.
+- Use `bun run typecheck` before larger refactors.
+- Use `bun run test` for local regression coverage.
+- Use `bun run check` before merging structural or behavior changes.
+
+Tests are invoked through Bun scripts but still use Node's `node:test` runner because the suite uses nested subtests that Bun's native test runner does not yet support.
+
+The published CLI still targets Node through `dist/cli.js` and the `canvas-cli` package `bin`, so users can install released versions with npm even though this repository uses Bun for development.
 
 ## Local State
 

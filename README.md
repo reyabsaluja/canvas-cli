@@ -13,10 +13,10 @@
 ## Quick Start
 
 ```bash
-npm install
+bun install
 cp .env.example .env
-npm run build
-npm start
+bun run build
+bun start
 ```
 
 Configure `.env` with:
@@ -47,11 +47,11 @@ Generated local state is stored under `.canvas-cli/` and ignored by git:
 ## Development
 
 ```bash
-npm run dev
-npm run typecheck
-npm run test
-npm run build
-npm run check
+bun run dev
+bun run typecheck
+bun run test
+bun run build
+bun run check
 ```
 
 ## Documentation
