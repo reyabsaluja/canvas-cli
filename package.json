@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "A terminal interface for Canvas LMS",
   "type": "module",
+  "packageManager": "bun@1.3.11",
   "files": [
     "dist",
     "README.md"
@@ -14,14 +15,17 @@
     "terminal",
     "typescript"
   ],
+  "engines": {
+    "node": ">=20"
+  },
   "bin": {
     "canvas-cli": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf dist",
-    "check": "npm run typecheck && npm run test && npm run build",
-    "dev": "tsx src/cli.ts",
+    "check": "bun run typecheck && bun run test && bun run build",
+    "dev": "bun run src/cli.ts",
     "start": "node dist/cli.js",
     "test": "node --import tsx --test test/*.test.ts tests/*.test.ts",
     "typecheck": "tsc --noEmit"

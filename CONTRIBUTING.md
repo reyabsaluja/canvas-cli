@@ -3,7 +3,7 @@
 ## Setup
 
 ```bash
-npm install
+bun install
 cp .env.example .env
 ```
 
@@ -12,11 +12,11 @@ Add your Canvas credentials to `.env`. If you want to use AI-assisted commands, 
 ## Common Commands
 
 ```bash
-npm run dev
-npm run typecheck
-npm run test
-npm run build
-npm run check
+bun run dev
+bun run typecheck
+bun run test
+bun run build
+bun run check
 ```
 
 ## Project Conventions
@@ -30,6 +30,6 @@ npm run check
 
 ## Before Opening a PR
 
-- Run `npm run check`
+- Run `bun run check`
 - Update documentation when structure or behavior changes
 - Add or extend tests when touching TUI parsing, workspace behavior, or CLI command flows
