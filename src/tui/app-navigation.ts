@@ -170,7 +170,8 @@ export async function pickRecentScope(
     subtitle: `${recent.length} workspaces`,
     items: recent.map((workspace) => ({
       label: workspace.name,
-      sublabel: workspace.course,
+      sublabel: "Workspace",
+      description: workspace.course,
       value: workspace.path,
     })),
     filterable: true,
@@ -194,15 +195,24 @@ export async function pickRecentScope(
 
 export function buildRecentSessionPickerItems(
   sessions: ChatSessionSummary[]
-): Array<{ label: string; sublabel: string; value: string }> {
-  return sessions.map((session) => ({
-    label: session.title,
-    sublabel:
-      session.scope.type === "course"
-        ? `Course · ${session.metadata.courseName ?? ""}`
-        : `Workspace · ${session.metadata.courseName ?? ""}`,
-    value: session.id,
-  }));
+): Array<{
+  label: string;
+  sublabel: string;
+  description: string;
+  rightLabel: string;
+  value: string;
+}> {
+  return sessions.map((session) => {
+    const kind = session.scope.type === "course" ? "Course" : "Workspace";
+    const courseName = session.metadata.courseName ?? "";
+    return {
+      label: session.title,
+      sublabel: kind,
+      description: courseName,
+      rightLabel: formatTimeAgo(session.lastOpenedAt),
+      value: session.id,
+    };
+  });
 }
 
 export async function resolveGlobalOpen(

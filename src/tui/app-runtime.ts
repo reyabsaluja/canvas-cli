@@ -323,6 +323,9 @@ async function loadOrCreateWorkspaceShell(
   };
   const course = courseId ? getCourseById(services, courseId) : null;
   const cache = course ? await loadCourseCache(course.courseCode, course.id) : null;
+  const courseAssignments: Assignment[] = course
+    ? await fetchAssignments(services, course.id, course.name).catch(() => [])
+    : [];
   const openResources = await collectOpenableResources({ loaded, cache });
   const openOptions = buildShellOpenOptions(openResources);
   const lifecycleState = getWorkspaceLifecycleState(
@@ -360,6 +363,9 @@ async function loadOrCreateWorkspaceShell(
         client: services.client,
         config: services.config,
         courseId: courseId ?? null,
+        courseName: course?.name ?? loaded.courseName ?? null,
+        assignments: courseAssignments,
+        radar: services.radar,
       })
     : null;
   if (chatContext) {
@@ -408,6 +414,9 @@ async function loadOrCreateWorkspaceShell(
           client: services.client,
           config: services.config,
           courseId: courseId ?? null,
+          courseName: course?.name ?? loaded.courseName ?? null,
+          assignments: courseAssignments,
+          radar: services.radar,
         },
         chatContext,
         callbacks.onTextDelta

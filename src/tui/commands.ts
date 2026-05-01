@@ -50,7 +50,7 @@ export const COMMANDS: CommandDefinition[] = [
   {
     name: "/home",
     description: "Return to the global home session",
-    scopes: ["global", "course", "workspace"],
+    scopes: ["course", "workspace"],
   },
   {
     name: "/help",

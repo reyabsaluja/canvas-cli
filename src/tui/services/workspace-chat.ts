@@ -24,6 +24,9 @@ export function createChatContext(
     client: extraContext?.client ?? null,
     config: extraContext?.config ?? null,
     courseId: extraContext?.courseId ?? null,
+    courseName: extraContext?.courseName ?? loaded.courseName ?? null,
+    assignments: extraContext?.assignments ?? [],
+    radar: extraContext?.radar ?? null,
     conversationHistory: [],
     runState: createEmptyRunState(),
   };

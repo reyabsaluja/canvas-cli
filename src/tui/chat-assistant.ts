@@ -6,11 +6,14 @@ import {
 import type { Assignment } from "../domain/models.js";
 import type { CourseCache } from "../enrich/cache-loader.js";
 import {
+  fetchAssignments,
   filterActionableUpcomingAssignments,
   getDisplayCourseAvailability,
   getDisplayCourses,
   type AppServices,
 } from "./services.js";
+import { loadCourseCache } from "../enrich/cache-loader.js";
+import type { Course } from "../domain/models.js";
 import type { ChatMessage } from "./chat-state.js";
 import {
   readCourseDocument,
@@ -98,6 +101,40 @@ const GLOBAL_TOOLS: ToolDefinition[] = [
         },
       },
       required: ["topic"],
+    },
+  },
+  {
+    name: "list_course_assignments",
+    description:
+      "List assignments for a specific course by its code or name. Use when the student asks about what's due or upcoming in a specific course without opening it.",
+    parameters: {
+      type: "object",
+      properties: {
+        course: {
+          type: "string",
+          description: "Course code (e.g. 'ECE221') or partial name to match.",
+        },
+      },
+      required: ["course"],
+    },
+  },
+  {
+    name: "search_course_knowledge",
+    description:
+      "Search a specific course's cached knowledge — modules, pages, assignments, attachments — without opening that course. Use when the student asks a specific content question that clearly belongs to one course.",
+    parameters: {
+      type: "object",
+      properties: {
+        course: {
+          type: "string",
+          description: "Course code or partial name to identify the course.",
+        },
+        query: {
+          type: "string",
+          description: "Search keyword or phrase.",
+        },
+      },
+      required: ["course", "query"],
     },
   },
 ];
@@ -330,6 +367,58 @@ export async function answerGlobalQuestion(options: {
           });
           return resolved.content;
         }
+        case "list_course_assignments": {
+          const courseQuery = String(input.course ?? "");
+          const course = findCourseByQuery(options.services, courseQuery);
+          if (!course) {
+            const message = `No course matched "${courseQuery}".`;
+            options.onToolCall?.({
+              action: "list",
+              target: courseQuery || "course assignments",
+              result: message,
+              color: "red",
+            });
+            return message;
+          }
+          const assignments = await fetchAssignments(
+            options.services,
+            course.id,
+            course.name
+          ).catch(() => [] as Assignment[]);
+          const result = renderCourseAssignments(course.name, assignments);
+          options.onToolCall?.({
+            action: "list",
+            target: `${course.courseCode} assignments`,
+            result,
+            color: "green",
+          });
+          return result;
+        }
+        case "search_course_knowledge": {
+          const courseQuery = String(input.course ?? "");
+          const query = String(input.query ?? "");
+          const course = findCourseByQuery(options.services, courseQuery);
+          if (!course) {
+            const message = `No course matched "${courseQuery}".`;
+            options.onToolCall?.({
+              action: "search",
+              target: courseQuery || "course",
+              result: message,
+              color: "red",
+            });
+            return message;
+          }
+          const cache = await loadCourseCache(course.courseCode, course.id);
+          const search = await searchCourseKnowledge(cache, query);
+          const result = renderCourseArtifactSearchResult(search, query);
+          options.onToolCall?.({
+            action: "search",
+            target: `${course.courseCode}: ${query}`,
+            result,
+            color: "green",
+          });
+          return result;
+        }
         default:
           return `Unknown tool: ${toolName}`;
       }
@@ -337,7 +426,7 @@ export async function answerGlobalQuestion(options: {
     {
       onTextDelta: options.onTextDelta,
     },
-    4
+    8
   );
 }
 
@@ -493,10 +582,9 @@ function buildGlobalSystemPrompt(
     filterActionableUpcomingAssignments(upcomingAssignments);
   const lines: string[] = [
     "You are the global home assistant for canvas-cli.",
-    "This scope is navigation-oriented. Help the user with cross-course questions, upcoming work, and where to go next.",
-    "Do not pretend you can read assignment documents from global scope.",
-    "If the user needs assignment-level detail, tell them to open the course or workspace.",
-    "Use list_radar and read_thread to check announcements and discussions across courses.",
+    "This scope is navigation-oriented but you also have cross-course tools: list_radar and read_thread for announcements and discussions, list_course_assignments to inspect a specific course's assignments without opening it, and search_course_knowledge to peek into any course's cached modules, pages, and attachments.",
+    "Reach for these tools before telling the user to open a course — you can often answer directly from global scope.",
+    "Only fall back to 'open the course or workspace' guidance when the student genuinely needs deep assignment-level reading (full PDFs, workup detail).",
     "",
     "Available configured courses:",
   ];
@@ -667,6 +755,52 @@ function renderUpcomingAssignments(assignments: Assignment[]): string {
       return `- ${assignment.name} — ${assignment.courseName} — ${due}`;
     })
     .join("\n");
+}
+
+function findCourseByQuery(
+  services: AppServices,
+  query: string
+): Course | null {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return null;
+  const courses = getDisplayCourses(services);
+  const exact = courses.find(
+    (course) =>
+      course.courseCode.toLowerCase() === normalized ||
+      course.name.toLowerCase() === normalized
+  );
+  if (exact) return exact;
+  return (
+    courses.find(
+      (course) =>
+        course.courseCode.toLowerCase().includes(normalized) ||
+        course.name.toLowerCase().includes(normalized)
+    ) ?? null
+  );
+}
+
+function renderCourseAssignments(
+  courseName: string,
+  assignments: Assignment[]
+): string {
+  if (assignments.length === 0) {
+    return `No assignments found for ${courseName}.`;
+  }
+  const lines = [`Assignments for ${courseName}:`];
+  for (const assignment of assignments.slice(0, 20)) {
+    const due = assignment.dueAt
+      ? assignment.dueAt.toLocaleString("en-US", {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })
+      : "no due date";
+    lines.push(
+      `- ${assignment.name} — ${due}${assignment.submitted ? " — submitted" : ""}`
+    );
+  }
+  return lines.join("\n");
 }
 
 function searchGlobalHome(
