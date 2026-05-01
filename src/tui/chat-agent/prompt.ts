@@ -9,7 +9,16 @@ import type {
 export function buildSystemPrompt(ctx: ChatAgentContext): string {
   const parts: string[] = [];
 
+  const assignmentName = ctx.loaded.assignmentName;
+  const courseName = ctx.courseName ?? ctx.loaded.courseName;
+  const courseCode = ctx.loaded.courseCode;
+  const scopeLine = assignmentName && courseName
+    ? `You are scoped to the assignment "${assignmentName}" inside ${courseName}${courseCode ? ` (${courseCode})` : ""}. The full course toolkit is available — announcements, discussions, lectures, sibling assignments, and the course knowledge store — but your answers should stay oriented around this assignment unless the student explicitly broadens the question.`
+    : "";
+
   parts.push(`You are a workspace assistant for a university assignment. You help students understand their assignments.
+
+${scopeLine}
 
 You already have a detailed workup of this assignment pre-loaded below. For most questions, you can answer directly from this context WITHOUT using tools.
 
@@ -45,6 +54,8 @@ Rules:
 - For simple questions, keep it brief. For "explain" or "in depth" questions, be thorough and specific.
 
 IMPORTANT: Before calling any tool, ALWAYS write a brief sentence explaining what you're about to do. For example, write "Let me read the lab document..." before calling read_file, or "Searching for that..." before calling search_workspace. This sentence must come BEFORE the tool call, not after. The student needs to see your thought process in real-time.
+
+Course-level tools (when available): use list_assignments to orient across the course's other work, open_lecture to launch lecture content by number or topic, list_radar for announcements and discussions, and read_thread to pull a full discussion thread. These are the same capabilities the course assistant has — stay assignment-focused but reach for them when the student's question points outside this assignment.
 
 When you have enough information, respond with your answer directly (no tool calls).`);
 

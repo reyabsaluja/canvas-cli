@@ -15,6 +15,11 @@ import {
   searchCourseKnowledge,
 } from "../course-retrieval.js";
 import {
+  formatRadarItems,
+  resolveAndRenderThread,
+} from "../radar-commands.js";
+import type { RadarFilter } from "../services.js";
+import {
   listWorkspaceKnowledgeArtifacts,
   persistCourseAttachmentUpdates,
   readWorkspaceKnowledgeArtifact,
@@ -52,6 +57,16 @@ async function executeToolCallDetailed(
       return openResource(input.query as string, ctx);
     case "open_lecture":
       return openLecture(input.query as string, ctx);
+    case "list_assignments":
+      return listAssignments(ctx);
+    case "list_radar":
+      return listRadar(
+        (input.filter as RadarFilter | undefined) ?? "all",
+        (input.query as string | undefined) ?? "",
+        ctx
+      );
+    case "read_thread":
+      return readThread(input.topic as string, ctx);
     default:
       return {
         observation: {
@@ -669,6 +684,125 @@ async function openLecture(
     },
     modelText: result.message,
     uiText: result.message,
+  };
+}
+
+async function listAssignments(
+  ctx: ChatAgentContext
+): Promise<ToolExecutionResult> {
+  const assignments = ctx.assignments ?? [];
+  if (assignments.length === 0) {
+    const message =
+      "No assignments are available for this course in the current context.";
+    return {
+      observation: {
+        tool: "list_assignments",
+        status: "not_found",
+        summary: message,
+        artifacts: [],
+      },
+      modelText: message,
+      uiText: message,
+    };
+  }
+  const lines = assignments.slice(0, 40).map((assignment) => {
+    const due = assignment.dueAt
+      ? assignment.dueAt.toLocaleString("en-US", {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })
+      : "no due date";
+    return `- ${assignment.name} — ${due}${assignment.submitted ? " — submitted" : ""}`;
+  });
+  const rendered = lines.join("\n");
+  return {
+    observation: {
+      tool: "list_assignments",
+      status: "ok",
+      summary: `Listed ${assignments.length} assignment${assignments.length === 1 ? "" : "s"} for this course.`,
+      artifacts: [],
+    },
+    modelText: rendered,
+    uiText: rendered,
+  };
+}
+
+async function listRadar(
+  filter: RadarFilter,
+  query: string,
+  ctx: ChatAgentContext
+): Promise<ToolExecutionResult> {
+  if (!ctx.radar || ctx.courseId == null) {
+    const message =
+      "Radar is unavailable in this context (no course binding).";
+    return {
+      observation: {
+        tool: "list_radar",
+        status: "error",
+        summary: message,
+        artifacts: [],
+      },
+      modelText: message,
+      uiText: message,
+    };
+  }
+  const courseName = ctx.courseName ?? ctx.loaded.courseName ?? "";
+  const items = await ctx.radar.getRadarItems(
+    ctx.courseId,
+    courseName,
+    filter,
+    query || undefined
+  );
+  const rendered = formatRadarItems(items, filter, query);
+  return {
+    observation: {
+      tool: "list_radar",
+      status: "ok",
+      summary: `Listed ${items.length} radar item${items.length === 1 ? "" : "s"}${query ? ` matching "${query}"` : ""}.`,
+      artifacts: [],
+    },
+    modelText: rendered,
+    uiText: rendered,
+  };
+}
+
+async function readThread(
+  topic: string,
+  ctx: ChatAgentContext
+): Promise<ToolExecutionResult> {
+  if (!ctx.radar || ctx.courseId == null) {
+    const message =
+      "Threads are unavailable in this context (no course binding).";
+    return {
+      observation: {
+        tool: "read_thread",
+        status: "error",
+        summary: message,
+        artifacts: [],
+      },
+      modelText: message,
+      uiText: message,
+    };
+  }
+  const courseName = ctx.courseName ?? ctx.loaded.courseName ?? "";
+  const resolved = await resolveAndRenderThread(
+    { radar: ctx.radar } as unknown as Parameters<typeof resolveAndRenderThread>[0],
+    [{ id: ctx.courseId, name: courseName }],
+    topic
+  );
+  return {
+    observation: {
+      tool: "read_thread",
+      status: resolved.found ? "ok" : "not_found",
+      summary: resolved.found
+        ? `Read discussion thread for "${topic}".`
+        : resolved.content,
+      artifacts: [],
+    },
+    modelText: resolved.content,
+    uiText: resolved.content,
   };
 }
 

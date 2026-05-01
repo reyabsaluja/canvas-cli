@@ -92,14 +92,79 @@ const OPEN_RESOURCE_TOOL: ToolDefinition = {
   },
 };
 
+const LIST_ASSIGNMENTS_TOOL: ToolDefinition = {
+  name: "list_assignments",
+  description:
+    "List this course's assignments with due dates and submission status. Use when the student asks about upcoming work, what's due, or to orient across assignments beyond the current one.",
+  parameters: {
+    type: "object",
+    properties: {},
+    required: [],
+  },
+};
+
+const OPEN_LECTURE_TOOL: ToolDefinition = {
+  name: "open_lecture",
+  description:
+    "Find and open lecture content (video, slides, or page) for this course. Use when the user asks about lectures, recordings, or slides by number, title, or topic.",
+  parameters: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description:
+          "Lecture number, title keyword, or content type (e.g. '13', 'lecture 13 slides', 'video')",
+      },
+    },
+    required: ["query"],
+  },
+};
+
+const LIST_RADAR_TOOL: ToolDefinition = {
+  name: "list_radar",
+  description:
+    "List recent announcements and discussion topics for this course. Optionally filter by type and search by keyword. Use when the student asks about announcements, discussions, posts, or what's new in the course.",
+  parameters: {
+    type: "object",
+    properties: {
+      filter: {
+        type: "string",
+        enum: ["all", "announcements", "discussions"],
+        description: "Type of items to list. Default: all.",
+      },
+      query: {
+        type: "string",
+        description: "Optional keyword to search titles.",
+      },
+    },
+    required: [],
+  },
+};
+
+const READ_THREAD_TOOL: ToolDefinition = {
+  name: "read_thread",
+  description:
+    "Read a full discussion or announcement thread including all replies. Identify the thread by numeric topic ID or partial title. Use after list_radar surfaces a candidate, or when the student references a specific post or announcement.",
+  parameters: {
+    type: "object",
+    properties: {
+      topic: {
+        type: "string",
+        description: "Topic ID (number) or partial title to match.",
+      },
+    },
+    required: ["topic"],
+  },
+};
+
 export function getAvailableChatToolNames(
-  ctx: Pick<ChatAgentContext, "cache" | "client">
+  ctx: Pick<ChatAgentContext, "cache" | "client" | "assignments" | "radar" | "courseId">
 ): string[] {
   return buildChatTools(ctx).map((tool) => tool.name);
 }
 
 export function buildChatTools(
-  ctx: Pick<ChatAgentContext, "cache" | "client">
+  ctx: Pick<ChatAgentContext, "cache" | "client" | "assignments" | "radar" | "courseId">
 ): ToolDefinition[] {
   const tools: ToolDefinition[] = [
     SEARCH_WORKSPACE_TOOL,
@@ -116,6 +181,19 @@ export function buildChatTools(
   }
 
   tools.push(OPEN_RESOURCE_TOOL);
+
+  if (ctx.assignments && ctx.assignments.length > 0) {
+    tools.push(LIST_ASSIGNMENTS_TOOL);
+  }
+
+  if (ctx.cache && ctx.cache.lectures && ctx.cache.lectures.length > 0) {
+    tools.push(OPEN_LECTURE_TOOL);
+  }
+
+  if (ctx.radar && ctx.courseId != null) {
+    tools.push(LIST_RADAR_TOOL);
+    tools.push(READ_THREAD_TOOL);
+  }
 
   return tools;
 }
@@ -155,6 +233,22 @@ export function mapToolCall(
       return {
         action: "open",
         target: (input.query as string) ?? "resource",
+        color: "green",
+      };
+    case "list_assignments":
+      return { action: "list", target: "assignments", color: "green" };
+    case "open_lecture":
+      return {
+        action: "open",
+        target: (input.query as string) ?? "lecture",
+        color: "green",
+      };
+    case "list_radar":
+      return { action: "list", target: "radar", color: "green" };
+    case "read_thread":
+      return {
+        action: "read",
+        target: (input.topic as string) ?? "thread",
         color: "green",
       };
     default:
