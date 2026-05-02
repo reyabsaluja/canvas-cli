@@ -195,6 +195,8 @@ export async function runChatShell<TExit>(
   let processingStartTime = 0;
   let processingAbort: AbortController | null = null;
   let preProcessingInput = "";
+  let stdinEscHold = "";
+  let stdinEscTimer: ReturnType<typeof setTimeout> | null = null;
   let bannerLinesCache: string[] | null = null;
   let bannerCacheCols = -1;
   let openSearchOptionsRef: ShellOpenOption[] | null = null;
@@ -584,6 +586,10 @@ export async function runChatShell<TExit>(
     if (renderTimer) {
       clearTimeout(renderTimer);
       renderTimer = null;
+    }
+    if (stdinEscTimer) {
+      clearTimeout(stdinEscTimer);
+      stdinEscTimer = null;
     }
     renderQueued = false;
     return leaveChatShell(
@@ -1270,7 +1276,24 @@ export async function runChatShell<TExit>(
       renderAfterInputMutation(hadOverlay, nextInputState);
     }
 
-    let stdinEscHold = "";
+    function flushEscHold(): void {
+      if (stdinEscTimer) {
+        clearTimeout(stdinEscTimer);
+        stdinEscTimer = null;
+      }
+      if (!stdinEscHold) return;
+      const held = stdinEscHold;
+      stdinEscHold = "";
+      if (held === "\x1B") {
+        keyQueue.enqueue(() => handleKey(held));
+      }
+    }
+
+    function scheduleEscHoldFlush(): void {
+      if (stdinEscTimer) clearTimeout(stdinEscTimer);
+      stdinEscTimer = setTimeout(flushEscHold, 50);
+    }
+
     function enqueueInputChunk(chunk: string): void {
       if (!chunk) return;
 
@@ -1296,6 +1319,7 @@ export async function runChatShell<TExit>(
 
     function onData(data: string): void {
       if (shellClosed) return;
+      if (stdinEscTimer) { clearTimeout(stdinEscTimer); stdinEscTimer = null; }
       let input = stdinEscHold + data;
       stdinEscHold = "";
 
@@ -1311,6 +1335,7 @@ export async function runChatShell<TExit>(
 
         if (input.length === 1) {
           stdinEscHold = input;
+          scheduleEscHoldFlush();
           return;
         }
 
@@ -1342,6 +1367,7 @@ export async function runChatShell<TExit>(
             continue;
           }
           stdinEscHold = input;
+          scheduleEscHoldFlush();
           return;
         }
 
