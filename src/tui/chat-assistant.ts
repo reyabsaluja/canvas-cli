@@ -262,6 +262,7 @@ interface CourseAssistantOptions {
   question: string;
   onToolCall?: (event: ScopeToolCallEvent) => void;
   onTextDelta?: (delta: string) => void;
+  abortSignal?: AbortSignal;
 }
 
 export async function answerGlobalQuestion(options: {
@@ -273,6 +274,7 @@ export async function answerGlobalQuestion(options: {
   upcomingAssignments: Assignment[];
   onToolCall?: (event: ScopeToolCallEvent) => void;
   onTextDelta?: (delta: string) => void;
+  abortSignal?: AbortSignal;
 }): Promise<string> {
   const system = buildGlobalSystemPrompt(
     options.services,
@@ -425,6 +427,7 @@ export async function answerGlobalQuestion(options: {
     },
     {
       onTextDelta: options.onTextDelta,
+      abortSignal: options.abortSignal,
     },
     8
   );
@@ -565,6 +568,7 @@ export async function answerCourseQuestion(
     },
     {
       onTextDelta: options.onTextDelta,
+      abortSignal: options.abortSignal,
     },
     8
   );

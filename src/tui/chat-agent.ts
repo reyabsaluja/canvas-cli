@@ -50,7 +50,8 @@ export async function runChatAgent(
   ctx: ChatAgentContext,
   question: string,
   onToolCall: (event: ToolCallEvent) => void,
-  onTextDelta?: (delta: string) => void
+  onTextDelta?: (delta: string) => void,
+  abortSignal?: AbortSignal
 ): Promise<WorkspaceAnswer> {
   const systemPrompt = buildSystemPrompt(ctx);
   const availableTools = buildChatTools(ctx);
@@ -70,7 +71,7 @@ export async function runChatAgent(
 
   if (retrievalDecision.action === "answer_from_workup") {
     usedWorkup = true;
-    fullText = await answerWithoutTools(ctx, systemPrompt, question, [], onTextDelta);
+    fullText = await answerWithoutTools(ctx, systemPrompt, question, [], onTextDelta, abortSignal);
   } else if (retrievalDecision.action === "answer_from_memory") {
     supportingObservations = selectArtifactSupportObservations(
       ctx.runState.observations,
@@ -82,7 +83,8 @@ export async function runChatAgent(
       systemPrompt,
       question,
       supportingObservations,
-      onTextDelta
+      onTextDelta,
+      abortSignal
     );
   } else if (retrievalDecision.action === "read_artifact") {
     const toolResult = await readArtifactForGate(retrievalDecision.artifactId, ctx);
@@ -126,7 +128,8 @@ export async function runChatAgent(
             input: { filename: gateReadFilename },
             result: toolResult,
           },
-        ]
+        ],
+        abortSignal
       ));
     } else {
       fullText = await answerWithoutTools(
@@ -134,7 +137,8 @@ export async function runChatAgent(
         systemPrompt,
         question,
         supportingObservations,
-        onTextDelta
+        onTextDelta,
+        abortSignal
       );
     }
   } else {
@@ -149,7 +153,9 @@ export async function runChatAgent(
       question,
       onToolCall,
       onTextDelta,
-      observationStart
+      observationStart,
+      [],
+      abortSignal
     ));
   }
 
@@ -188,7 +194,8 @@ async function runToolLoopTurn(
     name: string;
     input: Record<string, unknown>;
     result: Awaited<ReturnType<typeof readArtifactForGate>>;
-  }> = []
+  }> = [],
+  abortSignal?: AbortSignal
 ): Promise<ToolLoopRunResult> {
   const pendingToolResults: ToolExecutionResult[] = [];
   const turnToolCache = new Map<string, ToolExecutionResult>();
@@ -231,6 +238,7 @@ async function runToolLoopTurn(
           });
         },
         onTextDelta,
+        abortSignal,
       },
       10
     );
@@ -291,7 +299,8 @@ async function runToolLoopTurn(
       systemPrompt,
       question,
       verificationObservations,
-      onTextDelta
+      onTextDelta,
+      abortSignal
     );
   } else if (toolLoopError) {
     throw toolLoopError;

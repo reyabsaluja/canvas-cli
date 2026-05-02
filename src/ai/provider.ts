@@ -230,6 +230,7 @@ export async function streamWithTools(
   callbacks: {
     onToolCall?: (name: string, input: Record<string, unknown>, result: string) => void;
     onTextDelta?: (delta: string) => void;
+    abortSignal?: AbortSignal;
   },
   maxSteps: number = 10
 ): Promise<string> {
@@ -261,7 +262,7 @@ export async function streamWithTools(
   }
 
   function emitTextDelta(delta: string): void {
-    if (!delta) {
+    if (!delta || signal?.aborted) {
       return;
     }
     callbacks.onTextDelta?.(delta);
@@ -314,13 +315,17 @@ export async function streamWithTools(
     }, STREAM_TEXT_FLUSH_MS);
   }
 
+  const signal = callbacks.abortSignal;
+
   for (const t of toolDefs) {
     aiTools[t.name] = tool({
       description: t.description,
       inputSchema: jsonSchema(t.parameters as any),
       execute: async (input: any) => {
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
         flushPendingTextDelta(true);
         const result = await executeTool(t.name, input);
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
         callbacks.onToolCall?.(t.name, input, result);
         return result;
       },
@@ -334,6 +339,7 @@ export async function streamWithTools(
     messages: messages as any,
     tools: aiTools,
     stopWhen: stepCountIs(maxSteps),
+    abortSignal: signal,
     onError: ({ error }: { error: unknown }) => {
       capturedStreamError = error;
     },
