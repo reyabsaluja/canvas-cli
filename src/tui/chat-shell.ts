@@ -646,27 +646,6 @@ export async function runChatShell<TExit>(
       return true;
     }
 
-    function keyOkWhileProcessing(key: string): boolean {
-      return [
-        "\x03",
-        "\x0F",
-        "\x10",
-        "\x0e",
-        "\x19",
-        "\x1B",
-        "\x1B[A",
-        "\x1B[B",
-        "\x1b[5~",
-        "\x1B[5~",
-        "\x1b[6~",
-        "\x1B[6~",
-        "\x1b[4~",
-        "\x1B[4~",
-        "\x1b[1~",
-        "\x1B[1~",
-      ].includes(key);
-    }
-
     async function handlePrompt(input: string): Promise<void> {
       const extractedPins = extractInlinePins(input, options.getPinOptions?.() ?? []);
       if (extractedPins.missing.length > 0 || extractedPins.ambiguous.length > 0) {
@@ -1033,7 +1012,6 @@ export async function runChatShell<TExit>(
 
     async function handleKey(key: string): Promise<void> {
       if (shellClosed) return;
-      if (isProcessing && !keyOkWhileProcessing(key)) return;
 
       if (key === "\x03") {
         if (inputBuffer.length > 0) {
@@ -1096,6 +1074,7 @@ export async function runChatShell<TExit>(
       }
 
       if (key === "\r" || key === "\n") {
+        if (isProcessing) return;
         setChatScrollOffset(0);
         const inputState = getInputState();
 
@@ -1271,7 +1250,7 @@ export async function runChatShell<TExit>(
     }
 
     function handleTextInputChunk(text: string): void {
-      if (shellClosed || !text || isProcessing) return;
+      if (shellClosed || !text) return;
 
       const hadOverlay = hasVisibleOverlay();
       inputBuffer += text;
