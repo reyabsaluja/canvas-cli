@@ -21,20 +21,21 @@ export interface PdfExportResult {
   warning?: string;
 }
 
-const MARKDOWN_COMPOSE_SYSTEM_PROMPT = `You create concise, high-quality PDF-ready Markdown documents from canvas-cli chat and workspace context.
+const MARKDOWN_COMPOSE_SYSTEM_PROMPT = `You create thorough, comprehensive, high-quality PDF-ready Markdown documents from canvas-cli chat and workspace context.
 
 Return Markdown only — no code fences around the entire document, no preamble.
 
 Critical rules:
-- Be CONCISE. A typical document is 1-4 pages when printed. Do NOT pad with filler.
-- Every sentence must add value. Cut anything a student would skip.
-- Infer the best document type: study guide, assignment brief, cheat sheet, checklist, summary, or action plan.
-- Use ## and ### headings to organize. Use bullet lists for quick scanning.
+- Be THOROUGH and COMPREHENSIVE. Cover EVERYTHING in the provided context. Do not summarize or abbreviate — expand on every topic, every detail, every concept. A typical document should be 8-20+ pages when printed. More is better.
+- Infer the best document type: study guide, assignment brief, cheat sheet, checklist, summary, or action plan — then go deep on it.
+- Use ## and ### headings to organize into clear sections. Use bullet lists for quick scanning.
 - Use Markdown tables when comparing items or listing structured data (dates, scores, options).
-- Preserve due dates, deliverables, constraints, source names, and open questions.
-- Do not invent facts beyond the supplied context.
-- If the request is vague, produce the most useful possible summary of the conversation and workspace.
-- Skip any "Sources" section if there are fewer than 3 distinct sources.
+- For study guides: explain each concept fully with definitions, examples, and connections to other topics. Include formulas, code snippets, key terms, and practice-ready content.
+- For assignment briefs: detail every requirement, constraint, deliverable, resource, and step of the action plan with full explanations.
+- Preserve ALL due dates, deliverables, constraints, source names, open questions, lecture content, and module details.
+- Include a Sources section listing all referenced materials.
+- Do not invent facts beyond the supplied context, but DO fully elaborate on everything that IS in the context.
+- If the request is vague, produce the most comprehensive and useful document possible from all available context.
 - Never mention AI, PDF generation, or canvas-cli in the document body.
 - Never repeat the same information in multiple sections.`;
 
@@ -48,7 +49,10 @@ export async function generatePdfExport(
     return generateLatexPdf(input, bundle, latexCompiler);
   }
 
-  return generateMarkdownPdf(input, bundle);
+  const noLatexWarning = !latexCompiler
+    ? "No LaTeX compiler found. Install one for high-quality output: brew install tectonic"
+    : undefined;
+  return generateMarkdownPdf(input, bundle, noLatexWarning);
 }
 
 async function generateLatexPdf(
@@ -73,7 +77,7 @@ async function generateLatexPdf(
   let warning: string | undefined;
 
   try {
-    const raw = await callModel(input.aiConfig!, LATEX_COMPOSE_SYSTEM_PROMPT, userMessage);
+    const raw = await callModel(input.aiConfig!, LATEX_COMPOSE_SYSTEM_PROMPT, userMessage, { maxTokens: 8000, timeoutMs: 600_000 });
     latexBody = sanitizeLatexBody(raw);
   } catch (error) {
     usedAI = false;
@@ -110,7 +114,25 @@ async function generateLatexPdf(
   warning = (warning ? warning + " " : "") +
     "LaTeX compilation failed — falling back to PDFKit renderer.";
 
-  return generateMarkdownPdf(input, bundle, warning);
+  const fallbackMarkdown = usedAI
+    ? ensureMarkdownTitle(latexBodyToMarkdown(latexBody), finalTitle)
+    : ensureMarkdownTitle(bundle.fallbackMarkdown, bundle.suggestedTitle);
+
+  const pdfPath = path.join(bundle.outputDirectory, `${outputBaseName}.pdf`);
+  await renderMarkdownToPdf(fallbackMarkdown, pdfPath, {
+    title: finalTitle,
+    subtitle: input.runtime.title,
+    generatedAt: bundle.generatedAt,
+  });
+
+  return {
+    title: finalTitle,
+    pdfPath,
+    markdownPath: texPath,
+    usedAI,
+    usedLatex: false,
+    warning,
+  };
 }
 
 async function generateMarkdownPdf(
@@ -168,7 +190,7 @@ async function composeMarkdown(
   ].join("\n");
 
   try {
-    const raw = await callModel(input.aiConfig, MARKDOWN_COMPOSE_SYSTEM_PROMPT, userMessage);
+    const raw = await callModel(input.aiConfig, MARKDOWN_COMPOSE_SYSTEM_PROMPT, userMessage, { maxTokens: 8000, timeoutMs: 600_000 });
     const markdown = normalizeModelMarkdown(raw, bundle.suggestedTitle);
     return { markdown, usedAI: true };
   } catch (error) {
@@ -252,4 +274,35 @@ function stripMarkdownFence(text: string): string {
 function extractMarkdownTitle(markdown: string): string | null {
   const match = markdown.match(/^#\s+(.+)$/m);
   return match?.[1]?.trim() || null;
+}
+
+function latexBodyToMarkdown(latex: string): string {
+  return latex
+    .replace(/\\section\{([^}]+)\}/g, "# $1")
+    .replace(/\\subsection\{([^}]+)\}/g, "## $1")
+    .replace(/\\subsubsection\{([^}]+)\}/g, "### $1")
+    .replace(/\\textbf\{([^}]+)\}/g, "**$1**")
+    .replace(/\\textit\{([^}]+)\}/g, "*$1*")
+    .replace(/\\texttt\{([^}]+)\}/g, "`$1`")
+    .replace(/\\begin\{itemize\}/g, "")
+    .replace(/\\end\{itemize\}/g, "")
+    .replace(/\\begin\{enumerate\}/g, "")
+    .replace(/\\end\{enumerate\}/g, "")
+    .replace(/\\item\s*/g, "- ")
+    .replace(/\\begin\{lstlisting\}(\[.*?\])?\s*\n?/g, "```\n")
+    .replace(/\\end\{lstlisting\}/g, "```")
+    .replace(/\\begin\{(?:quotebox|highlightbox)\}/g, "> ")
+    .replace(/\\end\{(?:quotebox|highlightbox)\}/g, "")
+    .replace(/\\begin\{tabular\}[\s\S]*?\\end\{tabular\}/g, (m) => m)
+    .replace(/\\\\/g, "\n")
+    .replace(/\\[&%$#_{}]/g, (m) => m[1]!)
+    .replace(/\\textbackslash\{\}/g, "\\")
+    .replace(/\\textasciitilde\{\}/g, "~")
+    .replace(/\\textasciicircum\{\}/g, "^")
+    .replace(/\\vspace\{[^}]*\}/g, "")
+    .replace(/\\(?:hfill|noindent|clearpage|newpage|par)\b/g, "")
+    .replace(/\{\\color\{[^}]+\}\\hrule[^}]*\}/g, "---")
+    .replace(/\\toprule|\\midrule|\\bottomrule/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }

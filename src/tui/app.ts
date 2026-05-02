@@ -59,6 +59,8 @@ export async function launchApp(): Promise<void> {
         extraHelpCommands: shellContext.extraHelpCommands,
         getPinOptions: shellContext.getPinOptions,
         getOpenOptions: shellContext.getOpenOptions,
+        getLoadedWorkspace: shellContext.getLoadedWorkspace,
+        getCourseCache: shellContext.getCourseCache,
         onClear: shellContext.onClear,
         resolvePinContent: shellContext.resolvePinContent,
         onReady: shellContext.onReady,
