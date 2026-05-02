@@ -1,4 +1,7 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 import fsp from "node:fs/promises";
 import path from "node:path";
 
@@ -229,24 +232,22 @@ export async function compileLatex(
 
   try {
     if (compiler === "tectonic") {
-      execFileSync(compiler, [
+      await execFileAsync(compiler, [
         "--outdir", dir,
         texPath,
       ], {
         cwd: dir,
-        stdio: "pipe",
         timeout: 120_000,
       });
     } else {
       for (let pass = 0; pass < 2; pass++) {
-        execFileSync(compiler, [
+        await execFileAsync(compiler, [
           "-interaction=nonstopmode",
           "-halt-on-error",
           `-output-directory=${dir}`,
           texPath,
         ], {
           cwd: dir,
-          stdio: "pipe",
           timeout: 30_000,
         });
       }
