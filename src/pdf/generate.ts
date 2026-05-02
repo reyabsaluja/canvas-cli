@@ -104,7 +104,7 @@ async function generateLatexPdf(
     return {
       title: finalTitle,
       pdfPath: result.pdfPath,
-      markdownPath: texPath,
+      markdownPath,
       usedAI,
       usedLatex: true,
       warning,
