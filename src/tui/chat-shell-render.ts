@@ -1438,23 +1438,29 @@ function wrapLines(text: string, maxWidth: number): string[] {
   const words = text.split(/\s+/);
   const lines: string[] = [];
   let current = "";
+  let currentWidth = 0;
   for (const word of words) {
     if (!word) continue;
-    if (word.length > maxWidth) {
+    const wordWidth = visibleWidth(word);
+    if (wordWidth > maxWidth) {
       if (current) {
         lines.push(current);
         current = "";
+        currentWidth = 0;
       }
-      for (let index = 0; index < word.length; index += maxWidth) {
-        lines.push(word.slice(index, index + maxWidth));
-      }
+      lines.push(word);
       continue;
     }
-    if (current.length + word.length + 1 > maxWidth && current.length > 0) {
+    if (currentWidth + wordWidth + 1 > maxWidth && currentWidth > 0) {
       lines.push(current);
       current = word;
+      currentWidth = wordWidth;
+    } else if (current) {
+      current = `${current} ${word}`;
+      currentWidth += wordWidth + 1;
     } else {
-      current = current ? `${current} ${word}` : word;
+      current = word;
+      currentWidth = wordWidth;
     }
   }
   if (current) lines.push(current);
