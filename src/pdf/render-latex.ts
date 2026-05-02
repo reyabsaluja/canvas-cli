@@ -1,0 +1,324 @@
+import { execFileSync } from "node:child_process";
+import fsp from "node:fs/promises";
+import path from "node:path";
+
+export interface LatexRenderOptions {
+  title: string;
+  subtitle?: string;
+  generatedAt?: string;
+}
+
+const TEX_COMPILERS = ["pdflatex", "xelatex", "lualatex"] as const;
+
+export function getLatexCompiler(): string | null {
+  const whichCmd = process.platform === "win32" ? "where" : "which";
+  for (const compiler of TEX_COMPILERS) {
+    try {
+      execFileSync(whichCmd, [compiler], { stdio: "pipe", timeout: 5_000 });
+      return compiler;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+function escapeLatexTitle(text: string): string {
+  return text
+    .replace(/\\/g, "\\textbackslash{}")
+    .replace(/([&%$#_{}])/g, "\\$1")
+    .replace(/~/g, "\\textasciitilde{}")
+    .replace(/\^/g, "\\textasciicircum{}");
+}
+
+const PREAMBLE = String.raw`\documentclass[11pt,letterpaper]{article}
+
+% ── Encoding & Fonts ──
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+
+% ── Page Layout ──
+\usepackage[
+  top=1.15in,
+  bottom=1.15in,
+  left=1.1in,
+  right=1.1in,
+  headheight=14pt,
+]{geometry}
+
+% ── Colors ──
+\usepackage{xcolor}
+\definecolor{accent}{HTML}{b91c1c}
+\definecolor{accentdark}{HTML}{991b1b}
+\definecolor{muted}{HTML}{6b7280}
+\definecolor{codebg}{HTML}{f4f4f5}
+\definecolor{codetext}{HTML}{374151}
+\definecolor{linkblue}{HTML}{1d4ed8}
+\definecolor{rulegray}{HTML}{d4d4d8}
+\definecolor{quotebg}{HTML}{fafafa}
+
+% ── Typography ──
+\usepackage{microtype}
+\usepackage{parskip}
+\setlength{\parskip}{6pt plus 2pt minus 1pt}
+
+% ── Math ──
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+
+% ── Code Listings ──
+\usepackage{listings}
+\lstset{
+  backgroundcolor=\color{codebg},
+  basicstyle=\ttfamily\small\color{codetext},
+  keywordstyle=\color{accentdark}\bfseries,
+  commentstyle=\color{muted}\itshape,
+  stringstyle=\color{accent},
+  breaklines=true,
+  breakatwhitespace=false,
+  frame=single,
+  framerule=0pt,
+  rulecolor=\color{codebg},
+  xleftmargin=10pt,
+  xrightmargin=10pt,
+  framexleftmargin=6pt,
+  framextoppad=6pt,
+  framexbottompad=6pt,
+  tabsize=4,
+  showstringspaces=false,
+  captionpos=b,
+  aboveskip=12pt,
+  belowskip=8pt,
+  numbers=none,
+}
+
+% ── Tables ──
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+
+% ── Lists ──
+\usepackage{enumitem}
+\setlist[itemize]{leftmargin=*, nosep, topsep=4pt, itemsep=2pt}
+\setlist[enumerate]{leftmargin=*, nosep, topsep=4pt, itemsep=2pt}
+
+% ── Headers & Footers ──
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{accent}\textbf{canvas-cli}}
+\fancyhead[R]{\small\color{muted}\nouppercase{\leftmark}}
+\fancyfoot[C]{\small\color{muted}Page~\thepage}
+\renewcommand{\headrulewidth}{0.5pt}
+\renewcommand{\footrulewidth}{0pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{rulegray}\leaders\hrule height \headrulewidth\hfill}}
+
+% ── Section Formatting ──
+\usepackage{titlesec}
+\titleformat{\section}
+  {\Large\bfseries\color{accent}}
+  {\thesection}{0.8em}{}
+  [\vspace{-4pt}{\color{rulegray}\titlerule[0.6pt]}]
+\titleformat{\subsection}
+  {\large\bfseries\color{accentdark}}
+  {\thesubsection}{0.7em}{}
+\titleformat{\subsubsection}
+  {\normalsize\bfseries}
+  {\thesubsubsection}{0.6em}{}
+
+\titlespacing*{\section}{0pt}{18pt plus 4pt minus 2pt}{8pt plus 2pt}
+\titlespacing*{\subsection}{0pt}{14pt plus 3pt minus 2pt}{6pt plus 2pt}
+\titlespacing*{\subsubsection}{0pt}{10pt plus 2pt minus 1pt}{4pt plus 1pt}
+
+% ── Links ──
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=accent,
+  urlcolor=linkblue,
+  citecolor=accent,
+  pdfborder={0 0 0},
+}
+
+% ── Blockquote Environment ──
+\usepackage{mdframed}
+\newmdenv[
+  topline=false,
+  bottomline=false,
+  rightline=false,
+  linewidth=3pt,
+  linecolor=accent,
+  backgroundcolor=quotebg,
+  innertopmargin=8pt,
+  innerbottommargin=8pt,
+  innerleftmargin=12pt,
+  innerrightmargin=12pt,
+  skipabove=10pt,
+  skipbelow=10pt,
+]{quotebox}
+
+% ── Highlight Box ──
+\newmdenv[
+  linewidth=1pt,
+  linecolor=accent,
+  backgroundcolor=codebg,
+  innertopmargin=10pt,
+  innerbottommargin=10pt,
+  innerleftmargin=12pt,
+  innerrightmargin=12pt,
+  roundcorner=3pt,
+  skipabove=10pt,
+  skipbelow=10pt,
+]{highlightbox}
+`;
+
+export function buildLatexDocument(
+  body: string,
+  options: LatexRenderOptions
+): string {
+  const title = escapeLatexTitle(options.title);
+  const subtitle = options.subtitle
+    ? escapeLatexTitle(options.subtitle)
+    : "";
+  const date = options.generatedAt
+    ? escapeLatexTitle(options.generatedAt)
+    : "";
+
+  const titleLines = [
+    String.raw`\begin{center}`,
+    String.raw`  {\small\color{accent}\textbf{canvas-cli}}\\[6pt]`,
+    String.raw`  {\LARGE\bfseries ${title}}\\[4pt]`,
+  ];
+  if (subtitle) {
+    titleLines.push(
+      String.raw`  {\color{muted}\small ${subtitle}}\\[2pt]`
+    );
+  }
+  if (date) {
+    titleLines.push(
+      String.raw`  {\color{muted}\footnotesize Generated ${date}}`
+    );
+  }
+  titleLines.push(
+    String.raw`\end{center}`,
+    String.raw`\vspace{4pt}`,
+    String.raw`{\color{rulegray}\hrule height 0.6pt}`,
+    String.raw`\vspace{12pt}`
+  );
+
+  return [
+    PREAMBLE,
+    "",
+    String.raw`\begin{document}`,
+    "",
+    titleLines.join("\n"),
+    "",
+    body,
+    "",
+    String.raw`\end{document}`,
+  ].join("\n");
+}
+
+export async function compileLatex(
+  texPath: string,
+  compiler: string
+): Promise<{ success: boolean; pdfPath: string; log?: string }> {
+  const dir = path.dirname(texPath);
+  const basename = path.basename(texPath, ".tex");
+  const pdfPath = path.join(dir, `${basename}.pdf`);
+
+  try {
+    for (let pass = 0; pass < 2; pass++) {
+      execFileSync(compiler, [
+        "-interaction=nonstopmode",
+        "-halt-on-error",
+        `-output-directory=${dir}`,
+        texPath,
+      ], {
+        cwd: dir,
+        stdio: "pipe",
+        timeout: 30_000,
+      });
+    }
+
+    await fsp.access(pdfPath);
+
+    const auxExts = [".aux", ".log", ".out", ".toc", ".nav", ".snm"];
+    await Promise.allSettled(
+      auxExts.map((ext) => fsp.unlink(path.join(dir, `${basename}${ext}`)))
+    );
+
+    return { success: true, pdfPath };
+  } catch (error) {
+    const logPath = path.join(dir, `${basename}.log`);
+    let log: string | undefined;
+    try {
+      log = await fsp.readFile(logPath, "utf-8");
+    } catch {}
+    return { success: false, pdfPath, log };
+  }
+}
+
+export function sanitizeLatexBody(raw: string): string {
+  let body = raw.trim();
+  body = body.replace(/^\\documentclass[\s\S]*?\\begin\{document\}\s*/i, "");
+  body = body.replace(/\\end\{document\}\s*$/i, "");
+  body = body.replace(/^```(?:latex|tex)?\s*\n/i, "");
+  body = body.replace(/\n```\s*$/i, "");
+  body = body.replace(
+    /^(?:here(?:'s| is)\s+.*?:|sure[,!.\s]+.*?:)\s*/i,
+    ""
+  );
+  return body.trim();
+}
+
+export function extractLatexTitle(body: string): string | null {
+  const match = body.match(/\\section\{([^}]+)\}/);
+  return match?.[1]?.trim() || null;
+}
+
+export const LATEX_COMPOSE_SYSTEM_PROMPT = `You create concise, high-quality LaTeX document bodies from canvas-cli chat and workspace context.
+
+Return ONLY LaTeX body content. Do NOT include \\documentclass, \\usepackage, \\begin{document}, or \\end{document} — the preamble and document wrapper are handled externally.
+
+The first line of your output should begin the document content directly (e.g., with a \\section{} or paragraph).
+
+Available environments and commands (already loaded in preamble):
+- Headings: \\section{Title}, \\subsection{Title}, \\subsubsection{Title}
+- Lists: itemize (\\begin{itemize} \\item ... \\end{itemize}), enumerate
+- Code blocks: \\begin{lstlisting}[language=Python] ... \\end{lstlisting}
+  Supported languages: Python, Java, C, C++, JavaScript, SQL, Bash, R, MATLAB
+- Inline code: \\texttt{code here}
+- Math: $x^2 + y^2 = z^2$ for inline, \\[ E = mc^2 \\] for display
+- Aligned equations: \\begin{align*} a &= b + c \\\\ d &= e + f \\end{align*}
+- Tables: \\begin{tabular}{lll} \\toprule H1 & H2 & H3 \\\\ \\midrule ... \\bottomrule \\end{tabular}
+- Block quotes: \\begin{quotebox} ... \\end{quotebox}
+- Highlight boxes: \\begin{highlightbox} ... \\end{highlightbox}
+- Bold: \\textbf{text}, Italic: \\textit{text}, Monospace: \\texttt{text}
+- Horizontal rules: \\vspace{6pt}{\\color{rulegray}\\hrule}\\vspace{6pt}
+
+CRITICAL LaTeX escaping — in regular text (NOT in math mode, lstlisting, or \\texttt{}):
+- & → \\&
+- % → \\%
+- $ → \\$ (unless opening/closing math mode)
+- # → \\#
+- _ → \\_
+- { and } → \\{ and \\} (unless used as LaTeX grouping)
+- ~ → \\textasciitilde{}
+- ^ → \\textasciicircum{} (unless in math mode)
+
+Content rules:
+- Be CONCISE. A typical document is 1–4 pages printed. Do NOT pad with filler.
+- Every sentence must add value. Cut anything a student would skip.
+- Infer the best document type: study guide, assignment brief, cheat sheet, checklist, summary, or action plan.
+- Use proper LaTeX math for ALL mathematical expressions, formulas, and equations.
+- Use lstlisting for ALL code snippets — never use verbatim or raw monospace for code.
+- Use booktabs tables (\\toprule, \\midrule, \\bottomrule) for structured data comparisons.
+- Preserve due dates, deliverables, constraints, source names, and open questions.
+- Do not invent facts beyond the supplied context.
+- If the request is vague, produce the most useful possible summary of the conversation and workspace.
+- Skip any "Sources" section if there are fewer than 3 distinct sources.
+- Never mention AI, PDF generation, or canvas-cli in the document body.
+- Never repeat the same information in multiple sections.`;

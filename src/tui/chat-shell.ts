@@ -87,6 +87,8 @@ export interface ChatShellOptions<TExit> {
   onReady?: (api: ShellRuntimeApi) => Promise<void> | void;
 }
 
+const inlinePdfPattern = /\/(?:make-pdf|pdf)\b/i;
+
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const VERBS = [
   "Working",
@@ -1123,7 +1125,21 @@ export async function runChatShell<TExit>(
 
         if (input.startsWith("/")) {
           const [commandName, ...rest] = input.split(/\s+/);
-          await handleCommandInput(input, commandName, rest.join(" "));
+          const normalizedCmd = commandName.toLowerCase();
+          if (normalizedCmd === "/make-pdf" || normalizedCmd === "/pdf") {
+            await handleCommandInput(input, normalizedCmd, rest.join(" "));
+          } else {
+            await handleCommandInput(input, commandName, rest.join(" "));
+          }
+          return;
+        }
+
+        if (inlinePdfPattern.test(input)) {
+          const cleaned = input
+            .replace(inlinePdfPattern, "")
+            .replace(/\s+/g, " ")
+            .trim();
+          await handleCommandInput(input, "/make-pdf", cleaned);
           return;
         }
 
