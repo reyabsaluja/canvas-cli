@@ -636,8 +636,6 @@ class IngestionProgressRenderer {
 
     allLines.push("");
 
-    const lastStep = this.steps[this.steps.length - 1];
-    const isActive = lastStep && !lastStep.completedAt;
     const verb = INGESTION_VERBS[this.verbIndex % INGESTION_VERBS.length]!;
     const verbText = `${verb}...`;
     let shimmer = "";
@@ -645,10 +643,7 @@ class IngestionProgressRenderer {
       const colorIndex = (this.shimmerFrame + j) % SHIMMER_COLORS.length;
       shimmer += SHIMMER_COLORS[colorIndex]!(verbText[j]!);
     }
-    const spinnerLine = isActive
-      ? `  ${spinnerColor(SPINNER_FRAMES[this.frame]!)} ${shimmer}  ${C.secondary("(esc to interrupt)")}`
-      : `  ${spinnerColor(SPINNER_FRAMES[this.frame]!)} ${shimmer}`;
-    allLines.push(spinnerLine);
+    allLines.push(`  ${spinnerColor(SPINNER_FRAMES[this.frame]!)} ${shimmer}`);
 
     const maxVisible = rows - 1;
     const totalLines = allLines.length;

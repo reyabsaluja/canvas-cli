@@ -154,7 +154,8 @@ export class ActivityIndicator {
     const elapsed = formatElapsed(Date.now() - this.startTime);
     const verbText = `${this.verb}...`;
     const shimmer = buildShimmerText(verbText, this.shimmerFrame);
-    return `  ${spinnerColor(SPINNER[this.frame]!)} ${shimmer} ${C.dim(`(${elapsed})`)}  ${C.secondary("(esc to interrupt)")}`;
+    return `  ${spinnerColor(SPINNER[this.frame]!)} ${shimmer} ${C.dim(`(${elapsed})`)}`;
+
   }
 
   private getRow(termRows: number): number {
