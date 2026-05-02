@@ -493,6 +493,7 @@ export async function runChatShell<TExit>(
       slashSelected,
       openSelected,
       pinSelected,
+      availableCommands,
     });
     chatScrollOffset = next.chatScrollOffset;
     maxChatScrollOffset = next.maxScroll;
@@ -538,6 +539,7 @@ export async function runChatShell<TExit>(
       slashSelected,
       openSelected,
       pinSelected,
+      availableCommands,
     });
   }
 
