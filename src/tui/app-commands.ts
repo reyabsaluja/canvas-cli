@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { loadCourseCache } from "../enrich/cache-loader.js";
 import type { LoadedWorkspace } from "../ask/types.js";
 import type { AssignmentWorkup } from "../work/types.js";
@@ -16,6 +17,7 @@ import {
   resolveAndRenderThread,
 } from "./radar-commands.js";
 import { handleLectureQuery } from "./lecture-resources.js";
+import { executeMakePdf } from "./pdf-command.js";
 
 export async function handleCommand(
   command: string,
@@ -64,6 +66,38 @@ export async function handleCommand(
 
   if (command === "/manage-courses") {
     return { type: "course-management" };
+  }
+
+  if (command === "/make-pdf" || command === "/pdf") {
+    await api.addMessage({
+      role: "system",
+      content: "Generating PDF...",
+    });
+    try {
+      const result = await executeMakePdf({
+        instruction: args,
+        session: api.session,
+        runtime: api.runtime,
+        getLoadedWorkspace: api.getLoadedWorkspace,
+        getCourseCache: api.getCourseCache,
+      });
+      const lines = [`PDF saved: ${result.pdfPath}`];
+      if (result.usedLatex) {
+        lines.push("Rendered with LaTeX for high-quality math and code formatting.");
+      }
+      if (result.warning) {
+        lines.push(result.warning);
+      }
+      lines.push("Opening PDF...");
+      await api.addMessage({ role: "system", content: lines.join("\n") });
+      openFile(result.pdfPath);
+    } catch (error) {
+      await api.addMessage({
+        role: "system",
+        content: `PDF generation failed: ${error instanceof Error ? error.message : "unknown error"}`,
+      });
+    }
+    return;
   }
 
   if (scope.type === "global") {
@@ -451,4 +485,23 @@ export async function handleCommand(
     });
     return;
   }
+}
+
+function openFile(filePath: string): void {
+  const { command, args } = getOpenCommand(filePath);
+  const child = spawn(command, args, {
+    detached: process.platform !== "win32",
+    stdio: "ignore",
+  });
+  child.unref();
+}
+
+function getOpenCommand(target: string): { command: string; args: string[] } {
+  if (process.platform === "darwin") {
+    return { command: "open", args: [target] };
+  }
+  if (process.platform === "win32") {
+    return { command: "cmd", args: ["/c", "start", "", target] };
+  }
+  return { command: "xdg-open", args: [target] };
 }
