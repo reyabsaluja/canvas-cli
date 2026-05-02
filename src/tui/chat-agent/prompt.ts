@@ -174,7 +174,8 @@ export async function answerWithoutTools(
   systemPrompt: string,
   question: string,
   observations: Observation[],
-  onTextDelta?: (delta: string) => void
+  onTextDelta?: (delta: string) => void,
+  abortSignal?: AbortSignal
 ): Promise<string> {
   const userMessage = buildEvidenceBackedQuestion(question, observations);
   const answer = await callModel(
@@ -182,7 +183,7 @@ export async function answerWithoutTools(
     `${systemPrompt}\n\nNo tools are available for this turn. Answer only from the pre-loaded assignment context and any supplemental evidence provided in the user message.`,
     buildConversationPrompt(ctx.conversationHistory, userMessage)
   );
-  if (answer && onTextDelta) {
+  if (answer && onTextDelta && !abortSignal?.aborted) {
     onTextDelta(answer);
   }
   return answer;

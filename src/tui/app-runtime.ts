@@ -92,6 +92,7 @@ export async function createShellContext(
           upcomingAssignments: upcoming,
           onToolCall: callbacks.onToolCall,
           onTextDelta: callbacks.onTextDelta,
+          abortSignal: callbacks.abortSignal,
         });
         return { content: answer };
       },
@@ -267,6 +268,7 @@ export async function createShellContext(
           question: input,
           onToolCall: callbacks.onToolCall,
           onTextDelta: callbacks.onTextDelta,
+          abortSignal: callbacks.abortSignal,
         });
         return { content: answer };
       },
@@ -419,7 +421,8 @@ async function loadOrCreateWorkspaceShell(
           radar: services.radar,
         },
         chatContext,
-        callbacks.onTextDelta
+        callbacks.onTextDelta,
+        callbacks.abortSignal
       );
       return {
         content: answer.answer,

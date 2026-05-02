@@ -58,6 +58,7 @@ interface AskCallbacks {
     observation?: Observation;
   }) => void;
   onTextDelta?: (delta: string) => void;
+  abortSignal?: AbortSignal;
 }
 
 export interface ChatShellOptions<TExit> {
@@ -780,9 +781,13 @@ export async function runChatShell<TExit>(
           }
         }
 
+        const signal = processingAbort!.signal;
+
         const final = await Promise.race([
           options.onAsk(fullInput, {
+            abortSignal: signal,
             onToolCall: async (event) => {
+              if (signal.aborted) return;
               flushPendingStreamDelta();
               if (streamingStarted) {
                 if (streamedText.trim()) {
@@ -815,6 +820,7 @@ export async function runChatShell<TExit>(
               startSpinner();
             },
             onTextDelta: (delta) => {
+              if (signal.aborted) return;
               pendingStreamDelta += delta;
               schedulePendingStreamDelta();
             },

@@ -64,6 +64,7 @@ export interface ShellContext {
         color: "green" | "red";
       }) => void | Promise<void>;
       onTextDelta?: (delta: string) => void;
+      abortSignal?: AbortSignal;
     }
   ) => Promise<{
     content: string;

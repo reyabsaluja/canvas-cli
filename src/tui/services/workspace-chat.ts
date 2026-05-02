@@ -61,13 +61,14 @@ export async function askWorkspaceQuestion(
   }) => void,
   extraContext?: ChatAgentExtraContext,
   chatContext?: ChatAgentContext,
-  onTextDelta?: (delta: string) => void
+  onTextDelta?: (delta: string) => void,
+  abortSignal?: AbortSignal
 ): Promise<WorkspaceAnswer> {
   const { runChatAgent } = await import("../chat-agent.js");
 
   const context = chatContext ?? createChatContext(aiConfig, loaded, extraContext);
 
-  return runChatAgent(context, question, onToolCall ?? (() => {}), onTextDelta);
+  return runChatAgent(context, question, onToolCall ?? (() => {}), onTextDelta, abortSignal);
 }
 
 export type { ToolCallEvent };
