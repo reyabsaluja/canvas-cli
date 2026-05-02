@@ -1036,6 +1036,13 @@ export async function runChatShell<TExit>(
       if (isProcessing && !keyOkWhileProcessing(key)) return;
 
       if (key === "\x03") {
+        if (inputBuffer.length > 0) {
+          inputBuffer = "";
+          slashSelected = 0;
+          showSlashMenu = false;
+          render();
+          return;
+        }
         await exitShellAborted(closeShellOnce, (code) => process.exit(code));
       }
 
