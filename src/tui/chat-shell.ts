@@ -1,7 +1,9 @@
+import { spawn } from "node:child_process";
 import chalk from "chalk";
 import { C, getTermSize, stripAnsi } from "./screen.js";
 import { formatAIError } from "../ai/provider.js";
 import type { Observation } from "../agent/observation.js";
+import { executeMakePdf } from "./pdf-command.js";
 import type {
   ChatMessage,
   CommandDefinition,
@@ -70,6 +72,8 @@ export interface ChatShellOptions<TExit> {
   extraHelpCommands?: Array<{ cmd: string; desc: string }>;
   getPinOptions?: () => ShellPinOption[];
   getOpenOptions?: () => ShellOpenOption[];
+  getLoadedWorkspace?: () => import("../ask/types.js").LoadedWorkspace | null;
+  getCourseCache?: () => import("../enrich/cache-loader.js").CourseCache | null;
   onClear?: () => Promise<ChatMessage[]>;
   resolvePinContent?: (pin: ShellPinOption) => Promise<string | null>;
   onAsk: (input: string, callbacks: AskCallbacks) => Promise<{
@@ -1012,6 +1016,77 @@ export async function runChatShell<TExit>(
       }
     }
 
+    function launchPdfGeneration(
+      rawInput: string,
+      instruction: string
+    ): void {
+      isProcessing = true;
+      processingAbort = new AbortController();
+      currentVerb = "Generating PDF";
+      spinnerFrame = 0;
+      shimmerFrame = 0;
+      processingStartTime = Date.now();
+      currentSpinnerLine = buildSpinnerLine();
+
+      messages.push({ role: "user", content: rawInput });
+      markTranscriptDirty(messages.length - 1);
+      persistence.schedule();
+      render();
+      startSpinner();
+
+      void (async () => {
+        try {
+          const result = await executeMakePdf({
+            instruction,
+            session,
+            runtime: options.runtime,
+            getLoadedWorkspace: options.getLoadedWorkspace,
+            getCourseCache: options.getCourseCache,
+          });
+
+          stopSpinner();
+          const elapsed = formatElapsed(Date.now() - processingStartTime);
+
+          const lines = [`PDF saved to \`${result.pdfPath}\``];
+          if (result.usedLatex) {
+            lines.push("Rendered with LaTeX for high-quality math and code formatting.");
+          }
+          if (result.warning) {
+            lines.push(result.warning);
+          }
+
+          await appendPersistedMessage({
+            role: "assistant",
+            content: lines.join("\n"),
+          });
+          await appendPersistedMessage({
+            role: "system",
+            content: `Generated in ${elapsed}`,
+          });
+
+          openFile(result.pdfPath);
+        } catch (error) {
+          stopSpinner();
+          if (error instanceof DOMException && error.name === "AbortError") {
+            await appendPersistedMessage({
+              role: "system",
+              content: "PDF generation cancelled.",
+            });
+          } else {
+            await appendPersistedMessage({
+              role: "system",
+              content: `PDF generation failed: ${error instanceof Error ? error.message : "unknown error"}`,
+            });
+          }
+        }
+
+        isProcessing = false;
+        processingAbort = null;
+        currentSpinnerLine = "";
+        render();
+      })();
+    }
+
     async function handleKey(key: string): Promise<void> {
       if (shellClosed) return;
 
@@ -1127,7 +1202,7 @@ export async function runChatShell<TExit>(
           const [commandName, ...rest] = input.split(/\s+/);
           const normalizedCmd = commandName.toLowerCase();
           if (normalizedCmd === "/make-pdf" || normalizedCmd === "/pdf") {
-            await handleCommandInput(input, normalizedCmd, rest.join(" "));
+            launchPdfGeneration(input, rest.join(" "));
           } else {
             await handleCommandInput(input, commandName, rest.join(" "));
           }
@@ -1139,7 +1214,7 @@ export async function runChatShell<TExit>(
             .replace(inlinePdfPattern, "")
             .replace(/\s+/g, " ")
             .trim();
-          await handleCommandInput(input, "/make-pdf", cleaned);
+          launchPdfGeneration(input, cleaned);
           return;
         }
 
@@ -1445,4 +1520,19 @@ export async function runChatShell<TExit>(
       });
     }
   });
+}
+
+function openFile(filePath: string): void {
+  const cmd =
+    process.platform === "darwin"
+      ? { command: "open", args: [filePath] }
+      : process.platform === "win32"
+        ? { command: "cmd", args: ["/c", "start", "", filePath] }
+        : { command: "xdg-open", args: [filePath] };
+
+  const child = spawn(cmd.command, cmd.args, {
+    detached: process.platform !== "win32",
+    stdio: "ignore",
+  });
+  child.unref();
 }

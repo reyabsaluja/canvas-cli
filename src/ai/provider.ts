@@ -146,12 +146,15 @@ function getModel(config: AIProviderConfig) {
 export async function callModel(
   config: AIProviderConfig,
   systemPrompt: string,
-  userMessage: string
+  userMessage: string,
+  options?: { maxTokens?: number; timeoutMs?: number }
 ): Promise<string> {
   const result = await generateText({
     model: getModel(config),
     system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
+    ...(options?.maxTokens ? { maxTokens: options.maxTokens } : {}),
+    ...(options?.timeoutMs ? { abortSignal: AbortSignal.timeout(options.timeoutMs) } : {}),
   });
 
   return result.text;

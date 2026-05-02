@@ -8,7 +8,7 @@ export interface LatexRenderOptions {
   generatedAt?: string;
 }
 
-const TEX_COMPILERS = ["pdflatex", "xelatex", "lualatex"] as const;
+const TEX_COMPILERS = ["tectonic", "pdflatex", "xelatex", "lualatex"] as const;
 
 export function getLatexCompiler(): string | null {
   const whichCmd = process.platform === "win32" ? "where" : "which";
@@ -84,8 +84,6 @@ const PREAMBLE = String.raw`\documentclass[11pt,letterpaper]{article}
   xleftmargin=10pt,
   xrightmargin=10pt,
   framexleftmargin=6pt,
-  framextoppad=6pt,
-  framexbottompad=6pt,
   tabsize=4,
   showstringspaces=false,
   captionpos=b,
@@ -230,17 +228,28 @@ export async function compileLatex(
   const pdfPath = path.join(dir, `${basename}.pdf`);
 
   try {
-    for (let pass = 0; pass < 2; pass++) {
+    if (compiler === "tectonic") {
       execFileSync(compiler, [
-        "-interaction=nonstopmode",
-        "-halt-on-error",
-        `-output-directory=${dir}`,
+        "--outdir", dir,
         texPath,
       ], {
         cwd: dir,
         stdio: "pipe",
-        timeout: 30_000,
+        timeout: 120_000,
       });
+    } else {
+      for (let pass = 0; pass < 2; pass++) {
+        execFileSync(compiler, [
+          "-interaction=nonstopmode",
+          "-halt-on-error",
+          `-output-directory=${dir}`,
+          texPath,
+        ], {
+          cwd: dir,
+          stdio: "pipe",
+          timeout: 30_000,
+        });
+      }
     }
 
     await fsp.access(pdfPath);
@@ -310,15 +319,16 @@ CRITICAL LaTeX escaping — in regular text (NOT in math mode, lstlisting, or \\
 - ^ → \\textasciicircum{} (unless in math mode)
 
 Content rules:
-- Be CONCISE. A typical document is 1–4 pages printed. Do NOT pad with filler.
-- Every sentence must add value. Cut anything a student would skip.
-- Infer the best document type: study guide, assignment brief, cheat sheet, checklist, summary, or action plan.
+- Be THOROUGH and COMPREHENSIVE. Cover EVERYTHING in the provided context. Do not summarize or abbreviate — expand on every topic, every detail, every concept. A typical document should be 8–20+ pages printed. More is better.
+- Infer the best document type: study guide, assignment brief, cheat sheet, checklist, summary, or action plan — then go deep on it.
+- For study guides: explain each concept fully with definitions, examples, and connections to other topics. Include formulas, code snippets, key terms, and practice-ready content.
+- For assignment briefs: detail every requirement, constraint, deliverable, resource, and step of the action plan with full explanations.
 - Use proper LaTeX math for ALL mathematical expressions, formulas, and equations.
 - Use lstlisting for ALL code snippets — never use verbatim or raw monospace for code.
 - Use booktabs tables (\\toprule, \\midrule, \\bottomrule) for structured data comparisons.
-- Preserve due dates, deliverables, constraints, source names, and open questions.
-- Do not invent facts beyond the supplied context.
-- If the request is vague, produce the most useful possible summary of the conversation and workspace.
-- Skip any "Sources" section if there are fewer than 3 distinct sources.
+- Preserve ALL due dates, deliverables, constraints, source names, open questions, lecture content, and module details.
+- Include a Sources section listing all referenced materials.
+- Do not invent facts beyond the supplied context, but DO fully elaborate on everything that IS in the context.
+- If the request is vague, produce the most comprehensive and useful document possible from all available context.
 - Never mention AI, PDF generation, or canvas-cli in the document body.
 - Never repeat the same information in multiple sections.`;
