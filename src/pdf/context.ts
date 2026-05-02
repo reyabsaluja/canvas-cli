@@ -11,6 +11,7 @@ export interface PdfContextInput {
   loaded?: LoadedWorkspace | null;
   cache?: CourseCache | null;
   aiConfig?: AIProviderConfig | null;
+  abortSignal?: AbortSignal;
   now?: Date;
 }
 

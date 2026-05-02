@@ -569,8 +569,7 @@ function addFooters(doc: PdfDoc, options: PdfRenderOptions): void {
 
 function ensureSpace(doc: PdfDoc, height: number): void {
   const remaining = pageBottom(doc) - doc.y;
-  const threshold = Math.min(height, 36);
-  if (remaining < threshold) {
+  if (remaining < height) {
     doc.addPage();
   }
 }
