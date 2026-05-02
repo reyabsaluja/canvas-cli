@@ -1298,7 +1298,11 @@ export async function runChatShell<TExit>(
         if (!textBuffer) return;
         const next = textBuffer;
         textBuffer = "";
-        keyQueue.enqueue(() => handleTextInputChunk(next));
+        if (isProcessing) {
+          handleTextInputChunk(next);
+        } else {
+          keyQueue.enqueue(() => handleTextInputChunk(next));
+        }
       };
 
       for (const char of Array.from(chunk)) {
@@ -1307,7 +1311,11 @@ export async function runChatShell<TExit>(
           continue;
         }
         flushTextBuffer();
-        keyQueue.enqueue(() => handleKey(char));
+        if (isProcessing) {
+          void handleKey(char);
+        } else {
+          keyQueue.enqueue(() => handleKey(char));
+        }
       }
 
       flushTextBuffer();
@@ -1339,7 +1347,7 @@ export async function runChatShell<TExit>(
           const mouseMatch = input.match(/^\x1b\[<(\d+);\d+;\d+[Mm]/);
           if (mouseMatch) {
             const button = parseInt(mouseMatch[1]!, 10);
-            keyQueue.enqueue(async () => {
+            const handleMouse = async () => {
               if (shellClosed) return;
               let didScroll = false;
               if (button === 64) {
@@ -1350,7 +1358,12 @@ export async function runChatShell<TExit>(
               if (didScroll) {
                 render();
               }
-            });
+            };
+            if (isProcessing) {
+              void handleMouse();
+            } else {
+              keyQueue.enqueue(handleMouse);
+            }
             input = input.slice(mouseMatch[0].length);
             continue;
           }
@@ -1358,7 +1371,11 @@ export async function runChatShell<TExit>(
           const match = input.match(/^\x1b\[[\d;]*[~A-Za-z]/);
           if (match) {
             const key = match[0];
-            keyQueue.enqueue(() => handleKey(key));
+            if (isProcessing) {
+              void handleKey(key);
+            } else {
+              keyQueue.enqueue(() => handleKey(key));
+            }
             input = input.slice(match[0].length);
             continue;
           }
@@ -1369,13 +1386,21 @@ export async function runChatShell<TExit>(
 
         if (input[1] === "O" && input.length >= 3) {
           const key = input.slice(0, 3);
-          keyQueue.enqueue(() => handleKey(key));
+          if (isProcessing) {
+            void handleKey(key);
+          } else {
+            keyQueue.enqueue(() => handleKey(key));
+          }
           input = input.slice(3);
           continue;
         }
 
         const key = input.slice(0, 2);
-        keyQueue.enqueue(() => handleKey(key));
+        if (isProcessing) {
+          void handleKey(key);
+        } else {
+          keyQueue.enqueue(() => handleKey(key));
+        }
         input = input.slice(2);
       }
     }
