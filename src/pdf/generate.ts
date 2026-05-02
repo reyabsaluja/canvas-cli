@@ -77,7 +77,7 @@ async function generateLatexPdf(
   let warning: string | undefined;
 
   try {
-    const raw = await callModel(input.aiConfig!, LATEX_COMPOSE_SYSTEM_PROMPT, userMessage, { maxTokens: 8000, timeoutMs: 600_000 });
+    const raw = await callModel(input.aiConfig!, LATEX_COMPOSE_SYSTEM_PROMPT, userMessage, { maxTokens: 8000, timeoutMs: 600_000, abortSignal: input.abortSignal });
     latexBody = sanitizeLatexBody(raw);
   } catch (error) {
     usedAI = false;
@@ -190,7 +190,7 @@ async function composeMarkdown(
   ].join("\n");
 
   try {
-    const raw = await callModel(input.aiConfig, MARKDOWN_COMPOSE_SYSTEM_PROMPT, userMessage, { maxTokens: 8000, timeoutMs: 600_000 });
+    const raw = await callModel(input.aiConfig, MARKDOWN_COMPOSE_SYSTEM_PROMPT, userMessage, { maxTokens: 8000, timeoutMs: 600_000, abortSignal: input.abortSignal });
     const markdown = normalizeModelMarkdown(raw, bundle.suggestedTitle);
     return { markdown, usedAI: true };
   } catch (error) {

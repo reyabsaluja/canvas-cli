@@ -11,6 +11,7 @@ export interface MakePdfRequest {
   runtime: ScopeRuntime;
   getLoadedWorkspace?: () => LoadedWorkspace | null;
   getCourseCache?: () => CourseCache | null;
+  abortSignal?: AbortSignal;
 }
 
 const MAKE_PDF_PATTERN = /\/(?:make-pdf|pdf)\b/i;
@@ -51,6 +52,7 @@ export async function executeMakePdf(
     loaded,
     cache,
     aiConfig,
+    abortSignal: request.abortSignal,
   };
 
   return generatePdfExport(input);

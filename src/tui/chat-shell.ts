@@ -1044,6 +1044,7 @@ export async function runChatShell<TExit>(
             runtime: options.runtime,
             getLoadedWorkspace: options.getLoadedWorkspace,
             getCourseCache: options.getCourseCache,
+            abortSignal: processingAbort!.signal,
           });
 
           stopSpinner();
