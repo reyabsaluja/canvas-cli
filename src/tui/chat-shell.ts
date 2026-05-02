@@ -193,6 +193,8 @@ export async function runChatShell<TExit>(
   let currentVerb = "";
   let shimmerFrame = 0;
   let processingStartTime = 0;
+  let processingAbort: AbortController | null = null;
+  let preProcessingInput = "";
   let bannerLinesCache: string[] | null = null;
   let bannerCacheCols = -1;
   let openSearchOptionsRef: ShellOpenOption[] | null = null;
@@ -553,7 +555,7 @@ export async function runChatShell<TExit>(
     const elapsed = formatElapsed(Date.now() - processingStartTime);
     const verbText = `${currentVerb}...`;
     const shimmer = buildShimmerText(verbText, shimmerFrame);
-    return `${spinnerColor(SPINNER[spinnerFrame]!)} ${shimmer} ${C.dim(`(${elapsed})`)}`;
+    return `${spinnerColor(SPINNER[spinnerFrame]!)} ${shimmer} ${C.dim(`(${elapsed})`)}  ${C.secondary("(esc to interrupt)")}`;
   }
 
   function startSpinner(): void {
@@ -644,6 +646,7 @@ export async function runChatShell<TExit>(
         "\x10",
         "\x0e",
         "\x19",
+        "\x1B",
         "\x1B[A",
         "\x1B[B",
         "\x1b[5~",
@@ -686,8 +689,11 @@ export async function runChatShell<TExit>(
 
       const pins = mergePinOptions(pendingPins, extractedPins.resolved);
       const cleanInput = extractedPins.cleanInput;
+      const messageCountBeforeAsk = messages.length;
       await appendPersistedMessage({ role: "user", content: input });
       isProcessing = true;
+      preProcessingInput = input;
+      processingAbort = new AbortController();
       currentVerb = VERBS[Math.floor(Math.random() * VERBS.length)]!;
       spinnerFrame = 0;
       shimmerFrame = 0;
@@ -742,6 +748,12 @@ export async function runChatShell<TExit>(
         }, FULL_RENDER_BATCH_MS);
       }
 
+      const abortPromise = new Promise<never>((_, reject) => {
+        processingAbort!.signal.addEventListener("abort", () => {
+          reject(new DOMException("User interrupted", "AbortError"));
+        });
+      });
+
       try {
         let fullInput = cleanInput;
         if (pins.length > 0 && options.resolvePinContent) {
@@ -762,44 +774,47 @@ export async function runChatShell<TExit>(
           }
         }
 
-        const final = await options.onAsk(fullInput, {
-          onToolCall: async (event) => {
-            flushPendingStreamDelta();
-            if (streamingStarted) {
-              if (streamedText.trim()) {
-                messages[messages.length - 1] = {
-                  role: "assistant",
-                  content: streamedText.trim(),
-                };
-                markTranscriptDirty(messages.length - 1);
-                persistence.schedule();
-              } else {
-                messages.pop();
-                markTranscriptDirty(messages.length);
+        const final = await Promise.race([
+          options.onAsk(fullInput, {
+            onToolCall: async (event) => {
+              flushPendingStreamDelta();
+              if (streamingStarted) {
+                if (streamedText.trim()) {
+                  messages[messages.length - 1] = {
+                    role: "assistant",
+                    content: streamedText.trim(),
+                  };
+                  markTranscriptDirty(messages.length - 1);
+                  persistence.schedule();
+                } else {
+                  messages.pop();
+                  markTranscriptDirty(messages.length);
+                }
+                streamingStarted = false;
+                streamedText = "";
               }
-              streamingStarted = false;
-              streamedText = "";
-            }
-            stopSpinner();
-            messages.push({
-              role: "tool",
-              content: event.result,
-              toolAction: event.action,
-              toolTarget: event.target,
-              toolColor: event.color,
-              observation: event.observation,
-            });
-            markTranscriptDirty(messages.length - 1);
-            persistence.schedule();
-            currentSpinnerLine = buildSpinnerLine();
-            scheduleRender();
-            startSpinner();
-          },
-          onTextDelta: (delta) => {
-            pendingStreamDelta += delta;
-            schedulePendingStreamDelta();
-          },
-        });
+              stopSpinner();
+              messages.push({
+                role: "tool",
+                content: event.result,
+                toolAction: event.action,
+                toolTarget: event.target,
+                toolColor: event.color,
+                observation: event.observation,
+              });
+              markTranscriptDirty(messages.length - 1);
+              persistence.schedule();
+              currentSpinnerLine = buildSpinnerLine();
+              scheduleRender();
+              startSpinner();
+            },
+            onTextDelta: (delta) => {
+              pendingStreamDelta += delta;
+              schedulePendingStreamDelta();
+            },
+          }),
+          abortPromise,
+        ]);
 
         flushPendingStreamDelta();
         stopSpinner();
@@ -836,28 +851,31 @@ export async function runChatShell<TExit>(
       } catch (error) {
         flushPendingStreamDelta();
         stopSpinner();
-        if (streamingStarted) {
-          if (streamedText.trim()) {
-            messages[messages.length - 1] = {
-              role: "assistant",
-              content: streamedText.trim(),
-            };
-            markTranscriptDirty(messages.length - 1);
-            persistence.schedule();
-          } else {
-            messages.pop();
-            markTranscriptDirty(messages.length);
+        streamingStarted = false;
+        streamedText = "";
+
+        if (error instanceof DOMException && error.name === "AbortError") {
+          messages.splice(messageCountBeforeAsk);
+          markTranscriptDirty(messageCountBeforeAsk);
+          persistence.schedule(0);
+          inputBuffer = preProcessingInput;
+        } else {
+          if (messages.length > messageCountBeforeAsk + 1) {
+            const lastMsg = messages[messages.length - 1];
+            if (lastMsg && lastMsg.role !== "user") {
+              // keep partial tool/assistant messages as-is
+            }
           }
-          streamingStarted = false;
-          streamedText = "";
+          await appendPersistedMessage({
+            role: "system",
+            content: `Error: ${formatAIError(error)}`,
+          });
         }
-        await appendPersistedMessage({
-          role: "system",
-          content: `Error: ${formatAIError(error)}`,
-        });
       }
 
       isProcessing = false;
+      processingAbort = null;
+      preProcessingInput = "";
       currentSpinnerLine = "";
       render();
     }
@@ -1046,6 +1064,10 @@ export async function runChatShell<TExit>(
       }
 
       if (key === "\x1B") {
+        if (isProcessing && processingAbort) {
+          processingAbort.abort();
+          return;
+        }
         if (showSlashMenu) {
           const hadOverlay = hasVisibleOverlay();
           showSlashMenu = false;
