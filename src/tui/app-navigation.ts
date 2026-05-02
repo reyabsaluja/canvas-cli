@@ -406,16 +406,44 @@ interface IngestionStep {
 
 const CONTENT_PREVIEW_LINES = 8;
 
+const INGESTION_VERBS = [
+  "Working",
+  "Thinking",
+  "Studying",
+  "Reading",
+  "Analyzing",
+  "Researching",
+  "Exploring",
+  "Reviewing",
+  "Processing",
+];
+
+const TOOL_ACTION_MAP: Record<string, string> = {
+  search_modules: "searching",
+  get_module_items: "reading",
+  read_document: "reading",
+  download_module_file: "downloading",
+  get_syllabus: "reading",
+  list_assignments: "listing",
+  list_downloaded_files: "listing",
+  search_files: "searching",
+  complete_investigation: "completing",
+};
+
+function friendlyAction(raw: string): string {
+  return TOOL_ACTION_MAP[raw] ?? raw;
+}
+
 function parseStage(stage: string): { action: string; target: string } {
   const toolMatch = stage.match(/^(\w+)\s*\((.+)\)$/);
   if (toolMatch) {
-    return { action: toolMatch[1]!, target: toolMatch[2]! };
+    return { action: friendlyAction(toolMatch[1]!), target: toolMatch[2]! };
   }
   const parts = stage.split(" ");
   if (parts.length >= 2) {
-    return { action: parts[0]!, target: parts.slice(1).join(" ") };
+    return { action: friendlyAction(parts[0]!), target: parts.slice(1).join(" ") };
   }
-  return { action: stage, target: "" };
+  return { action: friendlyAction(stage), target: "" };
 }
 
 function wrapPlain(text: string, maxWidth: number): string[] {
@@ -456,6 +484,8 @@ class IngestionProgressRenderer {
   private expandedSteps = new Set<number>();
   private frame = 0;
   private shimmerFrame = 0;
+  private verbIndex = 0;
+  private verbTickCounter = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
   private startTime: number;
   private scrollOffset = 0;
@@ -464,6 +494,7 @@ class IngestionProgressRenderer {
     this.title = title;
     this.subtitle = subtitle;
     this.startTime = Date.now();
+    this.verbIndex = Math.floor(Math.random() * INGESTION_VERBS.length);
   }
 
   start(): void {
@@ -473,6 +504,11 @@ class IngestionProgressRenderer {
     this.timer = setInterval(() => {
       this.frame = (this.frame + 1) % SPINNER_FRAMES.length;
       this.shimmerFrame = (this.shimmerFrame + 1) % SHIMMER_COLORS.length;
+      this.verbTickCounter++;
+      if (this.verbTickCounter >= 30) {
+        this.verbTickCounter = 0;
+        this.verbIndex = (this.verbIndex + 1) % INGESTION_VERBS.length;
+      }
       this.render();
     }, 80);
 
@@ -602,7 +638,8 @@ class IngestionProgressRenderer {
 
     const lastStep = this.steps[this.steps.length - 1];
     const isActive = lastStep && !lastStep.completedAt;
-    const verbText = isActive ? `${lastStep.action}...` : "Preparing...";
+    const verb = INGESTION_VERBS[this.verbIndex % INGESTION_VERBS.length]!;
+    const verbText = `${verb}...`;
     let shimmer = "";
     for (let j = 0; j < verbText.length; j++) {
       const colorIndex = (this.shimmerFrame + j) % SHIMMER_COLORS.length;
