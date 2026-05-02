@@ -1537,5 +1537,6 @@ function openFile(filePath: string): void {
     detached: process.platform !== "win32",
     stdio: "ignore",
   });
+  child.on("error", () => {});
   child.unref();
 }
