@@ -1285,6 +1285,10 @@ export async function runChatShell<TExit>(
       const held = stdinEscHold;
       stdinEscHold = "";
       if (held === "\x1B") {
+        if (isProcessing && processingAbort) {
+          processingAbort.abort();
+          return;
+        }
         keyQueue.enqueue(() => handleKey(held));
       }
     }
