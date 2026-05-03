@@ -162,6 +162,7 @@ function buildWorkspaceSection(loaded: LoadedWorkspace | null): string {
       [
         "## Extracted Documents",
         ...loaded.extractedFiles
+          .slice(0, 50)
           .map((file) => `- ${file.name} (${file.relativePath})`),
       ].join("\n")
     );
@@ -275,7 +276,7 @@ function buildCourseSection(cache: CourseCache | null): string {
     parts.push(
       [
         "## Assignments",
-        ...cache.assignments.map((assignment) => {
+        ...cache.assignments.slice(0, 60).map((assignment) => {
           const due = assignment.dueAt ? ` due ${assignment.dueAt}` : "";
           return `- ${assignment.name}${due}`;
         }),
@@ -287,8 +288,9 @@ function buildCourseSection(cache: CourseCache | null): string {
     parts.push(
       [
         "## Modules",
-        ...cache.modules.map((module) => {
+        ...cache.modules.slice(0, 40).map((module) => {
           const items = module.items
+            .slice(0, 20)
             .map((item) => item.title)
             .join("; ");
           return `- ${module.name}${items ? `: ${items}` : ""}`;
@@ -301,7 +303,7 @@ function buildCourseSection(cache: CourseCache | null): string {
     parts.push(
       [
         "## Lectures",
-        ...cache.lectures.map((lecture) => {
+        ...cache.lectures.slice(0, 60).map((lecture) => {
           const number =
             lecture.lectureNumber !== null ? `Lecture ${lecture.lectureNumber}: ` : "";
           const topic = lecture.topic ? ` - ${lecture.topic}` : "";
@@ -315,7 +317,7 @@ function buildCourseSection(cache: CourseCache | null): string {
     parts.push(
       [
         "## Syllabus Candidates",
-        ...cache.syllabusCandidates.map((candidate) => {
+        ...cache.syllabusCandidates.slice(0, 10).map((candidate) => {
           return `- ${candidate.title} (${candidate.confidence}) - ${candidate.reason}`;
         }),
       ].join("\n")
