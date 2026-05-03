@@ -80,6 +80,7 @@ async function generateLatexPdf(
     const raw = await callModel(input.aiConfig!, LATEX_COMPOSE_SYSTEM_PROMPT, userMessage, { maxTokens: 8000, timeoutMs: 600_000, abortSignal: input.abortSignal });
     latexBody = sanitizeLatexBody(raw);
   } catch (error) {
+    if (input.abortSignal?.aborted) throw error;
     usedAI = false;
     warning = `AI composition failed: ${formatAIError(error)}. Using fallback.`;
     latexBody = buildFallbackLatexBody(bundle);
@@ -194,6 +195,7 @@ async function composeMarkdown(
     const markdown = normalizeModelMarkdown(raw, bundle.suggestedTitle);
     return { markdown, usedAI: true };
   } catch (error) {
+    if (input.abortSignal?.aborted) throw error;
     return {
       markdown: ensureMarkdownTitle(bundle.fallbackMarkdown, bundle.suggestedTitle),
       usedAI: false,
