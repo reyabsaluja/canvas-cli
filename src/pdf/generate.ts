@@ -3,36 +3,139 @@ import path from "node:path";
 import { callModel, formatAIError } from "../ai/provider.js";
 import { buildPdfContextBundle, type PdfContextInput } from "./context.js";
 import { renderMarkdownToPdf } from "./render.js";
+import {
+  buildLatexDocument,
+  compileLatex,
+  getLatexCompiler,
+  sanitizeLatexBody,
+  extractLatexTitle,
+  escapeLatex,
+  LATEX_COMPOSE_SYSTEM_PROMPT,
+  SHARED_CONTENT_RULES,
+} from "./render-latex.js";
 
 export interface PdfExportResult {
   title: string;
   pdfPath: string;
   markdownPath: string;
   usedAI: boolean;
+  usedLatex: boolean;
   warning?: string;
 }
 
-const COMPOSE_SYSTEM_PROMPT = `You create concise, high-quality PDF-ready Markdown documents from canvas-cli chat and workspace context.
+const MARKDOWN_COMPOSE_SYSTEM_PROMPT = `You create thorough, comprehensive, high-quality PDF-ready Markdown documents from canvas-cli chat and workspace context.
 
 Return Markdown only — no code fences around the entire document, no preamble.
 
 Critical rules:
-- Be CONCISE. A typical document is 1-4 pages when printed. Do NOT pad with filler.
-- Every sentence must add value. Cut anything a student would skip.
-- Infer the best document type: study guide, assignment brief, cheat sheet, checklist, summary, or action plan.
-- Use ## and ### headings to organize. Use bullet lists for quick scanning.
-- Use Markdown tables when comparing items or listing structured data (dates, scores, options).
-- Preserve due dates, deliverables, constraints, source names, and open questions.
-- Do not invent facts beyond the supplied context.
-- If the request is vague, produce the most useful possible summary of the conversation and workspace.
-- Skip any "Sources" section if there are fewer than 3 distinct sources.
-- Never mention AI, PDF generation, or canvas-cli in the document body.
-- Never repeat the same information in multiple sections.`;
+${SHARED_CONTENT_RULES}
+- Use ## and ### headings to organize into clear sections. Use bullet lists for quick scanning.
+- Use Markdown tables when comparing items or listing structured data (dates, scores, options).`;
 
 export async function generatePdfExport(
   input: PdfContextInput
 ): Promise<PdfExportResult> {
   const bundle = buildPdfContextBundle(input);
+  const latexCompiler = await getLatexCompiler();
+
+  if (latexCompiler && input.aiConfig) {
+    return generateLatexPdf(input, bundle, latexCompiler);
+  }
+
+  const noLatexWarning = !latexCompiler
+    ? "No LaTeX compiler found. Install one for high-quality output: brew install tectonic"
+    : undefined;
+  return generateMarkdownPdf(input, bundle, noLatexWarning);
+}
+
+async function generateLatexPdf(
+  input: PdfContextInput,
+  bundle: ReturnType<typeof buildPdfContextBundle>,
+  compiler: string
+): Promise<PdfExportResult> {
+  const title = bundle.suggestedTitle;
+  const outputBaseName = bundle.outputBaseName;
+
+  await fsp.mkdir(bundle.outputDirectory, { recursive: true });
+
+  const userMessage = [
+    `Requested PDF: ${bundle.instruction || "(infer the most useful document)"}`,
+    "",
+    "Current canvas-cli context:",
+    bundle.promptContext,
+  ].join("\n");
+
+  let latexBody: string;
+  let usedAI = true;
+  let warning: string | undefined;
+
+  try {
+    const raw = await callModel(input.aiConfig!, LATEX_COMPOSE_SYSTEM_PROMPT, userMessage, { maxTokens: 16_000, timeoutMs: 600_000, abortSignal: input.abortSignal });
+    latexBody = sanitizeLatexBody(raw);
+  } catch (error) {
+    if (input.abortSignal?.aborted) throw error;
+    usedAI = false;
+    warning = `AI composition failed: ${formatAIError(error)}. Using fallback.`;
+    latexBody = buildFallbackLatexBody(bundle);
+  }
+
+  const finalTitle = extractLatexTitle(latexBody) ?? title;
+  const fullTex = buildLatexDocument(latexBody, {
+    title: finalTitle,
+    subtitle: input.runtime.title,
+    generatedAt: bundle.generatedAt,
+  });
+
+  const texPath = path.join(bundle.outputDirectory, `${outputBaseName}.tex`);
+  const markdownPath = path.join(bundle.outputDirectory, `${outputBaseName}.md`);
+
+  await fsp.writeFile(texPath, fullTex, "utf-8");
+  await fsp.writeFile(markdownPath, latexBody, "utf-8");
+
+  const result = await compileLatex(texPath, compiler, { signal: input.abortSignal });
+
+  if (result.success) {
+    return {
+      title: finalTitle,
+      pdfPath: result.pdfPath,
+      markdownPath,
+      usedAI,
+      usedLatex: true,
+      warning,
+    };
+  }
+
+  warning = (warning ? warning + " " : "") +
+    "LaTeX compilation failed — falling back to PDFKit renderer.";
+
+  const fallbackMarkdown = usedAI
+    ? ensureMarkdownTitle(latexBodyToMarkdown(latexBody), finalTitle)
+    : ensureMarkdownTitle(bundle.fallbackMarkdown, bundle.suggestedTitle);
+
+  await fsp.writeFile(markdownPath, fallbackMarkdown, "utf-8");
+
+  const pdfPath = path.join(bundle.outputDirectory, `${outputBaseName}.pdf`);
+  await renderMarkdownToPdf(fallbackMarkdown, pdfPath, {
+    title: finalTitle,
+    subtitle: input.runtime.title,
+    generatedAt: bundle.generatedAt,
+  });
+
+  return {
+    title: finalTitle,
+    pdfPath,
+    markdownPath,
+    usedAI,
+    usedLatex: false,
+    warning,
+  };
+}
+
+async function generateMarkdownPdf(
+  input: PdfContextInput,
+  bundle: ReturnType<typeof buildPdfContextBundle>,
+  existingWarning?: string
+): Promise<PdfExportResult> {
   const composed = await composeMarkdown(bundle.promptContext, bundle, input);
   const title = extractMarkdownTitle(composed.markdown) ?? bundle.suggestedTitle;
   const outputBaseName = bundle.outputBaseName;
@@ -47,12 +150,17 @@ export async function generatePdfExport(
     generatedAt: bundle.generatedAt,
   });
 
+  const warning = existingWarning
+    ? `${existingWarning} ${composed.warning ?? ""}`.trim()
+    : composed.warning;
+
   return {
     title,
     pdfPath,
     markdownPath,
     usedAI: composed.usedAI,
-    warning: composed.warning,
+    usedLatex: false,
+    warning: warning || undefined,
   };
 }
 
@@ -78,16 +186,124 @@ async function composeMarkdown(
   ].join("\n");
 
   try {
-    const raw = await callModel(input.aiConfig, COMPOSE_SYSTEM_PROMPT, userMessage);
+    const raw = await callModel(input.aiConfig, MARKDOWN_COMPOSE_SYSTEM_PROMPT, userMessage, { maxTokens: 16_000, timeoutMs: 600_000, abortSignal: input.abortSignal });
     const markdown = normalizeModelMarkdown(raw, bundle.suggestedTitle);
     return { markdown, usedAI: true };
   } catch (error) {
+    if (input.abortSignal?.aborted) throw error;
     return {
       markdown: ensureMarkdownTitle(bundle.fallbackMarkdown, bundle.suggestedTitle),
       usedAI: false,
       warning: `AI composition failed, so canvas-cli exported the current context directly. ${formatAIError(error)}`,
     };
   }
+}
+
+function buildFallbackLatexBody(
+  bundle: ReturnType<typeof buildPdfContextBundle>
+): string {
+  const lines: string[] = [];
+  if (bundle.instruction) {
+    lines.push(String.raw`\section{${escapeLatex(bundle.suggestedTitle)}}`);
+    lines.push("");
+    lines.push(String.raw`\begin{quotebox}`);
+    lines.push(escapeLatex(bundle.instruction));
+    lines.push(String.raw`\end{quotebox}`);
+    lines.push("");
+  }
+  lines.push(
+    String.raw`\begin{quotebox}`,
+    "AI composition was unavailable. This PDF exports the current canvas-cli context directly.",
+    String.raw`\end{quotebox}`,
+    ""
+  );
+  const contextLines = bundle.fallbackMarkdown.split("\n");
+  let listType: "itemize" | "enumerate" | null = null;
+  let inCode = false;
+  let codeLang = "";
+  const codeBuffer: string[] = [];
+
+  function closeList() {
+    if (listType) {
+      lines.push(String.raw`\end{${listType}}`);
+      listType = null;
+    }
+  }
+
+  function convertInlineFormatting(text: string): string {
+    return escapeLatex(text)
+      .replace(/\*\*(.+?)\*\*/g, (_, t) => String.raw`\textbf{${t}}`)
+      .replace(/\*(.+?)\*/g, (_, t) => String.raw`\textit{${t}}`)
+      .replace(/`(.+?)`/g, (_, t) => String.raw`\texttt{${t}}`);
+  }
+
+  for (const line of contextLines) {
+    const fenceMatch = line.match(/^```(\w*)$/);
+    if (fenceMatch) {
+      if (inCode) {
+        const langOpt = codeLang ? `[language=${codeLang}]` : "";
+        lines.push(String.raw`\begin{lstlisting}${langOpt}`);
+        lines.push(...codeBuffer);
+        lines.push(String.raw`\end{lstlisting}`);
+        codeBuffer.length = 0;
+        codeLang = "";
+        inCode = false;
+      } else {
+        closeList();
+        inCode = true;
+        codeLang = fenceMatch[1] ?? "";
+      }
+      continue;
+    }
+    if (inCode) {
+      codeBuffer.push(line);
+      continue;
+    }
+
+    const isBullet = line.startsWith("- ") || line.startsWith("* ");
+    const numberedMatch = line.match(/^(\d+)[.)]\s+(.+)$/);
+
+    if (!isBullet && !numberedMatch && listType) {
+      closeList();
+    }
+
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      closeList();
+      const level = heading[1]!.length;
+      const text = heading[2]!;
+      if (level === 1) lines.push(String.raw`\section{${escapeLatex(text)}}`);
+      else if (level === 2) lines.push(String.raw`\subsection{${escapeLatex(text)}}`);
+      else lines.push(String.raw`\subsubsection{${escapeLatex(text)}}`);
+      continue;
+    }
+    if (isBullet) {
+      if (listType !== "itemize") {
+        closeList();
+        lines.push(String.raw`\begin{itemize}`);
+        listType = "itemize";
+      }
+      lines.push(String.raw`  \item ${convertInlineFormatting(line.slice(2))}`);
+      continue;
+    }
+    if (numberedMatch) {
+      if (listType !== "enumerate") {
+        closeList();
+        lines.push(String.raw`\begin{enumerate}`);
+        listType = "enumerate";
+      }
+      lines.push(String.raw`  \item ${convertInlineFormatting(numberedMatch[2]!)}`);
+      continue;
+    }
+    lines.push(convertInlineFormatting(line));
+  }
+  closeList();
+  if (inCode && codeBuffer.length > 0) {
+    lines.push(String.raw`\begin{lstlisting}`);
+    lines.push(...codeBuffer);
+    lines.push(String.raw`\end{lstlisting}`);
+  }
+  return lines.join("\n");
 }
 
 function normalizeModelMarkdown(raw: string, fallbackTitle: string): string {
@@ -114,4 +330,36 @@ function stripMarkdownFence(text: string): string {
 function extractMarkdownTitle(markdown: string): string | null {
   const match = markdown.match(/^#\s+(.+)$/m);
   return match?.[1]?.trim() || null;
+}
+
+export function latexBodyToMarkdown(latex: string): string {
+  return latex
+    .replace(/\\section\{([^}]+)\}/g, "# $1")
+    .replace(/\\subsection\{([^}]+)\}/g, "## $1")
+    .replace(/\\subsubsection\{([^}]+)\}/g, "### $1")
+    .replace(/\\textbf\{([^}]+)\}/g, "**$1**")
+    .replace(/\\textit\{([^}]+)\}/g, "*$1*")
+    .replace(/\\texttt\{([^}]+)\}/g, "`$1`")
+    .replace(/\\begin\{itemize\}/g, "")
+    .replace(/\\end\{itemize\}/g, "")
+    .replace(/\\begin\{enumerate\}/g, "")
+    .replace(/\\end\{enumerate\}/g, "")
+    .replace(/\\item\s*/g, "- ")
+    .replace(/\\begin\{lstlisting\}(\[.*?\])?\s*\n?/g, "```\n")
+    .replace(/\\end\{lstlisting\}/g, "```")
+    .replace(/\\begin\{(?:quotebox|highlightbox)\}/g, "> ")
+    .replace(/\\end\{(?:quotebox|highlightbox)\}/g, "")
+    .replace(/\\begin\{tabular\}\{[^}]*\}\s*/g, "")
+    .replace(/\\end\{tabular\}/g, "")
+    .replace(/\\\\/g, "\n")
+    .replace(/\\[&%$#_{}]/g, (m) => m[1]!)
+    .replace(/\\textbackslash\{\}/g, "\\")
+    .replace(/\\textasciitilde\{\}/g, "~")
+    .replace(/\\textasciicircum\{\}/g, "^")
+    .replace(/\\vspace\{[^}]*\}/g, "")
+    .replace(/\\(?:hfill|noindent|clearpage|newpage|par)\b/g, "")
+    .replace(/\{\\color\{[^}]+\}\\hrule[^}]*\}/g, "---")
+    .replace(/\\toprule|\\midrule|\\bottomrule/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }

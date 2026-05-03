@@ -58,6 +58,12 @@ export const COMMANDS: CommandDefinition[] = [
     scopes: ["global", "course", "workspace"],
   },
   {
+    name: "/make-pdf",
+    description: "Generate a polished PDF from chat context",
+    scopes: ["global", "course", "workspace"],
+    aliases: ["/pdf"],
+  },
+  {
     name: "/quit",
     description: "Exit canvas-cli",
     scopes: ["global", "course", "workspace"],

@@ -11,6 +11,7 @@ export interface PdfContextInput {
   loaded?: LoadedWorkspace | null;
   cache?: CourseCache | null;
   aiConfig?: AIProviderConfig | null;
+  abortSignal?: AbortSignal;
   now?: Date;
 }
 
@@ -24,10 +25,10 @@ export interface PdfContextBundle {
   fallbackMarkdown: string;
 }
 
-const MAX_PROMPT_CONTEXT_CHARS = 42000;
-const MAX_CONVERSATION_MESSAGES = 48;
-const MAX_SECTION_CHARS = 8000;
-const MAX_SMALL_SECTION_CHARS = 3000;
+const MAX_PROMPT_CONTEXT_CHARS = 60000;
+const MAX_CONVERSATION_MESSAGES = 80;
+const MAX_SECTION_CHARS = 16000;
+const MAX_SMALL_SECTION_CHARS = 6000;
 
 export function buildPdfContextBundle(input: PdfContextInput): PdfContextBundle {
   const now = input.now ?? new Date();
@@ -161,10 +162,10 @@ function buildWorkspaceSection(loaded: LoadedWorkspace | null): string {
       [
         "## Extracted Documents",
         ...loaded.extractedFiles
-          .slice(0, 40)
+          .slice(0, 50)
           .map((file) => `- ${file.name} (${file.relativePath})`),
-        loaded.extractedFiles.length > 40
-          ? `- ...and ${loaded.extractedFiles.length - 40} more`
+        loaded.extractedFiles.length > 50
+          ? `- ...and ${loaded.extractedFiles.length - 50} more`
           : "",
       ]
         .filter(Boolean)
@@ -246,7 +247,7 @@ function formatWorkup(workup: Record<string, unknown>): string {
     parts.push(
       [
         "### Source Trace",
-        ...sourceTrace.slice(0, 24).map((entry) => {
+        ...sourceTrace.slice(0, 100).map((entry) => {
           if (typeof entry !== "object" || entry === null) return `- ${String(entry)}`;
           const record = entry as Record<string, unknown>;
           const conclusion = stringField(record, "conclusion") ?? "Conclusion";
@@ -280,7 +281,7 @@ function buildCourseSection(cache: CourseCache | null): string {
     parts.push(
       [
         "## Assignments",
-        ...cache.assignments.slice(0, 30).map((assignment) => {
+        ...cache.assignments.slice(0, 60).map((assignment) => {
           const due = assignment.dueAt ? ` due ${assignment.dueAt}` : "";
           return `- ${assignment.name}${due}`;
         }),
@@ -292,9 +293,9 @@ function buildCourseSection(cache: CourseCache | null): string {
     parts.push(
       [
         "## Modules",
-        ...cache.modules.slice(0, 24).map((module) => {
+        ...cache.modules.slice(0, 40).map((module) => {
           const items = module.items
-            .slice(0, 6)
+            .slice(0, 20)
             .map((item) => item.title)
             .join("; ");
           return `- ${module.name}${items ? `: ${items}` : ""}`;
@@ -307,7 +308,7 @@ function buildCourseSection(cache: CourseCache | null): string {
     parts.push(
       [
         "## Lectures",
-        ...cache.lectures.slice(0, 30).map((lecture) => {
+        ...cache.lectures.slice(0, 60).map((lecture) => {
           const number =
             lecture.lectureNumber !== null ? `Lecture ${lecture.lectureNumber}: ` : "";
           const topic = lecture.topic ? ` - ${lecture.topic}` : "";
@@ -321,7 +322,7 @@ function buildCourseSection(cache: CourseCache | null): string {
     parts.push(
       [
         "## Syllabus Candidates",
-        ...cache.syllabusCandidates.slice(0, 8).map((candidate) => {
+        ...cache.syllabusCandidates.slice(0, 10).map((candidate) => {
           return `- ${candidate.title} (${candidate.confidence}) - ${candidate.reason}`;
         }),
       ].join("\n")
