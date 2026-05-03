@@ -1067,7 +1067,9 @@ export async function runChatShell<TExit>(
             content: `Generated in ${elapsed}`,
           });
 
-          openFile(result.pdfPath);
+          openFile(result.pdfPath, (msg) => {
+            void appendPersistedMessage({ role: "system", content: msg });
+          });
         } catch (error) {
           stopSpinner();
           if (error instanceof DOMException && error.name === "AbortError") {
@@ -1525,7 +1527,7 @@ export async function runChatShell<TExit>(
   });
 }
 
-function openFile(filePath: string): void {
+function openFile(filePath: string, onError?: (msg: string) => void): void {
   const cmd =
     process.platform === "darwin"
       ? { command: "open", args: [filePath] }
@@ -1537,6 +1539,8 @@ function openFile(filePath: string): void {
     detached: process.platform !== "win32",
     stdio: "ignore",
   });
-  child.on("error", () => {});
+  child.on("error", (err) => {
+    onError?.(`Could not open file: ${err.message}`);
+  });
   child.unref();
 }
