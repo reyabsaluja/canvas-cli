@@ -1,4 +1,4 @@
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -13,11 +13,11 @@ export interface LatexRenderOptions {
 
 const TEX_COMPILERS = ["tectonic", "pdflatex", "xelatex", "lualatex"] as const;
 
-export function getLatexCompiler(): string | null {
+export async function getLatexCompiler(): Promise<string | null> {
   const whichCmd = process.platform === "win32" ? "where" : "which";
   for (const compiler of TEX_COMPILERS) {
     try {
-      execFileSync(whichCmd, [compiler], { stdio: "pipe", timeout: 5_000 });
+      await execFileAsync(whichCmd, [compiler], { timeout: 5_000 });
       return compiler;
     } catch {
       continue;
@@ -26,12 +26,15 @@ export function getLatexCompiler(): string | null {
   return null;
 }
 
-function escapeLatexTitle(text: string): string {
+export function escapeLatex(text: string): string {
   return text
-    .replace(/\\/g, "\\textbackslash{}")
+    .replace(/\\/g, "\0BACKSLASH\0")
+    .replace(/~/g, "\0TILDE\0")
+    .replace(/\^/g, "\0CARET\0")
     .replace(/([&%$#_{}])/g, "\\$1")
-    .replace(/~/g, "\\textasciitilde{}")
-    .replace(/\^/g, "\\textasciicircum{}");
+    .replace(/\0BACKSLASH\0/g, "\\textbackslash{}")
+    .replace(/\0TILDE\0/g, "\\textasciitilde{}")
+    .replace(/\0CARET\0/g, "\\textasciicircum{}");
 }
 
 const PREAMBLE = String.raw`\documentclass[11pt,letterpaper]{article}
@@ -179,12 +182,12 @@ export function buildLatexDocument(
   body: string,
   options: LatexRenderOptions
 ): string {
-  const title = escapeLatexTitle(options.title);
+  const title = escapeLatex(options.title);
   const subtitle = options.subtitle
-    ? escapeLatexTitle(options.subtitle)
+    ? escapeLatex(options.subtitle)
     : "";
   const date = options.generatedAt
-    ? escapeLatexTitle(options.generatedAt)
+    ? escapeLatex(options.generatedAt)
     : "";
 
   const titleLines = [
@@ -265,6 +268,7 @@ export async function compileLatex(
 
     return { success: true, pdfPath };
   } catch (error) {
+    if (options?.signal?.aborted) throw error;
     const logPath = path.join(dir, `${basename}.log`);
     let log: string | undefined;
     try {
@@ -292,7 +296,7 @@ export function extractLatexTitle(body: string): string | null {
   return match?.[1]?.trim() || null;
 }
 
-export const LATEX_COMPOSE_SYSTEM_PROMPT = `You create concise, high-quality LaTeX document bodies from canvas-cli chat and workspace context.
+export const LATEX_COMPOSE_SYSTEM_PROMPT = `You create thorough, comprehensive, high-quality LaTeX document bodies from canvas-cli chat and workspace context.
 
 Return ONLY LaTeX body content. Do NOT include \\documentclass, \\usepackage, \\begin{document}, or \\end{document} — the preamble and document wrapper are handled externally.
 

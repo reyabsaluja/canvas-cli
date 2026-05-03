@@ -9,6 +9,7 @@ import {
   getLatexCompiler,
   sanitizeLatexBody,
   extractLatexTitle,
+  escapeLatex,
   LATEX_COMPOSE_SYSTEM_PROMPT,
 } from "./render-latex.js";
 
@@ -43,7 +44,7 @@ export async function generatePdfExport(
   input: PdfContextInput
 ): Promise<PdfExportResult> {
   const bundle = buildPdfContextBundle(input);
-  const latexCompiler = getLatexCompiler();
+  const latexCompiler = await getLatexCompiler();
 
   if (latexCompiler && input.aiConfig) {
     return generateLatexPdf(input, bundle, latexCompiler);
@@ -223,7 +224,13 @@ function buildFallbackLatexBody(
     ""
   );
   const contextLines = bundle.fallbackMarkdown.split("\n");
+  let inList = false;
   for (const line of contextLines) {
+    const isBullet = line.startsWith("- ") || line.startsWith("* ");
+    if (!isBullet && inList) {
+      lines.push(String.raw`\end{itemize}`);
+      inList = false;
+    }
     const heading = line.match(/^(#{1,3})\s+(.+)$/);
     if (heading) {
       const level = heading[1]!.length;
@@ -233,23 +240,20 @@ function buildFallbackLatexBody(
       else lines.push(String.raw`\subsubsection{${escapeLatex(text)}}`);
       continue;
     }
-    if (line.startsWith("- ") || line.startsWith("* ")) {
-      lines.push(String.raw`\begin{itemize}`);
+    if (isBullet) {
+      if (!inList) {
+        lines.push(String.raw`\begin{itemize}`);
+        inList = true;
+      }
       lines.push(String.raw`  \item ${escapeLatex(line.slice(2))}`);
-      lines.push(String.raw`\end{itemize}`);
       continue;
     }
     lines.push(escapeLatex(line));
   }
+  if (inList) {
+    lines.push(String.raw`\end{itemize}`);
+  }
   return lines.join("\n");
-}
-
-function escapeLatex(text: string): string {
-  return text
-    .replace(/\\/g, "\\textbackslash{}")
-    .replace(/([&%$#_{}])/g, "\\$1")
-    .replace(/~/g, "\\textasciitilde{}")
-    .replace(/\^/g, "\\textasciicircum{}");
 }
 
 function normalizeModelMarkdown(raw: string, fallbackTitle: string): string {
