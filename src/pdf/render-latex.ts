@@ -224,7 +224,8 @@ export function buildLatexDocument(
 
 export async function compileLatex(
   texPath: string,
-  compiler: string
+  compiler: string,
+  options?: { signal?: AbortSignal }
 ): Promise<{ success: boolean; pdfPath: string; log?: string }> {
   const dir = path.dirname(texPath);
   const basename = path.basename(texPath, ".tex");
@@ -238,6 +239,7 @@ export async function compileLatex(
       ], {
         cwd: dir,
         timeout: 120_000,
+        signal: options?.signal,
       });
     } else {
       for (let pass = 0; pass < 2; pass++) {
@@ -249,6 +251,7 @@ export async function compileLatex(
         ], {
           cwd: dir,
           timeout: 30_000,
+          signal: options?.signal,
         });
       }
     }

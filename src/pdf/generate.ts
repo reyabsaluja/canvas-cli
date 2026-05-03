@@ -98,7 +98,7 @@ async function generateLatexPdf(
   await fsp.writeFile(texPath, fullTex, "utf-8");
   await fsp.writeFile(markdownPath, latexBody, "utf-8");
 
-  const result = await compileLatex(texPath, compiler);
+  const result = await compileLatex(texPath, compiler, { signal: input.abortSignal });
 
   if (result.success) {
     return {
