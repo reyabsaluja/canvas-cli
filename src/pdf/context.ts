@@ -164,7 +164,12 @@ function buildWorkspaceSection(loaded: LoadedWorkspace | null): string {
         ...loaded.extractedFiles
           .slice(0, 50)
           .map((file) => `- ${file.name} (${file.relativePath})`),
-      ].join("\n")
+        loaded.extractedFiles.length > 50
+          ? `- ...and ${loaded.extractedFiles.length - 50} more`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n")
     );
   }
 
@@ -242,7 +247,7 @@ function formatWorkup(workup: Record<string, unknown>): string {
     parts.push(
       [
         "### Source Trace",
-        ...sourceTrace.map((entry) => {
+        ...sourceTrace.slice(0, 100).map((entry) => {
           if (typeof entry !== "object" || entry === null) return `- ${String(entry)}`;
           const record = entry as Record<string, unknown>;
           const conclusion = stringField(record, "conclusion") ?? "Conclusion";
