@@ -363,7 +363,7 @@ function buildAutocompleteOverlayRows(
   return overlayRows;
 }
 
-function getInlineCommandGhost(
+export function getInlineCommandGhost(
   inputBuffer: string,
   commands?: CommandDefinition[]
 ): string {
