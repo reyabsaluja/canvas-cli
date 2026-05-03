@@ -120,6 +120,8 @@ async function generateLatexPdf(
     ? ensureMarkdownTitle(latexBodyToMarkdown(latexBody), finalTitle)
     : ensureMarkdownTitle(bundle.fallbackMarkdown, bundle.suggestedTitle);
 
+  await fsp.writeFile(markdownPath, fallbackMarkdown, "utf-8");
+
   const pdfPath = path.join(bundle.outputDirectory, `${outputBaseName}.pdf`);
   await renderMarkdownToPdf(fallbackMarkdown, pdfPath, {
     title: finalTitle,
@@ -130,7 +132,7 @@ async function generateLatexPdf(
   return {
     title: finalTitle,
     pdfPath,
-    markdownPath: texPath,
+    markdownPath,
     usedAI,
     usedLatex: false,
     warning,
