@@ -91,7 +91,7 @@ export interface ChatShellOptions<TExit> {
   onReady?: (api: ShellRuntimeApi) => Promise<void> | void;
 }
 
-const inlinePdfPattern = /\/(?:make-pdf|pdf)\b/i;
+const inlinePdfPattern = /\s\/(?:make-pdf|pdf)\s*$/i;
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const VERBS = [
