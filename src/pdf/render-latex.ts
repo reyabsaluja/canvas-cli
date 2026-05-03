@@ -26,15 +26,19 @@ export async function getLatexCompiler(): Promise<string | null> {
   return null;
 }
 
+const PH_BACKSLASH = "";
+const PH_TILDE = "";
+const PH_CARET = "";
+
 export function escapeLatex(text: string): string {
   return text
-    .replace(/\\/g, "\0BACKSLASH\0")
-    .replace(/~/g, "\0TILDE\0")
-    .replace(/\^/g, "\0CARET\0")
+    .replace(/\\/g, PH_BACKSLASH)
+    .replace(/~/g, PH_TILDE)
+    .replace(/\^/g, PH_CARET)
     .replace(/([&%$#_{}])/g, "\\$1")
-    .replace(/\0BACKSLASH\0/g, "\\textbackslash{}")
-    .replace(/\0TILDE\0/g, "\\textasciitilde{}")
-    .replace(/\0CARET\0/g, "\\textasciicircum{}");
+    .replace(new RegExp(PH_BACKSLASH, "g"), "\\textbackslash{}")
+    .replace(new RegExp(PH_TILDE, "g"), "\\textasciitilde{}")
+    .replace(new RegExp(PH_CARET, "g"), "\\textasciicircum{}");
 }
 
 const PREAMBLE = String.raw`\documentclass[11pt,letterpaper]{article}
