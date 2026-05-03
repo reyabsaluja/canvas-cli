@@ -226,15 +226,58 @@ function buildFallbackLatexBody(
     ""
   );
   const contextLines = bundle.fallbackMarkdown.split("\n");
-  let inList = false;
-  for (const line of contextLines) {
-    const isBullet = line.startsWith("- ") || line.startsWith("* ");
-    if (!isBullet && inList) {
-      lines.push(String.raw`\end{itemize}`);
-      inList = false;
+  let listType: "itemize" | "enumerate" | null = null;
+  let inCode = false;
+  let codeLang = "";
+  const codeBuffer: string[] = [];
+
+  function closeList() {
+    if (listType) {
+      lines.push(String.raw`\end{${listType}}`);
+      listType = null;
     }
+  }
+
+  function convertInlineFormatting(text: string): string {
+    return escapeLatex(text)
+      .replace(/\*\*(.+?)\*\*/g, (_, t) => String.raw`\textbf{${t}}`)
+      .replace(/\*(.+?)\*/g, (_, t) => String.raw`\textit{${t}}`)
+      .replace(/`(.+?)`/g, (_, t) => String.raw`\texttt{${t}}`);
+  }
+
+  for (const line of contextLines) {
+    const fenceMatch = line.match(/^```(\w*)$/);
+    if (fenceMatch) {
+      if (inCode) {
+        const langOpt = codeLang ? `[language=${codeLang}]` : "";
+        lines.push(String.raw`\begin{lstlisting}${langOpt}`);
+        lines.push(...codeBuffer);
+        lines.push(String.raw`\end{lstlisting}`);
+        codeBuffer.length = 0;
+        codeLang = "";
+        inCode = false;
+      } else {
+        closeList();
+        inCode = true;
+        codeLang = fenceMatch[1] ?? "";
+      }
+      continue;
+    }
+    if (inCode) {
+      codeBuffer.push(line);
+      continue;
+    }
+
+    const isBullet = line.startsWith("- ") || line.startsWith("* ");
+    const numberedMatch = line.match(/^(\d+)[.)]\s+(.+)$/);
+
+    if (!isBullet && !numberedMatch && listType) {
+      closeList();
+    }
+
     const heading = line.match(/^(#{1,3})\s+(.+)$/);
     if (heading) {
+      closeList();
       const level = heading[1]!.length;
       const text = heading[2]!;
       if (level === 1) lines.push(String.raw`\section{${escapeLatex(text)}}`);
@@ -243,17 +286,30 @@ function buildFallbackLatexBody(
       continue;
     }
     if (isBullet) {
-      if (!inList) {
+      if (listType !== "itemize") {
+        closeList();
         lines.push(String.raw`\begin{itemize}`);
-        inList = true;
+        listType = "itemize";
       }
-      lines.push(String.raw`  \item ${escapeLatex(line.slice(2))}`);
+      lines.push(String.raw`  \item ${convertInlineFormatting(line.slice(2))}`);
       continue;
     }
-    lines.push(escapeLatex(line));
+    if (numberedMatch) {
+      if (listType !== "enumerate") {
+        closeList();
+        lines.push(String.raw`\begin{enumerate}`);
+        listType = "enumerate";
+      }
+      lines.push(String.raw`  \item ${convertInlineFormatting(numberedMatch[2]!)}`);
+      continue;
+    }
+    lines.push(convertInlineFormatting(line));
   }
-  if (inList) {
-    lines.push(String.raw`\end{itemize}`);
+  closeList();
+  if (inCode && codeBuffer.length > 0) {
+    lines.push(String.raw`\begin{lstlisting}`);
+    lines.push(...codeBuffer);
+    lines.push(String.raw`\end{lstlisting}`);
   }
   return lines.join("\n");
 }
