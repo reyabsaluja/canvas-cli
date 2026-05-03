@@ -452,4 +452,3 @@ export async function handleCommand(
     return;
   }
 }
-
