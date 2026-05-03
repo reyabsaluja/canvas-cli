@@ -296,6 +296,17 @@ export function extractLatexTitle(body: string): string | null {
   return match?.[1]?.trim() || null;
 }
 
+export const SHARED_CONTENT_RULES = `- Be THOROUGH and COMPREHENSIVE. Cover EVERYTHING in the provided context. Do not summarize or abbreviate — expand on every topic, every detail, every concept. A typical document should be 5-15 pages printed.
+- Infer the best document type: study guide, assignment brief, cheat sheet, checklist, summary, or action plan — then go deep on it.
+- For study guides: explain each concept fully with definitions, examples, and connections to other topics. Include formulas, code snippets, key terms, and practice-ready content.
+- For assignment briefs: detail every requirement, constraint, deliverable, resource, and step of the action plan with full explanations.
+- Preserve ALL due dates, deliverables, constraints, source names, open questions, lecture content, and module details.
+- Include a Sources section listing all referenced materials.
+- Do not invent facts beyond the supplied context, but DO fully elaborate on everything that IS in the context.
+- If the request is vague, produce the most comprehensive and useful document possible from all available context.
+- Never mention AI, PDF generation, or canvas-cli in the document body.
+- Never repeat the same information in multiple sections.`;
+
 export const LATEX_COMPOSE_SYSTEM_PROMPT = `You create thorough, comprehensive, high-quality LaTeX document bodies from canvas-cli chat and workspace context.
 
 Return ONLY LaTeX body content. Do NOT include \\documentclass, \\usepackage, \\begin{document}, or \\end{document} — the preamble and document wrapper are handled externally.
@@ -327,16 +338,7 @@ CRITICAL LaTeX escaping — in regular text (NOT in math mode, lstlisting, or \\
 - ^ → \\textasciicircum{} (unless in math mode)
 
 Content rules:
-- Be THOROUGH and COMPREHENSIVE. Cover EVERYTHING in the provided context. Do not summarize or abbreviate — expand on every topic, every detail, every concept. A typical document should be 5-15 pages printed.
-- Infer the best document type: study guide, assignment brief, cheat sheet, checklist, summary, or action plan — then go deep on it.
-- For study guides: explain each concept fully with definitions, examples, and connections to other topics. Include formulas, code snippets, key terms, and practice-ready content.
-- For assignment briefs: detail every requirement, constraint, deliverable, resource, and step of the action plan with full explanations.
+${SHARED_CONTENT_RULES}
 - Use proper LaTeX math for ALL mathematical expressions, formulas, and equations.
 - Use lstlisting for ALL code snippets — never use verbatim or raw monospace for code.
-- Use booktabs tables (\\toprule, \\midrule, \\bottomrule) for structured data comparisons.
-- Preserve ALL due dates, deliverables, constraints, source names, open questions, lecture content, and module details.
-- Include a Sources section listing all referenced materials.
-- Do not invent facts beyond the supplied context, but DO fully elaborate on everything that IS in the context.
-- If the request is vague, produce the most comprehensive and useful document possible from all available context.
-- Never mention AI, PDF generation, or canvas-cli in the document body.
-- Never repeat the same information in multiple sections.`;
+- Use booktabs tables (\\toprule, \\midrule, \\bottomrule) for structured data comparisons.`;

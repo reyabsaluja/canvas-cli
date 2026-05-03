@@ -11,6 +11,7 @@ import {
   extractLatexTitle,
   escapeLatex,
   LATEX_COMPOSE_SYSTEM_PROMPT,
+  SHARED_CONTENT_RULES,
 } from "./render-latex.js";
 
 export interface PdfExportResult {
@@ -27,18 +28,9 @@ const MARKDOWN_COMPOSE_SYSTEM_PROMPT = `You create thorough, comprehensive, high
 Return Markdown only — no code fences around the entire document, no preamble.
 
 Critical rules:
-- Be THOROUGH and COMPREHENSIVE. Cover EVERYTHING in the provided context. Do not summarize or abbreviate — expand on every topic, every detail, every concept. A typical document should be 5-15 pages when printed.
-- Infer the best document type: study guide, assignment brief, cheat sheet, checklist, summary, or action plan — then go deep on it.
+${SHARED_CONTENT_RULES}
 - Use ## and ### headings to organize into clear sections. Use bullet lists for quick scanning.
-- Use Markdown tables when comparing items or listing structured data (dates, scores, options).
-- For study guides: explain each concept fully with definitions, examples, and connections to other topics. Include formulas, code snippets, key terms, and practice-ready content.
-- For assignment briefs: detail every requirement, constraint, deliverable, resource, and step of the action plan with full explanations.
-- Preserve ALL due dates, deliverables, constraints, source names, open questions, lecture content, and module details.
-- Include a Sources section listing all referenced materials.
-- Do not invent facts beyond the supplied context, but DO fully elaborate on everything that IS in the context.
-- If the request is vague, produce the most comprehensive and useful document possible from all available context.
-- Never mention AI, PDF generation, or canvas-cli in the document body.
-- Never repeat the same information in multiple sections.`;
+- Use Markdown tables when comparing items or listing structured data (dates, scores, options).`;
 
 export async function generatePdfExport(
   input: PdfContextInput
