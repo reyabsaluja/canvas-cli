@@ -160,7 +160,7 @@ export async function callModel(
     model: getModel(config),
     system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
-    ...(options?.maxTokens ? { maxTokens: options.maxTokens } : {}),
+    ...(options?.maxTokens != null ? { maxTokens: options.maxTokens } : {}),
     ...(combinedSignal ? { abortSignal: combinedSignal } : {}),
   });
 
