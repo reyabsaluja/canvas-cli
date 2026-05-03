@@ -1,7 +1,9 @@
+import { spawn } from "node:child_process";
 import chalk from "chalk";
 import { C, getTermSize, stripAnsi } from "./screen.js";
 import { formatAIError } from "../ai/provider.js";
 import type { Observation } from "../agent/observation.js";
+import { executeMakePdf } from "./pdf-command.js";
 import type {
   ChatMessage,
   CommandDefinition,
@@ -23,7 +25,7 @@ import {
   mergePinOptions,
 } from "./pins.js";
 import type { OpenableResource } from "./open-resources.js";
-import { searchOpenableResources } from "./open-resources.js";
+import { searchOpenableResources, getOpenCommand } from "./open-resources.js";
 import {
   MAIN_VIEW_BOTTOM_RESERVE,
   buildBannerLines,
@@ -70,6 +72,8 @@ export interface ChatShellOptions<TExit> {
   extraHelpCommands?: Array<{ cmd: string; desc: string }>;
   getPinOptions?: () => ShellPinOption[];
   getOpenOptions?: () => ShellOpenOption[];
+  getLoadedWorkspace?: () => import("../ask/types.js").LoadedWorkspace | null;
+  getCourseCache?: () => import("../enrich/cache-loader.js").CourseCache | null;
   onClear?: () => Promise<ChatMessage[]>;
   resolvePinContent?: (pin: ShellPinOption) => Promise<string | null>;
   onAsk: (input: string, callbacks: AskCallbacks) => Promise<{
@@ -86,6 +90,8 @@ export interface ChatShellOptions<TExit> {
   ) => Promise<TExit | null | void>;
   onReady?: (api: ShellRuntimeApi) => Promise<void> | void;
 }
+
+const inlinePdfPattern = /\s\/(?:make-pdf|pdf)\s*$/i;
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const VERBS = [
@@ -487,6 +493,7 @@ export async function runChatShell<TExit>(
       slashSelected,
       openSelected,
       pinSelected,
+      availableCommands,
     });
     chatScrollOffset = next.chatScrollOffset;
     maxChatScrollOffset = next.maxScroll;
@@ -532,6 +539,7 @@ export async function runChatShell<TExit>(
       slashSelected,
       openSelected,
       pinSelected,
+      availableCommands,
     });
   }
 
@@ -1010,6 +1018,80 @@ export async function runChatShell<TExit>(
       }
     }
 
+    function launchPdfGeneration(
+      rawInput: string,
+      instruction: string
+    ): void {
+      isProcessing = true;
+      processingAbort = new AbortController();
+      currentVerb = "Generating PDF";
+      spinnerFrame = 0;
+      shimmerFrame = 0;
+      processingStartTime = Date.now();
+      currentSpinnerLine = buildSpinnerLine();
+
+      messages.push({ role: "user", content: rawInput });
+      markTranscriptDirty(messages.length - 1);
+      persistence.schedule();
+      render();
+      startSpinner();
+
+      void (async () => {
+        try {
+          const result = await executeMakePdf({
+            instruction,
+            session,
+            runtime: options.runtime,
+            getLoadedWorkspace: options.getLoadedWorkspace,
+            getCourseCache: options.getCourseCache,
+            abortSignal: processingAbort!.signal,
+          });
+
+          stopSpinner();
+          const elapsed = formatElapsed(Date.now() - processingStartTime);
+
+          const lines = [`PDF saved to \`${result.pdfPath}\``];
+          if (result.usedLatex) {
+            lines.push("Rendered with LaTeX for high-quality math and code formatting.");
+          }
+          if (result.warning) {
+            lines.push(result.warning);
+          }
+
+          await appendPersistedMessage({
+            role: "assistant",
+            content: lines.join("\n"),
+          });
+          await appendPersistedMessage({
+            role: "system",
+            content: `Generated in ${elapsed}`,
+          });
+
+          openFile(result.pdfPath, (msg) => {
+            void appendPersistedMessage({ role: "system", content: msg });
+          });
+        } catch (error) {
+          stopSpinner();
+          if (error instanceof DOMException && error.name === "AbortError") {
+            await appendPersistedMessage({
+              role: "system",
+              content: "PDF generation cancelled.",
+            });
+          } else {
+            await appendPersistedMessage({
+              role: "system",
+              content: `PDF generation failed: ${error instanceof Error ? error.message : "unknown error"}`,
+            });
+          }
+        }
+
+        isProcessing = false;
+        processingAbort = null;
+        currentSpinnerLine = "";
+        render();
+      })();
+    }
+
     async function handleKey(key: string): Promise<void> {
       if (shellClosed) return;
 
@@ -1123,7 +1205,21 @@ export async function runChatShell<TExit>(
 
         if (input.startsWith("/")) {
           const [commandName, ...rest] = input.split(/\s+/);
-          await handleCommandInput(input, commandName, rest.join(" "));
+          const normalizedCmd = commandName.toLowerCase();
+          if (normalizedCmd === "/make-pdf" || normalizedCmd === "/pdf") {
+            launchPdfGeneration(input, rest.join(" "));
+          } else {
+            await handleCommandInput(input, commandName, rest.join(" "));
+          }
+          return;
+        }
+
+        if (inlinePdfPattern.test(input)) {
+          const cleaned = input
+            .replace(inlinePdfPattern, "")
+            .replace(/\s+/g, " ")
+            .trim();
+          launchPdfGeneration(input, cleaned);
           return;
         }
 
@@ -1429,4 +1525,16 @@ export async function runChatShell<TExit>(
       });
     }
   });
+}
+
+function openFile(filePath: string, onError?: (msg: string) => void): void {
+  const { command, args } = getOpenCommand(filePath);
+  const child = spawn(command, args, {
+    detached: process.platform !== "win32",
+    stdio: "ignore",
+  });
+  child.on("error", (err) => {
+    onError?.(`Could not open file: ${err.message}`);
+  });
+  child.unref();
 }

@@ -24,9 +24,9 @@ const TABLE_HEADER_BG = "#f4f4f5";
 const TABLE_BORDER = "#e4e4e7";
 
 const BODY_SIZE = 10;
-const BODY_LINE_GAP = 3.2;
+const BODY_LINE_GAP = 2.4;
 const LIST_SIZE = 10;
-const PARA_SPACING = 6;
+const PARA_SPACING = 4;
 
 type PdfDoc = PDFKit.PDFDocument;
 
@@ -187,42 +187,42 @@ function renderDocument(
 
 function renderTopMatter(doc: PdfDoc, options: PdfRenderOptions): void {
   doc.fillColor(ACCENT_COLOR).font("Helvetica-Bold").fontSize(9).text("canvas-cli");
-  doc.moveDown(0.35);
+  doc.moveDown(0.25);
   doc
     .fillColor(TEXT_COLOR)
     .font("Helvetica-Bold")
-    .fontSize(20)
-    .text(options.title, { width: contentWidth(doc), lineGap: 2 });
+    .fontSize(18)
+    .text(options.title, { width: contentWidth(doc), lineGap: 1 });
   if (options.subtitle) {
-    doc.moveDown(0.2);
-    doc
-      .fillColor(MUTED_COLOR)
-      .font("Helvetica")
-      .fontSize(9)
-      .text(options.subtitle, { width: contentWidth(doc) });
-  }
-  if (options.generatedAt) {
     doc.moveDown(0.15);
     doc
       .fillColor(MUTED_COLOR)
       .font("Helvetica")
-      .fontSize(8)
+      .fontSize(8.5)
+      .text(options.subtitle, { width: contentWidth(doc) });
+  }
+  if (options.generatedAt) {
+    doc.moveDown(0.1);
+    doc
+      .fillColor(MUTED_COLOR)
+      .font("Helvetica")
+      .fontSize(7.5)
       .text(`Generated ${options.generatedAt}`);
   }
-  doc.moveDown(0.6);
+  doc.moveDown(0.4);
   renderRule(doc);
 }
 
 function renderHeading(doc: PdfDoc, rawText: string, level: number): void {
   const text = cleanInlineMarkdown(rawText);
   const config = {
-    1: { fontSize: 16, before: 14, after: 5, color: ACCENT_COLOR },
-    2: { fontSize: 13, before: 12, after: 4, color: ACCENT_COLOR },
-    3: { fontSize: 11, before: 9, after: 3, color: TEXT_COLOR },
-    4: { fontSize: BODY_SIZE, before: 7, after: 2, color: TEXT_COLOR },
-  }[level] ?? { fontSize: BODY_SIZE, before: 7, after: 2, color: TEXT_COLOR };
+    1: { fontSize: 15, before: 10, after: 4, color: ACCENT_COLOR },
+    2: { fontSize: 12.5, before: 8, after: 3, color: ACCENT_COLOR },
+    3: { fontSize: 11, before: 6, after: 2, color: TEXT_COLOR },
+    4: { fontSize: BODY_SIZE, before: 5, after: 2, color: TEXT_COLOR },
+  }[level] ?? { fontSize: BODY_SIZE, before: 5, after: 2, color: TEXT_COLOR };
 
-  ensureSpace(doc, config.fontSize * 2.5);
+  ensureSpace(doc, config.fontSize + 14);
   doc.moveDown(config.before / 12);
   doc.fillColor(config.color);
   doc.font("Helvetica-Bold").fontSize(config.fontSize).text(text, {
@@ -235,7 +235,7 @@ function renderHeading(doc: PdfDoc, rawText: string, level: number): void {
 function renderParagraph(doc: PdfDoc, text: string): void {
   const cleaned = cleanInlineMarkdown(text);
   if (!cleaned) return;
-  ensureSpace(doc, 28);
+  ensureSpace(doc, 18);
   doc.fillColor(TEXT_COLOR).font("Helvetica").fontSize(BODY_SIZE).text(cleaned, {
     width: contentWidth(doc),
     lineGap: BODY_LINE_GAP,
@@ -254,7 +254,7 @@ function renderListItem(
   const bullet = isNumbered ? marker.replace(/[.)]$/, ".") : "\u2022";
   const markerWidth = isNumbered ? 22 : 12;
 
-  ensureSpace(doc, 20);
+  ensureSpace(doc, 14);
   const x = doc.page.margins.left + indent;
   const y = doc.y;
   const width = contentWidth(doc) - indent - markerWidth;
@@ -270,9 +270,9 @@ function renderListItem(
     .fontSize(LIST_SIZE)
     .text(cleanInlineMarkdown(rawText), x + markerWidth + 2, y, {
       width: width - 2,
-      lineGap: 2.5,
+      lineGap: 2,
     });
-  doc.moveDown(0.15);
+  doc.moveDown(0.08);
 }
 
 function renderQuote(doc: PdfDoc, rawText: string): void {
@@ -286,17 +286,17 @@ function renderQuote(doc: PdfDoc, rawText: string): void {
     lineGap: 2,
   });
 
-  ensureSpace(doc, height + 16);
+  ensureSpace(doc, height + 14);
   const x = doc.page.margins.left;
   const y = doc.y;
-  doc.roundedRect(x, y, width, height + 12, 3).fill(QUOTE_BG);
-  doc.rect(x, y, 3, height + 12).fill(QUOTE_BAR);
+  doc.roundedRect(x, y, width, height + 10, 3).fill(QUOTE_BG);
+  doc.rect(x, y, 3, height + 10).fill(QUOTE_BAR);
   doc
     .fillColor(MUTED_COLOR)
     .font("Helvetica-Oblique")
     .fontSize(9)
-    .text(text, x + 12, y + 6, { width: bodyWidth, lineGap: 2 });
-  doc.y = y + height + 16;
+    .text(text, x + 12, y + 5, { width: bodyWidth, lineGap: 2 });
+  doc.y = y + height + 12;
 }
 
 function renderCodeBlock(doc: PdfDoc, code: string): void {
@@ -314,7 +314,7 @@ function renderCodeBlock(doc: PdfDoc, code: string): void {
   });
 
   const blockHeight = height + padY * 2;
-  const maxFirstPageBlock = usableHeight(doc) * 0.6;
+  const maxFirstPageBlock = usableHeight(doc) * 0.85;
 
   if (blockHeight > maxFirstPageBlock) {
     renderCodeBlockFlowing(doc, text, width, padX, padY);
@@ -348,7 +348,7 @@ function renderCodeBlockFlowing(
   const width = contentWidth(doc);
   const codeWidth = width - padX * 2;
 
-  ensureSpace(doc, 30);
+  ensureSpace(doc, 24);
   const x = doc.page.margins.left;
 
   let bgStartY = doc.y;
@@ -460,7 +460,7 @@ function renderTable(doc: PdfDoc, tableLines: string[]): void {
     drawRow(row, false);
   }
 
-  doc.moveDown(0.4);
+  doc.moveDown(0.25);
 }
 
 function parseTable(
@@ -524,7 +524,7 @@ function computeColumnWidths(
 }
 
 function renderRule(doc: PdfDoc): void {
-  ensureSpace(doc, 10);
+  ensureSpace(doc, 8);
   const y = doc.y;
   doc
     .strokeColor(RULE_COLOR)
@@ -532,20 +532,23 @@ function renderRule(doc: PdfDoc): void {
     .moveTo(doc.page.margins.left, y)
     .lineTo(doc.page.width - doc.page.margins.right, y)
     .stroke();
-  doc.moveDown(0.6);
+  doc.moveDown(0.35);
 }
 
 function addFooters(doc: PdfDoc, options: PdfRenderOptions): void {
   const range = doc.bufferedPageRange();
+  const pageCount = range.count;
   for (
     let pageIndex = range.start;
-    pageIndex < range.start + range.count;
+    pageIndex < range.start + pageCount;
     pageIndex++
   ) {
     doc.switchToPage(pageIndex);
     const pageNumber = pageIndex + 1 - range.start;
     const y = doc.page.height - 38;
     const width = contentWidth(doc);
+    const savedMarginBottom = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
     doc
       .fillColor(MUTED_COLOR)
       .font("Helvetica")
@@ -555,16 +558,18 @@ function addFooters(doc: PdfDoc, options: PdfRenderOptions): void {
         ellipsis: true,
         lineBreak: false,
       });
-    doc.text(`Page ${pageNumber} of ${range.count}`, doc.page.margins.left, y, {
+    doc.text(`Page ${pageNumber} of ${pageCount}`, doc.page.margins.left, y, {
       width,
       align: "right",
       lineBreak: false,
     });
+    doc.page.margins.bottom = savedMarginBottom;
   }
 }
 
 function ensureSpace(doc: PdfDoc, height: number): void {
-  if (doc.y + height > pageBottom(doc)) {
+  const remaining = pageBottom(doc) - doc.y;
+  if (remaining < height) {
     doc.addPage();
   }
 }

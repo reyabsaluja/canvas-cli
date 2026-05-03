@@ -57,6 +57,7 @@ export interface RenderChatFrameOptions {
   slashSelected: number;
   openSelected: number;
   pinSelected: number;
+  availableCommands?: CommandDefinition[];
 }
 
 const messageRenderCache = new WeakMap<ChatMessage, Map<string, string[]>>();
@@ -138,7 +139,8 @@ export function renderChatFrame(
     options.inputBuffer,
     options.runtime.scopeLabel,
     options.runtime.statusLabel,
-    options.modelLabel
+    options.modelLabel,
+    options.availableCommands
   );
 
   const buf = createBuffer();
@@ -244,6 +246,7 @@ export function renderInputFooter(options: {
   slashSelected: number;
   openSelected: number;
   pinSelected: number;
+  availableCommands?: CommandDefinition[];
 }): void {
   writeStickyBottom(
     buildStickyBottomRows(
@@ -251,7 +254,8 @@ export function renderInputFooter(options: {
       options.inputBuffer,
       options.scopeLabel,
       options.statusLabel,
-      options.modelLabel
+      options.modelLabel,
+      options.availableCommands
     )
   );
   const overlayRows = buildAutocompleteOverlayRows(
@@ -359,12 +363,33 @@ function buildAutocompleteOverlayRows(
   return overlayRows;
 }
 
+export function getInlineCommandGhost(
+  inputBuffer: string,
+  commands?: CommandDefinition[]
+): string {
+  if (!commands || !inputBuffer) return "";
+  const match = inputBuffer.match(/\s(\/\S*)$/);
+  if (!match) return "";
+  const partial = match[1]!.toLowerCase();
+  if (partial.length < 2) return "";
+  for (const cmd of commands) {
+    const names = [cmd.name, ...(cmd.aliases ?? [])];
+    for (const name of names) {
+      if (name.startsWith(partial) && name !== partial) {
+        return name.slice(partial.length);
+      }
+    }
+  }
+  return "";
+}
+
 function buildStickyBottomRows(
   placeholder: string,
   inputBuffer: string,
   leftStatus: string,
   runtimeStatus: string | undefined,
-  modelLabel: string
+  modelLabel: string,
+  availableCommands?: CommandDefinition[]
 ): string[] {
   const { cols, rows: termRows } = getTermSize();
   const boxWidth = Math.max(24, cols - 5);
@@ -398,6 +423,7 @@ function buildStickyBottomRows(
     const displayText = padTo(cursor + styled, firstLineWidth);
     contentRows.push(`  ${b("│")} ${inputPromptColor(">")} ${displayText} ${b("│")}`);
   } else {
+    const ghost = getInlineCommandGhost(inputBuffer, availableCommands);
     const textWithCursor = inputBuffer + "█";
     const chunks: string[] = [];
     let remaining = textWithCursor;
@@ -421,7 +447,8 @@ function buildStickyBottomRows(
       const hasCursor = chunk.endsWith("█");
       const rawText = hasCursor ? chunk.slice(0, -1) : chunk;
       const colored = rawText.replace(/@\S+/g, (match) => C.warm(match));
-      const display = hasCursor ? colored + cursor : colored;
+      const ghostSuffix = hasCursor && ghost ? inputPlaceholderFg(ghost) : "";
+      const display = hasCursor ? colored + cursor + ghostSuffix : colored;
       const padded = padTo(display, w);
       if (isFirstVisible) {
         contentRows.push(`  ${b("│")} ${inputPromptColor(">")} ${padded} ${b("│")}`);
