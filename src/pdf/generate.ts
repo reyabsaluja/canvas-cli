@@ -27,7 +27,7 @@ const MARKDOWN_COMPOSE_SYSTEM_PROMPT = `You create thorough, comprehensive, high
 Return Markdown only — no code fences around the entire document, no preamble.
 
 Critical rules:
-- Be THOROUGH and COMPREHENSIVE. Cover EVERYTHING in the provided context. Do not summarize or abbreviate — expand on every topic, every detail, every concept. A typical document should be 8-20+ pages when printed. More is better.
+- Be THOROUGH and COMPREHENSIVE. Cover EVERYTHING in the provided context. Do not summarize or abbreviate — expand on every topic, every detail, every concept. A typical document should be 5-15 pages when printed.
 - Infer the best document type: study guide, assignment brief, cheat sheet, checklist, summary, or action plan — then go deep on it.
 - Use ## and ### headings to organize into clear sections. Use bullet lists for quick scanning.
 - Use Markdown tables when comparing items or listing structured data (dates, scores, options).
@@ -78,7 +78,7 @@ async function generateLatexPdf(
   let warning: string | undefined;
 
   try {
-    const raw = await callModel(input.aiConfig!, LATEX_COMPOSE_SYSTEM_PROMPT, userMessage, { maxTokens: 8000, timeoutMs: 600_000, abortSignal: input.abortSignal });
+    const raw = await callModel(input.aiConfig!, LATEX_COMPOSE_SYSTEM_PROMPT, userMessage, { maxTokens: 16_000, timeoutMs: 600_000, abortSignal: input.abortSignal });
     latexBody = sanitizeLatexBody(raw);
   } catch (error) {
     if (input.abortSignal?.aborted) throw error;
@@ -194,7 +194,7 @@ async function composeMarkdown(
   ].join("\n");
 
   try {
-    const raw = await callModel(input.aiConfig, MARKDOWN_COMPOSE_SYSTEM_PROMPT, userMessage, { maxTokens: 8000, timeoutMs: 600_000, abortSignal: input.abortSignal });
+    const raw = await callModel(input.aiConfig, MARKDOWN_COMPOSE_SYSTEM_PROMPT, userMessage, { maxTokens: 16_000, timeoutMs: 600_000, abortSignal: input.abortSignal });
     const markdown = normalizeModelMarkdown(raw, bundle.suggestedTitle);
     return { markdown, usedAI: true };
   } catch (error) {

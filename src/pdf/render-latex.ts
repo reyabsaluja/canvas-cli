@@ -327,7 +327,7 @@ CRITICAL LaTeX escaping — in regular text (NOT in math mode, lstlisting, or \\
 - ^ → \\textasciicircum{} (unless in math mode)
 
 Content rules:
-- Be THOROUGH and COMPREHENSIVE. Cover EVERYTHING in the provided context. Do not summarize or abbreviate — expand on every topic, every detail, every concept. A typical document should be 8–20+ pages printed. More is better.
+- Be THOROUGH and COMPREHENSIVE. Cover EVERYTHING in the provided context. Do not summarize or abbreviate — expand on every topic, every detail, every concept. A typical document should be 5-15 pages printed.
 - Infer the best document type: study guide, assignment brief, cheat sheet, checklist, summary, or action plan — then go deep on it.
 - For study guides: explain each concept fully with definitions, examples, and connections to other topics. Include formulas, code snippets, key terms, and practice-ready content.
 - For assignment briefs: detail every requirement, constraint, deliverable, resource, and step of the action plan with full explanations.
