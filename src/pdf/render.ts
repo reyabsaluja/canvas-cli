@@ -286,7 +286,7 @@ function renderQuote(doc: PdfDoc, rawText: string): void {
     lineGap: 2,
   });
 
-  ensureSpace(doc, Math.min(height + 14, 60));
+  ensureSpace(doc, height + 14);
   const x = doc.page.margins.left;
   const y = doc.y;
   doc.roundedRect(x, y, width, height + 10, 3).fill(QUOTE_BG);
