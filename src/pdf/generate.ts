@@ -284,7 +284,7 @@ function extractMarkdownTitle(markdown: string): string | null {
   return match?.[1]?.trim() || null;
 }
 
-function latexBodyToMarkdown(latex: string): string {
+export function latexBodyToMarkdown(latex: string): string {
   return latex
     .replace(/\\section\{([^}]+)\}/g, "# $1")
     .replace(/\\subsection\{([^}]+)\}/g, "## $1")
