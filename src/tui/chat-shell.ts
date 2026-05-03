@@ -25,7 +25,7 @@ import {
   mergePinOptions,
 } from "./pins.js";
 import type { OpenableResource } from "./open-resources.js";
-import { searchOpenableResources } from "./open-resources.js";
+import { searchOpenableResources, getOpenCommand } from "./open-resources.js";
 import {
   MAIN_VIEW_BOTTOM_RESERVE,
   buildBannerLines,
@@ -1528,14 +1528,8 @@ export async function runChatShell<TExit>(
 }
 
 function openFile(filePath: string, onError?: (msg: string) => void): void {
-  const cmd =
-    process.platform === "darwin"
-      ? { command: "open", args: [filePath] }
-      : process.platform === "win32"
-        ? { command: "cmd", args: ["/c", "start", "", filePath] }
-        : { command: "xdg-open", args: [filePath] };
-
-  const child = spawn(cmd.command, cmd.args, {
+  const { command, args } = getOpenCommand(filePath);
+  const child = spawn(command, args, {
     detached: process.platform !== "win32",
     stdio: "ignore",
   });

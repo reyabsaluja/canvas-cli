@@ -556,7 +556,7 @@ export async function openResourceTarget(
   });
 }
 
-function getOpenCommand(target: string): { command: string; args: string[] } {
+export function getOpenCommand(target: string): { command: string; args: string[] } {
   if (process.platform === "darwin") {
     return { command: "open", args: [target] };
   }
