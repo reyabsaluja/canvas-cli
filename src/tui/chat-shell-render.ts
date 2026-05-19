@@ -178,7 +178,6 @@ export function renderChatFrame(
         lastStickyBottomRows = null;
         lastStickyBottomScreenSize = "";
       }
-      buf.flush(0, 0);
 
       const overlayRows = buildAutocompleteOverlayRows(
         options.slashMatches,
@@ -189,15 +188,13 @@ export function renderChatFrame(
         options.pinSelected,
         options.inputBuffer
       );
-      if (overlayRows === null && lastOverlayRows) {
+      if (overlayRows === null && lastOverlayRows && lastOverlayStartRow > 0) {
         invalidateScreenRows(
           lastOverlayStartRow,
           lastOverlayStartRow + lastOverlayRows.length - 1
         );
-        lastOverlayRows = null;
-        lastOverlayStartRow = -1;
-        lastOverlayScreenSize = "";
       }
+      buf.flush(0, 0);
       writeAutocompleteOverlay(overlayRows);
 
       return { chatScrollOffset: 0, maxScroll: 0 };
@@ -243,14 +240,11 @@ export function renderChatFrame(
       options.pinSelected,
       options.inputBuffer
     );
-    if (overlayRows === null && lastOverlayRows) {
+    if (overlayRows === null && lastOverlayRows && lastOverlayStartRow > 0) {
       invalidateScreenRows(
         lastOverlayStartRow,
         lastOverlayStartRow + lastOverlayRows.length - 1
       );
-      lastOverlayRows = null;
-      lastOverlayStartRow = -1;
-      lastOverlayScreenSize = "";
     }
 
     appendVisibleLines(buf, headerLines, start, end, 0);
@@ -329,14 +323,11 @@ export function renderChatFrame(
     options.pinSelected,
     options.inputBuffer
   );
-  if (overlayRows === null && lastOverlayRows) {
+  if (overlayRows === null && lastOverlayRows && lastOverlayStartRow > 0) {
     invalidateScreenRows(
       lastOverlayStartRow,
       lastOverlayStartRow + lastOverlayRows.length - 1
     );
-    lastOverlayRows = null;
-    lastOverlayStartRow = -1;
-    lastOverlayScreenSize = "";
   }
 
   appendVisibleLines(buf, headerLines, start, end, 0);
