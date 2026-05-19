@@ -40,6 +40,11 @@ const CHAT_GAP_ROWS = 2;
 const MAX_OVERLAY_ROWS = 8;
 export const MAIN_VIEW_BOTTOM_RESERVE = BASE_STICKY_ROWS + CHAT_GAP_ROWS;
 
+type InputMode = "sticky" | "flowing";
+let currentInputMode: InputMode = "sticky";
+let lastInputStartRow: number = 0;
+export function getInputMode(): InputMode { return currentInputMode; }
+
 export interface RenderChatFrameOptions {
   runtime: ScopeRuntime;
   placeholder: string;
@@ -68,6 +73,8 @@ export function resetChatShellRenderCache(): void {
   lastOverlayRows = null;
   lastOverlayStartRow = -1;
   lastOverlayScreenSize = "";
+  currentInputMode = "sticky";
+  lastInputStartRow = 0;
 }
 
 export function buildBannerLines(options: {
@@ -145,8 +152,145 @@ export function renderChatFrame(
 
   const buf = createBuffer();
   const { cols, rows } = getTermSize();
-  const contentWidth = Math.min(cols - 4, 100);
+  const isGlobalScope = options.runtime.scope.type === "global";
   const baseHeaderLines = ["", "", ...options.bannerLines, ""];
+  const spinnerLines =
+    options.isProcessing && options.currentSpinnerLine
+      ? ["", `  ${options.currentSpinnerLine}`]
+      : [];
+
+  if (!isGlobalScope) {
+    const rawContentHeight =
+      baseHeaderLines.length +
+      options.transcriptTotalLines +
+      spinnerLines.length +
+      CHAT_GAP_ROWS +
+      stickyRows.length;
+
+    if (rawContentHeight <= rows) {
+      // --- FLOWING MODE: input inline, no scroll ---
+      const wasSticky = currentInputMode === "sticky";
+      currentInputMode = "flowing";
+      currentStickyRows = 0;
+
+      for (const line of baseHeaderLines) buf.push(line);
+      const transcriptLines = options.getTranscriptLines(0, options.transcriptTotalLines);
+      for (const line of transcriptLines) buf.push(line);
+      for (const line of spinnerLines) buf.push(line);
+      for (let i = 0; i < CHAT_GAP_ROWS; i++) buf.push("");
+      lastInputStartRow = baseHeaderLines.length + transcriptLines.length + spinnerLines.length + CHAT_GAP_ROWS + 1;
+      for (const line of stickyRows) buf.push(line);
+
+      if (wasSticky) {
+        lastStickyBottomRows = null;
+        lastStickyBottomScreenSize = "";
+      }
+      buf.flush(0, 0);
+
+      const overlayRows = buildAutocompleteOverlayRows(
+        options.slashMatches,
+        options.openMatches,
+        options.pinMatches,
+        options.slashSelected,
+        options.openSelected,
+        options.pinSelected,
+        options.inputBuffer
+      );
+      if (overlayRows === null && lastOverlayRows) {
+        invalidateScreenRows(
+          lastOverlayStartRow,
+          lastOverlayStartRow + lastOverlayRows.length - 1
+        );
+        lastOverlayRows = null;
+        lastOverlayStartRow = -1;
+        lastOverlayScreenSize = "";
+      }
+      writeAutocompleteOverlay(overlayRows);
+
+      return { chatScrollOffset: 0, maxScroll: 0 };
+    }
+
+    // --- STICKY MODE (non-global, no centering) ---
+    currentInputMode = "sticky";
+    const olderHintLines =
+      options.chatScrollOffset > 0
+        ? [
+            C.dim(
+              "  ↑ Older · PgUp / PgDn · Ctrl+P up / Ctrl+N down · End latest · Home oldest"
+            ),
+          ]
+        : [];
+    const maxContent = Math.max(1, rows - currentStickyRows - CHAT_GAP_ROWS);
+    const headerLines = baseHeaderLines;
+    const totalVirtualLines =
+      headerLines.length +
+      olderHintLines.length +
+      options.transcriptTotalLines +
+      spinnerLines.length +
+      CHAT_GAP_ROWS;
+
+    const maxScroll = Math.max(0, totalVirtualLines - maxContent);
+    const chatScrollOffset = Math.min(
+      Math.max(0, options.chatScrollOffset),
+      maxScroll
+    );
+    const end = totalVirtualLines - chatScrollOffset;
+    const start = Math.max(0, end - maxContent);
+    const transcriptSectionStart = headerLines.length + olderHintLines.length;
+    const transcriptLines = options.getTranscriptLines(
+      Math.max(0, start - transcriptSectionStart),
+      Math.max(0, end - transcriptSectionStart)
+    );
+    const overlayRows = buildAutocompleteOverlayRows(
+      options.slashMatches,
+      options.openMatches,
+      options.pinMatches,
+      options.slashSelected,
+      options.openSelected,
+      options.pinSelected,
+      options.inputBuffer
+    );
+    if (overlayRows === null && lastOverlayRows) {
+      invalidateScreenRows(
+        lastOverlayStartRow,
+        lastOverlayStartRow + lastOverlayRows.length - 1
+      );
+      lastOverlayRows = null;
+      lastOverlayStartRow = -1;
+      lastOverlayScreenSize = "";
+    }
+
+    appendVisibleLines(buf, headerLines, start, end, 0);
+    appendVisibleLines(buf, olderHintLines, start, end, headerLines.length);
+    appendVisibleLines(buf, transcriptLines, 0, transcriptLines.length, 0);
+    appendVisibleLines(
+      buf,
+      spinnerLines,
+      start,
+      end,
+      transcriptSectionStart + options.transcriptTotalLines
+    );
+    appendVisibleBlankSection(
+      buf,
+      CHAT_GAP_ROWS,
+      start,
+      end,
+      headerLines.length +
+        olderHintLines.length +
+        options.transcriptTotalLines +
+        spinnerLines.length
+    );
+
+    lastInputStartRow = rows - currentStickyRows + 1;
+    buf.flush(currentStickyRows, chatScrollOffset);
+    writeStickyBottom(stickyRows);
+    writeAutocompleteOverlay(overlayRows);
+
+    return { chatScrollOffset, maxScroll };
+  }
+
+  // --- GLOBAL SCOPE: existing behavior with centering ---
+  currentInputMode = "sticky";
   const olderHintLines =
     options.chatScrollOffset > 0
       ? [
@@ -154,10 +298,6 @@ export function renderChatFrame(
             "  ↑ Older · PgUp / PgDn · Ctrl+P up / Ctrl+N down · End latest · Home oldest"
           ),
         ]
-      : [];
-  const spinnerLines =
-    options.isProcessing && options.currentSpinnerLine
-      ? ["", `  ${options.currentSpinnerLine}`]
       : [];
   const maxContent = Math.max(1, rows - currentStickyRows - CHAT_GAP_ROWS);
   const baseContentHeight =
@@ -227,6 +367,7 @@ export function renderChatFrame(
       spinnerLines.length
   );
 
+  lastInputStartRow = rows - currentStickyRows + 1;
   buf.flush(currentStickyRows, chatScrollOffset);
   writeStickyBottom(stickyRows);
   writeAutocompleteOverlay(overlayRows);
@@ -248,6 +389,9 @@ export function renderInputFooter(options: {
   pinSelected: number;
   availableCommands?: CommandDefinition[];
 }): void {
+  if (currentInputMode === "flowing") {
+    return;
+  }
   writeStickyBottom(
     buildStickyBottomRows(
       options.placeholder,
@@ -281,7 +425,9 @@ function buildAutocompleteOverlayRows(
 ): string[] | null {
   const { cols, rows } = getTermSize();
   const maxVisibleCols = Math.max(1, cols - 1);
-  const lastRowAboveInput = rows - currentStickyRows;
+  const lastRowAboveInput = currentInputMode === "flowing"
+    ? lastInputStartRow - 1
+    : rows - currentStickyRows;
   if (lastRowAboveInput < 1) return null;
   const hasOverlay =
     openMatches.length > 0 || pinMatches.length > 0 || slashMatches.length > 0;
@@ -543,7 +689,9 @@ function writeAutocompleteOverlay(rows: string[] | null): void {
     return;
   }
 
-  const startRow = Math.max(1, totalRows - currentStickyRows - rows.length + 1);
+  const startRow = currentInputMode === "flowing"
+    ? Math.max(1, lastInputStartRow - rows.length)
+    : Math.max(1, totalRows - currentStickyRows - rows.length + 1);
   if (
     lastOverlayScreenSize !== screenSizeKey ||
     lastOverlayStartRow !== startRow ||
