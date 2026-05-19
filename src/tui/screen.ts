@@ -113,21 +113,12 @@ class ScreenBuffer {
       rendered.push("");
     }
 
-    const writes: string[] = [];
+    const writes: string[] = ["\x1B[0m"];
     for (let row = 0; row < maxContentLines; row++) {
-      if (lastFlushedRows?.[row] === rendered[row]) {
-        continue;
-      }
-      if (writes.length === 0) {
-        writes.push("\x1B[0m");
-      }
       writes.push(`\x1B[${row + 1};1H\x1B[0m\x1B[2K${rendered[row]!}`);
     }
-
-    if (writes.length > 0) {
-      writes.push("\x1B[0m");
-      process.stdout.write(writes.join(""));
-    }
+    writes.push("\x1B[0m");
+    process.stdout.write(writes.join(""));
 
     lastFlushedRows = Array.from({ length: rows }, (_, i) =>
       i < rendered.length ? rendered[i]! : null

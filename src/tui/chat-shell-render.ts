@@ -36,7 +36,7 @@ const BASE_STICKY_ROWS = 4;
 let currentStickyRows = BASE_STICKY_ROWS;
 export function getStickyBottomRows(): number { return currentStickyRows; }
 export const STICKY_BOTTOM_ROWS = BASE_STICKY_ROWS;
-const CHAT_GAP_ROWS = 2;
+export const CHAT_GAP_ROWS = 2;
 const MAX_OVERLAY_ROWS = 8;
 export const MAIN_VIEW_BOTTOM_RESERVE = BASE_STICKY_ROWS + CHAT_GAP_ROWS;
 
@@ -210,27 +210,29 @@ export function renderChatFrame(
             ),
           ]
         : [];
-    const maxContent = Math.max(1, rows - currentStickyRows - CHAT_GAP_ROWS);
     const headerLines = baseHeaderLines;
+    const transcriptLines = options.getTranscriptLines(0, options.transcriptTotalLines);
+
+    for (const line of headerLines) buf.push(line);
+    for (const line of olderHintLines) buf.push(line);
+    for (const line of transcriptLines) buf.push(line);
+    for (const line of spinnerLines) buf.push(line);
+    for (let i = 0; i < CHAT_GAP_ROWS; i++) buf.push("");
+
     const totalVirtualLines =
       headerLines.length +
       olderHintLines.length +
-      options.transcriptTotalLines +
+      transcriptLines.length +
       spinnerLines.length +
       CHAT_GAP_ROWS;
-
+    const maxContent = Math.max(1, rows - currentStickyRows);
     const maxScroll = Math.max(0, totalVirtualLines - maxContent);
     const chatScrollOffset = Math.min(
       Math.max(0, options.chatScrollOffset),
       maxScroll
     );
-    const end = totalVirtualLines - chatScrollOffset;
-    const start = Math.max(0, end - maxContent);
-    const transcriptSectionStart = headerLines.length + olderHintLines.length;
-    const transcriptLines = options.getTranscriptLines(
-      Math.max(0, start - transcriptSectionStart),
-      Math.max(0, end - transcriptSectionStart)
-    );
+
+
     const overlayRows = buildAutocompleteOverlayRows(
       options.slashMatches,
       options.openMatches,
@@ -246,27 +248,6 @@ export function renderChatFrame(
         lastOverlayStartRow + lastOverlayRows.length - 1
       );
     }
-
-    appendVisibleLines(buf, headerLines, start, end, 0);
-    appendVisibleLines(buf, olderHintLines, start, end, headerLines.length);
-    appendVisibleLines(buf, transcriptLines, 0, transcriptLines.length, 0);
-    appendVisibleLines(
-      buf,
-      spinnerLines,
-      start,
-      end,
-      transcriptSectionStart + options.transcriptTotalLines
-    );
-    appendVisibleBlankSection(
-      buf,
-      CHAT_GAP_ROWS,
-      start,
-      end,
-      headerLines.length +
-        olderHintLines.length +
-        options.transcriptTotalLines +
-        spinnerLines.length
-    );
 
     lastInputStartRow = rows - currentStickyRows + 1;
     buf.flush(currentStickyRows, chatScrollOffset);
@@ -286,7 +267,7 @@ export function renderChatFrame(
           ),
         ]
       : [];
-  const maxContent = Math.max(1, rows - currentStickyRows - CHAT_GAP_ROWS);
+  const maxContent = Math.max(1, rows - currentStickyRows);
   const baseContentHeight =
     baseHeaderLines.length +
     olderHintLines.length +
@@ -295,25 +276,26 @@ export function renderChatFrame(
     CHAT_GAP_ROWS;
   const topPadding = Math.floor(Math.max(0, maxContent - baseContentHeight) / 2);
   const headerLines = [...new Array<string>(topPadding).fill(""), ...baseHeaderLines];
+  const transcriptLines = options.getTranscriptLines(0, options.transcriptTotalLines);
+
+  for (const line of headerLines) buf.push(line);
+  for (const line of olderHintLines) buf.push(line);
+  for (const line of transcriptLines) buf.push(line);
+  for (const line of spinnerLines) buf.push(line);
+  for (let i = 0; i < CHAT_GAP_ROWS; i++) buf.push("");
+
   const totalVirtualLines =
     headerLines.length +
     olderHintLines.length +
-    options.transcriptTotalLines +
+    transcriptLines.length +
     spinnerLines.length +
     CHAT_GAP_ROWS;
-
   const maxScroll = Math.max(0, totalVirtualLines - maxContent);
   const chatScrollOffset = Math.min(
     Math.max(0, options.chatScrollOffset),
     maxScroll
   );
-  const end = totalVirtualLines - chatScrollOffset;
-  const start = Math.max(0, end - maxContent);
-  const transcriptSectionStart = headerLines.length + olderHintLines.length;
-  const transcriptLines = options.getTranscriptLines(
-    Math.max(0, start - transcriptSectionStart),
-    Math.max(0, end - transcriptSectionStart)
-  );
+
   const overlayRows = buildAutocompleteOverlayRows(
     options.slashMatches,
     options.openMatches,
@@ -329,27 +311,6 @@ export function renderChatFrame(
       lastOverlayStartRow + lastOverlayRows.length - 1
     );
   }
-
-  appendVisibleLines(buf, headerLines, start, end, 0);
-  appendVisibleLines(buf, olderHintLines, start, end, headerLines.length);
-  appendVisibleLines(buf, transcriptLines, 0, transcriptLines.length, 0);
-  appendVisibleLines(
-    buf,
-    spinnerLines,
-    start,
-    end,
-    transcriptSectionStart + options.transcriptTotalLines
-  );
-  appendVisibleBlankSection(
-    buf,
-    CHAT_GAP_ROWS,
-    start,
-    end,
-    headerLines.length +
-      olderHintLines.length +
-      options.transcriptTotalLines +
-      spinnerLines.length
-  );
 
   lastInputStartRow = rows - currentStickyRows + 1;
   buf.flush(currentStickyRows, chatScrollOffset);

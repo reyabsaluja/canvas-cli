@@ -27,10 +27,12 @@ import {
 import type { OpenableResource } from "./open-resources.js";
 import { searchOpenableResources, getOpenCommand } from "./open-resources.js";
 import {
+  CHAT_GAP_ROWS,
   MAIN_VIEW_BOTTOM_RESERVE,
   buildBannerLines,
   getInputMode,
   getRenderedMessageLines,
+  getStickyBottomRows,
   renderChatFrame,
   renderInputFooter,
 } from "./chat-shell-render.js";
@@ -664,6 +666,14 @@ export async function runChatShell<TExit>(
     }
 
     function setChatScrollOffset(nextOffset: number): boolean {
+      if (nextOffset > maxChatScrollOffset) {
+        const transcriptIndex = getActiveTranscriptIndex();
+        const { rows } = getTermSize();
+        const bannerLen = getCachedBannerLines().length + 3;
+        const totalVirtual = bannerLen + 1 + transcriptIndex.totalLines + CHAT_GAP_ROWS;
+        const maxContent = Math.max(1, rows - getStickyBottomRows());
+        maxChatScrollOffset = Math.max(0, totalVirtual - maxContent);
+      }
       const normalized = Math.max(0, Math.min(nextOffset, maxChatScrollOffset));
       if (normalized === chatScrollOffset) {
         return false;
