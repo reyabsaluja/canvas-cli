@@ -588,8 +588,14 @@ function buildStickyBottomRows(
       const colored = rawText
         .replace(/@\S+/g, (match) => C.warm(match))
         .replace(/\/\S+/g, (match) => C.warm(match));
-      const ghostSuffix = hasCursor && ghost ? inputPlaceholderFg(ghost) : "";
-      const display = hasCursor ? colored + cursor + ghostSuffix : colored;
+      let display: string;
+      if (hasCursor && ghost) {
+        const ghostCursor = chalk.bgHex("#505050").hex("#808080")(ghost[0]!);
+        const ghostRest = ghost.length > 1 ? inputPlaceholderFg(ghost.slice(1)) : "";
+        display = colored + ghostCursor + ghostRest;
+      } else {
+        display = hasCursor ? colored + cursor : colored;
+      }
       const padded = padTo(display, w);
       if (isFirstVisible) {
         contentRows.push(`  ${b("│")} ${inputPromptColor("❯")} ${padded} ${b("│")}`);
