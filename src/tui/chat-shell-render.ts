@@ -488,12 +488,14 @@ function buildAutocompleteOverlayRows(
     0,
     Math.min(slashSelected - Math.floor(maxShow / 2), slashMatches.length - maxShow)
   );
+  const maxNameLen = Math.max(...slashMatches.slice(start, start + maxShow).map((c) => c.name.length));
   const firstRow = lastRowAboveInput - maxShow + 1;
   for (let index = 0; index < maxShow; index++) {
     const command = slashMatches[start + index]!;
     const selected = start + index === slashSelected;
     const pointer = selected ? C.bold("❯ ") : "  ";
-    const name = selected ? C.bold(command.name) : C.text(command.name);
+    const padded = command.name + " ".repeat(maxNameLen - command.name.length);
+    const name = selected ? C.bold(padded) : C.text(padded);
     overlayRows[firstRow + index - clearStartRow] = fitToRow(
       ` ${pointer}${name}  ${C.muted(command.description)}`
     );
@@ -587,7 +589,13 @@ function buildStickyBottomRows(
       const rawText = hasCursor ? chunk.slice(0, -1) : chunk;
       const colored = rawText
         .replace(/@\S+/g, (match) => C.warm(match))
-        .replace(/\/\S+/g, (match) => C.warm(match));
+        .replace(/\/\S+/g, (match) => {
+          const cmd = match.toLowerCase();
+          if (availableCommands?.some((c) => c.name === cmd || (c.aliases ?? []).includes(cmd))) {
+            return C.warm(match);
+          }
+          return match;
+        });
       let display: string;
       if (hasCursor && ghost) {
         const ghostCursor = chalk.bgHex("#505050").hex("#808080")(ghost[0]!);
