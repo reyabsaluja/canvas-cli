@@ -29,6 +29,7 @@ import { searchOpenableResources, getOpenCommand } from "./open-resources.js";
 import {
   MAIN_VIEW_BOTTOM_RESERVE,
   buildBannerLines,
+  getInputMode,
   getRenderedMessageLines,
   renderChatFrame,
   renderInputFooter,
@@ -472,9 +473,18 @@ export async function runChatShell<TExit>(
     };
   }
 
+  let lastTranscriptTotalLines = 0;
+
   function renderNow(): void {
     const transcriptIndex = getActiveTranscriptIndex();
     const inputState = getInputState();
+
+    // Keep viewport stable when user is scrolled up and content grows
+    if (chatScrollOffset > 0 && transcriptIndex.totalLines > lastTranscriptTotalLines) {
+      chatScrollOffset += transcriptIndex.totalLines - lastTranscriptTotalLines;
+    }
+    lastTranscriptTotalLines = transcriptIndex.totalLines;
+
     const next = renderChatFrame({
       runtime: options.runtime,
       placeholder,
@@ -527,6 +537,10 @@ export async function runChatShell<TExit>(
   }
 
   function renderInputOnly(inputState: InputState = getInputState()): void {
+    if (getInputMode() === "flowing") {
+      render();
+      return;
+    }
     renderInputFooter({
       placeholder,
       inputBuffer,
@@ -551,6 +565,10 @@ export async function runChatShell<TExit>(
     hadOverlay: boolean,
     inputState: InputState = getInputState()
   ): void {
+    if (getInputMode() === "flowing") {
+      render();
+      return;
+    }
     if (hadOverlay && !inputState.hasVisibleOverlay) {
       scheduleRender(true);
       return;
@@ -971,6 +989,7 @@ export async function runChatShell<TExit>(
         messages.splice(0, messages.length, ...resetMessages);
         markTranscriptDirty(0);
         chatScrollOffset = 0;
+        lastTranscriptTotalLines = 0;
         await persistence.flush();
         render();
         return;
