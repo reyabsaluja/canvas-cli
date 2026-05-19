@@ -950,7 +950,7 @@ export async function runChatShell<TExit>(
 
     const NAV_COMMANDS = new Set([
       "/courses", "/back", "/recent", "/quit", "/exit", "/q", "/home",
-      "/manage-courses",
+      "/manage-courses", "/assignments",
     ]);
 
     async function handleCommandInput(
