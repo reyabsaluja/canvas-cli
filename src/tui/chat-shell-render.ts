@@ -567,7 +567,7 @@ function buildStickyBottomRows(
         : placeholder.slice(0, maxPlaceholder);
     const styled = inputPlaceholderFg(trimmed);
     const displayText = padTo(cursor + styled, firstLineWidth);
-    contentRows.push(`  ${b("│")} ${inputPromptColor(">")} ${displayText} ${b("│")}`);
+    contentRows.push(`  ${b("│")} ${inputPromptColor("❯")} ${displayText} ${b("│")}`);
   } else {
     const ghost = getInlineCommandGhost(inputBuffer, availableCommands);
     const textWithCursor = inputBuffer + "█";
@@ -592,12 +592,14 @@ function buildStickyBottomRows(
       const w = isFirstVisible ? firstLineWidth : contLineWidth;
       const hasCursor = chunk.endsWith("█");
       const rawText = hasCursor ? chunk.slice(0, -1) : chunk;
-      const colored = rawText.replace(/@\S+/g, (match) => C.warm(match));
+      const colored = rawText
+        .replace(/@\S+/g, (match) => C.warm(match))
+        .replace(/\/\S+/g, (match) => C.warm(match));
       const ghostSuffix = hasCursor && ghost ? inputPlaceholderFg(ghost) : "";
       const display = hasCursor ? colored + cursor + ghostSuffix : colored;
       const padded = padTo(display, w);
       if (isFirstVisible) {
-        contentRows.push(`  ${b("│")} ${inputPromptColor(">")} ${padded} ${b("│")}`);
+        contentRows.push(`  ${b("│")} ${inputPromptColor("❯")} ${padded} ${b("│")}`);
       } else {
         contentRows.push(`  ${b("│")} ${padded} ${b("│")}`);
       }
