@@ -171,9 +171,7 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
 
       buf.push("");
       buf.push(
-        P.dimmer(
-          `  ↑↓ navigate  enter select${backLabel ? `  esc ${backLabel}` : ""}${filterable ? "  type to search" : ""}`
-        )
+        "  " + C.pureWhite("↑↓") + P.dimmer(" navigate  ") + C.pureWhite("enter") + P.dimmer(" select") + (backLabel ? "  " + C.pureWhite("esc") + P.dimmer(` ${backLabel}`) : "") + (filterable ? "  " + P.dimmer("type to search") : "")
       );
 
       buf.flush();
