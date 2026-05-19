@@ -948,12 +948,19 @@ export async function runChatShell<TExit>(
       render();
     }
 
+    const NAV_COMMANDS = new Set([
+      "/courses", "/back", "/recent", "/quit", "/exit", "/q", "/home",
+      "/manage-courses",
+    ]);
+
     async function handleCommandInput(
       rawInput: string,
       commandName: string,
       args: string
     ): Promise<void> {
-      await appendPersistedMessage({ role: "user", content: rawInput });
+      if (!NAV_COMMANDS.has(commandName.toLowerCase())) {
+        await appendPersistedMessage({ role: "user", content: rawInput });
+      }
 
       if (commandName === "/help") {
         const helpLines = availableCommands.map(
