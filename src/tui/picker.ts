@@ -85,8 +85,11 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
       const visibleItems = filtered.slice(windowStart, windowEnd);
 
       buf.push("");
-      buf.push(P.whiteBold(`  ${title}`));
-      if (subtitle) buf.push(P.dim(`  ${subtitle}`));
+      buf.push("  " + C.primaryBold("▎") + " " + P.whiteBold(title));
+      if (subtitle) buf.push("    " + P.dim(subtitle));
+      const dividerWidth = Math.max(24, cols - 4);
+      const accentWidth = Math.min(6, dividerWidth);
+      buf.push("  " + C.primary("─".repeat(accentWidth)) + C.dimmer("─".repeat(dividerWidth - accentWidth)));
       buf.push("");
 
       if (filterable) {
