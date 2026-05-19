@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { hideCursor, showCursor, createBuffer, clearScreen, getTermSize, padAnsiToWidth, stripAnsi, CANVAS_TEXT, C } from "./screen.js";
+import { hideCursor, showCursor, createBuffer, clearScreen, getTermSize, padAnsiToWidth, stripAnsi, CANVAS_TEXT, C, visibleWidth } from "./screen.js";
 import { USER_ABORT_EXIT_CODE } from "./chat-shell-exit.js";
 import type { Course } from "../domain/models.js";
 import type { UserCourse, CourseConfig } from "./course-config.js";
@@ -54,9 +54,9 @@ export function showMultiSelect(
       const visibleItems = filtered.slice(windowStart, windowEnd);
 
       buf.push("");
+      const _artW = Math.max(...CANVAS_TEXT.map((l) => visibleWidth(l)));
       for (const line of CANVAS_TEXT) {
-        const lineWidth = stripAnsi(line).length;
-        const pad = Math.max(0, Math.floor((cols - lineWidth) / 2));
+        const pad = Math.max(0, Math.floor((cols - _artW) / 2));
         buf.push(" ".repeat(pad) + C.primary(line));
       }
       buf.push("");
@@ -257,9 +257,9 @@ export async function promptRenames(
     const border = C.secondary;
 
     console.log("");
+    const artW = Math.max(...CANVAS_TEXT.map((l) => visibleWidth(l)));
     for (const line of CANVAS_TEXT) {
-      const lineWidth = stripAnsi(line).length;
-      const pad = Math.max(0, Math.floor((cols - lineWidth) / 2));
+      const pad = Math.max(0, Math.floor((cols - artW) / 2));
       console.log(" ".repeat(pad) + C.primary(line));
     }
     console.log("");
@@ -302,9 +302,9 @@ export async function promptRenames(
   const { cols } = getTermSize();
 
   console.log("");
+  const artW2 = Math.max(...CANVAS_TEXT.map((l) => visibleWidth(l)));
   for (const line of CANVAS_TEXT) {
-    const lineWidth = stripAnsi(line).length;
-    const pad = Math.max(0, Math.floor((cols - lineWidth) / 2));
+    const pad = Math.max(0, Math.floor((cols - artW2) / 2));
     console.log(" ".repeat(pad) + C.primary(line));
   }
   console.log("");
@@ -472,9 +472,9 @@ export async function runCourseManagement(
         const border = C.secondary;
 
         console.log("");
+        const artW3 = Math.max(...CANVAS_TEXT.map((l) => visibleWidth(l)));
         for (const line of CANVAS_TEXT) {
-          const lineWidth = stripAnsi(line).length;
-          const pad = Math.max(0, Math.floor((cols - lineWidth) / 2));
+          const pad = Math.max(0, Math.floor((cols - artW3) / 2));
           console.log(" ".repeat(pad) + C.primary(line));
         }
         console.log("");
@@ -505,9 +505,9 @@ export async function runCourseManagement(
 
           clearScreen();
           console.log("");
+          const artW4 = Math.max(...CANVAS_TEXT.map((l) => visibleWidth(l)));
           for (const line of CANVAS_TEXT) {
-            const lineWidth = stripAnsi(line).length;
-            const pad = Math.max(0, Math.floor((cols - lineWidth) / 2));
+            const pad = Math.max(0, Math.floor((cols - artW4) / 2));
             console.log(" ".repeat(pad) + C.primary(line));
           }
           console.log("");
