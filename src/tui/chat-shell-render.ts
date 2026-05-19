@@ -77,6 +77,20 @@ export function resetChatShellRenderCache(): void {
   lastInputStartRow = 0;
 }
 
+const CANVAS_LOGO = [
+  "  ⠀⠀⢀⣤⠀⠺⣿⣿⠗⠀⣠⣀⠀⠀",
+  "  ⠀⣴⣿⠟⣀⠀⠰⡆⠀⢀⠻⣿⣧⠀",
+  "  ⣠⡀⠀⠈⠛⠀⠀⠀⠀⠛⠃⠀⢀⣠",
+  "  ⣿⣿⠰⠶⠀⠀⠀⠀⠀⠀⠰⠆⢾⣿",
+  "  ⠙⠁⠀⢀⣤⠀⠀⠀⠀⣠⡄⠀⠈⠛",
+  "  ⠀⠺⣿⣦⠉⠀⠰⠆⠀⠈⣱⣾⡿⠀",
+  "  ⠀⠀⠈⠛⠀⣰⣾⣿⣦⠀⠙⠋⠀⠀",
+];
+
+function logoVisualWidth(line: string): number {
+  return [...line].length;
+}
+
 export function buildBannerLines(options: {
   runtime: ScopeRuntime;
   bannerRenderer?: (buf: { push(line?: string): void }) => void;
@@ -91,51 +105,30 @@ export function buildBannerLines(options: {
     return lines;
   }
 
-  const { cols } = getTermSize();
   const title = options.runtime.title;
   const subtitle = options.runtime.subtitle ?? "";
-  const description = options.runtime.description ?? "";
 
-  const chip = C.primaryBold("▎");
-  const chipPlainWidth = 2; // "▎ "
-  const left =
-    chip +
-    " " +
-    C.pureWhiteBold(title) +
-    (subtitle ? "  " + statusBarGrey(subtitle) : "");
-  const leftPlainWidth =
-    chipPlainWidth + title.length + (subtitle ? 2 + subtitle.length : 0);
+  const logoWidth = Math.max(...CANVAS_LOGO.map((l) => logoVisualWidth(l)));
+  const textLines: string[] = [
+    C.pureWhiteBold(title),
+    subtitle ? statusBarGrey(subtitle) : "",
+  ].filter(Boolean);
 
-  const statusText = options.runtime.statusLabel?.replace(/^Status:\s*/, "") ?? "";
-  const maxRightWidth = Math.max(0, cols - 4 - leftPlainWidth - 4);
-  let rightText = "";
-  if (description && maxRightWidth >= 12) {
-    rightText = description.length > maxRightWidth
-      ? description.slice(0, maxRightWidth - 3) + "..."
-      : description;
-    if (statusText) {
-      const combined = `${rightText} · ${statusText}`;
-      rightText = combined.length > maxRightWidth
-        ? rightText
-        : combined;
-    }
-  } else {
-    rightText = statusText;
+  const totalLogoLines = CANVAS_LOGO.length;
+  const textStart = 2;
+
+  const bannerLines: string[] = [];
+  for (let i = 0; i < totalLogoLines; i++) {
+    const logoLine = CANVAS_LOGO[i]!;
+    const pad = " ".repeat(Math.max(0, logoWidth - logoVisualWidth(logoLine)));
+    const textIndex = i - textStart;
+    const rightText = textIndex >= 0 && textIndex < textLines.length
+      ? "   " + textLines[textIndex]!
+      : "";
+    bannerLines.push(" " + C.primary(logoLine) + pad + rightText);
   }
-  const right = rightText ? statusBarGrey(rightText) : "";
-  const rightPlain = rightText;
 
-  const gap = Math.max(2, cols - 4 - leftPlainWidth - rightPlain.length);
-  const headerLine = "  " + left + " ".repeat(gap) + right;
-
-  const dividerWidth = Math.max(24, cols - 4);
-  const accentWidth = Math.min(6, dividerWidth);
-  const divider =
-    "  " +
-    C.primary("─".repeat(accentWidth)) +
-    C.dimmer("─".repeat(dividerWidth - accentWidth));
-
-  return [headerLine, divider];
+  return bannerLines;
 }
 
 export function renderChatFrame(
