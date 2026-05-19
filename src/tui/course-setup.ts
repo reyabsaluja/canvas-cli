@@ -118,10 +118,10 @@ export function showMultiSelect(
       }
       const count = checked.size;
       const doneHint = count > 0
-        ? C.success(`d done (${count} selected)`)
-        : C.dimmer(`d done (${count} selected)`);
+        ? C.pureWhite("d") + C.success(` done (${count} selected)`)
+        : C.pureWhite("d") + C.dimmer(` done (${count} selected)`);
       buf.push(
-        C.dimmer("  enter/space toggle  ↑↓ navigate  ") + doneHint + C.dimmer("  type to filter")
+        "  " + C.pureWhite("enter/space") + C.dimmer(" toggle  ") + C.pureWhite("↑↓") + C.dimmer(" navigate  ") + doneHint + "  " + C.dimmer("type to filter")
       );
 
       buf.flush();
