@@ -58,10 +58,10 @@ export const COMMANDS: CommandDefinition[] = [
     scopes: ["global", "course", "workspace"],
   },
   {
-    name: "/make-pdf",
+    name: "/pdf",
     description: "Generate a polished PDF from chat context",
     scopes: ["global", "course", "workspace"],
-    aliases: ["/pdf"],
+    aliases: ["/make-pdf"],
   },
   {
     name: "/quit",
