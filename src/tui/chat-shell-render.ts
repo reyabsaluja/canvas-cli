@@ -205,9 +205,7 @@ export function renderChatFrame(
     const olderHintLines =
       options.chatScrollOffset > 0
         ? [
-            C.dim(
-              "  ↑ Older · PgUp / PgDn · Ctrl+P up / Ctrl+N down · End latest · Home oldest"
-            ),
+            `  ${C.dim("↑ Older ·")} ${C.white("PgUp")} ${C.dim("/")} ${C.white("PgDn")} ${C.dim("·")} ${C.white("Ctrl+P")} ${C.dim("up /")} ${C.white("Ctrl+N")} ${C.dim("down ·")} ${C.white("End")} ${C.dim("latest ·")} ${C.white("Home")} ${C.dim("oldest")}`,
           ]
         : [];
     const headerLines = baseHeaderLines;
