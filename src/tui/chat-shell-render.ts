@@ -36,7 +36,7 @@ const BASE_STICKY_ROWS = 4;
 let currentStickyRows = BASE_STICKY_ROWS;
 export function getStickyBottomRows(): number { return currentStickyRows; }
 export const STICKY_BOTTOM_ROWS = BASE_STICKY_ROWS;
-export const CHAT_GAP_ROWS = 2;
+export const CHAT_GAP_ROWS = 1;
 const MAX_OVERLAY_ROWS = 8;
 export const MAIN_VIEW_BOTTOM_RESERVE = BASE_STICKY_ROWS + CHAT_GAP_ROWS;
 
