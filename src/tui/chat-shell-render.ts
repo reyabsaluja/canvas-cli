@@ -31,6 +31,8 @@ let lastStickyBottomScreenSize = "";
 let lastOverlayRows: string[] | null = null;
 let lastOverlayStartRow = -1;
 let lastOverlayScreenSize = "";
+let lastOverlayPaintedStart = -1;
+let lastOverlayPaintedEnd = -1;
 
 const BASE_STICKY_ROWS = 4;
 let currentStickyRows = BASE_STICKY_ROWS;
@@ -73,6 +75,8 @@ export function resetChatShellRenderCache(): void {
   lastOverlayRows = null;
   lastOverlayStartRow = -1;
   lastOverlayScreenSize = "";
+  lastOverlayPaintedStart = -1;
+  lastOverlayPaintedEnd = -1;
   currentInputMode = "sticky";
   lastInputStartRow = 0;
 }
@@ -188,12 +192,7 @@ export function renderChatFrame(
         options.pinSelected,
         options.inputBuffer
       );
-      if (overlayRows === null && lastOverlayRows && lastOverlayStartRow > 0) {
-        invalidateScreenRows(
-          lastOverlayStartRow,
-          lastOverlayStartRow + lastOverlayRows.length - 1
-        );
-      }
+      clearOverlayPaintedRows();
       buf.flush(0, 0);
       writeAutocompleteOverlay(overlayRows);
 
@@ -240,13 +239,7 @@ export function renderChatFrame(
       options.pinSelected,
       options.inputBuffer
     );
-    if (overlayRows === null && lastOverlayRows && lastOverlayStartRow > 0) {
-      invalidateScreenRows(
-        lastOverlayStartRow,
-        lastOverlayStartRow + lastOverlayRows.length - 1
-      );
-    }
-
+    clearOverlayPaintedRows();
     lastInputStartRow = rows - currentStickyRows + 1;
     buf.flush(currentStickyRows, chatScrollOffset);
     writeStickyBottom(stickyRows);
@@ -303,13 +296,7 @@ export function renderChatFrame(
     options.pinSelected,
     options.inputBuffer
   );
-  if (overlayRows === null && lastOverlayRows && lastOverlayStartRow > 0) {
-    invalidateScreenRows(
-      lastOverlayStartRow,
-      lastOverlayStartRow + lastOverlayRows.length - 1
-    );
-  }
-
+  clearOverlayPaintedRows();
   lastInputStartRow = rows - currentStickyRows + 1;
   buf.flush(currentStickyRows, chatScrollOffset);
   writeStickyBottom(stickyRows);
@@ -638,6 +625,21 @@ function writeStickyBottom(rows: string[]): void {
   lastStickyBottomRows = rows.slice();
 }
 
+function clearOverlayPaintedRows(): void {
+  if (lastOverlayPaintedStart < 1 || lastOverlayPaintedEnd < lastOverlayPaintedStart) {
+    return;
+  }
+  const writes: string[] = ["\x1B[0m"];
+  for (let row = lastOverlayPaintedStart; row <= lastOverlayPaintedEnd; row++) {
+    writes.push(`\x1B[${row};1H\x1B[2K`);
+  }
+  writes.push("\x1B[0m");
+  process.stdout.write(writes.join(""));
+  invalidateScreenRows(lastOverlayPaintedStart, lastOverlayPaintedEnd);
+  lastOverlayPaintedStart = -1;
+  lastOverlayPaintedEnd = -1;
+}
+
 function writeAutocompleteOverlay(rows: string[] | null): void {
   const { rows: totalRows, cols } = getTermSize();
   const screenSizeKey = `${totalRows}:${cols}`;
@@ -651,33 +653,22 @@ function writeAutocompleteOverlay(rows: string[] | null): void {
   const startRow = currentInputMode === "flowing"
     ? Math.max(1, lastInputStartRow - rows.length)
     : Math.max(1, totalRows - currentStickyRows - rows.length + 1);
-  if (
-    lastOverlayScreenSize !== screenSizeKey ||
-    lastOverlayStartRow !== startRow ||
-    !lastOverlayRows ||
-    lastOverlayRows.length !== rows.length
-  ) {
-    lastOverlayRows = null;
-    lastOverlayStartRow = startRow;
-    lastOverlayScreenSize = screenSizeKey;
-  }
 
-  const writes: string[] = [];
+  clearOverlayPaintedRows();
+
+  const writes: string[] = ["\x1B[0m"];
   for (let index = 0; index < rows.length; index++) {
-    if (lastOverlayRows?.[index] === rows[index]) {
-      continue;
-    }
-    if (writes.length === 0) {
-      writes.push("\x1B[0m");
-    }
     writes.push(`\x1B[${startRow + index};1H\x1B[0m\x1B[2K${rows[index]!}`);
   }
-  if (writes.length > 0) {
-    writes.push("\x1B[0m");
-    process.stdout.write(writes.join(""));
-  }
+  writes.push("\x1B[0m");
+  process.stdout.write(writes.join(""));
+  invalidateScreenRows(startRow, startRow + rows.length - 1);
 
+  lastOverlayPaintedStart = startRow;
+  lastOverlayPaintedEnd = startRow + rows.length - 1;
   lastOverlayRows = rows.slice();
+  lastOverlayStartRow = startRow;
+  lastOverlayScreenSize = screenSizeKey;
 }
 
 export function getRenderedMessageLines(
