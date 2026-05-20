@@ -653,15 +653,31 @@ function writeAutocompleteOverlay(rows: string[] | null): void {
     ? Math.max(1, lastInputStartRow - rows.length)
     : Math.max(1, totalRows - currentStickyRows - rows.length + 1);
 
-  clearOverlayPaintedRows();
+  const positionChanged =
+    lastOverlayScreenSize !== screenSizeKey ||
+    lastOverlayStartRow !== startRow ||
+    !lastOverlayRows ||
+    lastOverlayRows.length !== rows.length;
 
-  const writes: string[] = ["\x1B[0m"];
+  if (positionChanged) {
+    clearOverlayPaintedRows();
+  }
+
+  const writes: string[] = [];
   for (let index = 0; index < rows.length; index++) {
+    if (!positionChanged && lastOverlayRows?.[index] === rows[index]) {
+      continue;
+    }
+    if (writes.length === 0) {
+      writes.push("\x1B[0m");
+    }
     writes.push(`\x1B[${startRow + index};1H\x1B[0m\x1B[2K${rows[index]!}`);
   }
-  writes.push("\x1B[0m");
-  process.stdout.write(writes.join(""));
-  invalidateScreenRows(startRow, startRow + rows.length - 1);
+  if (writes.length > 0) {
+    writes.push("\x1B[0m");
+    process.stdout.write(writes.join(""));
+    invalidateScreenRows(startRow, startRow + rows.length - 1);
+  }
 
   lastOverlayPaintedStart = startRow;
   lastOverlayPaintedEnd = startRow + rows.length - 1;
