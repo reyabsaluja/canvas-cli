@@ -229,7 +229,6 @@ export function renderChatFrame(
       maxScroll
     );
 
-
     const overlayRows = buildAutocompleteOverlayRows(
       options.slashMatches,
       options.openMatches,
