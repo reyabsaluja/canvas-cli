@@ -22,7 +22,7 @@ export const COMMANDS: CommandDefinition[] = [
     aliases: ["/lec"],
   },
   { name: "/assignments", description: "Open the assignment picker", scopes: ["course"] },
-  { name: "/files", description: "List course files and cached downloads", scopes: ["course"] },
+  { name: "/files", description: "List cached course files", scopes: ["course"] },
   { name: "/modules", description: "List course modules", scopes: ["course"] },
   { name: "/overview", description: "Show assignment overview", scopes: ["workspace"] },
   {
