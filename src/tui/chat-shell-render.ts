@@ -626,6 +626,7 @@ function writeStickyBottom(rows: string[]): void {
 
 function clearOverlayPaintedRows(): void {
   if (lastOverlayPaintedStart < 1 || lastOverlayPaintedEnd < lastOverlayPaintedStart) {
+    lastOverlayRows = null;
     return;
   }
   const writes: string[] = ["\x1B[0m"];
@@ -637,6 +638,7 @@ function clearOverlayPaintedRows(): void {
   invalidateScreenRows(lastOverlayPaintedStart, lastOverlayPaintedEnd);
   lastOverlayPaintedStart = -1;
   lastOverlayPaintedEnd = -1;
+  lastOverlayRows = null;
 }
 
 function writeAutocompleteOverlay(rows: string[] | null): void {
@@ -664,14 +666,23 @@ function writeAutocompleteOverlay(rows: string[] | null): void {
   }
 
   const writes: string[] = [];
+  let paintedStart = -1;
+  let paintedEnd = -1;
   for (let index = 0; index < rows.length; index++) {
+    if (rows[index] === "") {
+      continue;
+    }
     if (!positionChanged && lastOverlayRows?.[index] === rows[index]) {
+      if (paintedStart < 0) paintedStart = startRow + index;
+      paintedEnd = startRow + index;
       continue;
     }
     if (writes.length === 0) {
       writes.push("\x1B[0m");
     }
     writes.push(`\x1B[${startRow + index};1H\x1B[0m\x1B[2K${rows[index]!}`);
+    if (paintedStart < 0) paintedStart = startRow + index;
+    paintedEnd = startRow + index;
   }
   if (writes.length > 0) {
     writes.push("\x1B[0m");
@@ -679,8 +690,8 @@ function writeAutocompleteOverlay(rows: string[] | null): void {
     invalidateScreenRows(startRow, startRow + rows.length - 1);
   }
 
-  lastOverlayPaintedStart = startRow;
-  lastOverlayPaintedEnd = startRow + rows.length - 1;
+  lastOverlayPaintedStart = paintedStart;
+  lastOverlayPaintedEnd = paintedEnd;
   lastOverlayRows = rows.slice();
   lastOverlayStartRow = startRow;
   lastOverlayScreenSize = screenSizeKey;
