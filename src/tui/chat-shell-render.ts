@@ -1250,7 +1250,7 @@ interface TableLayout {
 }
 
 function colMatches(cell: string, ...keywords: string[]): boolean {
-  return keywords.some((kw) => cell.includes(kw));
+  return keywords.some((kw) => new RegExp(`(?:^|\\s)${kw}`, "i").test(cell));
 }
 
 function detectTableLayout(header: string[]): TableLayout | null {
