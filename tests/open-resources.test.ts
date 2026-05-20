@@ -461,7 +461,7 @@ test("handleOpenResourceQuery opens exported PDF instead of similarly named cour
   });
 });
 
-test("handleOpenResourceQuery opens last export for vague it query", async () => {
+test("handleOpenResourceQuery opens last export for vague 'the pdf' query", async () => {
   await withTempDir(async (tempDir) => {
     const exportDir = path.join(tempDir, "exports");
     const exportPdf = path.join(exportDir, "study-guide.pdf");
@@ -470,7 +470,7 @@ test("handleOpenResourceQuery opens last export for vague it query", async () =>
 
     const opened: string[] = [];
     const result = await handleOpenResourceQuery(
-      "it",
+      "the pdf",
       {
         cache: null,
         exportDirectories: [exportDir],
