@@ -5,10 +5,47 @@ import {
   sanitizeLatexBody,
   extractLatexTitle,
   buildLatexDocument,
+  fixCommonLatexIssues,
+  parseLatexCompilerOutput,
+  formatLatexErrorSummary,
 } from "../src/pdf/render-latex.js";
 import { latexBodyToMarkdown } from "../src/pdf/generate.js";
 import { getInlineCommandGhost } from "../src/tui/chat-shell-render.js";
 import type { CommandDefinition } from "../src/tui/chat-state.js";
+
+// ── fixCommonLatexIssues ──
+
+test("fixCommonLatexIssues escapes unescaped underscores in texttt", () => {
+  const input = String.raw`\texttt{..._2023\_solutions.pdf}`;
+  const fixed = fixCommonLatexIssues(input);
+  assert.equal(fixed, String.raw`\texttt{...\_2023\_solutions.pdf}`);
+});
+
+test("fixCommonLatexIssues leaves already-escaped underscores unchanged", () => {
+  const input = String.raw`\texttt{final\_exam\_2022.pdf}`;
+  assert.equal(fixCommonLatexIssues(input), input);
+});
+
+// ── parseLatexCompilerOutput ──
+
+test("parseLatexCompilerOutput extracts tectonic error lines", () => {
+  const output = [
+    "note: Running TeX ...",
+    "error: file.tex:1386: Missing $ inserted",
+    "error: halted on potentially-recoverable error",
+  ].join("\n");
+  assert.deepEqual(parseLatexCompilerOutput(output), [
+    "file.tex:1386: Missing $ inserted",
+    "halted on potentially-recoverable error",
+  ]);
+});
+
+test("formatLatexErrorSummary joins errors", () => {
+  assert.equal(
+    formatLatexErrorSummary(["line 1: bad", "line 2: worse"]),
+    "line 1: bad; line 2: worse"
+  );
+});
 
 // ── escapeLatex ──
 

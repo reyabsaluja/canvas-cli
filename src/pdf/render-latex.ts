@@ -229,11 +229,47 @@ export function buildLatexDocument(
   ].join("\n");
 }
 
+export interface LatexCompileResult {
+  success: boolean;
+  pdfPath: string;
+  log?: string;
+  /** Human-readable compiler errors (e.g. from Tectonic). */
+  errors: string[];
+}
+
+export function parseLatexCompilerOutput(output: string): string[] {
+  const errors: string[] = [];
+  for (const line of output.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (/^error:/i.test(trimmed)) {
+      errors.push(trimmed.replace(/^error:\s*/i, ""));
+    }
+  }
+  return errors;
+}
+
+export function formatLatexErrorSummary(errors: string[]): string {
+  if (errors.length === 0) {
+    return "LaTeX compilation failed (see the .tex file for details).";
+  }
+  const preview = errors.slice(0, 3).join("; ");
+  return errors.length > 3 ? `${preview}; …` : preview;
+}
+
+/** Escape stray underscores inside \\texttt{...} blocks (common model mistake). */
+export function fixCommonLatexIssues(body: string): string {
+  return body.replace(/\\texttt\{([^}]*)\}/g, (_match, content: string) => {
+    const fixed = content.replace(/(?<!\\)_/g, "\\_");
+    return `\\texttt{${fixed}}`;
+  });
+}
+
 export async function compileLatex(
   texPath: string,
   compiler: string,
   options?: { signal?: AbortSignal }
-): Promise<{ success: boolean; pdfPath: string; log?: string }> {
+): Promise<LatexCompileResult> {
   const dir = path.dirname(texPath);
   const basename = path.basename(texPath, ".tex");
   const pdfPath = path.join(dir, `${basename}.pdf`);
@@ -247,6 +283,7 @@ export async function compileLatex(
         cwd: dir,
         timeout: 120_000,
         signal: options?.signal,
+        maxBuffer: 10 * 1024 * 1024,
       });
     } else {
       for (let pass = 0; pass < 2; pass++) {
@@ -270,7 +307,7 @@ export async function compileLatex(
       auxExts.map((ext) => fsp.unlink(path.join(dir, `${basename}${ext}`)))
     );
 
-    return { success: true, pdfPath };
+    return { success: true, pdfPath, errors: [] };
   } catch (error) {
     if (options?.signal?.aborted) throw error;
     const logPath = path.join(dir, `${basename}.log`);
@@ -278,7 +315,26 @@ export async function compileLatex(
     try {
       log = await fsp.readFile(logPath, "utf-8");
     } catch {}
-    return { success: false, pdfPath, log };
+
+    const stderr =
+      error &&
+      typeof error === "object" &&
+      "stderr" in error &&
+      error.stderr != null
+        ? String(error.stderr)
+        : "";
+    const stdout =
+      error &&
+      typeof error === "object" &&
+      "stdout" in error &&
+      error.stdout != null
+        ? String(error.stdout)
+        : "";
+
+    const combined = [stderr, stdout, log ?? ""].filter(Boolean).join("\n");
+    const errors = parseLatexCompilerOutput(combined);
+
+    return { success: false, pdfPath, log, errors };
   }
 }
 

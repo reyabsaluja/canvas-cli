@@ -4,6 +4,7 @@ import { C, getTermSize, stripAnsi } from "./screen.js";
 import { formatAIError } from "../ai/provider.js";
 import type { Observation } from "../agent/observation.js";
 import { executeMakePdf } from "./pdf-command.js";
+import { resolvePdfRenderMode } from "./pdf-latex-prompt.js";
 import type {
   ChatMessage,
   CommandDefinition,
@@ -1060,20 +1061,53 @@ export async function runChatShell<TExit>(
     ): void {
       isProcessing = true;
       processingAbort = new AbortController();
-      currentVerb = "Generating PDF";
-      spinnerFrame = 0;
-      shimmerFrame = 0;
-      processingStartTime = Date.now();
-      currentSpinnerLine = buildSpinnerLine();
 
       messages.push({ role: "user", content: rawInput });
       markTranscriptDirty(messages.length - 1);
       persistence.schedule();
       render();
-      startSpinner();
 
       void (async () => {
         try {
+          const renderMode = await resolvePdfRenderMode(
+            {
+              pauseInput: () => {
+                stdin.removeListener("data", onData);
+                try {
+                  stdin.setRawMode(false);
+                } catch {}
+              },
+              resumeInput: () => {
+                try {
+                  stdin.setRawMode(true);
+                } catch {}
+                stdin.on("data", onData);
+                render();
+              },
+            },
+            { signal: processingAbort!.signal }
+          );
+
+          if (renderMode === "cancel") {
+            await appendPersistedMessage({
+              role: "system",
+              content: "PDF generation cancelled.",
+            });
+            isProcessing = false;
+            processingAbort = null;
+            currentSpinnerLine = "";
+            render();
+            return;
+          }
+
+          currentVerb = "Generating PDF";
+          spinnerFrame = 0;
+          shimmerFrame = 0;
+          processingStartTime = Date.now();
+          currentSpinnerLine = buildSpinnerLine();
+          render();
+          startSpinner();
+
           const result = await executeMakePdf({
             instruction,
             session,
@@ -1081,6 +1115,7 @@ export async function runChatShell<TExit>(
             getLoadedWorkspace: options.getLoadedWorkspace,
             getCourseCache: options.getCourseCache,
             abortSignal: processingAbort!.signal,
+            renderMode,
           });
 
           stopSpinner();
@@ -1089,6 +1124,15 @@ export async function runChatShell<TExit>(
           const lines = [`PDF saved to \`${result.pdfPath}\``];
           if (result.usedLatex) {
             lines.push("Rendered with LaTeX for high-quality math and code formatting.");
+          } else if (result.latexCompileFailed) {
+            lines.push(
+              "LaTeX was installed but compilation failed — this PDF uses the basic layout."
+            );
+            if (result.texPath) {
+              lines.push(`LaTeX source: \`${result.texPath}\``);
+            }
+          } else if (renderMode === "basic" && result.usedAI) {
+            lines.push("Used basic PDF layout (install Tectonic for LaTeX-quality math and code).");
           }
           if (result.warning) {
             lines.push(result.warning);

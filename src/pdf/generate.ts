@@ -6,6 +6,8 @@ import { renderMarkdownToPdf } from "./render.js";
 import {
   buildLatexDocument,
   compileLatex,
+  fixCommonLatexIssues,
+  formatLatexErrorSummary,
   getLatexCompiler,
   sanitizeLatexBody,
   extractLatexTitle,
@@ -14,6 +16,8 @@ import {
   SHARED_CONTENT_RULES,
 } from "./render-latex.js";
 
+export type PdfRenderMode = "auto" | "latex" | "basic";
+
 export interface PdfExportResult {
   title: string;
   pdfPath: string;
@@ -21,6 +25,9 @@ export interface PdfExportResult {
   usedAI: boolean;
   usedLatex: boolean;
   warning?: string;
+  /** Set when LaTeX was attempted but the final PDF used PDFKit fallback. */
+  latexCompileFailed?: boolean;
+  texPath?: string;
 }
 
 const MARKDOWN_COMPOSE_SYSTEM_PROMPT = `You create thorough, comprehensive, high-quality PDF-ready Markdown documents from canvas-cli chat and workspace context.
@@ -32,19 +39,47 @@ ${SHARED_CONTENT_RULES}
 - Use ## and ### headings to organize into clear sections. Use bullet lists for quick scanning.
 - Use Markdown tables when comparing items or listing structured data (dates, scores, options).`;
 
+const LATEX_REPAIR_SYSTEM_PROMPT = `You fix LaTeX compilation errors in a document body.
+
+Return ONLY the corrected LaTeX body (no preamble, no \\documentclass, no code fences).
+
+Rules:
+- Fix the reported errors while preserving all content and structure.
+- In \\texttt{...} and tables, escape special characters: _ → \\_ & → \\& % → \\% # → \\# $ → \\$
+- Keep math in $...$ or \\[...\\]; do not break lstlisting blocks.
+- Do not add commentary or explanations.`;
+
 export async function generatePdfExport(
-  input: PdfContextInput
+  input: PdfContextInput,
+  options?: { renderMode?: PdfRenderMode }
 ): Promise<PdfExportResult> {
   const bundle = buildPdfContextBundle(input);
+  const renderMode = options?.renderMode ?? "auto";
   const latexCompiler = await getLatexCompiler();
+  const wantsLatex =
+    renderMode === "latex" ||
+    (renderMode === "auto" && latexCompiler !== null && input.aiConfig);
 
-  if (latexCompiler && input.aiConfig) {
+  if (wantsLatex) {
+    if (!input.aiConfig) {
+      return generateMarkdownPdf(
+        input,
+        bundle,
+        "AI is not configured, so canvas-cli used the basic PDF renderer."
+      );
+    }
+    if (!latexCompiler) {
+      throw new Error(
+        "LaTeX compiler not found. Install Tectonic (e.g. brew install tectonic) or choose basic PDF."
+      );
+    }
     return generateLatexPdf(input, bundle, latexCompiler);
   }
 
-  const noLatexWarning = !latexCompiler
-    ? "No LaTeX compiler found. Install one for high-quality output: brew install tectonic"
-    : undefined;
+  const noLatexWarning =
+    renderMode === "auto" && !latexCompiler && input.aiConfig
+      ? "No LaTeX compiler found. Install Tectonic for high-quality math and code (brew install tectonic)."
+      : undefined;
   return generateMarkdownPdf(input, bundle, noLatexWarning);
 }
 
@@ -80,33 +115,63 @@ async function generateLatexPdf(
   }
 
   const finalTitle = extractLatexTitle(latexBody) ?? title;
-  const fullTex = buildLatexDocument(latexBody, {
-    title: finalTitle,
-    subtitle: input.runtime.title,
-    generatedAt: bundle.generatedAt,
-  });
-
   const texPath = path.join(bundle.outputDirectory, `${outputBaseName}.tex`);
   const markdownPath = path.join(bundle.outputDirectory, `${outputBaseName}.md`);
 
-  await fsp.writeFile(texPath, fullTex, "utf-8");
+  latexBody = fixCommonLatexIssues(latexBody);
   await fsp.writeFile(markdownPath, latexBody, "utf-8");
 
-  const result = await compileLatex(texPath, compiler, { signal: input.abortSignal });
+  let result = await compileLatexFromBody(
+    latexBody,
+    texPath,
+    compiler,
+    {
+      title: finalTitle,
+      subtitle: input.runtime.title,
+      generatedAt: bundle.generatedAt,
+    },
+    input.abortSignal
+  );
+
+  if (!result.success && input.aiConfig && result.errors.length > 0) {
+    const repaired = await repairLatexBody(
+      latexBody,
+      result.errors,
+      input.aiConfig,
+      input.abortSignal
+    );
+    if (repaired) {
+      latexBody = fixCommonLatexIssues(repaired);
+      await fsp.writeFile(markdownPath, latexBody, "utf-8");
+      result = await compileLatexFromBody(
+        latexBody,
+        texPath,
+        compiler,
+        {
+          title: extractLatexTitle(latexBody) ?? finalTitle,
+          subtitle: input.runtime.title,
+          generatedAt: bundle.generatedAt,
+        },
+        input.abortSignal
+      );
+    }
+  }
 
   if (result.success) {
     return {
-      title: finalTitle,
+      title: extractLatexTitle(latexBody) ?? finalTitle,
       pdfPath: result.pdfPath,
       markdownPath,
       usedAI,
       usedLatex: true,
       warning,
+      texPath,
     };
   }
 
+  const errorSummary = formatLatexErrorSummary(result.errors);
   warning = (warning ? warning + " " : "") +
-    "LaTeX compilation failed — falling back to PDFKit renderer.";
+    `LaTeX compilation failed (${errorSummary}). Used basic PDF layout instead. Source: ${texPath}`;
 
   const fallbackMarkdown = usedAI
     ? ensureMarkdownTitle(latexBodyToMarkdown(latexBody), finalTitle)
@@ -128,7 +193,52 @@ async function generateLatexPdf(
     usedAI,
     usedLatex: false,
     warning,
+    latexCompileFailed: true,
+    texPath,
   };
+}
+
+async function compileLatexFromBody(
+  latexBody: string,
+  texPath: string,
+  compiler: string,
+  docOptions: {
+    title: string;
+    subtitle?: string;
+    generatedAt?: string;
+  },
+  abortSignal?: AbortSignal
+): Promise<Awaited<ReturnType<typeof compileLatex>>> {
+  const fullTex = buildLatexDocument(latexBody, docOptions);
+  await fsp.writeFile(texPath, fullTex, "utf-8");
+  return compileLatex(texPath, compiler, { signal: abortSignal });
+}
+
+async function repairLatexBody(
+  body: string,
+  errors: string[],
+  aiConfig: NonNullable<PdfContextInput["aiConfig"]>,
+  abortSignal?: AbortSignal
+): Promise<string | null> {
+  const userMessage = [
+    "Compilation errors:",
+    ...errors.map((e) => `- ${e}`),
+    "",
+    "LaTeX body to fix:",
+    body,
+  ].join("\n");
+
+  try {
+    const raw = await callModel(aiConfig, LATEX_REPAIR_SYSTEM_PROMPT, userMessage, {
+      maxTokens: 16_000,
+      timeoutMs: 120_000,
+      abortSignal,
+    });
+    return sanitizeLatexBody(raw);
+  } catch (error) {
+    if (abortSignal?.aborted) throw error;
+    return null;
+  }
 }
 
 async function generateMarkdownPdf(
