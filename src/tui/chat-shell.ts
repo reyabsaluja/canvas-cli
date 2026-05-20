@@ -959,17 +959,17 @@ export async function runChatShell<TExit>(
       render();
     }
 
-    const NAV_COMMANDS = new Set([
-      "/courses", "/back", "/recent", "/quit", "/exit", "/q", "/home",
-      "/manage-courses", "/assignments",
-    ]);
+    function isNavigationCommand(name: string): boolean {
+      const resolved = resolveCommand(availableCommands, name.toLowerCase());
+      return resolved?.navigation === true;
+    }
 
     async function handleCommandInput(
       rawInput: string,
       commandName: string,
       args: string
     ): Promise<void> {
-      if (!NAV_COMMANDS.has(commandName.toLowerCase())) {
+      if (!isNavigationCommand(commandName)) {
         await appendPersistedMessage({ role: "user", content: rawInput });
       }
 

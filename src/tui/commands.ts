@@ -1,13 +1,14 @@
 import type { CommandDefinition, ScopeType } from "./chat-state.js";
 
 export const COMMANDS: CommandDefinition[] = [
-  { name: "/courses", description: "Open the course picker", scopes: ["global"] },
+  { name: "/courses", description: "Open the course picker", scopes: ["global"], navigation: true },
   {
     name: "/manage-courses",
     description: "Add, remove, or rename courses",
     scopes: ["global"],
+    navigation: true,
   },
-  { name: "/recent", description: "Reopen a recent course or workspace", scopes: ["global"] },
+  { name: "/recent", description: "Reopen a recent course or workspace", scopes: ["global"], navigation: true },
   {
     name: "/open",
     description: "Open a resource or file",
@@ -21,7 +22,7 @@ export const COMMANDS: CommandDefinition[] = [
     scopes: ["course", "workspace"],
     aliases: ["/lec"],
   },
-  { name: "/assignments", description: "Open the assignment picker", scopes: ["course"] },
+  { name: "/assignments", description: "Open the assignment picker", scopes: ["course"], navigation: true },
   { name: "/files", description: "List cached course files", scopes: ["course"] },
   { name: "/modules", description: "List course modules", scopes: ["course"] },
   { name: "/overview", description: "Show assignment overview", scopes: ["workspace"] },
@@ -46,11 +47,12 @@ export const COMMANDS: CommandDefinition[] = [
     scopes: ["global", "course", "workspace"],
   },
   { name: "/refresh", description: "Refresh the current workspace", scopes: ["workspace"] },
-  { name: "/back", description: "Go up one scope", scopes: ["course", "workspace"] },
+  { name: "/back", description: "Go up one scope", scopes: ["course", "workspace"], navigation: true },
   {
     name: "/home",
     description: "Return to the global home session",
     scopes: ["course", "workspace"],
+    navigation: true,
   },
   {
     name: "/help",
@@ -68,6 +70,7 @@ export const COMMANDS: CommandDefinition[] = [
     description: "Exit canvas-cli",
     scopes: ["global", "course", "workspace"],
     aliases: ["/exit", "/q"],
+    navigation: true,
   },
 ];
 
