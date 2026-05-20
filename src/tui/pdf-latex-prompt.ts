@@ -176,7 +176,7 @@ async function runInstallFlow(
         "\n  LaTeX compiler still not found. Install Tectonic, then try /pdf again.\n"
       )
     );
-    await sleep(1800);
+    await waitForKeypress();
   });
 
   return "retry";
@@ -202,12 +202,13 @@ async function runInstallWithInheritedStdio(
           `\n  Install did not finish successfully${result.error ? `: ${result.error}` : "."}\n`
         )
       );
-      await sleep(2000);
+      console.log(C.dim("  Press any key to continue…"));
+      await waitForKeypress();
       return "failed";
     }
     clearScreen();
     console.log(C.success("\n  Install finished. Checking for LaTeX…\n"));
-    await sleep(800);
+    await waitForKeypress();
     return "ok";
   } finally {
     controls.resumeInput();
@@ -220,7 +221,8 @@ async function showManualInstallNotice(
   await withPausedInput(controls, async () => {
     clearScreen();
     console.log(C.dim(`\n${formatLatexManualInstallMessage()}\n`));
-    await sleep(2500);
+    console.log(C.dim("  Press any key to continue…"));
+    await waitForKeypress();
   });
 }
 
@@ -236,6 +238,15 @@ async function withPausedInput<T>(
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function waitForKeypress(): Promise<void> {
+  return new Promise((resolve) => {
+    const stdin = process.stdin;
+    const wasRaw = stdin.isRaw;
+    try { stdin.setRawMode(true); } catch {}
+    stdin.resume();
+    stdin.once("data", () => {
+      try { stdin.setRawMode(wasRaw ?? false); } catch {}
+      resolve();
+    });
+  });
 }
