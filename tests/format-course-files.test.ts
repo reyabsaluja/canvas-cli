@@ -20,7 +20,7 @@ function makeCache(
   };
 }
 
-test("formatCourseFilesList renders a full-width friendly markdown table", () => {
+test("formatCourseFilesList renders only the table and footer", () => {
   const output = formatCourseFilesList(
     makeCache({
       attachments: [
@@ -30,11 +30,11 @@ test("formatCourseFilesList renders a full-width friendly markdown table", () =>
     })
   );
 
-  assert.match(output, /\*\*Files\*\* · 2 cached locally/);
-  assert.match(output, /\| Name \| Type \| Size \|/);
+  assert.match(output, /^\| Name \| Type \| Size \|/);
   assert.match(output, /\| lab1_rubric\.pdf \| \*\*PDF\*\* \| 512 B \|/);
-  assert.match(output, /\| lab2\.zip \| \*\*ZIP\*\* \| 2\.0 KB \|/);
-  assert.match(output, /\*\*PDF\*\* 1/);
+  assert.match(output, /Use `\/open <name>` to open a file\.$/);
+  assert.doesNotMatch(output, /\*\*Files\*\*/);
+  assert.doesNotMatch(output, /\*\*PDF\*\* 1/);
   assert.doesNotMatch(output, /Downloaded attachments/i);
 });
 

@@ -17,6 +17,7 @@ import {
 } from "./radar-commands.js";
 import { handleLectureQuery } from "./lecture-resources.js";
 import { formatCourseFilesList } from "./format-course-files.js";
+import { formatCourseModulesList } from "./format-course-modules.js";
 
 export async function handleCommand(
   command: string,
@@ -175,11 +176,7 @@ export async function handleCommand(
       }
       await api.addMessage({
         role: "assistant",
-        content: cache.modules
-          .map(
-            (module, index) => `${index + 1}. ${module.name} (${module.itemCount} items)`
-          )
-          .join("\n"),
+        content: formatCourseModulesList(cache),
       });
       return;
     }

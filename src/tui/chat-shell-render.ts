@@ -1254,6 +1254,12 @@ function detectTableLayout(header: string[]): TableLayout | null {
   if (normalized[0] === "name" && normalized[1] === "size") {
     return { fullWidth: true, columnWeights: [0.72, 0.28] };
   }
+  if (normalized[0] === "#" && normalized[1] === "module" && normalized[2] === "items") {
+    return { fullWidth: true, columnWeights: [0.07, 0.69, 0.24] };
+  }
+  if (normalized[0] === "module" && normalized[1] === "items") {
+    return { fullWidth: true, columnWeights: [0.78, 0.22] };
+  }
   return null;
 }
 

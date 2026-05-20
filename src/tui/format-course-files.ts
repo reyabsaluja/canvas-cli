@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { CourseCache } from "../enrich/cache-loader.js";
 import type { DownloadedAttachmentEntry } from "../ingest/types.js";
+import { escapeTableCell } from "./format-table-utils.js";
 
 const MAX_TABLE_ROWS = 50;
 const MAX_INDEX_ROWS = 12;
@@ -19,32 +20,24 @@ export function formatCourseFilesList(cache: CourseCache): string {
   const lines: string[] = [];
 
   if (cached.length > 0) {
-    lines.push(...formatCachedFilesTable(cached));
+    lines.push(...buildFilesTable(cached));
   }
 
   if (indexed.length > 0) {
-    if (lines.length > 0) {
-      lines.push("");
-      lines.push("---");
-      lines.push("");
-    }
-    lines.push(...formatIndexedFilesTable(indexed));
+    if (lines.length > 0) lines.push("");
+    lines.push(...buildIndexedTable(indexed));
   }
 
   lines.push("", "Use `/open <name>` to open a file.");
   return lines.join("\n").trim();
 }
 
-function formatCachedFilesTable(attachments: DownloadedAttachmentEntry[]): string[] {
+function buildFilesTable(attachments: DownloadedAttachmentEntry[]): string[] {
   const sorted = [...attachments].sort(compareFilenames);
   const visible = sorted.slice(0, MAX_TABLE_ROWS);
   const hidden = sorted.length - visible.length;
 
   const lines: string[] = [
-    `**Files** · ${sorted.length} cached locally`,
-    "",
-    formatTypeSummary(sorted),
-    "",
     "| Name | Type | Size |",
     "| --- | --- | --- |",
   ];
@@ -57,13 +50,15 @@ function formatCachedFilesTable(attachments: DownloadedAttachmentEntry[]): strin
 
   if (hidden > 0) {
     lines.push("");
-    lines.push(`… and ${hidden} more file${hidden === 1 ? "" : "s"} — use \`/open <name>\` or ask me to find one.`);
+    lines.push(
+      `… and ${hidden} more file${hidden === 1 ? "" : "s"} — use \`/open <name>\` or ask me to find one.`
+    );
   }
 
   return lines;
 }
 
-function formatIndexedFilesTable(files: CourseCache["files"]): string[] {
+function buildIndexedTable(files: CourseCache["files"]): string[] {
   const sorted = [...files].sort((a, b) =>
     a.displayName.localeCompare(b.displayName, undefined, {
       numeric: true,
@@ -73,12 +68,7 @@ function formatIndexedFilesTable(files: CourseCache["files"]): string[] {
   const visible = sorted.slice(0, MAX_INDEX_ROWS);
   const hidden = sorted.length - visible.length;
 
-  const lines: string[] = [
-    `**Canvas index** · ${sorted.length} on Canvas`,
-    "",
-    "| Name | Size |",
-    "| --- | --- |",
-  ];
+  const lines: string[] = ["| Name | Size |", "| --- | --- |"];
 
   for (const file of visible) {
     lines.push(
@@ -92,25 +82,6 @@ function formatIndexedFilesTable(files: CourseCache["files"]): string[] {
   }
 
   return lines;
-}
-
-function formatTypeSummary(attachments: DownloadedAttachmentEntry[]): string {
-  const counts = new Map<string, number>();
-  for (const attachment of attachments) {
-    const label = formatTypeCell(attachment.originalFilename);
-    counts.set(label, (counts.get(label) ?? 0) + 1);
-  }
-
-  const order = ["PDF", "ZIP", "CODE", "ASM", "SHEET", "DOC", "SLIDES", "TEXT", "IMAGE"];
-  const parts: string[] = [];
-  for (const key of order) {
-    const count = counts.get(key);
-    if (count) parts.push(`**${key}** ${count}`);
-  }
-  for (const [key, count] of counts) {
-    if (!order.includes(key)) parts.push(`**${key}** ${count}`);
-  }
-  return parts.join("  ·  ");
 }
 
 function formatTypeCell(filename: string): string {
@@ -158,10 +129,6 @@ function compareFilenames(
     numeric: true,
     sensitivity: "base",
   });
-}
-
-function escapeTableCell(text: string): string {
-  return text.replace(/\|/g, "\\|").replace(/\n/g, " ");
 }
 
 function formatFileSize(bytes: number | null | undefined): string {
