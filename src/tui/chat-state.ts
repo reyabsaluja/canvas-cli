@@ -51,6 +51,8 @@ export interface ChatSessionMetadata {
   workspacePath?: string;
   sessionSlug?: string;
   lastOpenedAt?: string;
+  /** Most recent /pdf export in this chat session (for open it). */
+  lastExportedPdfPath?: string;
 }
 
 export interface ChatSession {
