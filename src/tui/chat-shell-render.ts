@@ -91,7 +91,7 @@ const CANVAS_LOGO = [
   "  ⠀⠀⠈⠛⠀⣰⣾⣿⣦⠀⠙⠋⠀⠀",
 ];
 
-function logoVisualWidth(line: string): number {
+function logoCodePointLength(line: string): number {
   return [...line].length;
 }
 
@@ -112,7 +112,7 @@ export function buildBannerLines(options: {
   const title = options.runtime.title;
   const subtitle = options.runtime.subtitle ?? "";
 
-  const logoWidth = Math.max(...CANVAS_LOGO.map((l) => logoVisualWidth(l)));
+  const logoWidth = Math.max(...CANVAS_LOGO.map((l) => logoCodePointLength(l)));
   const textLines: string[] = [
     C.pureWhiteBold(title),
     subtitle ? statusBarGrey(subtitle) : "",
@@ -124,7 +124,7 @@ export function buildBannerLines(options: {
   const bannerLines: string[] = [];
   for (let i = 0; i < totalLogoLines; i++) {
     const logoLine = CANVAS_LOGO[i]!;
-    const pad = " ".repeat(Math.max(0, logoWidth - logoVisualWidth(logoLine)));
+    const pad = " ".repeat(Math.max(0, logoWidth - logoCodePointLength(logoLine)));
     const textIndex = i - textStart;
     const rightText = textIndex >= 0 && textIndex < textLines.length
       ? "   " + textLines[textIndex]!
