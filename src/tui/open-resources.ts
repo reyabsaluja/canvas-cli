@@ -657,7 +657,7 @@ async function listExportFiles(
 }
 
 const RECENT_EXPORT_QUERY =
-  /^(?:it|this|that|the pdf|the file|open it|that pdf|this pdf|exported pdf|generated pdf|study guide pdf|pdf you made|the study guide|the export|my pdf|my study guide)$/i;
+  /^(?:the pdf|the file|open it|that pdf|this pdf|exported pdf|generated pdf|study guide pdf|pdf you made|the study guide|the export|my pdf|my study guide)$/i;
 
 export function isRecentExportQuery(query: string): boolean {
   const trimmed = query.trim();
