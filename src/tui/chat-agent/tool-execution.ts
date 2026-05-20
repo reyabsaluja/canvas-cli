@@ -649,7 +649,11 @@ async function openResource(
   query: string,
   ctx: ChatAgentContext
 ): Promise<ToolExecutionResult> {
-  const context = { loaded: ctx.loaded, cache: ctx.cache };
+  const context = {
+    loaded: ctx.loaded,
+    cache: ctx.cache,
+    lastExportedPdfPath: ctx.lastExportedPdfPath ?? null,
+  };
   const result = await handleOpenResourceQuery(query, context, undefined, true);
   const success = result.status === "opened";
   return {

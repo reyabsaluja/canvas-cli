@@ -1138,6 +1138,9 @@ export async function runChatShell<TExit>(
             lines.push(result.warning);
           }
 
+          session.metadata.lastExportedPdfPath = result.pdfPath;
+          persistence.schedule();
+
           await appendPersistedMessage({
             role: "assistant",
             content: lines.join("\n"),

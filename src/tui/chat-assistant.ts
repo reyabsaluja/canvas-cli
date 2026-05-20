@@ -259,6 +259,7 @@ interface CourseAssistantOptions {
   cache: CourseCache | null;
   assignments: Assignment[];
   history: ChatMessage[];
+  lastExportedPdfPath?: string | null;
   question: string;
   onToolCall?: (event: ScopeToolCallEvent) => void;
   onTextDelta?: (delta: string) => void;
@@ -491,7 +492,10 @@ export async function answerCourseQuestion(
           const query = String(input.query ?? "");
           const result = await handleOpenResourceQuery(
             query,
-            { cache: options.cache },
+            {
+              cache: options.cache,
+              lastExportedPdfPath: options.lastExportedPdfPath ?? null,
+            },
             undefined,
             true
           );
@@ -644,6 +648,7 @@ function buildCourseSystemPrompt(
     "Answer questions about assignments, modules, files, and course structure.",
     "Use tools when the user asks for details that require searching or reading cached course materials.",
     "IMPORTANT: If the user asks to open, launch, show, or pull up ANY file, PDF, page, or resource, you MUST call open_course_resource immediately. Do NOT describe the resource or answer from context — the user wants it opened on their machine. After a successful open, just confirm it was opened.",
+    "PDFs created in this chat with /pdf are saved under .canvas-cli/exports/ (exported pdf). To reopen the latest export, call open_course_resource with query \"it\" or the exact export filename shown when the PDF was generated — never a vague course exam filename.",
     "Use list_radar and read_thread to check announcements and discussions for this course.",
     "Ground answers in the indexed local cache. If the cache does not contain the answer, say so plainly.",
     "If the cache is missing, say that clearly and guide the user toward opening a workspace or refreshing.",
