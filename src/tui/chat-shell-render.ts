@@ -670,6 +670,10 @@ function writeAutocompleteOverlay(rows: string[] | null): void {
   let paintedEnd = -1;
   for (let index = 0; index < rows.length; index++) {
     if (rows[index] === "") {
+      if (!positionChanged && lastOverlayRows?.[index] && lastOverlayRows[index] !== "") {
+        if (writes.length === 0) writes.push("\x1B[0m");
+        writes.push(`\x1B[${startRow + index};1H\x1B[2K`);
+      }
       continue;
     }
     if (!positionChanged && lastOverlayRows?.[index] === rows[index]) {
