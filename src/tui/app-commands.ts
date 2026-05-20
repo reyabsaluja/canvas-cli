@@ -16,6 +16,7 @@ import {
   resolveAndRenderThread,
 } from "./radar-commands.js";
 import { handleLectureQuery } from "./lecture-resources.js";
+import { formatCourseFilesList } from "./format-course-files.js";
 
 export async function handleCommand(
   command: string,
@@ -192,23 +193,9 @@ export async function handleCommand(
         });
         return;
       }
-      const downloaded = cache.attachments
-        .filter(
-          (attachment) =>
-            attachment.status === "downloaded" || attachment.status === "skipped"
-        )
-        .slice(0, 20)
-        .map((attachment) => `• ${attachment.originalFilename}`);
-      const indexed = cache.files.slice(0, 12).map((file) => `• ${file.displayName}`);
       await api.addMessage({
         role: "assistant",
-        content: [
-          `Downloaded attachments (${downloaded.length || 0})`,
-          downloaded.length > 0 ? downloaded.join("\n") : "• none yet",
-          "",
-          `Course file index (${cache.files.length})`,
-          indexed.length > 0 ? indexed.join("\n") : "• none indexed",
-        ].join("\n"),
+        content: formatCourseFilesList(cache),
       });
       return;
     }

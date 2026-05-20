@@ -730,7 +730,7 @@ export function getRenderedMessageLines(
       return ["", ...rendered];
     }
     case "assistant": {
-      renderWrappedContent(message.content, lines, maxWidth);
+      renderWrappedContent(message.content, lines, maxWidth, cols);
       if (message.bulletPoints?.length) {
         lines.push("");
         for (const point of message.bulletPoints) {
@@ -823,7 +823,12 @@ export function buildTranscriptLines(options: {
   );
 }
 
-function renderWrappedContent(content: string, lines: string[], maxWidth: number): void {
+function renderWrappedContent(
+  content: string,
+  lines: string[],
+  maxWidth: number,
+  cols: number
+): void {
   const rawLines = content.split("\n");
   for (let index = 0; index < rawLines.length; index++) {
     const line = rawLines[index]!;
@@ -837,7 +842,7 @@ function renderWrappedContent(content: string, lines: string[], maxWidth: number
       lines.push("");
       continue;
     }
-    const tableConsumed = tryRenderTable(rawLines, index, lines, maxWidth);
+    const tableConsumed = tryRenderTable(rawLines, index, lines, maxWidth, cols);
     if (tableConsumed > 0) {
       index += tableConsumed - 1;
       continue;
@@ -1233,11 +1238,31 @@ function isTableSeparatorRow(cells: string[]): boolean {
   return cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, "")));
 }
 
+interface TableLayout {
+  fullWidth: boolean;
+  columnWeights: number[];
+}
+
+function detectTableLayout(header: string[]): TableLayout | null {
+  const normalized = header.map((cell) => cell.trim().toLowerCase());
+  if (normalized[0] === "name" && normalized[1] === "type" && normalized[2] === "size") {
+    return { fullWidth: true, columnWeights: [0.64, 0.12, 0.24] };
+  }
+  if (normalized[0] === "name" && normalized[1] === "type") {
+    return { fullWidth: true, columnWeights: [0.78, 0.22] };
+  }
+  if (normalized[0] === "name" && normalized[1] === "size") {
+    return { fullWidth: true, columnWeights: [0.72, 0.28] };
+  }
+  return null;
+}
+
 function tryRenderTable(
   rawLines: string[],
   startIndex: number,
   out: string[],
-  maxWidth: number
+  maxWidth: number,
+  cols: number
 ): number {
   const headerCells = splitTableRow(rawLines[startIndex] ?? "");
   if (!headerCells || headerCells.length < 2) return 0;
@@ -1256,7 +1281,7 @@ function tryRenderTable(
     cursor++;
   }
 
-  renderMarkdownTable(headerCells, bodyRows, out, maxWidth);
+  renderMarkdownTable(headerCells, bodyRows, out, maxWidth, cols);
   return cursor - startIndex;
 }
 
@@ -1264,63 +1289,86 @@ function renderMarkdownTable(
   header: string[],
   rows: string[][],
   out: string[],
-  maxWidth: number
+  maxWidth: number,
+  cols: number
 ): void {
   const colCount = header.length;
-  const available = Math.max(20, maxWidth - 2);
-  // Subtract vertical borders (colCount + 1) and padding (2 per col).
+  const layout = detectTableLayout(header);
+  const tableWidth = layout?.fullWidth
+    ? Math.max(32, cols - 4)
+    : Math.max(20, maxWidth - 2);
   const borderOverhead = colCount + 1 + colCount * 2;
-  const usableContent = Math.max(colCount, available - borderOverhead);
+  const usableContent = Math.max(colCount, tableWidth - borderOverhead);
 
   const headerParsed = header.map((cell) => parseAndStripFormatting(cell));
   const rowsParsed = rows.map((row) => row.map((cell) => parseAndStripFormatting(cell)));
 
-  const naturalWidths = headerParsed.map((parsed, i) => {
-    let widest = visibleWidth(parsed.plain);
-    for (const row of rowsParsed) {
-      const cellPlain = row[i]?.plain ?? "";
-      for (const piece of cellPlain.split(/\s+/)) {
-        widest = Math.max(widest, visibleWidth(piece));
-      }
-      widest = Math.max(widest, Math.min(visibleWidth(cellPlain), 24));
-    }
-    return Math.max(3, widest);
-  });
-
-  const totalNatural = naturalWidths.reduce((a, b) => a + b, 0) || 1;
   let colWidths: number[];
-  if (totalNatural <= usableContent) {
-    colWidths = naturalWidths.slice();
-    let remaining = usableContent - totalNatural;
-    let i = 0;
-    while (remaining > 0) {
-      colWidths[i % colCount]!++;
-      remaining--;
-      i++;
-    }
-  } else {
-    colWidths = naturalWidths.map((w) =>
-      Math.max(3, Math.floor((w / totalNatural) * usableContent))
+  if (layout?.columnWeights.length === colCount) {
+    colWidths = layout.columnWeights.map((weight) =>
+      Math.max(3, Math.floor(usableContent * weight))
     );
-    let diff = usableContent - colWidths.reduce((a, b) => a + b, 0);
-    let i = 0;
+    let diff = usableContent - colWidths.reduce((sum, width) => sum + width, 0);
+    let index = 0;
     while (diff > 0) {
-      colWidths[i % colCount]!++;
+      colWidths[index % colCount]!++;
       diff--;
-      i++;
+      index++;
     }
     while (diff < 0) {
-      const idx = i % colCount;
-      if (colWidths[idx]! > 3) {
-        colWidths[idx]!--;
-        diff++;
+      const shrinkIndex = colWidths.findIndex((width) => width > 3);
+      if (shrinkIndex < 0) break;
+      colWidths[shrinkIndex]!--;
+      diff++;
+    }
+  } else {
+    const naturalWidths = headerParsed.map((parsed, i) => {
+      let widest = visibleWidth(parsed.plain);
+      for (const row of rowsParsed) {
+        const cellPlain = row[i]?.plain ?? "";
+        for (const piece of cellPlain.split(/\s+/)) {
+          widest = Math.max(widest, visibleWidth(piece));
+        }
+        widest = Math.max(widest, Math.min(visibleWidth(cellPlain), 24));
       }
-      i++;
-      if (i > colCount * 10) break;
+      return Math.max(3, widest);
+    });
+
+    const totalNatural = naturalWidths.reduce((a, b) => a + b, 0) || 1;
+    if (totalNatural <= usableContent) {
+      colWidths = naturalWidths.slice();
+      let remaining = usableContent - totalNatural;
+      let i = 0;
+      while (remaining > 0) {
+        colWidths[i % colCount]!++;
+        remaining--;
+        i++;
+      }
+    } else {
+      colWidths = naturalWidths.map((w) =>
+        Math.max(3, Math.floor((w / totalNatural) * usableContent))
+      );
+      let diff = usableContent - colWidths.reduce((a, b) => a + b, 0);
+      let i = 0;
+      while (diff > 0) {
+        colWidths[i % colCount]!++;
+        diff--;
+        i++;
+      }
+      while (diff < 0) {
+        const idx = i % colCount;
+        if (colWidths[idx]! > 3) {
+          colWidths[idx]!--;
+          diff++;
+        }
+        i++;
+        if (i > colCount * 10) break;
+      }
     }
   }
 
-  const b = C.dimmer;
+  const border = layout?.fullWidth ? C.secondary : C.dimmer;
+  const b = border;
   const top = b("┌") + colWidths.map((w) => b("─".repeat(w + 2))).join(b("┬")) + b("┐");
   const sep = b("├") + colWidths.map((w) => b("─".repeat(w + 2))).join(b("┼")) + b("┤");
   const bot = b("└") + colWidths.map((w) => b("─".repeat(w + 2))).join(b("┴")) + b("┘");
