@@ -33,7 +33,12 @@ export async function resolvePdfRenderMode(
     return "latex";
   }
 
-  return promptMissingLatexCompiler(controls, options?.signal);
+  try {
+    return await promptMissingLatexCompiler(controls, options?.signal);
+  } catch (err) {
+    if (err instanceof KeypressAbortError) return "cancel";
+    throw err;
+  }
 }
 
 async function promptMissingLatexCompiler(
@@ -238,14 +243,22 @@ async function withPausedInput<T>(
   }
 }
 
+class KeypressAbortError extends Error {
+  constructor() { super("aborted"); }
+}
+
 function waitForKeypress(): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const stdin = process.stdin;
     const wasRaw = stdin.isRaw;
     try { stdin.setRawMode(true); } catch {}
     stdin.resume();
-    stdin.once("data", () => {
+    stdin.once("data", (data: Buffer) => {
       try { stdin.setRawMode(wasRaw ?? false); } catch {}
+      if (data[0] === 0x03) {
+        reject(new KeypressAbortError());
+        return;
+      }
       resolve();
     });
   });
