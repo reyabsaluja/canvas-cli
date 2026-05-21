@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test, { afterEach } from "node:test";
 import { fetchWithRetry, DEFAULT_MAX_DELAY_MS, type RetryOptions } from "../src/canvas/retry.js";
+import { CanvasClient } from "../src/canvas/client.js";
 
 const FAST: RetryOptions = { baseDelayMs: 0 };
 
@@ -222,4 +223,44 @@ test("fetchWithRetry aborts sleep when signal is aborted", async () => {
     (err: Error) => err.name === "AbortError"
   );
   assert.equal(mock.callCount, 1);
+});
+
+test("CanvasClient retries 503 during pagination and continues", async () => {
+  let callCount = 0;
+  globalThis.fetch = (async () => {
+    callCount++;
+    if (callCount === 1) {
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        headers: new Headers({ link: '<http://test.com/api?page=2>; rel="next"' }),
+        body: { cancel: async () => {} },
+        json: async () => [{ id: 1 }],
+      } as unknown as Response;
+    }
+    if (callCount === 2) {
+      return {
+        ok: false,
+        status: 503,
+        statusText: "Service Unavailable",
+        headers: new Headers(),
+        body: { cancel: async () => {} },
+        json: async () => ({}),
+      } as unknown as Response;
+    }
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: new Headers(),
+      body: { cancel: async () => {} },
+      json: async () => [{ id: 2 }],
+    } as unknown as Response;
+  }) as typeof fetch;
+
+  const client = new CanvasClient({ baseUrl: "http://test.com", accessToken: "token" });
+  const courses = await (client as any).fetchPaginated("http://test.com/api?page=1");
+  assert.equal(callCount, 3);
+  assert.deepEqual(courses, [{ id: 1 }, { id: 2 }]);
 });
