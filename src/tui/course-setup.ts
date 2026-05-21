@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { hideCursor, showCursor, createBuffer, clearScreen, getTermSize, padAnsiToWidth, buildLogoBanner, C } from "./screen.js";
+import { hideCursor, showCursor, createBuffer, clearScreen, enterAlternateScreen, leaveAlternateScreen, getTermSize, padAnsiToWidth, buildLogoBanner, C } from "./screen.js";
 import { USER_ABORT_EXIT_CODE } from "./chat-shell-exit.js";
 import type { Course } from "../domain/models.js";
 import type { UserCourse, CourseConfig } from "./course-config.js";
@@ -124,6 +124,7 @@ export function showMultiSelect(
       buf.flush();
     }
 
+    enterAlternateScreen();
     clearScreen();
     hideCursor();
     render();
@@ -225,6 +226,8 @@ export function showMultiSelect(
       try {
         stdin.pause();
       } catch {}
+      leaveAlternateScreen();
+      clearScreen();
       showCursor();
     }
 
