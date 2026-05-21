@@ -315,6 +315,7 @@ export function showAnnouncementsView(
     function cleanup(): void {
       stdin.removeListener("data", onData);
       try { stdin.setRawMode(false); } catch {}
+      try { stdin.pause(); } catch {}
       try { leaveAlternateScreen(); } catch {}
       try { clearScreen(); } catch {}
       try { showCursor(); } catch {}
