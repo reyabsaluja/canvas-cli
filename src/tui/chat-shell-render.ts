@@ -1233,32 +1233,20 @@ interface TableLayout {
   columnWeights: number[];
 }
 
-function colMatches(cell: string, ...keywords: string[]): boolean {
-  return keywords.some((kw) => new RegExp(`(?:^|\\s)${kw}(?:\\s|$)`, "i").test(cell));
-}
-
+// Matches only the exact headers emitted by /files and /modules formatters.
 function detectTableLayout(header: string[]): TableLayout | null {
-  const normalized = header.map((cell) => cell.trim().toLowerCase().replace(/[_\-]/g, " "));
-  const col0 = normalized[0] ?? "";
-  const col1 = normalized[1] ?? "";
-  const col2 = normalized[2] ?? "";
+  const key = header.map((cell) => cell.trim().toLowerCase()).join("|");
 
-  if (colMatches(col0, "name", "file") && colMatches(col1, "type") && colMatches(col2, "size")) {
-    return { fullWidth: true, columnWeights: [0.64, 0.12, 0.24] };
+  switch (key) {
+    case "name|type|size":
+      return { fullWidth: true, columnWeights: [0.64, 0.12, 0.24] };
+    case "name|size":
+      return { fullWidth: true, columnWeights: [0.72, 0.28] };
+    case "#|module|items":
+      return { fullWidth: true, columnWeights: [0.07, 0.69, 0.24] };
+    default:
+      return null;
   }
-  if (colMatches(col0, "name", "file") && colMatches(col1, "type")) {
-    return { fullWidth: true, columnWeights: [0.78, 0.22] };
-  }
-  if (colMatches(col0, "name", "file") && colMatches(col1, "size")) {
-    return { fullWidth: true, columnWeights: [0.72, 0.28] };
-  }
-  if (colMatches(col0, "#", "num") && colMatches(col1, "module") && colMatches(col2, "item", "count")) {
-    return { fullWidth: true, columnWeights: [0.07, 0.69, 0.24] };
-  }
-  if (colMatches(col0, "module") && colMatches(col1, "item", "count")) {
-    return { fullWidth: true, columnWeights: [0.78, 0.22] };
-  }
-  return null;
 }
 
 function tryRenderTable(
