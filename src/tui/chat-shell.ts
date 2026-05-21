@@ -1241,6 +1241,10 @@ export async function runChatShell<TExit>(
       if (shellClosed) return;
 
       if (key === "\x03") {
+        if (isProcessing && processingAbort) {
+          processingAbort.abort();
+          return;
+        }
         if (inputBuffer.length > 0) {
           inputBuffer = "";
           slashSelected = 0;
@@ -1555,6 +1559,10 @@ export async function runChatShell<TExit>(
           continue;
         }
         flushTextBuffer();
+        if (char === "\x03" && isProcessing && processingAbort) {
+          processingAbort.abort();
+          continue;
+        }
         keyQueue.enqueue(() => handleKey(char));
       }
 
