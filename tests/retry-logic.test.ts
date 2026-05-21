@@ -17,6 +17,7 @@ function mockFetch(responses: Array<{ status: number; headers?: Record<string, s
       status: entry.status,
       statusText: `Status ${entry.status}`,
       headers: new Headers(entry.headers ?? {}),
+      body: { cancel: async () => {} },
       json: async () => ({}),
       text: async () => "",
     } as unknown as Response;
