@@ -89,10 +89,13 @@ function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
 
 export type SleepFn = (ms: number, signal?: AbortSignal | null) => Promise<void>;
 
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
 export interface RetryOptions {
   maxRetries?: number;
   baseDelayMs?: number;
   maxDelayMs?: number;
+  requestTimeoutMs?: number;
   log?: LogFn;
   sleepFn?: SleepFn;
 }
@@ -105,13 +108,18 @@ export async function fetchWithRetry(
   const maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
   const baseDelay = options?.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
   const maxDelay = options?.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
+  const requestTimeout = options?.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const log = options?.log ?? stderrLog;
   const sleepImpl = options?.sleepFn ?? sleep;
   const signal = init?.signal ?? null;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const response = await fetch(url, init);
+      let fetchInit = init;
+      if (requestTimeout > 0 && !signal) {
+        fetchInit = { ...init, signal: AbortSignal.timeout(requestTimeout) };
+      }
+      const response = await fetch(url, fetchInit);
 
       if (response.ok || isPermanentStatus(response.status)) {
         return response;
@@ -128,7 +136,8 @@ export async function fetchWithRetry(
       );
       await sleepImpl(delay, signal);
     } catch (err) {
-      if (isRetriableNetworkError(err) && attempt < maxRetries) {
+      const isTimeout = err instanceof Error && err.name === "TimeoutError";
+      if ((isRetriableNetworkError(err) || (isTimeout && !signal)) && attempt < maxRetries) {
         const delay = exponentialDelay(attempt, baseDelay, maxDelay);
         log(
           `Network error, retrying in ${Math.round(delay / 1000)}s (retry ${attempt + 1} of ${maxRetries})...`

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test, { afterEach, mock } from "node:test";
-import { CanvasApiError, fetchWithRetry, DEFAULT_MAX_DELAY_MS, type RetryOptions, type SleepFn } from "../src/canvas/retry.js";
+import { CanvasApiError, fetchWithRetry, DEFAULT_MAX_DELAY_MS, DEFAULT_REQUEST_TIMEOUT_MS, type RetryOptions, type SleepFn } from "../src/canvas/retry.js";
 import { CanvasClient } from "../src/canvas/client.js";
 
 const noopSleep: SleepFn = async () => {};
-const FAST: RetryOptions = { baseDelayMs: 1, log: () => {}, sleepFn: noopSleep };
+const FAST: RetryOptions = { baseDelayMs: 1, requestTimeoutMs: 0, log: () => {}, sleepFn: noopSleep };
 
 afterEach(() => {
   mock.restoreAll();
@@ -448,4 +448,72 @@ test("fetchWithRetry propagates abort during in-flight fetch", async () => {
     () => fetchWithRetry("http://test.com/api", { signal: controller.signal }, FAST),
     (err: Error) => err.name === "AbortError"
   );
+});
+
+test("fetchWithRetry retries on request timeout when no caller signal", async () => {
+  let callCount = 0;
+  mock.method(globalThis, "fetch", async () => {
+    callCount++;
+    if (callCount < 3) {
+      const err = new DOMException("The operation timed out.", "TimeoutError");
+      throw err;
+    }
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: new Headers(),
+      body: { cancel: async () => {} },
+    } as unknown as Response;
+  });
+  const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
+  assert.equal(res.status, 200);
+  assert.equal(callCount, 3);
+});
+
+test("fetchWithRetry does not retry timeout when caller provides signal", async () => {
+  const controller = new AbortController();
+  let callCount = 0;
+  mock.method(globalThis, "fetch", async () => {
+    callCount++;
+    throw new DOMException("The operation timed out.", "TimeoutError");
+  });
+  await assert.rejects(
+    () => fetchWithRetry("http://test.com/api", { signal: controller.signal }, FAST),
+    (err: Error) => err.name === "TimeoutError"
+  );
+  assert.equal(callCount, 1);
+});
+
+test("fetchWithRetry applies timeout signal when no caller signal provided", async () => {
+  let receivedSignal: AbortSignal | null | undefined = null;
+  mock.method(globalThis, "fetch", async (_url: string, init?: RequestInit) => {
+    receivedSignal = init?.signal;
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: new Headers(),
+      body: { cancel: async () => {} },
+    } as unknown as Response;
+  });
+  await fetchWithRetry("http://test.com/api", undefined, { ...FAST, requestTimeoutMs: 5000 });
+  assert.ok(receivedSignal, "Should have applied a timeout signal");
+});
+
+test("fetchWithRetry does not override caller-provided signal with timeout", async () => {
+  const controller = new AbortController();
+  let receivedSignal: AbortSignal | null | undefined = null;
+  mock.method(globalThis, "fetch", async (_url: string, init?: RequestInit) => {
+    receivedSignal = init?.signal;
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: new Headers(),
+      body: { cancel: async () => {} },
+    } as unknown as Response;
+  });
+  await fetchWithRetry("http://test.com/api", { signal: controller.signal }, { ...FAST, requestTimeoutMs: 5000 });
+  assert.equal(receivedSignal, controller.signal, "Should preserve caller signal");
 });
