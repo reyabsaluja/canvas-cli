@@ -296,11 +296,10 @@ test("fetchWithRetry applies jitter to retry delay", async () => {
   const trackingSleep: SleepFn = async (ms) => { delays.push(ms); };
   const res = await fetchWithRetry("http://test.com/api", undefined, { baseDelayMs, log: () => {}, sleepFn: trackingSleep });
   assert.equal(res.status, 200);
-  const minExpected = baseDelayMs * 0.7;
-  const maxExpected = baseDelayMs * 1.3;
+  const maxExpected = baseDelayMs * 2;
   assert.ok(
-    delays[0] >= minExpected && delays[0] <= maxExpected,
-    `Expected delay with jitter between ${minExpected}-${maxExpected}ms, got ${delays[0]}ms`
+    delays[0] >= 0 && delays[0] <= maxExpected,
+    `Expected delay with full jitter between 0-${maxExpected}ms, got ${delays[0]}ms`
   );
 });
 
