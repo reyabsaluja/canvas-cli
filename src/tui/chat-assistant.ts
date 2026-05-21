@@ -69,9 +69,9 @@ const GLOBAL_TOOLS: ToolDefinition[] = [
     },
   },
   {
-    name: "list_radar",
+    name: "list_announcements",
     description:
-      "List recent announcements and discussion topics across all courses. Optionally filter by type and search by keyword.",
+      "List announcements and discussion topics across all courses. Optionally filter by type and search by keyword.",
     parameters: {
       type: "object",
       properties: {
@@ -207,9 +207,9 @@ const COURSE_TOOLS: ToolDefinition[] = [
     },
   },
   {
-    name: "list_radar",
+    name: "list_announcements",
     description:
-      "List recent announcements and discussion topics for this course. Optionally filter by type and search by keyword.",
+      "List announcements and discussion topics for this course. Optionally filter by type and search by keyword.",
     parameters: {
       type: "object",
       properties: {
@@ -336,7 +336,7 @@ export async function answerGlobalQuestion(options: {
           });
           return result;
         }
-        case "list_radar": {
+        case "list_announcements": {
           const filter = (input.filter as RadarFilter) ?? "all";
           const query = (input.query as string) ?? "";
           const courses = getDisplayCourses(options.services);
@@ -348,7 +348,7 @@ export async function answerGlobalQuestion(options: {
           const result = formatRadarItems(items, filter, query);
           options.onToolCall?.({
             action: "list",
-            target: "radar",
+            target: "announcements",
             result,
             color: "green",
           });
@@ -529,7 +529,7 @@ export async function answerCourseQuestion(
           });
           return result.message;
         }
-        case "list_radar": {
+        case "list_announcements": {
           const filter = (input.filter as RadarFilter) ?? "all";
           const query = (input.query as string) ?? "";
           const items = await options.services.radar.getRadarItems(
@@ -541,7 +541,7 @@ export async function answerCourseQuestion(
           const result = formatRadarItems(items, filter, query);
           options.onToolCall?.({
             action: "list",
-            target: "radar",
+            target: "announcements",
             result,
             color: "green",
           });
@@ -590,7 +590,7 @@ function buildGlobalSystemPrompt(
     filterActionableUpcomingAssignments(upcomingAssignments);
   const lines: string[] = [
     "You are the global home assistant for canvas-cli.",
-    "This scope is navigation-oriented but you also have cross-course tools: list_radar and read_thread for announcements and discussions, list_course_assignments to inspect a specific course's assignments without opening it, and search_course_knowledge to peek into any course's cached modules, pages, and attachments.",
+    "This scope is navigation-oriented but you also have cross-course tools: list_announcements and read_thread for announcements and discussions, list_course_assignments to inspect a specific course's assignments without opening it, and search_course_knowledge to peek into any course's cached modules, pages, and attachments.",
     "Reach for these tools before telling the user to open a course — you can often answer directly from global scope.",
     "Only fall back to 'open the course or workspace' guidance when the student genuinely needs deep assignment-level reading (full PDFs, workup detail).",
     "",
@@ -649,7 +649,7 @@ function buildCourseSystemPrompt(
     "Use tools when the user asks for details that require searching or reading cached course materials.",
     "IMPORTANT: If the user asks to open, launch, show, or pull up ANY file, PDF, page, or resource, you MUST call open_course_resource immediately. Do NOT describe the resource or answer from context — the user wants it opened on their machine. After a successful open, just confirm it was opened.",
     "PDFs created in this chat with /pdf are saved under .canvas-cli/exports/ (exported pdf). To reopen the latest export, call open_course_resource with query \"it\" or the exact export filename shown when the PDF was generated — never a vague course exam filename.",
-    "Use list_radar and read_thread to check announcements and discussions for this course.",
+    "Use list_announcements and read_thread to check announcements and discussions for this course.",
     "Ground answers in the indexed local cache. If the cache does not contain the answer, say so plainly.",
     "If the cache is missing, say that clearly and guide the user toward opening a workspace or refreshing.",
     "",

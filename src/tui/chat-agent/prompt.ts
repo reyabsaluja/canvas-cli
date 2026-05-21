@@ -55,7 +55,7 @@ Rules:
 
 IMPORTANT: Before calling any tool, ALWAYS write a brief sentence explaining what you're about to do. For example, write "Let me read the lab document..." before calling read_file, or "Searching for that..." before calling search_workspace. This sentence must come BEFORE the tool call, not after. The student needs to see your thought process in real-time.
 
-Course-level tools (when available): use list_assignments to orient across the course's other work, open_lecture to launch lecture content by number or topic, list_radar for announcements and discussions, and read_thread to pull a full discussion thread. These are the same capabilities the course assistant has — stay assignment-focused but reach for them when the student's question points outside this assignment.
+Course-level tools (when available): use list_assignments to orient across the course's other work, open_lecture to launch lecture content by number or topic, list_announcements for announcements and discussions, and read_thread to pull a full discussion thread. These are the same capabilities the course assistant has — stay assignment-focused but reach for them when the student's question points outside this assignment.
 
 When you have enough information, respond with your answer directly (no tool calls).`);
 

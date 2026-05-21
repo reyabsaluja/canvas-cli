@@ -102,23 +102,13 @@ export async function handleCommand(
       }
       return { type: "recent-picker" };
     }
-    if (command === "/radar") {
+    if (command === "/announcements") {
       const courses = getDisplayCourses(services);
       if (courses.length === 0) {
         await api.addMessage({ role: "system", content: "No courses configured." });
         return;
       }
-      const { filter, query: radarQuery } = parseRadarArgs(args);
-      const items = await services.radar.getRadarItemsMultiCourse(
-        courses.map((c) => ({ id: c.id, name: c.name })),
-        filter,
-        radarQuery || undefined
-      );
-      await api.addMessage({
-        role: items.length > 0 ? "assistant" : "system",
-        content: formatRadarItems(items, filter, radarQuery),
-      });
-      return;
+      return { type: "announcements" } as const;
     }
     if (command === "/thread") {
       const trimmed = args.trim();
@@ -197,19 +187,8 @@ export async function handleCommand(
       return;
     }
 
-    if (command === "/radar") {
-      const { filter, query: radarQuery } = parseRadarArgs(args);
-      const items = await services.radar.getRadarItems(
-        course.id,
-        course.name,
-        filter,
-        radarQuery || undefined
-      );
-      await api.addMessage({
-        role: items.length > 0 ? "assistant" : "system",
-        content: formatRadarItems(items, filter, radarQuery),
-      });
-      return;
+    if (command === "/announcements") {
+      return { type: "announcements", courseId: course.id, courseName: course.name } as const;
     }
 
     if (command === "/thread") {
