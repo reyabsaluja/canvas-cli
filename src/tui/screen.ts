@@ -59,11 +59,12 @@ export const CANVAS_LOGO = [
   "  ⠀⠀⠈⠛⠀⣰⣾⣿⣦⠀⠙⠋⠀⠀",
 ];
 
-export function buildLogoBanner(title: string, subtitle?: string): string[] {
+export function buildLogoBanner(title: string, subtitle?: string, options?: { styledSubtitle?: string }): string[] {
   const logoWidth = Math.max(...CANVAS_LOGO.map((l) => [...l].length));
+  const subtitleLine = options?.styledSubtitle ?? (subtitle ? C.dimmer(subtitle) : "");
   const textLines: string[] = [
     C.pureWhiteBold(title),
-    subtitle ? C.dimmer(subtitle) : "",
+    subtitleLine,
   ].filter(Boolean);
   const textStart = 2;
 

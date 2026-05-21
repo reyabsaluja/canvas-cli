@@ -8,7 +8,6 @@ export class ChatShellPersistence {
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
   private persistChain: Promise<void> = Promise.resolve();
   private persistFailureMessage: string | null = null;
-  private consecutiveFailures = 0;
 
   constructor(
     private readonly session: ChatSession,
@@ -36,12 +35,10 @@ export class ChatShellPersistence {
         try {
           await saveChatSession(this.session);
           this.persistFailureMessage = null;
-          this.consecutiveFailures = 0;
           return;
         } catch (error) {
           this.persistFailureMessage =
             error instanceof Error ? error.message : "unknown persistence error";
-          this.consecutiveFailures++;
           if (attempt < MAX_PERSIST_RETRIES) {
             await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
           }

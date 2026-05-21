@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import {
   C,
-  CANVAS_LOGO,
+  buildLogoBanner,
   createBuffer,
   getTermSize,
   invalidateScreenRows,
@@ -82,11 +82,6 @@ export function resetChatShellRenderCache(): void {
   lastInputStartRow = 0;
 }
 
-
-function logoCodePointLength(line: string): number {
-  return [...line].length;
-}
-
 export function buildBannerLines(options: {
   runtime: ScopeRuntime;
   bannerRenderer?: (buf: { push(line?: string): void }) => void;
@@ -104,27 +99,9 @@ export function buildBannerLines(options: {
   const title = options.runtime.title;
   const subtitle = options.runtime.subtitle ?? "";
 
-  const logoWidth = Math.max(...CANVAS_LOGO.map((l) => logoCodePointLength(l)));
-  const textLines: string[] = [
-    C.pureWhiteBold(title),
-    subtitle ? statusBarGrey(subtitle) : "",
-  ].filter(Boolean);
-
-  const totalLogoLines = CANVAS_LOGO.length;
-  const textStart = 2;
-
-  const bannerLines: string[] = [];
-  for (let i = 0; i < totalLogoLines; i++) {
-    const logoLine = CANVAS_LOGO[i]!;
-    const pad = " ".repeat(Math.max(0, logoWidth - logoCodePointLength(logoLine)));
-    const textIndex = i - textStart;
-    const rightText = textIndex >= 0 && textIndex < textLines.length
-      ? "   " + textLines[textIndex]!
-      : "";
-    bannerLines.push(" " + C.primary(logoLine) + pad + rightText);
-  }
-
-  return bannerLines;
+  return buildLogoBanner(title, undefined, {
+    styledSubtitle: subtitle ? statusBarGrey(subtitle) : "",
+  });
 }
 
 export function renderChatFrame(
@@ -1257,7 +1234,7 @@ interface TableLayout {
 }
 
 function colMatches(cell: string, ...keywords: string[]): boolean {
-  return keywords.some((kw) => new RegExp(`(?:^|\\s)${kw}`, "i").test(cell));
+  return keywords.some((kw) => new RegExp(`(?:^|\\s)${kw}(?:\\s|$)`, "i").test(cell));
 }
 
 function detectTableLayout(header: string[]): TableLayout | null {
