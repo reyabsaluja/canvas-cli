@@ -85,13 +85,20 @@ export async function workCommand(
     process.exit(1);
   }
 
-  const { workup, result } = lifecycle;
+  const { workup, result, partial, aiErrorMessage } = lifecycle;
 
   // Phase 6: Render summary
   const relativePath = path.relative(process.cwd(), result.workspacePath);
 
   console.log("");
-  console.log(chalk.bold.green("Workspace ready"));
+  if (partial) {
+    console.log(chalk.bold.yellow("Workspace ready (partial — AI failed mid-investigation)"));
+    if (aiErrorMessage) {
+      console.log(chalk.yellow(`  ${aiErrorMessage}`));
+    }
+  } else {
+    console.log(chalk.bold.green("Workspace ready"));
+  }
   console.log("");
   console.log(`  ${chalk.dim("Assignment")}  ${detail.name}`);
   console.log(`  ${chalk.dim("Course    ")}  ${course.name}`);

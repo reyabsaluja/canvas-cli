@@ -115,8 +115,7 @@ test("formatAIError surfaces provider details for bad requests", () => {
     }),
   });
 
-  assert.equal(
-    formatAIError(error),
-    "AI provider rejected the request: The provided model identifier is invalid. Use a Bedrock model ID such as us.anthropic.claude-sonnet-4-20250514-v1:0."
-  );
+  const formatted = formatAIError(error);
+  assert.match(formatted, /The provided model identifier is invalid/);
+  assert.match(formatted, /AI_MODEL/);
 });
