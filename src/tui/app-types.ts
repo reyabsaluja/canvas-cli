@@ -15,6 +15,7 @@ export type ShellResult =
   | { type: "course-picker" }
   | { type: "recent-picker" }
   | { type: "assignment-picker"; courseId: number }
+  | { type: "announcements"; courseId?: number; courseName?: string }
   | {
       type: "open-assignment";
       courseId: number;

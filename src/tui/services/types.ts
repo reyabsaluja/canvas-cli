@@ -26,6 +26,7 @@ export interface AppServices {
     { courseName: string; assignmentsPromise: Promise<Assignment[]> }
   >;
   radar: RadarService;
+  resolvedAssignments: Map<number, Assignment[]>;
 }
 
 export interface WorkspaceOpenResult {

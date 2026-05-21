@@ -147,7 +147,7 @@ export async function callModel(
   config: AIProviderConfig,
   systemPrompt: string,
   userMessage: string,
-  options?: { maxTokens?: number; timeoutMs?: number; abortSignal?: AbortSignal }
+  options?: { maxTokens?: number; timeoutMs?: number; abortSignal?: AbortSignal; onTextDelta?: (delta: string) => void }
 ): Promise<string> {
   const signals: AbortSignal[] = [];
   if (options?.abortSignal) signals.push(options.abortSignal);
@@ -155,6 +155,22 @@ export async function callModel(
   const combinedSignal = signals.length > 0
     ? (signals.length === 1 ? signals[0]! : AbortSignal.any(signals))
     : undefined;
+
+  if (options?.onTextDelta) {
+    const stream = streamText({
+      model: getModel(config),
+      system: systemPrompt,
+      messages: [{ role: "user", content: userMessage }],
+      ...(options.maxTokens != null ? { maxTokens: options.maxTokens } : {}),
+      ...(combinedSignal ? { abortSignal: combinedSignal } : {}),
+    });
+    let text = "";
+    for await (const delta of stream.textStream) {
+      text += delta;
+      options.onTextDelta(delta);
+    }
+    return text;
+  }
 
   const result = await generateText({
     model: getModel(config),
@@ -377,12 +393,20 @@ export async function streamWithTools(
       }
     }
   } catch (err) {
+    if (textFlushTimer) {
+      clearTimeout(textFlushTimer);
+      textFlushTimer = null;
+    }
     flushPendingTextDelta(true);
     if (!fullText) {
       throw err;
     }
   }
 
+  if (textFlushTimer) {
+    clearTimeout(textFlushTimer);
+    textFlushTimer = null;
+  }
   flushPendingTextDelta(true);
   if (capturedStreamError && !fullText) {
     throw capturedStreamError;
