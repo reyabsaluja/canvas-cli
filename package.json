@@ -5,16 +5,30 @@
   "license": "MIT",
   "type": "module",
   "packageManager": "bun@1.3.11",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/reyabsaluja/canvas-cli.git"
+  },
+  "author": "Reyab Saluja",
+  "homepage": "https://github.com/reyabsaluja/canvas-cli#readme",
+  "bugs": {
+    "url": "https://github.com/reyabsaluja/canvas-cli/issues"
+  },
   "files": [
     "dist",
     "README.md"
   ],
   "keywords": [
     "canvas",
+    "canvas-lms",
     "cli",
     "lms",
     "terminal",
-    "typescript"
+    "typescript",
+    "education",
+    "assignments",
+    "tui",
+    "ai"
   ],
   "engines": {
     "node": ">=20"
