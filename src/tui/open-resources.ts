@@ -657,19 +657,12 @@ async function listExportFiles(
 }
 
 const RECENT_EXPORT_QUERY =
-  /^(?:the pdf|the file|open it|that pdf|this pdf|exported pdf|generated pdf|study guide pdf|pdf you made|the study guide|the export|my pdf|my study guide)$/i;
+  /^(?:(?:the|my|this|that|open|open the)?\s*(?:pdf|study guide|export|file)(?:\s+(?:you\s+)?(?:made|generated|created))?|open\s+it)$/i;
 
 export function isRecentExportQuery(query: string): boolean {
   const trimmed = query.trim();
   if (!trimmed) return false;
-  if (RECENT_EXPORT_QUERY.test(trimmed)) return true;
-  if (/^(?:the\s+)?(?:pdf|study guide|export)\s+(?:you\s+)?(?:made|generated|created)$/i.test(trimmed)) {
-    return true;
-  }
-  if (/^open\s+(?:the\s+)?(?:pdf|study guide|export)\s*(?:you\s+made)?$/i.test(trimmed)) {
-    return true;
-  }
-  return false;
+  return RECENT_EXPORT_QUERY.test(trimmed);
 }
 
 async function listWorkspaceFiles(
