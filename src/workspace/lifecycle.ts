@@ -55,6 +55,8 @@ export interface WorkspaceLifecycleResult {
   workup: AssignmentWorkup;
   state: InvestigationState;
   result: WorkResult;
+  partial?: boolean;
+  aiErrorMessage?: string;
 }
 
 export class MissingCourseCacheError extends Error {
@@ -138,6 +140,8 @@ export async function runWorkspaceLifecycle(
       workup: investigation.workup,
       state: investigation.state,
       result,
+      partial: investigation.partial,
+      aiErrorMessage: investigation.aiErrorMessage,
     };
   } catch (error) {
     await setState("error", getErrorMessage(error));
