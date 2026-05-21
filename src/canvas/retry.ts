@@ -99,7 +99,7 @@ export async function fetchWithRetry(
       }
 
       const delay = getRetryDelay(response, attempt + 1, baseDelay, maxDelay);
-      response.body?.cancel();
+      await response.body?.cancel();
       log(
         `Canvas API returned ${response.status}, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${maxRetries})...`
       );
