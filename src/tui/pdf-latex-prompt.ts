@@ -251,9 +251,10 @@ function waitForKeypress(): Promise<void> {
     const wasRaw = stdin.isRaw;
     try { stdin.setRawMode(true); } catch {}
     stdin.resume();
-    stdin.once("data", (data: Buffer) => {
+    stdin.once("data", (data: Buffer | string) => {
       try { stdin.setRawMode(wasRaw ?? false); } catch {}
-      if (data[0] === 0x03) {
+      const firstByte = typeof data === "string" ? data.charCodeAt(0) : data[0];
+      if (firstByte === 0x03) {
         reject(new KeypressAbortError());
         return;
       }
