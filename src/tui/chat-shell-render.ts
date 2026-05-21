@@ -1321,7 +1321,8 @@ function renderMarkdownTable(
 ): void {
   const colCount = header.length;
   const layout = detectTableLayout(header);
-  const tableWidth = layout?.fullWidth
+  const useFullWidth = layout?.fullWidth || colCount >= 5;
+  const tableWidth = useFullWidth
     ? Math.max(32, cols - 4)
     : Math.max(20, maxWidth - 2);
   const borderOverhead = colCount + 1 + colCount * 2;
@@ -1394,7 +1395,7 @@ function renderMarkdownTable(
     }
   }
 
-  const border = layout?.fullWidth ? C.secondary : C.dimmer;
+  const border = useFullWidth ? C.secondary : C.dimmer;
   const b = border;
   const top = b("┌") + colWidths.map((w) => b("─".repeat(w + 2))).join(b("┬")) + b("┐");
   const sep = b("├") + colWidths.map((w) => b("─".repeat(w + 2))).join(b("┼")) + b("┤");

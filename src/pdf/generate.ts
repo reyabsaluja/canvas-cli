@@ -1,6 +1,6 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { callModel, formatAIError } from "../ai/provider.js";
+import { callModel, formatAIError, type AIProviderConfig } from "../ai/provider.js";
 import { buildPdfContextBundle, type PdfContextInput } from "./context.js";
 import { renderMarkdownToPdf } from "./render.js";
 import {
@@ -48,6 +48,26 @@ Rules:
 - In \\texttt{...} and tables, escape special characters: _ → \\_ & → \\& % → \\% # → \\# $ → \\$
 - Keep math in $...$ or \\[...\\]; do not break lstlisting blocks.
 - Do not add commentary or explanations.`;
+
+async function callModelWithRetry(
+  config: AIProviderConfig,
+  systemPrompt: string,
+  userMessage: string,
+  options: { maxTokens: number; timeoutMs: number; abortSignal?: AbortSignal }
+): Promise<string> {
+  try {
+    return await callModel(config, systemPrompt, userMessage, options);
+  } catch (error) {
+    if (options.abortSignal?.aborted) throw error;
+    const isTimeout = error instanceof Error && (
+      error.name === "TimeoutError" ||
+      error.message.includes("timed out") ||
+      error.message.includes("ETIMEDOUT")
+    );
+    if (!isTimeout) throw error;
+    return await callModel(config, systemPrompt, userMessage, options);
+  }
+}
 
 export async function generatePdfExport(
   input: PdfContextInput,
@@ -105,7 +125,7 @@ async function generateLatexPdf(
   let warning: string | undefined;
 
   try {
-    const raw = await callModel(input.aiConfig!, LATEX_COMPOSE_SYSTEM_PROMPT, userMessage, { maxTokens: 16_000, timeoutMs: 600_000, abortSignal: input.abortSignal });
+    const raw = await callModelWithRetry(input.aiConfig!, LATEX_COMPOSE_SYSTEM_PROMPT, userMessage, { maxTokens: 16_000, timeoutMs: 600_000, abortSignal: input.abortSignal });
     latexBody = sanitizeLatexBody(raw);
   } catch (error) {
     if (input.abortSignal?.aborted) throw error;
@@ -296,7 +316,7 @@ async function composeMarkdown(
   ].join("\n");
 
   try {
-    const raw = await callModel(input.aiConfig, MARKDOWN_COMPOSE_SYSTEM_PROMPT, userMessage, { maxTokens: 16_000, timeoutMs: 600_000, abortSignal: input.abortSignal });
+    const raw = await callModelWithRetry(input.aiConfig, MARKDOWN_COMPOSE_SYSTEM_PROMPT, userMessage, { maxTokens: 16_000, timeoutMs: 600_000, abortSignal: input.abortSignal });
     const markdown = normalizeModelMarkdown(raw, bundle.suggestedTitle);
     return { markdown, usedAI: true };
   } catch (error) {

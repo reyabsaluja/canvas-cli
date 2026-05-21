@@ -211,9 +211,6 @@ async function runInstallWithInheritedStdio(
       await waitForKeypress();
       return "failed";
     }
-    clearScreen();
-    console.log(C.success("\n  Install finished. Checking for LaTeX…\n"));
-    await waitForKeypress();
     return "ok";
   } finally {
     controls.resumeInput();
