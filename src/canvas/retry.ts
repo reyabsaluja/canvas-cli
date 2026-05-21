@@ -14,15 +14,15 @@ const RETRIABLE_NETWORK_CODES = new Set([
   "UND_ERR_CONNECT_TIMEOUT",
 ]);
 
+const RETRIABLE_NETWORK_RE = new RegExp(
+  `\\b(${[...RETRIABLE_NETWORK_CODES].join("|")})\\b`
+);
+
 function isRetriableNetworkError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const cause = (err as { cause?: { code?: string } }).cause;
   if (cause?.code) return RETRIABLE_NETWORK_CODES.has(cause.code);
-  // Fallback: only message-match when there's no structured cause
-  for (const code of RETRIABLE_NETWORK_CODES) {
-    if (new RegExp(`\\b${code}\\b`).test(err.message)) return true;
-  }
-  return false;
+  return RETRIABLE_NETWORK_RE.test(err.message);
 }
 
 function isPermanentStatus(status: number): boolean {
