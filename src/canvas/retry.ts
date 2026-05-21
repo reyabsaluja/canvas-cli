@@ -101,5 +101,6 @@ export async function fetchWithRetry(
     }
   }
 
+  // Unreachable: final iteration always returns or throws, but satisfies TypeScript
   throw lastError;
 }
