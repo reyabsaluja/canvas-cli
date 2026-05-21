@@ -37,6 +37,7 @@ interface CachedThread {
 const LIST_TTL_MS = 60_000;
 const THREAD_TTL_MS = 300_000;
 const MAX_THREAD_ENTRIES = 200;
+const MAX_ANNOUNCEMENTS_PER_COURSE = 100;
 const RECENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 export class RadarService {
@@ -72,9 +73,10 @@ export class RadarService {
     courseName: string
   ): Promise<RadarItem[]> {
     const announcements = await this.client.getAnnouncementsSafe(courseId);
-    return sortRadarItems(
-      announcements.map((a) => normalizeTopicToRadarItem(a, courseId, courseName))
-    );
+    const items = announcements
+      .slice(0, MAX_ANNOUNCEMENTS_PER_COURSE)
+      .map((a) => normalizeTopicToRadarItem(a, courseId, courseName));
+    return sortRadarItems(items);
   }
 
   async getAllAnnouncementsMultiCourse(
