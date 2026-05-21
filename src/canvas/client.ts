@@ -15,6 +15,7 @@ import type {
 export class CanvasClient {
   private baseUrl: string;
   private headers: Record<string, string>;
+  private requestTimeoutMs: number;
 
   constructor(config: Config) {
     this.baseUrl = config.baseUrl;
@@ -22,6 +23,7 @@ export class CanvasClient {
       Authorization: `Bearer ${config.accessToken}`,
       Accept: "application/json",
     };
+    this.requestTimeoutMs = 30_000;
   }
 
   private async fetchPaginated<T>(url: string): Promise<T[]> {
@@ -29,7 +31,10 @@ export class CanvasClient {
     let nextUrl: string | null = url;
 
     while (nextUrl) {
-      const response = await fetch(nextUrl, { headers: this.headers });
+      const response = await fetch(nextUrl, {
+        headers: this.headers,
+        signal: AbortSignal.timeout(this.requestTimeoutMs),
+      });
 
       if (response.status === 401) {
         throw new Error(
@@ -52,7 +57,10 @@ export class CanvasClient {
   }
 
   private async fetchOne<T>(url: string): Promise<T> {
-    const response = await fetch(url, { headers: this.headers });
+    const response = await fetch(url, {
+      headers: this.headers,
+      signal: AbortSignal.timeout(this.requestTimeoutMs),
+    });
 
     if (response.status === 401) {
       throw new Error(
@@ -73,8 +81,14 @@ export class CanvasClient {
 
   private parseNextLink(linkHeader: string | null): string | null {
     if (!linkHeader) return null;
-    const match = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
-    return match ? match[1] : null;
+    const parts = linkHeader.split(",");
+    for (const part of parts) {
+      const match = part.match(/<([^>]+)>/);
+      if (match && /rel="next"/.test(part)) {
+        return match[1] ?? null;
+      }
+    }
+    return null;
   }
 
   /** Get courses with term and enrollment info for relevance filtering. */
@@ -188,6 +202,7 @@ export class CanvasClient {
       const response = await fetch(downloadUrl, {
         headers: this.headers,
         redirect: "follow",
+        signal: AbortSignal.timeout(60_000),
       });
       if (!response.ok) return null;
       return Buffer.from(await response.arrayBuffer());
