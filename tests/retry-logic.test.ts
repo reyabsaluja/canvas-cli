@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fetchWithRetry, type RetryOptions } from "../src/canvas/retry.js";
+import { fetchWithRetry, DEFAULT_MAX_DELAY_MS, type RetryOptions } from "../src/canvas/retry.js";
 
 const FAST: RetryOptions = { baseDelayMs: 0 };
 
@@ -251,4 +251,25 @@ test("fetchWithRetry clamps past-date Retry-After to minimum delay", async () =>
   } finally {
     mock.restore();
   }
+});
+
+test("fetchWithRetry caps large Retry-After to maxDelayMs", async () => {
+  const mock = mockFetch([
+    { status: 429, headers: { "retry-after": "3600" } },
+    { status: 200 },
+  ]);
+  try {
+    const start = Date.now();
+    const res = await fetchWithRetry("http://test.com/api", undefined, { baseDelayMs: 0, maxDelayMs: 1000 });
+    const elapsed = Date.now() - start;
+    assert.equal(res.status, 200);
+    assert.equal(mock.callCount, 2);
+    assert.ok(elapsed >= 500 && elapsed < 1500, `Should cap at maxDelayMs (1000ms), got ${elapsed}ms`);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("DEFAULT_MAX_DELAY_MS is 30 seconds", () => {
+  assert.equal(DEFAULT_MAX_DELAY_MS, 30_000);
 });
