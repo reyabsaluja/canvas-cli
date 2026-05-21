@@ -211,6 +211,24 @@ test("DEFAULT_MAX_DELAY_MS is 30 seconds", () => {
   assert.equal(DEFAULT_MAX_DELAY_MS, 30_000);
 });
 
+test("fetchWithRetry applies jitter to retry delay", async () => {
+  mockFetch([
+    { status: 503 },
+    { status: 200 },
+  ]);
+  const baseDelayMs = 200;
+  const start = Date.now();
+  const res = await fetchWithRetry("http://test.com/api", undefined, { baseDelayMs });
+  const elapsed = Date.now() - start;
+  assert.equal(res.status, 200);
+  const minExpected = baseDelayMs * 0.8;
+  const maxExpected = baseDelayMs * 1.2;
+  assert.ok(
+    elapsed >= minExpected && elapsed < maxExpected + 50,
+    `Expected delay with jitter between ${minExpected}-${maxExpected}ms, got ${elapsed}ms`
+  );
+});
+
 test("fetchWithRetry aborts sleep when signal is aborted", async () => {
   const mock = mockFetch([
     { status: 503 },
