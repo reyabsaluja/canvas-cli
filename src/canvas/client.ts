@@ -1,4 +1,6 @@
 import type { Config } from "../config/env.js";
+import { CanvasApiError } from "./errors.js";
+import { fetchWithRetry, type RetryOptions } from "./retry.js";
 import type {
   CanvasAssignment,
   CanvasAssignmentDetail,
@@ -15,15 +17,24 @@ import type {
 export class CanvasClient {
   private baseUrl: string;
   private headers: Record<string, string>;
-  private requestTimeoutMs: number;
+  private retryOptions?: RetryOptions;
+  private _skippedEndpoints: string[] = [];
 
-  constructor(config: Config) {
+  constructor(config: Config, retryOptions?: RetryOptions) {
     this.baseUrl = config.baseUrl;
     this.headers = {
       Authorization: `Bearer ${config.accessToken}`,
       Accept: "application/json",
     };
-    this.requestTimeoutMs = 30_000;
+    this.retryOptions = retryOptions;
+  }
+
+  get skippedEndpoints(): readonly string[] {
+    return this._skippedEndpoints;
+  }
+
+  resetSkippedEndpoints(): void {
+    this._skippedEndpoints = [];
   }
 
   private async fetchPaginated<T>(url: string): Promise<T[]> {
@@ -31,20 +42,12 @@ export class CanvasClient {
     let nextUrl: string | null = url;
 
     while (nextUrl) {
-      const response = await fetch(nextUrl, {
-        headers: this.headers,
-        signal: AbortSignal.timeout(this.requestTimeoutMs),
-      });
+      const response = await fetchWithRetry(nextUrl, { headers: this.headers }, this.retryOptions);
 
-      if (response.status === 401) {
-        throw new Error(
-          "Canvas API returned 401 Unauthorized. Check your CANVAS_ACCESS_TOKEN."
-        );
-      }
       if (!response.ok) {
-        throw new Error(
-          `Canvas API error: ${response.status} ${response.statusText}`
-        );
+        const err = new CanvasApiError(response.status, response.statusText);
+        if (err.userHint) err.message += ` — ${err.userHint}`;
+        throw err;
       }
 
       const data = (await response.json()) as T[];
@@ -57,23 +60,12 @@ export class CanvasClient {
   }
 
   private async fetchOne<T>(url: string): Promise<T> {
-    const response = await fetch(url, {
-      headers: this.headers,
-      signal: AbortSignal.timeout(this.requestTimeoutMs),
-    });
+    const response = await fetchWithRetry(url, { headers: this.headers }, this.retryOptions);
 
-    if (response.status === 401) {
-      throw new Error(
-        "Canvas API returned 401 Unauthorized. Check your CANVAS_ACCESS_TOKEN."
-      );
-    }
-    if (response.status === 404) {
-      throw new Error("Assignment not found on Canvas.");
-    }
     if (!response.ok) {
-      throw new Error(
-        `Canvas API error: ${response.status} ${response.statusText}`
-      );
+      const err = new CanvasApiError(response.status, response.statusText);
+      if (err.userHint) err.message += ` — ${err.userHint}`;
+      throw err;
     }
 
     return (await response.json()) as T;
@@ -199,11 +191,10 @@ export class CanvasClient {
    */
   async downloadFile(downloadUrl: string): Promise<Buffer | null> {
     try {
-      const response = await fetch(downloadUrl, {
+      const response = await fetchWithRetry(downloadUrl, {
         headers: this.headers,
         redirect: "follow",
-        signal: AbortSignal.timeout(60_000),
-      });
+      }, { ...this.retryOptions, requestTimeoutMs: 60_000 });
       if (!response.ok) return null;
       return Buffer.from(await response.arrayBuffer());
     } catch {
@@ -274,22 +265,23 @@ export class CanvasClient {
   }
 
   /**
-   * Like fetchPaginated but returns [] on auth/access errors instead of throwing.
-   * Used for endpoints that may be blocked for some users/courses.
+   * Like fetchPaginated but returns [] on auth/access/5xx errors instead of throwing.
+   * Used for endpoints that may be blocked or temporarily unavailable — after retries
+   * are exhausted, we prefer partial data over crashing the entire ingest.
    */
   private async fetchPaginatedSafe<T>(url: string): Promise<T[]> {
     try {
       return await this.fetchPaginated<T>(url);
     } catch (err) {
-      if (
-        err instanceof Error &&
-        (err.message.includes("401") ||
-          err.message.includes("403") ||
-          err.message.includes("404") ||
-          err.message.includes("unauthorized") ||
-          err.message.includes("disabled"))
-      ) {
-        return [];
+      if (err instanceof CanvasApiError) {
+        const s = err.status;
+        if (s === 401 || s === 403 || s === 404 || (s >= 500 && s < 600)) {
+          this._skippedEndpoints.push(url);
+          if (s >= 500) {
+            console.error(`Warning: Canvas API returned ${s} after retries, skipping: ${url}`);
+          }
+          return [];
+        }
       }
       throw err;
     }
