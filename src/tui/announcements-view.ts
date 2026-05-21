@@ -13,7 +13,6 @@ import {
   truncatePlainToWidth,
   wrapPlainText,
 } from "./screen.js";
-import { USER_ABORT_EXIT_CODE } from "./chat-shell-exit.js";
 import type { RadarItem, RadarThread } from "./services.js";
 import type { RadarService } from "./services/radar-service.js";
 import { htmlToText } from "../format/html-to-text.js";
@@ -308,7 +307,8 @@ export function showAnnouncementsView(
 
       if (key === "\x03") {
         cleanup();
-        process.exit(USER_ABORT_EXIT_CODE);
+        resolve();
+        return;
       }
     }
 
