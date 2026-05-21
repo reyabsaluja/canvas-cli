@@ -25,6 +25,8 @@ export interface AssignmentWorkup {
   confidence: "high" | "medium" | "low";
   /** Map conclusions back to evidence sources. */
   sourceTrace: SourceTraceEntry[];
+  /** True when AI failed mid-investigation and the workup is incomplete. */
+  partial?: boolean;
 }
 
 export interface RelevantResource {
