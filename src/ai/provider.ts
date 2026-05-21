@@ -540,6 +540,16 @@ export function formatAIError(error: unknown): string {
   return classifyAIError(error).userMessage;
 }
 
+export function isAIProviderError(error: unknown): boolean {
+  if (findAPICallError(error) !== null) return true;
+  if (error instanceof Error) {
+    if (error.message.includes("fetch failed") || error.message.includes("ECONNREFUSED")) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function parseRetryAfter(apiError: APICallError): number | null {
   const headers = apiError.responseHeaders;
   if (!headers) return null;

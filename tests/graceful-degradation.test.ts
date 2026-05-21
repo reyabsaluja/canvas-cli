@@ -5,6 +5,7 @@ import {
   AIError,
   classifyAIError,
   formatAIError,
+  isAIProviderError,
   type AIErrorKind,
 } from "../src/ai/provider.js";
 
@@ -259,6 +260,34 @@ test("auth error shows setup instructions", () => {
   });
   const formatted = formatAIError(error);
   assert.match(formatted, /AI_PROVIDER/);
+});
+
+// --- isAIProviderError tests ---
+
+test("isAIProviderError returns true for APICallError", () => {
+  const error = new APICallError({
+    message: "Rate limited",
+    url: "https://api.example.com/v1/chat",
+    requestBodyValues: {},
+    statusCode: 429,
+  });
+  assert.equal(isAIProviderError(error), true);
+});
+
+test("isAIProviderError returns true for fetch failed", () => {
+  assert.equal(isAIProviderError(new Error("fetch failed")), true);
+});
+
+test("isAIProviderError returns true for ECONNREFUSED", () => {
+  assert.equal(isAIProviderError(new Error("connect ECONNREFUSED 127.0.0.1:443")), true);
+});
+
+test("isAIProviderError returns false for generic errors", () => {
+  assert.equal(isAIProviderError(new Error("Cannot read file")), false);
+});
+
+test("isAIProviderError returns false for TypeError", () => {
+  assert.equal(isAIProviderError(new TypeError("undefined is not a function")), false);
 });
 
 // --- Non-AI commands should never fail from AI config ---
