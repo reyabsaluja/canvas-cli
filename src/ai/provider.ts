@@ -414,37 +414,146 @@ export async function streamWithTools(
   return fullText;
 }
 
-export function formatAIError(error: unknown): string {
+export type AIErrorKind =
+  | "rate_limit"
+  | "auth"
+  | "network"
+  | "model_not_found"
+  | "provider_unavailable"
+  | "bad_request"
+  | "unknown";
+
+export class AIError extends Error {
+  readonly kind: AIErrorKind;
+  readonly retryAfterMs: number | null;
+  readonly setupHint: string | null;
+
+  constructor(
+    message: string,
+    kind: AIErrorKind,
+    options?: { retryAfterMs?: number | null; setupHint?: string | null }
+  ) {
+    super(message);
+    this.name = "AIError";
+    this.kind = kind;
+    this.retryAfterMs = options?.retryAfterMs ?? null;
+    this.setupHint = options?.setupHint ?? null;
+  }
+
+  get userMessage(): string {
+    const parts = [this.message];
+    if (this.retryAfterMs !== null) {
+      const seconds = Math.ceil(this.retryAfterMs / 1000);
+      parts.push(`Try again in ~${seconds}s.`);
+    }
+    if (this.setupHint) {
+      parts.push(this.setupHint);
+    }
+    return parts.join(" ");
+  }
+}
+
+export function classifyAIError(error: unknown): AIError {
   const apiError = findAPICallError(error);
   if (apiError) {
     const status = apiError.statusCode;
-    if (status === 429) return "Rate limited by the AI provider. Wait a moment and try again.";
-    if (status === 401 || status === 403) {
-      return "Authentication failed. Check your API key or AWS credentials.";
+    if (status === 429) {
+      const retryAfterMs = parseRetryAfter(apiError);
+      return new AIError(
+        "Rate limited by the AI provider.",
+        "rate_limit",
+        {
+          retryAfterMs: retryAfterMs ?? 30_000,
+          setupHint: null,
+        }
+      );
     }
-    if (status === 404) return "Model not found. Check your AI_MODEL setting.";
+    if (status === 401 || status === 403) {
+      return new AIError(
+        "Authentication failed.",
+        "auth",
+        { setupHint: `Check your API key or AWS credentials. ${AI_PROVIDER_SETUP_HINT}` }
+      );
+    }
+    if (status === 404) {
+      return new AIError(
+        "Model not found.",
+        "model_not_found",
+        { setupHint: "Check your AI_MODEL environment variable." }
+      );
+    }
     if (status === 400) {
       const detail = extractAPIErrorDetail(apiError);
-      return detail
+      const message = detail
         ? `AI provider rejected the request: ${detail}`
-        : "Bad request sent to AI provider. Check your AI_MODEL setting and provider-specific request format.";
+        : "Bad request sent to AI provider.";
+      return new AIError(message, "bad_request", {
+        setupHint: "Check your AI_MODEL setting and provider-specific request format.",
+      });
     }
-    if (status === 503 || status === 502) return "AI provider is temporarily unavailable. Try again shortly.";
-    if (status && status >= 500) return `AI provider returned server error (${status}). Try again shortly.`;
-    if (status) return `AI provider returned error ${status}.`;
-    return "Failed to reach the AI provider. Check your network connection.";
+    if (status === 503 || status === 502) {
+      return new AIError(
+        "AI provider is temporarily unavailable.",
+        "provider_unavailable",
+        { retryAfterMs: 15_000 }
+      );
+    }
+    if (status && status >= 500) {
+      return new AIError(
+        `AI provider returned server error (${status}).`,
+        "provider_unavailable",
+        { retryAfterMs: 15_000 }
+      );
+    }
+    if (status) {
+      return new AIError(`AI provider returned error ${status}.`, "unknown");
+    }
+    return new AIError(
+      "Failed to reach the AI provider.",
+      "network",
+      { setupHint: "Check your network connection." }
+    );
   }
 
   if (error instanceof Error) {
     if (error.message.includes("fetch failed") || error.message.includes("ECONNREFUSED")) {
-      return "Failed to reach the AI provider. Check your network connection.";
+      return new AIError(
+        "Failed to reach the AI provider.",
+        "network",
+        { setupHint: "Check your network connection." }
+      );
     }
-    const msg = error.message;
-    if (msg.length > 200) return msg.slice(0, 200) + "...";
-    return msg;
+    const msg = error.message.length > 200 ? error.message.slice(0, 200) + "..." : error.message;
+    return new AIError(msg, "unknown");
   }
 
-  return "An unknown error occurred.";
+  return new AIError("An unknown AI error occurred.", "unknown");
+}
+
+export function formatAIError(error: unknown): string {
+  if (error instanceof AIError) {
+    return error.userMessage;
+  }
+  return classifyAIError(error).userMessage;
+}
+
+function parseRetryAfter(apiError: APICallError): number | null {
+  const headers = (apiError as any).responseHeaders;
+  if (!headers) return null;
+  const value = typeof headers.get === "function"
+    ? headers.get("retry-after")
+    : headers["retry-after"];
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.max(1000, seconds * 1000);
+  }
+  const date = Date.parse(value);
+  if (Number.isFinite(date)) {
+    const ms = date - Date.now();
+    return ms > 0 ? ms : 1000;
+  }
+  return null;
 }
 
 function findAPICallError(error: unknown): APICallError | null {

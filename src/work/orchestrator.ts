@@ -11,6 +11,8 @@ import type {
 import type { ToolContext } from "./tool-handlers.js";
 import {
   generateWithTools,
+  classifyAIError,
+  formatAIError,
   type AIProviderConfig,
 } from "../ai/provider.js";
 import { appendObservation, createEmptyRunState } from "../agent/run-state.js";
@@ -49,10 +51,15 @@ Be thorough. The student is depending on you to actually read and understand the
 export interface InvestigationResult {
   workup: AssignmentWorkup;
   state: InvestigationState;
+  partial?: boolean;
+  aiErrorMessage?: string;
 }
 
 /**
  * Run the investigation agent loop.
+ *
+ * If the AI fails mid-investigation, a partial workup is synthesized from
+ * whatever evidence was gathered so far rather than propagating the error.
  */
 export async function runInvestigation(
   aiConfig: AIProviderConfig,
@@ -81,56 +88,121 @@ export async function runInvestigation(
 
   // Run investigation using AI SDK's built-in tool loop
   let investigationSummary = "";
+  let investigationFailed = false;
+  let aiErrorMessage: string | undefined;
 
-  const result = await generateWithTools(
-    aiConfig,
-    INVESTIGATION_SYSTEM_PROMPT,
-    [{ role: "user", content: initialMessage }],
-    INVESTIGATION_TOOLS,
-    async (name, input) => {
-      state.toolCallCount++;
+  try {
+    const result = await generateWithTools(
+      aiConfig,
+      INVESTIGATION_SYSTEM_PROMPT,
+      [{ role: "user", content: initialMessage }],
+      INVESTIGATION_TOOLS,
+      async (name, input) => {
+        state.toolCallCount++;
 
-      if (name === "complete_investigation") {
-        const verification = verifyInvestigationState(state);
-        if (!verification.ok) {
-          return renderInvestigationVerificationMessage(verification);
+        if (name === "complete_investigation") {
+          const verification = verifyInvestigationState(state);
+          if (!verification.ok) {
+            return renderInvestigationVerificationMessage(verification);
+          }
+          investigationSummary = (input as any).summary ?? "";
+          return "Investigation complete. Proceeding to synthesis.";
         }
-        investigationSummary = (input as any).summary ?? "";
-        return "Investigation complete. Proceeding to synthesis.";
-      }
 
-      const label = input.query ?? input.filename ?? input.item_title ?? input.module_name ?? "";
-      onProgress(`${name}${label ? ` (${label})` : ""}`);
+        const label = input.query ?? input.filename ?? input.item_title ?? input.module_name ?? "";
+        onProgress(`${name}${label ? ` (${label})` : ""}`);
 
-      const result = await executeToolDetailed(name, input, toolCtx);
-      appendObservation(state.runState, result.observation);
-      onProgress(`${name}${label ? ` (${label})` : ""}`, result.modelText);
-      return result.modelText;
-    },
-    undefined,
-    MAX_ITERATIONS
-  );
+        const result = await executeToolDetailed(name, input, toolCtx);
+        appendObservation(state.runState, result.observation);
+        onProgress(`${name}${label ? ` (${label})` : ""}`, result.modelText);
+        return result.modelText;
+      },
+      undefined,
+      MAX_ITERATIONS
+    );
 
-  if (!investigationSummary && result.text) {
-    investigationSummary = result.text;
+    if (!investigationSummary && result.text) {
+      investigationSummary = result.text;
+    }
+  } catch (err) {
+    const classified = classifyAIError(err);
+    aiErrorMessage = formatAIError(classified);
+    investigationFailed = true;
+    onProgress(`AI error during investigation: ${classified.message}`);
   }
 
   // Synthesis phase
   onProgress("synthesizing assignment workup");
   const verification = verifyInvestigationState(state);
 
-  const workup = await synthesizeWorkup(
-    aiConfig,
-    detail,
-    course,
-    enrichment,
-    state,
-    investigationSummary,
-    verification,
-    { coursePath: cache.coursePath }
-  );
+  if (investigationFailed) {
+    const workup = buildPartialWorkup(detail, state, verification, aiErrorMessage!);
+    return { workup, state, partial: true, aiErrorMessage };
+  }
 
-  return { workup, state };
+  try {
+    const workup = await synthesizeWorkup(
+      aiConfig,
+      detail,
+      course,
+      enrichment,
+      state,
+      investigationSummary,
+      verification,
+      { coursePath: cache.coursePath }
+    );
+    return { workup, state };
+  } catch (err) {
+    const classified = classifyAIError(err);
+    aiErrorMessage = formatAIError(classified);
+    onProgress(`AI error during synthesis: ${classified.message}`);
+    const workup = buildPartialWorkup(detail, state, verification, aiErrorMessage);
+    return { workup, state, partial: true, aiErrorMessage };
+  }
+}
+
+function buildPartialWorkup(
+  detail: AssignmentDetail,
+  state: InvestigationState,
+  verification: WorkVerificationResult,
+  errorMessage: string
+): AssignmentWorkup {
+  const overview = state.evidenceNotes.length > 0
+    ? `Partial investigation (AI failed mid-run): ${state.evidenceNotes.slice(0, 3).join("; ")}`
+    : `AI failed before completing investigation: ${errorMessage}`;
+
+  const uncertainties = [
+    `AI error prevented full investigation: ${errorMessage}`,
+    ...verification.missing.map((m) =>
+      m === "primary_instruction"
+        ? "Primary instruction document was not read."
+        : "Due date source was not confirmed."
+    ),
+  ];
+
+  return {
+    overview,
+    deliverables: [],
+    constraints: [],
+    relevantResources: state.visitedSources.map((source) => ({
+      title: source,
+      type: "file" as const,
+      location: source,
+      why: "Visited during partial investigation",
+    })),
+    recommendedReadOrder: state.visitedSources.slice(0, 5),
+    actionPlan: [
+      { step: 1, action: "Retry the work command once the AI provider is available", detail: null },
+      { step: 2, action: "Review materials manually using the sources listed above", detail: null },
+    ],
+    uncertainties,
+    dueDate: detail.dueAt?.toISOString() ?? null,
+    confidence: "low",
+    sourceTrace: state.visitedSources.map((source) => ({
+      conclusion: "Partially investigated",
+      source,
+    })),
+  };
 }
 
 export function verifyInvestigationState(
