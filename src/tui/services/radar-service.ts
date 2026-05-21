@@ -403,14 +403,9 @@ function buildAnnouncementItems(
   courseId: number,
   courseName: string
 ): RadarItem[] {
-  const cutoff = Date.now() - RECENT_WINDOW_MS;
-  return announcements.flatMap((announcement) => {
-    const posted = announcement.posted_at
-      ? new Date(announcement.posted_at).getTime()
-      : 0;
-    if (posted < cutoff) return [];
-    return [normalizeTopicToRadarItem(announcement, courseId, courseName)];
-  });
+  return announcements.map((announcement) =>
+    normalizeTopicToRadarItem(announcement, courseId, courseName)
+  );
 }
 
 function buildDiscussionItems(
