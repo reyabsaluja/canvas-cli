@@ -73,8 +73,14 @@ export class CanvasClient {
 
   private parseNextLink(linkHeader: string | null): string | null {
     if (!linkHeader) return null;
-    const match = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
-    return match ? match[1] : null;
+    const parts = linkHeader.split(",");
+    for (const part of parts) {
+      const match = part.match(/<([^>]+)>/);
+      if (match && /rel="next"/.test(part)) {
+        return match[1] ?? null;
+      }
+    }
+    return null;
   }
 
   /** Get courses with term and enrollment info for relevance filtering. */
@@ -188,7 +194,7 @@ export class CanvasClient {
       const response = await fetchWithRetry(downloadUrl, {
         headers: this.headers,
         redirect: "follow",
-      }, this.retryOptions);
+      }, { ...this.retryOptions, requestTimeoutMs: 60_000 });
       if (!response.ok) return null;
       return Buffer.from(await response.arrayBuffer());
     } catch {

@@ -9,6 +9,7 @@ import {
   buildShellOpenOptions,
   collectOpenableResources,
   handleOpenResourceQuery,
+  isRecentExportQuery,
   searchOpenableResources,
 } from "../src/tui/open-resources.js";
 
@@ -391,4 +392,134 @@ test("handleOpenResourceQuery opens a zip entry PDF directly rather than the par
     assert.equal(opened[0], innerPdfPath);
     assert.match(result.message, /Opened final_exam_2024\.pdf \(zip entry\)/);
   });
+});
+
+test("handleOpenResourceQuery opens exported PDF instead of similarly named course files", async () => {
+  await withTempDir(async (tempDir) => {
+    const exportDir = path.join(tempDir, "exports");
+    const coursePath = path.join(tempDir, "course");
+    const exportPdf = path.join(
+      exportDir,
+      "20260519-230401-make-a-study-guide-for-final-exam.pdf"
+    );
+    const zipPdf = path.join(
+      coursePath,
+      "attachments/exams.zip.unpacked/._ECE243_Final_Exam_25_Solutions.pdf"
+    );
+
+    await fs.mkdir(exportDir, { recursive: true });
+    await fs.mkdir(path.dirname(zipPdf), { recursive: true });
+    await fs.writeFile(exportPdf, "%PDF-1.4 export", "utf-8");
+    await fs.writeFile(zipPdf, "zip entry", "utf-8");
+
+    const cache: CourseCache = {
+      courseId: 420148,
+      coursePath,
+      assignments: [],
+      modules: [],
+      files: [],
+      pages: [],
+      syllabusCandidates: [],
+      attachments: [
+        {
+          sourceType: "important_file",
+          canvasFileId: 1,
+          originalFilename: "exams.zip",
+          localPath: "attachments/exams.zip",
+          contentType: "application/zip",
+          size: 100,
+          downloadUrl: "https://example.com/exams.zip",
+          reason: "exams",
+          status: "downloaded",
+          zipEntries: [
+            {
+              entryName: "._ECE243_Final_Exam_25_Solutions.pdf",
+              filename: "._ECE243_Final_Exam_25_Solutions.pdf",
+              localPath:
+                "attachments/exams.zip.unpacked/._ECE243_Final_Exam_25_Solutions.pdf",
+              extractedTextPath: null,
+              size: 50,
+            },
+          ],
+        },
+      ],
+      lectures: [],
+      ingestion: null,
+    };
+
+    const opened: string[] = [];
+    const result = await handleOpenResourceQuery(
+      "20260519-230401-make-a-study-guide-for-final-exam.pdf",
+      { cache, exportDirectories: [exportDir] },
+      async (resource) => {
+        opened.push(resource.target);
+      }
+    );
+
+    assert.equal(result.status, "opened");
+    assert.equal(opened[0], exportPdf);
+    assert.match(result.message, /exported pdf/);
+  });
+});
+
+test("handleOpenResourceQuery opens last export for vague 'the pdf' query", async () => {
+  await withTempDir(async (tempDir) => {
+    const exportDir = path.join(tempDir, "exports");
+    const exportPdf = path.join(exportDir, "study-guide.pdf");
+    await fs.mkdir(exportDir, { recursive: true });
+    await fs.writeFile(exportPdf, "%PDF", "utf-8");
+
+    const opened: string[] = [];
+    const result = await handleOpenResourceQuery(
+      "the pdf",
+      {
+        cache: null,
+        exportDirectories: [exportDir],
+        lastExportedPdfPath: exportPdf,
+      },
+      async (resource) => {
+        opened.push(resource.target);
+      }
+    );
+
+    assert.equal(result.status, "opened");
+    assert.equal(opened[0], exportPdf);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isRecentExportQuery
+// ---------------------------------------------------------------------------
+
+test("isRecentExportQuery matches common user phrases for reopening exports", () => {
+  const positives = [
+    "the pdf",
+    "my pdf",
+    "open it",
+    "the study guide",
+    "export",
+    "the file you made",
+    "pdf you generated",
+    "that pdf",
+    "open the export",
+    "this study guide",
+  ];
+  for (const q of positives) {
+    assert.ok(isRecentExportQuery(q), `expected match for: "${q}"`);
+  }
+});
+
+test("isRecentExportQuery rejects unrelated queries", () => {
+  const negatives = [
+    "lab1.pdf",
+    "open the syllabus",
+    "midterm solutions",
+    "notes",
+    "",
+    "   ",
+    "my pdf assignment about chapter 5",
+  ];
+  for (const q of negatives) {
+    assert.ok(!isRecentExportQuery(q), `expected no match for: "${q}"`);
+  }
 });

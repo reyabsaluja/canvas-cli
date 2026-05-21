@@ -29,6 +29,7 @@ export function createChatContext(
     radar: extraContext?.radar ?? null,
     conversationHistory: [],
     runState: createEmptyRunState(),
+    lastExportedPdfPath: extraContext?.lastExportedPdfPath ?? null,
   };
 }
 

@@ -162,14 +162,12 @@ export async function createShellContext(
           ]);
           assignments = nextAssignments;
           cache = nextCache;
-          if (nextCache) {
-            const openResources = await collectOpenableResources({ cache: nextCache });
-            openOptions = buildShellOpenOptions(openResources);
-            pinOptions = buildWorkspacePinOptions(openResources);
-          } else {
-            openOptions = [];
-            pinOptions = [];
-          }
+          const openResources = await collectOpenableResources({
+            cache: nextCache,
+            lastExportedPdfPath: session.metadata.lastExportedPdfPath ?? null,
+          });
+          openOptions = buildShellOpenOptions(openResources);
+          pinOptions = nextCache ? buildWorkspacePinOptions(openResources) : [];
 
           if (runtime) {
             const upcoming = nextAssignments.filter(
@@ -179,12 +177,12 @@ export async function createShellContext(
               const nearest = upcoming.reduce((a, b) =>
                 new Date(a.dueAt!).getTime() < new Date(b.dueAt!).getTime() ? a : b
               );
-              setCourseStatus(runtime, `next due: ${formatDueCompact(nearest.dueAt)}`);
+              setCourseStatus(runtime, `Status: next due ${formatDueCompact(nearest.dueAt)}`);
             } else {
               const count = nextAssignments.length;
               setCourseStatus(
                 runtime,
-                count > 0 ? `${count} assignment${count !== 1 ? "s" : ""}` : undefined
+                count > 0 ? "Status: assignments ready" : "Status: course data ready"
               );
             }
           }
@@ -235,7 +233,7 @@ export async function createShellContext(
         subtitle: course.courseCode,
         description: course.publicDescription ?? undefined,
         scopeLabel: `Course: ${course.name}`,
-        statusLabel: undefined,
+        statusLabel: "Status: loading course data",
         placeholder: "Ask about this course, or use /assignments",
       },
       getOpenOptions: () => openOptions,
@@ -265,6 +263,7 @@ export async function createShellContext(
           cache,
           assignments,
           history: session.messages,
+          lastExportedPdfPath: session.metadata.lastExportedPdfPath ?? null,
           question: input,
           onToolCall: callbacks.onToolCall,
           onTextDelta: callbacks.onTextDelta,
@@ -328,8 +327,6 @@ async function loadOrCreateWorkspaceShell(
   const courseAssignments: Assignment[] = course
     ? await fetchAssignments(services, course.id, course.name).catch(() => [])
     : [];
-  const openResources = await collectOpenableResources({ loaded, cache });
-  const openOptions = buildShellOpenOptions(openResources);
   const lifecycleState = getWorkspaceLifecycleState(
     loaded.preparedAt,
     loaded.workspaceState,
@@ -359,6 +356,13 @@ async function loadOrCreateWorkspaceShell(
     }
   );
 
+  const openResources = await collectOpenableResources({
+    loaded,
+    cache,
+    lastExportedPdfPath: session.metadata.lastExportedPdfPath ?? null,
+  });
+  const openOptions = buildShellOpenOptions(openResources);
+
   const chatContext = services.aiConfig
     ? createChatContext(services.aiConfig, loaded, {
         cache,
@@ -368,6 +372,7 @@ async function loadOrCreateWorkspaceShell(
         courseName: course?.name ?? loaded.courseName ?? null,
         assignments: courseAssignments,
         radar: services.radar,
+        lastExportedPdfPath: session.metadata.lastExportedPdfPath ?? null,
       })
     : null;
   if (chatContext) {
@@ -406,6 +411,7 @@ async function loadOrCreateWorkspaceShell(
             "AI is unavailable because no provider key is configured. Workspace slash commands still work.",
         };
       }
+      chatContext.lastExportedPdfPath = session.metadata.lastExportedPdfPath ?? null;
       const answer = await askWorkspaceQuestion(
         services.aiConfig,
         loaded,
@@ -419,6 +425,7 @@ async function loadOrCreateWorkspaceShell(
           courseName: course?.name ?? loaded.courseName ?? null,
           assignments: courseAssignments,
           radar: services.radar,
+          lastExportedPdfPath: session.metadata.lastExportedPdfPath ?? null,
         },
         chatContext,
         callbacks.onTextDelta,
