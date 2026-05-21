@@ -74,7 +74,7 @@ test("fetchWithRetry does not retry 404", async () => {
 
 test("fetchWithRetry retries 429 and succeeds", async () => {
   const mock = mockFetch([
-    { status: 429, headers: { "retry-after": "0" } },
+    { status: 429 },
     { status: 200 },
   ]);
   try {
@@ -200,9 +200,9 @@ test("fetchWithRetry does not retry unknown errors", async () => {
   }
 });
 
-test("fetchWithRetry respects Retry-After header", async () => {
+test("fetchWithRetry respects Retry-After header over base delay", async () => {
   const mock = mockFetch([
-    { status: 429, headers: { "retry-after": "0" } },
+    { status: 429, headers: { "retry-after": "1" } },
     { status: 200 },
   ]);
   try {
@@ -210,7 +210,7 @@ test("fetchWithRetry respects Retry-After header", async () => {
     const res = await fetchWithRetry("http://test.com/api", undefined, { baseDelayMs: 5000 });
     const elapsed = Date.now() - start;
     assert.equal(res.status, 200);
-    assert.ok(elapsed < 500, "Should respect Retry-After: 0 and not use default backoff");
+    assert.ok(elapsed >= 1000 && elapsed < 2000, "Should use Retry-After: 1 (1000ms) not base delay (5000ms)");
   } finally {
     mock.restore();
   }

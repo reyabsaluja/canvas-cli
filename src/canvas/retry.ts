@@ -20,13 +20,15 @@ function isPermanentStatus(status: number): boolean {
   return status === 401 || status === 403 || status === 404;
 }
 
+const MIN_RETRY_DELAY_MS = 500;
+
 function getRetryDelay(response: Response, attempt: number, baseDelay: number): number {
   const retryAfter = response.headers.get("retry-after");
   if (retryAfter) {
     const seconds = Number(retryAfter);
-    if (!Number.isNaN(seconds)) return seconds * 1000;
+    if (!Number.isNaN(seconds)) return Math.max(MIN_RETRY_DELAY_MS, seconds * 1000);
     const date = Date.parse(retryAfter);
-    if (!Number.isNaN(date)) return Math.max(0, date - Date.now());
+    if (!Number.isNaN(date)) return Math.max(MIN_RETRY_DELAY_MS, date - Date.now());
   }
   return baseDelay * 2 ** (attempt - 1);
 }
