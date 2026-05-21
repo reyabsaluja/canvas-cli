@@ -593,12 +593,9 @@ class IngestionProgressRenderer {
     allLines.push("");
 
     const dividerWidth = Math.max(24, cols - 4);
-    const titleLeft = C.pureWhiteBold(this.title) + "  " + C.secondary(this.subtitle);
-    const titleRight = C.secondary(elapsed);
-    const titleLeftPlain = stripAnsi(this.title) + "  " + this.subtitle;
-    const titleGap = Math.max(2, dividerWidth - titleLeftPlain.length - elapsed.length);
-    allLines.push("  " + titleLeft + " ".repeat(titleGap) + titleRight);
-    allLines.push("  " + C.dimmer("─".repeat(dividerWidth)));
+    const accentWidth = Math.min(6, dividerWidth);
+    allLines.push("  " + C.primaryBold("▎") + " " + C.pureWhiteBold(this.title) + "  " + C.secondary(this.subtitle) + "  " + C.secondary(elapsed));
+    allLines.push("  " + C.primary("─".repeat(accentWidth)) + C.dimmer("─".repeat(dividerWidth - accentWidth)));
 
     for (let i = 0; i < this.steps.length; i++) {
       const step = this.steps[i]!;

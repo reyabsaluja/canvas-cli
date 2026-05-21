@@ -4,6 +4,7 @@ import { C, getTermSize, stripAnsi } from "./screen.js";
 import { formatAIError } from "../ai/provider.js";
 import type { Observation } from "../agent/observation.js";
 import { executeMakePdf } from "./pdf-command.js";
+import { resolvePdfRenderMode } from "./pdf-latex-prompt.js";
 import type {
   ChatMessage,
   CommandDefinition,
@@ -27,9 +28,12 @@ import {
 import type { OpenableResource } from "./open-resources.js";
 import { searchOpenableResources, getOpenCommand } from "./open-resources.js";
 import {
+  CHAT_GAP_ROWS,
   MAIN_VIEW_BOTTOM_RESERVE,
   buildBannerLines,
+  getInputMode,
   getRenderedMessageLines,
+  getStickyBottomRows,
   renderChatFrame,
   renderInputFooter,
 } from "./chat-shell-render.js";
@@ -145,6 +149,7 @@ function formatElapsed(ms: number): string {
   return `${minutes}m${remaining}s`;
 }
 const FULL_RENDER_BATCH_MS = 16;
+const PDF_PROGRESS_THROTTLE_MS = 80;
 const CLEAN_TRANSCRIPT_INDEX = Number.MAX_SAFE_INTEGER;
 
 type TranscriptBlock = {
@@ -472,9 +477,24 @@ export async function runChatShell<TExit>(
     };
   }
 
+  let lastTranscriptTotalLines = 0;
+
   function renderNow(): void {
     const transcriptIndex = getActiveTranscriptIndex();
     const inputState = getInputState();
+
+    // Keep viewport stable when user is scrolled up and content grows (skip during streaming to avoid jitter)
+    if (chatScrollOffset > 0 && transcriptIndex.totalLines > lastTranscriptTotalLines && !isProcessing) {
+      chatScrollOffset += transcriptIndex.totalLines - lastTranscriptTotalLines;
+      const { rows } = getTermSize();
+      const bannerLen = getCachedBannerLines().length + 3;
+      const totalVirtual = bannerLen + 1 + transcriptIndex.totalLines + CHAT_GAP_ROWS;
+      const maxContent = Math.max(1, rows - getStickyBottomRows());
+      const cap = Math.max(0, totalVirtual - maxContent);
+      chatScrollOffset = Math.min(chatScrollOffset, cap);
+    }
+    lastTranscriptTotalLines = transcriptIndex.totalLines;
+
     const next = renderChatFrame({
       runtime: options.runtime,
       placeholder,
@@ -527,6 +547,10 @@ export async function runChatShell<TExit>(
   }
 
   function renderInputOnly(inputState: InputState = getInputState()): void {
+    if (getInputMode() === "flowing") {
+      render();
+      return;
+    }
     renderInputFooter({
       placeholder,
       inputBuffer,
@@ -551,6 +575,10 @@ export async function runChatShell<TExit>(
     hadOverlay: boolean,
     inputState: InputState = getInputState()
   ): void {
+    if (getInputMode() === "flowing") {
+      render();
+      return;
+    }
     if (hadOverlay && !inputState.hasVisibleOverlay) {
       scheduleRender(true);
       return;
@@ -646,6 +674,14 @@ export async function runChatShell<TExit>(
     }
 
     function setChatScrollOffset(nextOffset: number): boolean {
+      if (nextOffset > maxChatScrollOffset) {
+        const transcriptIndex = getActiveTranscriptIndex();
+        const { rows } = getTermSize();
+        const bannerLen = getCachedBannerLines().length + 3;
+        const totalVirtual = bannerLen + 1 + transcriptIndex.totalLines + CHAT_GAP_ROWS;
+        const maxContent = Math.max(1, rows - getStickyBottomRows());
+        maxChatScrollOffset = Math.max(0, totalVirtual - maxContent);
+      }
       const normalized = Math.max(0, Math.min(nextOffset, maxChatScrollOffset));
       if (normalized === chatScrollOffset) {
         return false;
@@ -745,7 +781,7 @@ export async function runChatShell<TExit>(
       const abortPromise = new Promise<never>((_, reject) => {
         processingAbort!.signal.addEventListener("abort", () => {
           reject(new DOMException("User interrupted", "AbortError"));
-        });
+        }, { once: true });
       });
 
       try {
@@ -930,12 +966,19 @@ export async function runChatShell<TExit>(
       render();
     }
 
+    function isNavigationCommand(name: string): boolean {
+      const resolved = resolveCommand(availableCommands, name.toLowerCase());
+      return resolved?.navigation === true;
+    }
+
     async function handleCommandInput(
       rawInput: string,
       commandName: string,
       args: string
     ): Promise<void> {
-      await appendPersistedMessage({ role: "user", content: rawInput });
+      if (!isNavigationCommand(commandName)) {
+        await appendPersistedMessage({ role: "user", content: rawInput });
+      }
 
       if (commandName === "/help") {
         const helpLines = availableCommands.map(
@@ -971,6 +1014,7 @@ export async function runChatShell<TExit>(
         messages.splice(0, messages.length, ...resetMessages);
         markTranscriptDirty(0);
         chatScrollOffset = 0;
+        lastTranscriptTotalLines = 0;
         await persistence.flush();
         render();
         return;
@@ -1024,39 +1068,137 @@ export async function runChatShell<TExit>(
     ): void {
       isProcessing = true;
       processingAbort = new AbortController();
-      currentVerb = "Generating PDF";
-      spinnerFrame = 0;
-      shimmerFrame = 0;
-      processingStartTime = Date.now();
-      currentSpinnerLine = buildSpinnerLine();
 
       messages.push({ role: "user", content: rawInput });
       markTranscriptDirty(messages.length - 1);
       persistence.schedule();
       render();
-      startSpinner();
 
       void (async () => {
         try {
-          const result = await executeMakePdf({
-            instruction,
-            session,
-            runtime: options.runtime,
-            getLoadedWorkspace: options.getLoadedWorkspace,
-            getCourseCache: options.getCourseCache,
-            abortSignal: processingAbort!.signal,
-          });
+          const renderMode = await resolvePdfRenderMode(
+            {
+              pauseInput: () => {
+                stdin.removeListener("data", onData);
+                try {
+                  stdin.setRawMode(false);
+                } catch {}
+              },
+              resumeInput: () => {
+                try {
+                  stdin.setRawMode(true);
+                } catch {}
+                stdin.on("data", onData);
+                render();
+              },
+            },
+            { signal: processingAbort!.signal }
+          );
 
-          stopSpinner();
+          if (renderMode === "cancel") {
+            await appendPersistedMessage({
+              role: "system",
+              content: "PDF generation cancelled.",
+            });
+            isProcessing = false;
+            processingAbort = null;
+            currentSpinnerLine = "";
+            render();
+            return;
+          }
+
+          currentVerb = "Generating PDF";
+          spinnerFrame = 0;
+          shimmerFrame = 0;
+          processingStartTime = Date.now();
+          currentSpinnerLine = buildSpinnerLine();
+          render();
+          startSpinner();
+
+          let lastPdfProgressAction = "";
+          let lastPdfProgressMessage: ChatMessage | null = null;
+          let pdfContentDirty = false;
+          let pdfContentTimer: ReturnType<typeof setTimeout> | null = null;
+          const flushPdfContent = () => {
+            if (pdfContentDirty) {
+              pdfContentDirty = false;
+              markTranscriptDirty(messages.length - 1);
+              scheduleRender();
+            }
+            pdfContentTimer = null;
+          };
+          let result;
+          try {
+            result = await executeMakePdf({
+              instruction,
+              session,
+              runtime: options.runtime,
+              getLoadedWorkspace: options.getLoadedWorkspace,
+              getCourseCache: options.getCourseCache,
+              abortSignal: processingAbort!.signal,
+              renderMode,
+              onProgress: (event) => {
+                if (event.action === lastPdfProgressAction && lastPdfProgressMessage) {
+                  if (event.content != null) {
+                    lastPdfProgressMessage.content = event.content;
+                  }
+                  if (event.target !== lastPdfProgressMessage.toolTarget) {
+                    lastPdfProgressMessage.toolTarget = event.target;
+                  }
+                  pdfContentDirty = true;
+                  if (!pdfContentTimer) {
+                    pdfContentTimer = setTimeout(flushPdfContent, PDF_PROGRESS_THROTTLE_MS);
+                  }
+                  return;
+                }
+                if (pdfContentTimer) {
+                  clearTimeout(pdfContentTimer);
+                  pdfContentTimer = null;
+                }
+                pdfContentDirty = false;
+                lastPdfProgressAction = event.action;
+                const progressMsg: ChatMessage = {
+                  role: "tool",
+                  content: event.content ?? "",
+                  toolAction: event.action,
+                  toolTarget: event.target,
+                  toolColor: "green",
+                };
+                lastPdfProgressMessage = progressMsg;
+                messages.push(progressMsg);
+                markTranscriptDirty(messages.length - 1);
+                currentSpinnerLine = buildSpinnerLine();
+                scheduleRender();
+              },
+            });
+          } finally {
+            if (pdfContentTimer) {
+              clearTimeout(pdfContentTimer);
+              flushPdfContent();
+            }
+          }
+
           const elapsed = formatElapsed(Date.now() - processingStartTime);
 
           const lines = [`PDF saved to \`${result.pdfPath}\``];
           if (result.usedLatex) {
             lines.push("Rendered with LaTeX for high-quality math and code formatting.");
+          } else if (result.latexCompileFailed) {
+            lines.push(
+              "LaTeX was installed but compilation failed — this PDF uses the basic layout."
+            );
+            if (result.texPath) {
+              lines.push(`LaTeX source: \`${result.texPath}\``);
+            }
+          } else if (renderMode === "basic" && result.usedAI) {
+            lines.push("Used basic PDF layout (install Tectonic for LaTeX-quality math and code).");
           }
           if (result.warning) {
             lines.push(result.warning);
           }
+
+          session.metadata.lastExportedPdfPath = result.pdfPath;
+          persistence.schedule();
 
           await appendPersistedMessage({
             role: "assistant",
@@ -1070,25 +1212,28 @@ export async function runChatShell<TExit>(
           openFile(result.pdfPath, (msg) => {
             void appendPersistedMessage({ role: "system", content: msg });
           });
-        } catch (error) {
-          stopSpinner();
+        } catch (error: unknown) {
           if (error instanceof DOMException && error.name === "AbortError") {
             await appendPersistedMessage({
               role: "system",
               content: "PDF generation cancelled.",
             });
           } else {
+            const msg = error instanceof Error
+              ? error.message
+              : typeof error === "string" ? error : "unknown error";
             await appendPersistedMessage({
               role: "system",
-              content: `PDF generation failed: ${error instanceof Error ? error.message : "unknown error"}`,
+              content: `PDF generation failed: ${msg}`,
             });
           }
+        } finally {
+          stopSpinner();
+          isProcessing = false;
+          processingAbort = null;
+          currentSpinnerLine = "";
+          render();
         }
-
-        isProcessing = false;
-        processingAbort = null;
-        currentSpinnerLine = "";
-        render();
       })();
     }
 
@@ -1096,6 +1241,10 @@ export async function runChatShell<TExit>(
       if (shellClosed) return;
 
       if (key === "\x03") {
+        if (isProcessing && processingAbort) {
+          processingAbort.abort();
+          return;
+        }
         if (inputBuffer.length > 0) {
           inputBuffer = "";
           slashSelected = 0;
@@ -1162,7 +1311,8 @@ export async function runChatShell<TExit>(
 
         if (inputState.activeOpenPartial !== null) {
           if (inputState.openMatches.length > 0) {
-            const selected = inputState.openMatches[openSelected]!;
+            const clampedOpen = Math.min(openSelected, inputState.openMatches.length - 1);
+            const selected = inputState.openMatches[clampedOpen]!;
             await handleCommandInput(
               `/open ${selected.query}`,
               "/open",
@@ -1177,7 +1327,8 @@ export async function runChatShell<TExit>(
             (pin) => pin.label === inputState.activePinPartial
           );
           if (!isComplete && inputState.pinMatches.length > 0) {
-            const selected = inputState.pinMatches[pinSelected]!;
+            const clampedPin = Math.min(pinSelected, inputState.pinMatches.length - 1);
+            const selected = inputState.pinMatches[clampedPin]!;
             inputBuffer = inputBuffer.replace(
               /@\S*$/,
               `@${selected.label}`
@@ -1189,7 +1340,8 @@ export async function runChatShell<TExit>(
         }
 
         if (inputState.slashMatches.length > 0) {
-          inputBuffer = inputState.slashMatches[slashSelected]!.name;
+          const clampedSlash = Math.min(slashSelected, inputState.slashMatches.length - 1);
+          inputBuffer = inputState.slashMatches[clampedSlash]!.name;
           showSlashMenu = false;
         }
 
@@ -1407,11 +1559,11 @@ export async function runChatShell<TExit>(
           continue;
         }
         flushTextBuffer();
-        if (isProcessing) {
-          void handleKey(char);
-        } else {
-          keyQueue.enqueue(() => handleKey(char));
+        if (char === "\x03" && isProcessing && processingAbort) {
+          processingAbort.abort();
+          continue;
         }
+        keyQueue.enqueue(() => handleKey(char));
       }
 
       flushTextBuffer();
@@ -1455,11 +1607,7 @@ export async function runChatShell<TExit>(
                 render();
               }
             };
-            if (isProcessing) {
-              void handleMouse();
-            } else {
-              keyQueue.enqueue(handleMouse);
-            }
+            keyQueue.enqueue(handleMouse);
             input = input.slice(mouseMatch[0].length);
             continue;
           }
@@ -1467,11 +1615,7 @@ export async function runChatShell<TExit>(
           const match = input.match(/^\x1b\[[\d;]*[~A-Za-z]/);
           if (match) {
             const key = match[0];
-            if (isProcessing) {
-              void handleKey(key);
-            } else {
-              keyQueue.enqueue(() => handleKey(key));
-            }
+            keyQueue.enqueue(() => handleKey(key));
             input = input.slice(match[0].length);
             continue;
           }
@@ -1482,21 +1626,13 @@ export async function runChatShell<TExit>(
 
         if (input[1] === "O" && input.length >= 3) {
           const key = input.slice(0, 3);
-          if (isProcessing) {
-            void handleKey(key);
-          } else {
-            keyQueue.enqueue(() => handleKey(key));
-          }
+          keyQueue.enqueue(() => handleKey(key));
           input = input.slice(3);
           continue;
         }
 
         const key = input.slice(0, 2);
-        if (isProcessing) {
-          void handleKey(key);
-        } else {
-          keyQueue.enqueue(() => handleKey(key));
-        }
+        keyQueue.enqueue(() => handleKey(key));
         input = input.slice(2);
       }
     }

@@ -23,6 +23,10 @@ export interface OpenableResource {
 export interface OpenResourceContext {
   loaded?: LoadedWorkspace | null;
   cache?: CourseCache | null;
+  /** Prefer this file when the user asks to open "it" or "the pdf you made". */
+  lastExportedPdfPath?: string | null;
+  /** Override export scan roots (tests). */
+  exportDirectories?: string[];
 }
 
 export interface OpenResourceResult {
@@ -82,6 +86,32 @@ export async function handleOpenResourceQuery(
       status: "listed",
       message: formatResourceList(resources),
     };
+  }
+
+  if (context.lastExportedPdfPath && isRecentExportQuery(trimmed)) {
+    const recent = resources.find(
+      (resource) => resource.target === context.lastExportedPdfPath
+    );
+    if (recent) {
+      try {
+        await opener(recent);
+        return {
+          status: "opened",
+          resource: recent,
+          message: [
+            `Opened ${recent.title} (${recent.kind}).`,
+            displayPath(recent.target),
+          ].join("\n"),
+        };
+      } catch (error) {
+        return {
+          status: "missing",
+          message: `Failed to open ${recent.title}: ${
+            error instanceof Error ? error.message : "unknown error"
+          }`,
+        };
+      }
+    }
   }
 
   let resolved = resolveOpenableResource(trimmed, resources);
@@ -244,6 +274,28 @@ export async function collectOpenableResources(
           "workspace resource",
           attachment.absolutePath,
           [attachment.relativePath]
+        )
+      );
+    }
+  }
+
+  for (const exportDir of getExportDirectories(context)) {
+    for (const file of await listExportFiles(exportDir)) {
+      push(
+        createFileResource(
+          `export:${file.absolutePath}`,
+          file.title,
+          "exported pdf",
+          file.absolutePath,
+          [
+            file.title,
+            file.basename,
+            file.stem,
+            "exported pdf",
+            "canvas-cli export",
+            "study guide",
+            displayPath(file.absolutePath),
+          ]
         )
       );
     }
@@ -566,6 +618,53 @@ export function getOpenCommand(target: string): { command: string; args: string[
   return { command: "xdg-open", args: [target] };
 }
 
+function getExportDirectories(context: OpenResourceContext): string[] {
+  if (context.exportDirectories?.length) {
+    return context.exportDirectories;
+  }
+  const dirs = [path.resolve(process.cwd(), ".canvas-cli", "exports")];
+  if (context.loaded?.path) {
+    dirs.push(path.join(context.loaded.path, "exports"));
+  }
+  return dirs;
+}
+
+async function listExportFiles(
+  exportDir: string
+): Promise<
+  Array<{ title: string; basename: string; stem: string; absolutePath: string }>
+> {
+  if (!(await directoryExists(exportDir))) return [];
+
+  const entries: Array<{
+    title: string;
+    basename: string;
+    stem: string;
+    absolutePath: string;
+  }> = [];
+  const files = await fs.readdir(exportDir, { withFileTypes: true });
+  for (const entry of files) {
+    if (!entry.isFile() || !/\.pdf$/i.test(entry.name)) continue;
+    const absolutePath = path.join(exportDir, entry.name);
+    entries.push({
+      title: entry.name,
+      basename: entry.name,
+      stem: entry.name.replace(/\.pdf$/i, ""),
+      absolutePath,
+    });
+  }
+  return entries.sort((a, b) => b.basename.localeCompare(a.basename));
+}
+
+const RECENT_EXPORT_QUERY =
+  /^(?:(?:the|my|this|that|open|open the)?\s*(?:pdf|study guide|export|file)(?:\s+(?:you\s+)?(?:made|generated|created))?|open\s+it)$/i;
+
+export function isRecentExportQuery(query: string): boolean {
+  const trimmed = query.trim();
+  if (!trimmed) return false;
+  return RECENT_EXPORT_QUERY.test(trimmed);
+}
+
 async function listWorkspaceFiles(
   workspacePath: string,
   relativeDir: string
@@ -701,7 +800,14 @@ function rankResource(
 
   score += resourceTypePriority(resource);
   if (normalizedQuery.includes("pdf") && /\.pdf$/i.test(resource.title)) {
-    score += 18;
+    score += resource.kind === "exported pdf" ? 40 : 18;
+  }
+  if (
+    resource.kind === "exported pdf" &&
+    (resource.target.endsWith(`/${normalizedQuery}`) ||
+      normalizeSearchText(path.basename(resource.target)) === normalizedQuery)
+  ) {
+    score += 120;
   }
   if (normalizedQuery.includes("page") && resource.kind.includes("page")) {
     score += 12;
@@ -835,12 +941,14 @@ function levenshteinDistance(a: string, b: string): number {
 
 function resourceTypePriority(resource: OpenableResource): number {
   switch (resource.kind) {
+    case "exported pdf":
+      return 52;
     case "downloaded attachment":
     case "workspace attachment":
     case "workspace resource":
       return 30;
     case "zip entry":
-      return 28;
+      return 18;
     case "workspace file":
       return 24;
     case "page":

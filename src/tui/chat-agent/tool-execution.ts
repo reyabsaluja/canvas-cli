@@ -59,8 +59,8 @@ async function executeToolCallDetailed(
       return openLecture(input.query as string, ctx);
     case "list_assignments":
       return listAssignments(ctx);
-    case "list_radar":
-      return listRadar(
+    case "list_announcements":
+      return listAnnouncements(
         (input.filter as RadarFilter | undefined) ?? "all",
         (input.query as string | undefined) ?? "",
         ctx
@@ -649,7 +649,11 @@ async function openResource(
   query: string,
   ctx: ChatAgentContext
 ): Promise<ToolExecutionResult> {
-  const context = { loaded: ctx.loaded, cache: ctx.cache };
+  const context = {
+    loaded: ctx.loaded,
+    cache: ctx.cache,
+    lastExportedPdfPath: ctx.lastExportedPdfPath ?? null,
+  };
   const result = await handleOpenResourceQuery(query, context, undefined, true);
   const success = result.status === "opened";
   return {
@@ -729,17 +733,17 @@ async function listAssignments(
   };
 }
 
-async function listRadar(
+async function listAnnouncements(
   filter: RadarFilter,
   query: string,
   ctx: ChatAgentContext
 ): Promise<ToolExecutionResult> {
   if (!ctx.radar || ctx.courseId == null) {
     const message =
-      "Radar is unavailable in this context (no course binding).";
+      "Announcements are unavailable in this context (no course binding).";
     return {
       observation: {
-        tool: "list_radar",
+        tool: "list_announcements",
         status: "error",
         summary: message,
         artifacts: [],
@@ -758,9 +762,9 @@ async function listRadar(
   const rendered = formatRadarItems(items, filter, query);
   return {
     observation: {
-      tool: "list_radar",
+      tool: "list_announcements",
       status: "ok",
-      summary: `Listed ${items.length} radar item${items.length === 1 ? "" : "s"}${query ? ` matching "${query}"` : ""}.`,
+      summary: `Listed ${items.length} announcement${items.length === 1 ? "" : "s"}${query ? ` matching "${query}"` : ""}.`,
       artifacts: [],
     },
     modelText: rendered,

@@ -49,6 +49,40 @@ export const CANVAS_TEXT = [
 
 export const CANVAS_ASCII = CANVAS_TEXT.join("\n");
 
+export const CANVAS_LOGO = [
+  "  ⠀⠀⢀⣤⠀⠺⣿⣿⠗⠀⣠⣀⠀⠀",
+  "  ⠀⣴⣿⠟⣀⠀⠰⡆⠀⢀⠻⣿⣧⠀",
+  "  ⣠⡀⠀⠈⠛⠀⠀⠀⠀⠛⠃⠀⢀⣠",
+  "  ⣿⣿⠰⠶⠀⠀⠀⠀⠀⠀⠰⠆⢾⣿",
+  "  ⠙⠁⠀⢀⣤⠀⠀⠀⠀⣠⡄⠀⠈⠛",
+  "  ⠀⠺⣿⣦⠉⠀⠰⠆⠀⠈⣱⣾⡿⠀",
+  "  ⠀⠀⠈⠛⠀⣰⣾⣿⣦⠀⠙⠋⠀⠀",
+];
+
+const CANVAS_LOGO_WIDTH = Math.max(...CANVAS_LOGO.map((l) => [...l].length));
+
+export function buildLogoBanner(title: string, subtitle?: string, options?: { styledSubtitle?: string }): string[] {
+  const logoWidth = CANVAS_LOGO_WIDTH;
+  const subtitleLine = options?.styledSubtitle ?? (subtitle ? C.dimmer(subtitle) : "");
+  const textLines: string[] = [
+    C.pureWhiteBold(title),
+    subtitleLine,
+  ].filter(Boolean);
+  const textStart = 2;
+
+  const bannerLines: string[] = [];
+  for (let i = 0; i < CANVAS_LOGO.length; i++) {
+    const logoLine = CANVAS_LOGO[i]!;
+    const pad = " ".repeat(Math.max(0, logoWidth - [...logoLine].length));
+    const textIndex = i - textStart;
+    const rightText = textIndex >= 0 && textIndex < textLines.length
+      ? "   " + textLines[textIndex]!
+      : "";
+    bannerLines.push(" " + C.primary(logoLine) + pad + rightText);
+  }
+  return bannerLines;
+}
+
 /**
  * Screen buffer — collects lines, then flushes all at once.
  * Avoids flicker by writing a single large chunk to stdout.
@@ -123,7 +157,6 @@ class ScreenBuffer {
       }
       writes.push(`\x1B[${row + 1};1H\x1B[0m\x1B[2K${rendered[row]!}`);
     }
-
     if (writes.length > 0) {
       writes.push("\x1B[0m");
       process.stdout.write(writes.join(""));
