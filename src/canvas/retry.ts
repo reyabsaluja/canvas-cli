@@ -39,6 +39,10 @@ function clampDelay(ms: number, maxDelay: number): number {
   return Math.min(maxDelay, Math.max(MIN_RETRY_DELAY_MS, ms));
 }
 
+function exponentialDelay(attempt: number, baseDelay: number, maxDelay: number): number {
+  return clampDelay(addJitter(baseDelay * 2 ** attempt), maxDelay);
+}
+
 function getRetryDelay(response: Response, attempt: number, baseDelay: number, maxDelay: number): number {
   const retryAfter = response.headers.get("retry-after");
   if (retryAfter) {
@@ -47,7 +51,7 @@ function getRetryDelay(response: Response, attempt: number, baseDelay: number, m
     const date = Date.parse(retryAfter);
     if (!Number.isNaN(date)) return clampDelay(date - Date.now(), maxDelay);
   }
-  return clampDelay(addJitter(baseDelay * 2 ** (attempt - 1)), maxDelay);
+  return exponentialDelay(attempt, baseDelay, maxDelay);
 }
 
 function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
@@ -98,7 +102,7 @@ export async function fetchWithRetry(
         return response;
       }
 
-      const delay = getRetryDelay(response, attempt + 1, baseDelay, maxDelay);
+      const delay = getRetryDelay(response, attempt, baseDelay, maxDelay);
       await response.body?.cancel();
       log(
         `Canvas API returned ${response.status}, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${maxRetries})...`
@@ -108,7 +112,7 @@ export async function fetchWithRetry(
       lastError = err;
 
       if (isRetriableNetworkError(err) && attempt < maxRetries) {
-        const delay = clampDelay(addJitter(baseDelay * 2 ** attempt), maxDelay);
+        const delay = exponentialDelay(attempt, baseDelay, maxDelay);
         log(
           `Network error, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${maxRetries})...`
         );
