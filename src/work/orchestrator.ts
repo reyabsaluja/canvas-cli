@@ -6,13 +6,14 @@ import type { CanvasClient } from "../canvas/client.js";
 import type {
   AssignmentWorkup,
   InvestigationState,
+  RelevantResource,
   WorkVerificationResult,
 } from "./types.js";
 import type { ToolContext } from "./tool-handlers.js";
 import {
   generateWithTools,
   classifyAIError,
-  formatAIError,
+  isAIProviderError,
   type AIProviderConfig,
 } from "../ai/provider.js";
 import { appendObservation, createEmptyRunState } from "../agent/run-state.js";
@@ -105,7 +106,7 @@ export async function runInvestigation(
           if (!verification.ok) {
             return renderInvestigationVerificationMessage(verification);
           }
-          investigationSummary = (input as any).summary ?? "";
+          investigationSummary = (input.summary as string) ?? "";
           return "Investigation complete. Proceeding to synthesis.";
         }
 
@@ -125,8 +126,9 @@ export async function runInvestigation(
       investigationSummary = result.text;
     }
   } catch (err) {
+    if (!isAIProviderError(err)) throw err;
     const classified = classifyAIError(err);
-    aiErrorMessage = formatAIError(classified);
+    aiErrorMessage = classified.userMessage;
     investigationFailed = true;
     onProgress(`AI error during investigation: ${classified.message}`);
   }
@@ -136,7 +138,7 @@ export async function runInvestigation(
   const verification = verifyInvestigationState(state);
 
   if (investigationFailed) {
-    const workup = buildPartialWorkup(detail, state, verification, aiErrorMessage!);
+    const workup = buildPartialWorkup(detail, state, verification, aiErrorMessage ?? "Unknown AI error");
     return { workup, state, partial: true, aiErrorMessage };
   }
 
@@ -153,8 +155,9 @@ export async function runInvestigation(
     );
     return { workup, state };
   } catch (err) {
+    if (!isAIProviderError(err)) throw err;
     const classified = classifyAIError(err);
-    aiErrorMessage = formatAIError(classified);
+    aiErrorMessage = classified.userMessage;
     onProgress(`AI error during synthesis: ${classified.message}`);
     const workup = buildPartialWorkup(detail, state, verification, aiErrorMessage);
     return { workup, state, partial: true, aiErrorMessage };
@@ -186,9 +189,9 @@ export function buildPartialWorkup(
     overview,
     deliverables: [],
     constraints: [],
-    relevantResources: state.visitedSources.map((source) => ({
+    relevantResources: state.visitedSources.map((source): RelevantResource => ({
       title: source,
-      type: "file" as const,
+      type: "file",
       location: source,
       why: "Visited during partial investigation",
     })),
