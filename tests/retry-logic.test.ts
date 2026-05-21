@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test, { afterEach } from "node:test";
-import { fetchWithRetry, DEFAULT_MAX_DELAY_MS, type RetryOptions } from "../src/canvas/retry.js";
+import { fetchWithRetry, DEFAULT_MAX_DELAY_MS, type RetryOptions, type SleepFn } from "../src/canvas/retry.js";
 import { CanvasClient } from "../src/canvas/client.js";
 
-const FAST: RetryOptions = { baseDelayMs: 1, log: () => {} };
+const noopSleep: SleepFn = async () => {};
+const FAST: RetryOptions = { baseDelayMs: 1, log: () => {}, sleepFn: noopSleep };
 
 const originalFetch = globalThis.fetch;
 
@@ -236,18 +237,10 @@ test("fetchWithRetry respects Retry-After header over base delay", async () => {
     { status: 200 },
   ]);
   const delays: number[] = [];
-  const origSetTimeout = globalThis.setTimeout;
-  globalThis.setTimeout = ((fn: () => void, ms?: number) => {
-    delays.push(ms ?? 0);
-    return origSetTimeout(fn, 0);
-  }) as typeof setTimeout;
-  try {
-    const res = await fetchWithRetry("http://test.com/api", undefined, { baseDelayMs: 5000, log: () => {} });
-    assert.equal(res.status, 200);
-    assert.ok(delays[0] >= 1000 && delays[0] < 5000, `Should use Retry-After: 1 (1000ms) not base delay (5000ms), got ${delays[0]}ms`);
-  } finally {
-    globalThis.setTimeout = origSetTimeout;
-  }
+  const trackingSleep: SleepFn = async (ms) => { delays.push(ms); };
+  const res = await fetchWithRetry("http://test.com/api", undefined, { baseDelayMs: 5000, log: () => {}, sleepFn: trackingSleep });
+  assert.equal(res.status, 200);
+  assert.ok(delays[0] >= 1000 && delays[0] < 5000, `Should use Retry-After: 1 (1000ms) not base delay (5000ms), got ${delays[0]}ms`);
 });
 
 test("fetchWithRetry treats past-date Retry-After as immediate retry", async () => {
@@ -257,19 +250,11 @@ test("fetchWithRetry treats past-date Retry-After as immediate retry", async () 
     { status: 200 },
   ]);
   const delays: number[] = [];
-  const origSetTimeout = globalThis.setTimeout;
-  globalThis.setTimeout = ((fn: () => void, ms?: number) => {
-    delays.push(ms ?? 0);
-    return origSetTimeout(fn, 0);
-  }) as typeof setTimeout;
-  try {
-    const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
-    assert.equal(res.status, 200);
-    assert.equal(mock.callCount, 2);
-    assert.equal(delays[0], 0, "Past-date Retry-After should result in immediate retry (0ms)");
-  } finally {
-    globalThis.setTimeout = origSetTimeout;
-  }
+  const trackingSleep: SleepFn = async (ms) => { delays.push(ms); };
+  const res = await fetchWithRetry("http://test.com/api", undefined, { ...FAST, sleepFn: trackingSleep });
+  assert.equal(res.status, 200);
+  assert.equal(mock.callCount, 2);
+  assert.equal(delays[0], 0, "Past-date Retry-After should result in immediate retry (0ms)");
 });
 
 test("fetchWithRetry treats Retry-After: 0 as immediate retry", async () => {
@@ -278,19 +263,11 @@ test("fetchWithRetry treats Retry-After: 0 as immediate retry", async () => {
     { status: 200 },
   ]);
   const delays: number[] = [];
-  const origSetTimeout = globalThis.setTimeout;
-  globalThis.setTimeout = ((fn: () => void, ms?: number) => {
-    delays.push(ms ?? 0);
-    return origSetTimeout(fn, 0);
-  }) as typeof setTimeout;
-  try {
-    const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
-    assert.equal(res.status, 200);
-    assert.equal(mock.callCount, 2);
-    assert.equal(delays[0], 0, "Retry-After: 0 should result in immediate retry (0ms)");
-  } finally {
-    globalThis.setTimeout = origSetTimeout;
-  }
+  const trackingSleep: SleepFn = async (ms) => { delays.push(ms); };
+  const res = await fetchWithRetry("http://test.com/api", undefined, { ...FAST, sleepFn: trackingSleep });
+  assert.equal(res.status, 200);
+  assert.equal(mock.callCount, 2);
+  assert.equal(delays[0], 0, "Retry-After: 0 should result in immediate retry (0ms)");
 });
 
 test("fetchWithRetry caps large Retry-After to maxDelayMs", async () => {
@@ -299,20 +276,12 @@ test("fetchWithRetry caps large Retry-After to maxDelayMs", async () => {
     { status: 200 },
   ]);
   const delays: number[] = [];
-  const origSetTimeout = globalThis.setTimeout;
-  globalThis.setTimeout = ((fn: () => void, ms?: number) => {
-    delays.push(ms ?? 0);
-    return origSetTimeout(fn, 0);
-  }) as typeof setTimeout;
-  try {
-    const res = await fetchWithRetry("http://test.com/api", undefined, { baseDelayMs: 0, maxDelayMs: 1000, log: () => {} });
-    assert.equal(res.status, 200);
-    assert.equal(mock.callCount, 2);
-    assert.ok(delays[0] <= 1000, `Should cap at maxDelayMs (1000ms), got ${delays[0]}ms`);
-    assert.ok(delays[0] >= 500, `Should be at least MIN_RETRY_DELAY_MS (500ms), got ${delays[0]}ms`);
-  } finally {
-    globalThis.setTimeout = origSetTimeout;
-  }
+  const trackingSleep: SleepFn = async (ms) => { delays.push(ms); };
+  const res = await fetchWithRetry("http://test.com/api", undefined, { baseDelayMs: 0, maxDelayMs: 1000, log: () => {}, sleepFn: trackingSleep });
+  assert.equal(res.status, 200);
+  assert.equal(mock.callCount, 2);
+  assert.ok(delays[0] <= 1000, `Should cap at maxDelayMs (1000ms), got ${delays[0]}ms`);
+  assert.ok(delays[0] >= 500, `Should be at least MIN_RETRY_DELAY_MS (500ms), got ${delays[0]}ms`);
 });
 
 test("DEFAULT_MAX_DELAY_MS is 30 seconds", () => {
@@ -326,23 +295,15 @@ test("fetchWithRetry applies jitter to retry delay", async () => {
   ]);
   const baseDelayMs = 1000;
   const delays: number[] = [];
-  const origSetTimeout = globalThis.setTimeout;
-  globalThis.setTimeout = ((fn: () => void, ms?: number) => {
-    delays.push(ms ?? 0);
-    return origSetTimeout(fn, 0);
-  }) as typeof setTimeout;
-  try {
-    const res = await fetchWithRetry("http://test.com/api", undefined, { baseDelayMs, log: () => {} });
-    assert.equal(res.status, 200);
-    const minExpected = baseDelayMs * 0.7;
-    const maxExpected = baseDelayMs * 1.3;
-    assert.ok(
-      delays[0] >= minExpected && delays[0] <= maxExpected,
-      `Expected delay with jitter between ${minExpected}-${maxExpected}ms, got ${delays[0]}ms`
-    );
-  } finally {
-    globalThis.setTimeout = origSetTimeout;
-  }
+  const trackingSleep: SleepFn = async (ms) => { delays.push(ms); };
+  const res = await fetchWithRetry("http://test.com/api", undefined, { baseDelayMs, log: () => {}, sleepFn: trackingSleep });
+  assert.equal(res.status, 200);
+  const minExpected = baseDelayMs * 0.7;
+  const maxExpected = baseDelayMs * 1.3;
+  assert.ok(
+    delays[0] >= minExpected && delays[0] <= maxExpected,
+    `Expected delay with jitter between ${minExpected}-${maxExpected}ms, got ${delays[0]}ms`
+  );
 });
 
 test("fetchWithRetry aborts sleep when signal is aborted", async () => {
@@ -351,22 +312,17 @@ test("fetchWithRetry aborts sleep when signal is aborted", async () => {
     { status: 200 },
   ]);
   const controller = new AbortController();
-  const origSetTimeout = globalThis.setTimeout;
-  globalThis.setTimeout = ((fn: () => void, _ms?: number) => {
-    // Schedule abort on next microtick so the listener is registered first
-    queueMicrotask(() => controller.abort());
-    // Don't fire the timer — let the abort handle resolution
-    return origSetTimeout(() => {}, 60_000);
-  }) as typeof setTimeout;
-  try {
-    await assert.rejects(
-      () => fetchWithRetry("http://test.com/api", { signal: controller.signal }, { baseDelayMs: 10_000, log: () => {} }),
-      (err: Error) => err.name === "AbortError"
-    );
-    assert.equal(mock.callCount, 1);
-  } finally {
-    globalThis.setTimeout = origSetTimeout;
-  }
+  const abortingSleep: SleepFn = async (_ms, signal) => {
+    controller.abort();
+    if (signal?.aborted) {
+      throw signal.reason ?? new DOMException("Aborted", "AbortError");
+    }
+  };
+  await assert.rejects(
+    () => fetchWithRetry("http://test.com/api", { signal: controller.signal }, { baseDelayMs: 10_000, log: () => {}, sleepFn: abortingSleep }),
+    (err: Error) => err.name === "AbortError"
+  );
+  assert.equal(mock.callCount, 1);
 });
 
 test("fetchWithRetry passes same url and init on every attempt", async () => {
