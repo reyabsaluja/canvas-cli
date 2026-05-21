@@ -46,8 +46,18 @@ function getRetryDelay(response: Response, attempt: number, baseDelay: number, m
   return Math.min(maxDelay, addJitter(baseDelay * 2 ** (attempt - 1)));
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer);
+      reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+    }, { once: true });
+  });
 }
 
 export interface RetryOptions {
@@ -64,6 +74,7 @@ export async function fetchWithRetry(
   const maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
   const baseDelay = options?.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
   const maxDelay = options?.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
+  const signal = init?.signal ?? null;
   let lastError: unknown = new Error("fetchWithRetry: retries exhausted");
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -80,7 +91,7 @@ export async function fetchWithRetry(
         console.error(
           `Canvas API returned ${response.status}, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${maxRetries})...`
         );
-        await sleep(delay);
+        await sleep(delay, signal);
         continue;
       }
 
@@ -93,7 +104,7 @@ export async function fetchWithRetry(
         console.error(
           `Network error, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${maxRetries})...`
         );
-        await sleep(delay);
+        await sleep(delay, signal);
         continue;
       }
 

@@ -273,3 +273,21 @@ test("fetchWithRetry caps large Retry-After to maxDelayMs", async () => {
 test("DEFAULT_MAX_DELAY_MS is 30 seconds", () => {
   assert.equal(DEFAULT_MAX_DELAY_MS, 30_000);
 });
+
+test("fetchWithRetry aborts sleep when signal is aborted", async () => {
+  const mock = mockFetch([
+    { status: 503 },
+    { status: 200 },
+  ]);
+  try {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 50);
+    await assert.rejects(
+      () => fetchWithRetry("http://test.com/api", { signal: controller.signal }, { baseDelayMs: 10_000 }),
+      (err: Error) => err.name === "AbortError"
+    );
+    assert.equal(mock.callCount, 1);
+  } finally {
+    mock.restore();
+  }
+});
