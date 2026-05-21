@@ -434,3 +434,18 @@ test("CanvasClient fetchPaginatedSafe returns [] after retry exhaustion on 500",
   const result = await (client as any).fetchPaginatedSafe("http://test.com/api?page=1");
   assert.deepEqual(result, []);
 });
+
+test("fetchWithRetry propagates abort during in-flight fetch", async () => {
+  const controller = new AbortController();
+  mock.method(globalThis, "fetch", async (_url: string, init?: RequestInit) => {
+    if (init?.signal?.aborted) {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    }
+    controller.abort();
+    throw new DOMException("The operation was aborted.", "AbortError");
+  });
+  await assert.rejects(
+    () => fetchWithRetry("http://test.com/api", { signal: controller.signal }, FAST),
+    (err: Error) => err.name === "AbortError"
+  );
+});
