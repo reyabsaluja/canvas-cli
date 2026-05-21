@@ -65,6 +65,7 @@ function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
       reject(signal!.reason ?? new DOMException("Aborted", "AbortError"));
     };
     const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
       resolve();
     }, ms);
     signal?.addEventListener("abort", onAbort, { once: true });
