@@ -18,8 +18,9 @@ function isRetriableNetworkError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const cause = (err as { cause?: { code?: string } }).cause;
   if (cause?.code && RETRIABLE_NETWORK_CODES.has(cause.code)) return true;
+  // Fallback: match codes in the message using word boundaries to avoid substring false positives
   for (const code of RETRIABLE_NETWORK_CODES) {
-    if (err.message.includes(code)) return true;
+    if (new RegExp(`\\b${code}\\b`).test(err.message)) return true;
   }
   return false;
 }
