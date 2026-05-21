@@ -74,7 +74,8 @@ function renderInfoBox(
       ? `${displayCourses.length} active · ${availability.unavailable.length} unavailable`
       : `${displayCourses.length} active`;
   const workspaceCount = `${recent.length} active`;
-  const systemSummary = formatAssignmentSummary(services);
+  const activeCourseIds = new Set(displayCourses.map((c) => c.id));
+  const systemSummary = formatAssignmentSummary(services, activeCourseIds);
   const toolAgentSummary = `${displayCourses.length} course${displayCourses.length === 1 ? "" : "s"} connected`;
 
   const boxInner = Math.min(termCols - 5, 98);
@@ -304,13 +305,14 @@ function wrapWords(text: string, maxLen: number): string[] {
   return lines;
 }
 
-function formatAssignmentSummary(services: AppServices): string {
+function formatAssignmentSummary(services: AppServices, activeCourseIds: Set<number>): string {
   let total = 0;
   let upcoming = 0;
   const now = Date.now();
   const oneWeek = 7 * 24 * 60 * 60 * 1000;
 
-  for (const [, assignments] of services.resolvedAssignments ?? []) {
+  for (const [courseId, assignments] of services.resolvedAssignments ?? []) {
+    if (!activeCourseIds.has(courseId)) continue;
     total += assignments.length;
     upcoming += assignments.filter(
       (a) => a.dueAt && a.dueAt.getTime() > now && a.dueAt.getTime() - now < oneWeek
