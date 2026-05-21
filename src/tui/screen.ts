@@ -59,8 +59,10 @@ export const CANVAS_LOGO = [
   "  ⠀⠀⠈⠛⠀⣰⣾⣿⣦⠀⠙⠋⠀⠀",
 ];
 
+const CANVAS_LOGO_WIDTH = Math.max(...CANVAS_LOGO.map((l) => [...l].length));
+
 export function buildLogoBanner(title: string, subtitle?: string, options?: { styledSubtitle?: string }): string[] {
-  const logoWidth = Math.max(...CANVAS_LOGO.map((l) => [...l].length));
+  const logoWidth = CANVAS_LOGO_WIDTH;
   const subtitleLine = options?.styledSubtitle ?? (subtitle ? C.dimmer(subtitle) : "");
   const textLines: string[] = [
     C.pureWhiteBold(title),
