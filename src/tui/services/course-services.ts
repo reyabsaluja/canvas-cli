@@ -88,7 +88,8 @@ export async function fetchAssignments(
   courseId: number,
   courseName: string
 ): Promise<Assignment[]> {
-  const cached = services.assignmentCache.get(courseId);
+  const assignmentCache = services.assignmentCache ?? new Map();
+  const cached = assignmentCache.get(courseId);
   if (cached && cached.courseName === courseName) {
     return cached.assignmentsPromise;
   }
@@ -101,18 +102,18 @@ export async function fetchAssignments(
       );
       const filtered = filterRelevantAssignments(normalized, { all: true });
       const sorted = sortByUrgency(filtered);
-      services.resolvedAssignments.set(courseId, sorted);
+      services.resolvedAssignments?.set(courseId, sorted);
       return sorted;
     })
     .catch((error) => {
-      const current = services.assignmentCache.get(courseId);
+      const current = assignmentCache.get(courseId);
       if (current?.assignmentsPromise === assignmentsPromise) {
-        services.assignmentCache.delete(courseId);
+        assignmentCache.delete(courseId);
       }
       throw error;
     });
 
-  services.assignmentCache.set(courseId, {
+  assignmentCache.set(courseId, {
     courseName,
     assignmentsPromise,
   });
