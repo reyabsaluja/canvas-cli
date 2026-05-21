@@ -214,7 +214,7 @@ export function showAnnouncementsView(
     render();
 
     const stdin = process.stdin;
-    stdin.setRawMode(true);
+    if (stdin.isTTY) stdin.setRawMode(true);
     stdin.resume();
     stdin.setEncoding("utf8");
 
