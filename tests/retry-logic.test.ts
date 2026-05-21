@@ -471,18 +471,40 @@ test("fetchWithRetry retries on request timeout when no caller signal", async ()
   assert.equal(callCount, 3);
 });
 
-test("fetchWithRetry does not retry timeout when caller provides signal", async () => {
+test("fetchWithRetry does not retry when caller signal is aborted", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let callCount = 0;
+  mock.method(globalThis, "fetch", async () => {
+    callCount++;
+    throw new DOMException("The operation was aborted.", "AbortError");
+  });
+  await assert.rejects(
+    () => fetchWithRetry("http://test.com/api", { signal: controller.signal }, FAST),
+    (err: Error) => err.name === "AbortError"
+  );
+  assert.equal(callCount, 1);
+});
+
+test("fetchWithRetry retries timeout even when caller provides signal", async () => {
   const controller = new AbortController();
   let callCount = 0;
   mock.method(globalThis, "fetch", async () => {
     callCount++;
-    throw new DOMException("The operation timed out.", "TimeoutError");
+    if (callCount < 3) {
+      throw new DOMException("The operation timed out.", "TimeoutError");
+    }
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: new Headers(),
+      body: { cancel: async () => {} },
+    } as unknown as Response;
   });
-  await assert.rejects(
-    () => fetchWithRetry("http://test.com/api", { signal: controller.signal }, FAST),
-    (err: Error) => err.name === "TimeoutError"
-  );
-  assert.equal(callCount, 1);
+  const res = await fetchWithRetry("http://test.com/api", { signal: controller.signal }, FAST);
+  assert.equal(res.status, 200);
+  assert.equal(callCount, 3);
 });
 
 test("fetchWithRetry applies timeout signal when no caller signal provided", async () => {
@@ -501,7 +523,7 @@ test("fetchWithRetry applies timeout signal when no caller signal provided", asy
   assert.ok(receivedSignal, "Should have applied a timeout signal");
 });
 
-test("fetchWithRetry does not override caller-provided signal with timeout", async () => {
+test("fetchWithRetry combines caller signal with timeout signal", async () => {
   const controller = new AbortController();
   let receivedSignal: AbortSignal | null | undefined = null;
   mock.method(globalThis, "fetch", async (_url: string, init?: RequestInit) => {
@@ -515,5 +537,6 @@ test("fetchWithRetry does not override caller-provided signal with timeout", asy
     } as unknown as Response;
   });
   await fetchWithRetry("http://test.com/api", { signal: controller.signal }, { ...FAST, requestTimeoutMs: 5000 });
-  assert.equal(receivedSignal, controller.signal, "Should preserve caller signal");
+  assert.ok(receivedSignal, "Should have a signal");
+  assert.notEqual(receivedSignal, controller.signal, "Should be a combined signal, not the raw caller signal");
 });
