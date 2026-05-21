@@ -274,6 +274,10 @@ export class CanvasClient {
         (err.message.includes("401") ||
           err.message.includes("403") ||
           err.message.includes("404") ||
+          err.message.includes("500") ||
+          err.message.includes("502") ||
+          err.message.includes("503") ||
+          err.message.includes("504") ||
           err.message.includes("unauthorized") ||
           err.message.includes("disabled"))
       ) {
