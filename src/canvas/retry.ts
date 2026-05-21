@@ -3,17 +3,19 @@ export const DEFAULT_BASE_DELAY_MS = 1000;
 
 const RETRIABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 
-const RETRIABLE_NETWORK_ERRORS = [
+const RETRIABLE_NETWORK_CODES = new Set([
   "ECONNRESET",
   "ETIMEDOUT",
   "ECONNREFUSED",
-  "fetch failed",
   "UND_ERR_CONNECT_TIMEOUT",
-];
+]);
 
 function isRetriableNetworkError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
-  return RETRIABLE_NETWORK_ERRORS.some((code) => err.message.includes(code));
+  const cause = (err as { cause?: { code?: string } }).cause;
+  if (cause?.code && RETRIABLE_NETWORK_CODES.has(cause.code)) return true;
+  return RETRIABLE_NETWORK_CODES.has(err.message) ||
+    [...RETRIABLE_NETWORK_CODES].some((code) => err.message.includes(code));
 }
 
 function isPermanentStatus(status: number): boolean {

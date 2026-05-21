@@ -4,14 +4,18 @@ import { fetchWithRetry, type RetryOptions } from "../src/canvas/retry.js";
 
 const FAST: RetryOptions = { baseDelayMs: 0 };
 
-function mockFetch(responses: Array<{ status: number; headers?: Record<string, string> } | { error: string }>) {
+function mockFetch(responses: Array<{ status: number; headers?: Record<string, string> } | { error: string; causeCode?: string }>) {
   let callCount = 0;
   const originalFetch = globalThis.fetch;
 
   globalThis.fetch = (async () => {
     const entry = responses[callCount++];
     if (!entry) throw new Error("No more mock responses");
-    if ("error" in entry) throw new Error(entry.error);
+    if ("error" in entry) {
+      const err = new Error(entry.error);
+      if (entry.causeCode) (err as any).cause = { code: entry.causeCode };
+      throw err;
+    }
     return {
       ok: entry.status >= 200 && entry.status < 300,
       status: entry.status,
@@ -146,15 +150,28 @@ test("fetchWithRetry gives up after MAX_RETRIES", async () => {
   }
 });
 
-test("fetchWithRetry retries network errors", async () => {
+test("fetchWithRetry retries network errors with transient cause code", async () => {
   const mock = mockFetch([
-    { error: "fetch failed" },
+    { error: "fetch failed", causeCode: "ECONNRESET" },
     { status: 200 },
   ]);
   try {
     const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
     assert.equal(res.status, 200);
     assert.equal(mock.callCount, 2);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("fetchWithRetry does not retry generic fetch failed without transient cause", async () => {
+  const mock = mockFetch([{ error: "fetch failed" }]);
+  try {
+    await assert.rejects(
+      () => fetchWithRetry("http://test.com/api", undefined, FAST),
+      { message: "fetch failed" }
+    );
+    assert.equal(mock.callCount, 1);
   } finally {
     mock.restore();
   }
