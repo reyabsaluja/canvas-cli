@@ -273,7 +273,16 @@ export function showAnnouncementsView(
                 detailThread = thread;
                 detailScroll = 0;
               }
-            } catch {}
+            } catch {
+              detailThread = {
+                topic: item,
+                body: "(Failed to load thread — check your network connection.)",
+                entries: [],
+                totalEntries: 0,
+                participantCount: 0,
+              };
+              detailScroll = 0;
+            }
             loading = false;
             render();
           })();
