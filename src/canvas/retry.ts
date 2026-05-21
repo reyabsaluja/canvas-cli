@@ -96,7 +96,6 @@ export async function fetchWithRetry(
   const maxDelay = options?.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
   const log = options?.log ?? defaultLog;
   const signal = init?.signal ?? null;
-  let lastError: unknown;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -117,8 +116,6 @@ export async function fetchWithRetry(
       );
       await sleep(delay, signal);
     } catch (err) {
-      lastError = err;
-
       if (isRetriableNetworkError(err) && attempt < maxRetries) {
         const delay = exponentialDelay(attempt, baseDelay, maxDelay);
         log(
