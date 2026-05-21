@@ -3,7 +3,7 @@ export const DEFAULT_BASE_DELAY_MS = 1000;
 export const DEFAULT_MAX_DELAY_MS = 30_000;
 
 export type LogFn = (message: string) => void;
-const defaultLog: LogFn = (msg) => console.error(msg);
+const stderrLog: LogFn = (msg) => console.error(msg);
 
 const RETRIABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 
@@ -29,7 +29,7 @@ function isPermanentStatus(status: number): boolean {
   return status === 401 || status === 403 || status === 404;
 }
 
-const MIN_RETRY_DELAY_MS = 500;
+export const MIN_RETRY_DELAY_MS = 500;
 
 // ±20% jitter to decorrelate concurrent retries
 function addJitter(ms: number): number {
@@ -98,7 +98,7 @@ export async function fetchWithRetry(
   const maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
   const baseDelay = options?.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
   const maxDelay = options?.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
-  const log = options?.log ?? defaultLog;
+  const log = options?.log ?? stderrLog;
   const sleepImpl = options?.sleepFn ?? sleep;
   const signal = init?.signal ?? null;
 
