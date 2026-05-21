@@ -15,8 +15,10 @@ function isRetriableNetworkError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const cause = (err as { cause?: { code?: string } }).cause;
   if (cause?.code && RETRIABLE_NETWORK_CODES.has(cause.code)) return true;
-  return RETRIABLE_NETWORK_CODES.has(err.message) ||
-    [...RETRIABLE_NETWORK_CODES].some((code) => err.message.includes(code));
+  // Match messages like "read ECONNRESET" or "connect ETIMEDOUT" where code is a word boundary
+  return [...RETRIABLE_NETWORK_CODES].some((code) =>
+    new RegExp(`\\b${code}\\b`).test(err.message)
+  );
 }
 
 function isPermanentStatus(status: number): boolean {
