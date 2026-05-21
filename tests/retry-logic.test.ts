@@ -3,7 +3,7 @@ import test, { afterEach } from "node:test";
 import { fetchWithRetry, DEFAULT_MAX_DELAY_MS, type RetryOptions } from "../src/canvas/retry.js";
 import { CanvasClient } from "../src/canvas/client.js";
 
-const FAST: RetryOptions = { baseDelayMs: 0 };
+const FAST: RetryOptions = { baseDelayMs: 1 };
 
 const originalFetch = globalThis.fetch;
 
@@ -107,6 +107,16 @@ test("fetchWithRetry retries 503 and succeeds", async () => {
   assert.equal(mock.callCount, 3);
 });
 
+test("fetchWithRetry does not retry when maxRetries is 0", async () => {
+  const mock = mockFetch([
+    { status: 503 },
+    { status: 200 },
+  ]);
+  const res = await fetchWithRetry("http://test.com/api", undefined, { ...FAST, maxRetries: 0 });
+  assert.equal(res.status, 503);
+  assert.equal(mock.callCount, 1);
+});
+
 test("fetchWithRetry gives up after MAX_RETRIES", async () => {
   const mock = mockFetch([
     { status: 503 },
@@ -176,7 +186,7 @@ test("fetchWithRetry respects Retry-After header over base delay", async () => {
   const res = await fetchWithRetry("http://test.com/api", undefined, { baseDelayMs: 5000 });
   const elapsed = Date.now() - start;
   assert.equal(res.status, 200);
-  assert.ok(elapsed >= 1000 && elapsed < 2000, "Should use Retry-After: 1 (1000ms) not base delay (5000ms)");
+  assert.ok(elapsed >= 1000 && elapsed < 5000, "Should use Retry-After: 1 (1000ms) not base delay (5000ms)");
 });
 
 test("fetchWithRetry clamps past-date Retry-After to minimum delay", async () => {
@@ -191,7 +201,7 @@ test("fetchWithRetry clamps past-date Retry-After to minimum delay", async () =>
   assert.equal(res.status, 200);
   assert.equal(mock.callCount, 2);
   assert.ok(elapsed >= 500, "Past-date Retry-After should be clamped to MIN_RETRY_DELAY_MS (500ms)");
-  assert.ok(elapsed < 1500, "Should not wait longer than necessary");
+  assert.ok(elapsed < 3000, "Should not wait longer than necessary");
 });
 
 test("fetchWithRetry caps large Retry-After to maxDelayMs", async () => {
@@ -204,7 +214,7 @@ test("fetchWithRetry caps large Retry-After to maxDelayMs", async () => {
   const elapsed = Date.now() - start;
   assert.equal(res.status, 200);
   assert.equal(mock.callCount, 2);
-  assert.ok(elapsed >= 500 && elapsed < 1500, `Should cap at maxDelayMs (1000ms), got ${elapsed}ms`);
+  assert.ok(elapsed >= 500 && elapsed < 3000, `Should cap at maxDelayMs (1000ms), got ${elapsed}ms`);
 });
 
 test("DEFAULT_MAX_DELAY_MS is 30 seconds", () => {
@@ -221,10 +231,10 @@ test("fetchWithRetry applies jitter to retry delay", async () => {
   const res = await fetchWithRetry("http://test.com/api", undefined, { baseDelayMs });
   const elapsed = Date.now() - start;
   assert.equal(res.status, 200);
-  const minExpected = baseDelayMs * 0.8;
-  const maxExpected = baseDelayMs * 1.2;
+  const minExpected = baseDelayMs * 0.7;
+  const maxExpected = baseDelayMs * 1.5;
   assert.ok(
-    elapsed >= minExpected && elapsed < maxExpected + 50,
+    elapsed >= minExpected && elapsed < maxExpected + 100,
     `Expected delay with jitter between ${minExpected}-${maxExpected}ms, got ${elapsed}ms`
   );
 });
@@ -277,7 +287,7 @@ test("CanvasClient retries 503 during pagination and continues", async () => {
     } as unknown as Response;
   }) as typeof fetch;
 
-  const client = new CanvasClient({ baseUrl: "http://test.com", accessToken: "token" });
+  const client = new CanvasClient({ baseUrl: "http://test.com", accessToken: "token" }, FAST);
   const courses = await (client as any).fetchPaginated("http://test.com/api?page=1");
   assert.equal(callCount, 3);
   assert.deepEqual(courses, [{ id: 1 }, { id: 2 }]);

@@ -14,15 +14,14 @@ const RETRIABLE_NETWORK_CODES = new Set([
   "UND_ERR_CONNECT_TIMEOUT",
 ]);
 
-const RETRIABLE_MESSAGE_PATTERNS = [...RETRIABLE_NETWORK_CODES].map(
-  (code) => new RegExp(`\\b${code}\\b`)
-);
-
 function isRetriableNetworkError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const cause = (err as { cause?: { code?: string } }).cause;
   if (cause?.code && RETRIABLE_NETWORK_CODES.has(cause.code)) return true;
-  return RETRIABLE_MESSAGE_PATTERNS.some((pattern) => pattern.test(err.message));
+  for (const code of RETRIABLE_NETWORK_CODES) {
+    if (err.message.includes(code)) return true;
+  }
+  return false;
 }
 
 function isPermanentStatus(status: number): boolean {
@@ -95,17 +94,16 @@ export async function fetchWithRetry(
         return response;
       }
 
-      if (RETRIABLE_STATUS_CODES.has(response.status) && attempt < maxRetries) {
-        const delay = getRetryDelay(response, attempt + 1, baseDelay, maxDelay);
-        await response.body?.cancel();
-        log(
-          `Canvas API returned ${response.status}, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${maxRetries})...`
-        );
-        await sleep(delay, signal);
-        continue;
+      if (!RETRIABLE_STATUS_CODES.has(response.status) || attempt >= maxRetries) {
+        return response;
       }
 
-      return response;
+      const delay = getRetryDelay(response, attempt + 1, baseDelay, maxDelay);
+      response.body?.cancel();
+      log(
+        `Canvas API returned ${response.status}, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${maxRetries})...`
+      );
+      await sleep(delay, signal);
     } catch (err) {
       lastError = err;
 
