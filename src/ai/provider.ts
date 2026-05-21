@@ -538,11 +538,9 @@ export function formatAIError(error: unknown): string {
 }
 
 function parseRetryAfter(apiError: APICallError): number | null {
-  const headers = (apiError as any).responseHeaders;
+  const headers = apiError.responseHeaders;
   if (!headers) return null;
-  const value = typeof headers.get === "function"
-    ? headers.get("retry-after")
-    : headers["retry-after"];
+  const value = headers["retry-after"];
   if (!value) return null;
   const seconds = Number(value);
   if (Number.isFinite(seconds) && seconds > 0) {
