@@ -113,7 +113,7 @@ export async function fetchWithRetry(
       const delay = getRetryDelay(response, attempt, baseDelay, maxDelay);
       await response.body?.cancel().catch(() => {});
       log(
-        `Canvas API returned ${response.status}, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${maxRetries})...`
+        `Canvas API returned ${response.status}, retrying in ${Math.round(delay / 1000)}s (retry ${attempt + 1} of ${maxRetries})...`
       );
       await sleep(delay, signal);
     } catch (err) {
@@ -122,7 +122,7 @@ export async function fetchWithRetry(
       if (isRetriableNetworkError(err) && attempt < maxRetries) {
         const delay = exponentialDelay(attempt, baseDelay, maxDelay);
         log(
-          `Network error, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${maxRetries})...`
+          `Network error, retrying in ${Math.round(delay / 1000)}s (retry ${attempt + 1} of ${maxRetries})...`
         );
         await sleep(delay, signal);
         continue;
