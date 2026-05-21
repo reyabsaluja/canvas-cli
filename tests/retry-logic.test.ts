@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test, { afterEach, mock } from "node:test";
-import { CanvasApiError, fetchWithRetry, DEFAULT_MAX_DELAY_MS, type RetryOptions, type SleepFn } from "../src/canvas/retry.js";
+import { CanvasApiError, fetchWithRetry, DEFAULT_MAX_DELAY_MS, MIN_RETRY_DELAY_MS, type RetryOptions, type SleepFn } from "../src/canvas/retry.js";
 import { CanvasClient } from "../src/canvas/client.js";
 
 const noopSleep: SleepFn = async () => {};
@@ -241,7 +241,7 @@ test("fetchWithRetry respects Retry-After header over base delay", async () => {
   assert.ok(delays[0] >= 1000 && delays[0] < 5000, `Should use Retry-After: 1 (1000ms) not base delay (5000ms), got ${delays[0]}ms`);
 });
 
-test("fetchWithRetry treats past-date Retry-After as immediate retry", async () => {
+test("fetchWithRetry treats past-date Retry-After with minimum delay floor", async () => {
   const pastDate = new Date(Date.now() - 60000).toUTCString();
   const tracker = mockFetch([
     { status: 429, headers: { "retry-after": pastDate } },
@@ -252,10 +252,10 @@ test("fetchWithRetry treats past-date Retry-After as immediate retry", async () 
   const res = await fetchWithRetry("http://test.com/api", undefined, { ...FAST, sleepFn: trackingSleep });
   assert.equal(res.status, 200);
   assert.equal(tracker.callCount, 2);
-  assert.equal(delays[0], 0, "Past-date Retry-After should result in immediate retry (0ms)");
+  assert.equal(delays[0], MIN_RETRY_DELAY_MS, "Past-date Retry-After should clamp to MIN_RETRY_DELAY_MS");
 });
 
-test("fetchWithRetry treats Retry-After: 0 as immediate retry", async () => {
+test("fetchWithRetry treats Retry-After: 0 with minimum delay floor", async () => {
   const tracker = mockFetch([
     { status: 429, headers: { "retry-after": "0" } },
     { status: 200 },
@@ -265,7 +265,7 @@ test("fetchWithRetry treats Retry-After: 0 as immediate retry", async () => {
   const res = await fetchWithRetry("http://test.com/api", undefined, { ...FAST, sleepFn: trackingSleep });
   assert.equal(res.status, 200);
   assert.equal(tracker.callCount, 2);
-  assert.equal(delays[0], 0, "Retry-After: 0 should result in immediate retry (0ms)");
+  assert.equal(delays[0], MIN_RETRY_DELAY_MS, "Retry-After: 0 should clamp to MIN_RETRY_DELAY_MS");
 });
 
 test("fetchWithRetry caps large Retry-After to maxDelayMs", async () => {
