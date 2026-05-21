@@ -2,6 +2,9 @@ export const DEFAULT_MAX_RETRIES = 3;
 export const DEFAULT_BASE_DELAY_MS = 1000;
 export const DEFAULT_MAX_DELAY_MS = 30_000;
 
+export type LogFn = (message: string) => void;
+const defaultLog: LogFn = (msg) => console.error(msg);
+
 const RETRIABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 
 const RETRIABLE_NETWORK_CODES = new Set([
@@ -65,6 +68,7 @@ export interface RetryOptions {
   maxRetries?: number;
   baseDelayMs?: number;
   maxDelayMs?: number;
+  log?: LogFn;
 }
 
 export async function fetchWithRetry(
@@ -75,6 +79,7 @@ export async function fetchWithRetry(
   const maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
   const baseDelay = options?.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
   const maxDelay = options?.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
+  const log = options?.log ?? defaultLog;
   const signal = init?.signal ?? null;
   let lastError: unknown = new Error("fetchWithRetry: retries exhausted");
 
@@ -89,7 +94,7 @@ export async function fetchWithRetry(
       if (RETRIABLE_STATUS_CODES.has(response.status) && attempt < maxRetries) {
         const delay = getRetryDelay(response, attempt + 1, baseDelay, maxDelay);
         await response.body?.cancel();
-        console.error(
+        log(
           `Canvas API returned ${response.status}, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${maxRetries})...`
         );
         await sleep(delay, signal);
@@ -102,7 +107,7 @@ export async function fetchWithRetry(
 
       if (isRetriableNetworkError(err) && attempt < maxRetries) {
         const delay = Math.min(maxDelay, addJitter(baseDelay * 2 ** attempt));
-        console.error(
+        log(
           `Network error, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${maxRetries})...`
         );
         await sleep(delay, signal);
