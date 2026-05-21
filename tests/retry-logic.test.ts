@@ -226,7 +226,7 @@ test("fetchWithRetry applies jitter to retry delay", async () => {
     { status: 503 },
     { status: 200 },
   ]);
-  const baseDelayMs = 200;
+  const baseDelayMs = 1000;
   const start = Date.now();
   const res = await fetchWithRetry("http://test.com/api", undefined, { baseDelayMs });
   const elapsed = Date.now() - start;
