@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test, { afterEach, mock } from "node:test";
-import { CanvasApiError, fetchWithRetry, DEFAULT_MAX_DELAY_MS, DEFAULT_REQUEST_TIMEOUT_MS, type RetryOptions, type SleepFn } from "../src/canvas/retry.js";
+import { CanvasApiError, fetchWithRetry, DEFAULT_MAX_DELAY_MS, type RetryOptions, type SleepFn } from "../src/canvas/retry.js";
 import { CanvasClient } from "../src/canvas/client.js";
 
 const noopSleep: SleepFn = async () => {};
