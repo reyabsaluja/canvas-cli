@@ -9,6 +9,7 @@ import {
   buildShellOpenOptions,
   collectOpenableResources,
   handleOpenResourceQuery,
+  isRecentExportQuery,
   searchOpenableResources,
 } from "../src/tui/open-resources.js";
 
@@ -484,4 +485,41 @@ test("handleOpenResourceQuery opens last export for vague 'the pdf' query", asyn
     assert.equal(result.status, "opened");
     assert.equal(opened[0], exportPdf);
   });
+});
+
+// ---------------------------------------------------------------------------
+// isRecentExportQuery
+// ---------------------------------------------------------------------------
+
+test("isRecentExportQuery matches common user phrases for reopening exports", () => {
+  const positives = [
+    "the pdf",
+    "my pdf",
+    "open it",
+    "the study guide",
+    "export",
+    "the file you made",
+    "pdf you generated",
+    "that pdf",
+    "open the export",
+    "this study guide",
+  ];
+  for (const q of positives) {
+    assert.ok(isRecentExportQuery(q), `expected match for: "${q}"`);
+  }
+});
+
+test("isRecentExportQuery rejects unrelated queries", () => {
+  const negatives = [
+    "lab1.pdf",
+    "open the syllabus",
+    "midterm solutions",
+    "notes",
+    "",
+    "   ",
+    "my pdf assignment about chapter 5",
+  ];
+  for (const q of negatives) {
+    assert.ok(!isRecentExportQuery(q), `expected no match for: "${q}"`);
+  }
 });
