@@ -177,12 +177,12 @@ export async function createShellContext(
               const nearest = upcoming.reduce((a, b) =>
                 new Date(a.dueAt!).getTime() < new Date(b.dueAt!).getTime() ? a : b
               );
-              setCourseStatus(runtime, `next due: ${formatDueCompact(nearest.dueAt)}`);
+              setCourseStatus(runtime, `Status: next due ${formatDueCompact(nearest.dueAt)}`);
             } else {
               const count = nextAssignments.length;
               setCourseStatus(
                 runtime,
-                count > 0 ? `${count} assignment${count !== 1 ? "s" : ""}` : undefined
+                count > 0 ? "Status: assignments ready" : "Status: course data ready"
               );
             }
           }
@@ -233,7 +233,7 @@ export async function createShellContext(
         subtitle: course.courseCode,
         description: course.publicDescription ?? undefined,
         scopeLabel: `Course: ${course.name}`,
-        statusLabel: undefined,
+        statusLabel: "Status: loading course data",
         placeholder: "Ask about this course, or use /assignments",
       },
       getOpenOptions: () => openOptions,
