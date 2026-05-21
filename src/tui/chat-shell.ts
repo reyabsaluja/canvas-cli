@@ -149,6 +149,7 @@ function formatElapsed(ms: number): string {
   return `${minutes}m${remaining}s`;
 }
 const FULL_RENDER_BATCH_MS = 16;
+const PDF_PROGRESS_THROTTLE_MS = 80;
 const CLEAN_TRANSCRIPT_INDEX = Number.MAX_SAFE_INTEGER;
 
 type TranscriptBlock = {
@@ -485,6 +486,12 @@ export async function runChatShell<TExit>(
     // Keep viewport stable when user is scrolled up and content grows (skip during streaming to avoid jitter)
     if (chatScrollOffset > 0 && transcriptIndex.totalLines > lastTranscriptTotalLines && !isProcessing) {
       chatScrollOffset += transcriptIndex.totalLines - lastTranscriptTotalLines;
+      const { rows } = getTermSize();
+      const bannerLen = getCachedBannerLines().length + 3;
+      const totalVirtual = bannerLen + 1 + transcriptIndex.totalLines + CHAT_GAP_ROWS;
+      const maxContent = Math.max(1, rows - getStickyBottomRows());
+      const cap = Math.max(0, totalVirtual - maxContent);
+      chatScrollOffset = Math.min(chatScrollOffset, cap);
     }
     lastTranscriptTotalLines = transcriptIndex.totalLines;
 
@@ -1141,7 +1148,7 @@ export async function runChatShell<TExit>(
                     }
                     pdfContentDirty = true;
                     if (!pdfContentTimer) {
-                      pdfContentTimer = setTimeout(flushPdfContent, 80);
+                      pdfContentTimer = setTimeout(flushPdfContent, PDF_PROGRESS_THROTTLE_MS);
                     }
                     return;
                   }
@@ -1171,7 +1178,6 @@ export async function runChatShell<TExit>(
             }
           }
 
-          stopSpinner();
           const elapsed = formatElapsed(Date.now() - processingStartTime);
 
           const lines = [`PDF saved to \`${result.pdfPath}\``];
@@ -1207,7 +1213,6 @@ export async function runChatShell<TExit>(
             void appendPersistedMessage({ role: "system", content: msg });
           });
         } catch (error: unknown) {
-          stopSpinner();
           if (error instanceof DOMException && error.name === "AbortError") {
             await appendPersistedMessage({
               role: "system",
@@ -1223,6 +1228,7 @@ export async function runChatShell<TExit>(
             });
           }
         } finally {
+          stopSpinner();
           isProcessing = false;
           processingAbort = null;
           currentSpinnerLine = "";
