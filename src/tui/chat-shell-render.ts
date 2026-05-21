@@ -598,13 +598,21 @@ function clearOverlayPaintedRows(): void {
     lastOverlayRows = null;
     return;
   }
+  const { rows: totalRows } = getTermSize();
+  const clampedEnd = Math.min(lastOverlayPaintedEnd, totalRows);
+  if (lastOverlayPaintedStart > clampedEnd) {
+    lastOverlayPaintedStart = -1;
+    lastOverlayPaintedEnd = -1;
+    lastOverlayRows = null;
+    return;
+  }
   const writes: string[] = ["\x1B[0m"];
-  for (let row = lastOverlayPaintedStart; row <= lastOverlayPaintedEnd; row++) {
+  for (let row = lastOverlayPaintedStart; row <= clampedEnd; row++) {
     writes.push(`\x1B[${row};1H\x1B[2K`);
   }
   writes.push("\x1B[0m");
   process.stdout.write(writes.join(""));
-  invalidateScreenRows(lastOverlayPaintedStart, lastOverlayPaintedEnd);
+  invalidateScreenRows(lastOverlayPaintedStart, clampedEnd);
   lastOverlayPaintedStart = -1;
   lastOverlayPaintedEnd = -1;
   lastOverlayRows = null;
