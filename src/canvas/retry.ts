@@ -129,8 +129,12 @@ export async function fetchWithRetry(
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       let fetchInit = init;
-      if (requestTimeout > 0 && !signal) {
-        fetchInit = { ...init, signal: AbortSignal.timeout(requestTimeout) };
+      if (requestTimeout > 0) {
+        const timeoutSignal = AbortSignal.timeout(requestTimeout);
+        const combinedSignal = signal
+          ? AbortSignal.any([signal, timeoutSignal])
+          : timeoutSignal;
+        fetchInit = { ...init, signal: combinedSignal };
       }
       const response = await fetch(url, fetchInit);
 
@@ -149,8 +153,9 @@ export async function fetchWithRetry(
       );
       await sleepImpl(delay, signal);
     } catch (err) {
+      if (signal?.aborted) throw err;
       const isTimeout = err instanceof Error && err.name === "TimeoutError";
-      if ((isRetriableNetworkError(err) || (isTimeout && !signal)) && attempt < maxRetries) {
+      if ((isRetriableNetworkError(err) || isTimeout) && attempt < maxRetries) {
         const delay = exponentialDelay(attempt, baseDelay, maxDelay);
         log(
           `Network error, retrying in ${Math.round(delay / 1000)}s (retry ${attempt + 1} of ${maxRetries})...`
