@@ -129,8 +129,13 @@ export async function fetchCourseContent(
   }
 
   if (client.skippedEndpoints.length > 0) {
+    const skipped = client.skippedEndpoints.map((url) => {
+      const match = url.match(/\/courses\/\d+\/(\w+)/);
+      return match ? match[1] : url;
+    });
+    const unique = [...new Set(skipped)];
     warnings.push(
-      `${client.skippedEndpoints.length} endpoint(s) returned errors after retries — some data may be incomplete`
+      `${client.skippedEndpoints.length} endpoint(s) returned errors after retries — unavailable: ${unique.join(", ")}`
     );
   }
 
