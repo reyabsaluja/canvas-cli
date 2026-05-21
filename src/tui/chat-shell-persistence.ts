@@ -1,10 +1,14 @@
 import type { ChatMessage, ChatSession } from "./chat-state.js";
 import { saveChatSession } from "./chat-sessions.js";
 
+const MAX_PERSIST_RETRIES = 2;
+const RETRY_DELAY_MS = 500;
+
 export class ChatShellPersistence {
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
   private persistChain: Promise<void> = Promise.resolve();
   private persistFailureMessage: string | null = null;
+  private consecutiveFailures = 0;
 
   constructor(
     private readonly session: ChatSession,
@@ -28,13 +32,20 @@ export class ChatShellPersistence {
     }
     this.session.updatedAt = new Date().toISOString();
     this.persistChain = this.persistChain.catch(() => {}).then(async () => {
-      try {
-        await saveChatSession(this.session);
-        this.persistFailureMessage = null;
-      } catch (error) {
-        this.persistFailureMessage =
-          error instanceof Error ? error.message : "unknown persistence error";
-        throw error;
+      for (let attempt = 0; attempt <= MAX_PERSIST_RETRIES; attempt++) {
+        try {
+          await saveChatSession(this.session);
+          this.persistFailureMessage = null;
+          this.consecutiveFailures = 0;
+          return;
+        } catch (error) {
+          this.persistFailureMessage =
+            error instanceof Error ? error.message : "unknown persistence error";
+          this.consecutiveFailures++;
+          if (attempt < MAX_PERSIST_RETRIES) {
+            await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+          }
+        }
       }
     });
     return this.persistChain;
