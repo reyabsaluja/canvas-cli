@@ -1116,6 +1116,7 @@ export async function runChatShell<TExit>(
           startSpinner();
 
           let lastPdfProgressAction = "";
+          let lastPdfProgressMessage: ChatMessage | null = null;
           let pdfContentDirty = false;
           let pdfContentTimer: ReturnType<typeof setTimeout> | null = null;
           const flushPdfContent = () => {
@@ -1137,21 +1138,18 @@ export async function runChatShell<TExit>(
               abortSignal: processingAbort!.signal,
               renderMode,
               onProgress: (event) => {
-                if (event.action === lastPdfProgressAction) {
-                  const last = messages[messages.length - 1];
-                  if (last?.role === "tool") {
-                    if (event.content != null) {
-                      last.content = event.content;
-                    }
-                    if (event.target !== last.toolTarget) {
-                      last.toolTarget = event.target;
-                    }
-                    pdfContentDirty = true;
-                    if (!pdfContentTimer) {
-                      pdfContentTimer = setTimeout(flushPdfContent, PDF_PROGRESS_THROTTLE_MS);
-                    }
-                    return;
+                if (event.action === lastPdfProgressAction && lastPdfProgressMessage) {
+                  if (event.content != null) {
+                    lastPdfProgressMessage.content = event.content;
                   }
+                  if (event.target !== lastPdfProgressMessage.toolTarget) {
+                    lastPdfProgressMessage.toolTarget = event.target;
+                  }
+                  pdfContentDirty = true;
+                  if (!pdfContentTimer) {
+                    pdfContentTimer = setTimeout(flushPdfContent, PDF_PROGRESS_THROTTLE_MS);
+                  }
+                  return;
                 }
                 if (pdfContentTimer) {
                   clearTimeout(pdfContentTimer);
@@ -1159,13 +1157,15 @@ export async function runChatShell<TExit>(
                 }
                 pdfContentDirty = false;
                 lastPdfProgressAction = event.action;
-                messages.push({
+                const progressMsg: ChatMessage = {
                   role: "tool",
                   content: event.content ?? "",
                   toolAction: event.action,
                   toolTarget: event.target,
                   toolColor: "green",
-                });
+                };
+                lastPdfProgressMessage = progressMsg;
+                messages.push(progressMsg);
                 markTranscriptDirty(messages.length - 1);
                 currentSpinnerLine = buildSpinnerLine();
                 scheduleRender();
