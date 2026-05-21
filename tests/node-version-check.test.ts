@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { execFileSync } from "node:child_process";
+import { execFileSync, execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,19 +21,29 @@ test("version check wrapper contains CJS-compatible syntax for the check portion
   );
 });
 
-test("version check wrapper prints correct error message format", () => {
-  assert.ok(
-    wrapperContent.includes("canvas-cli requires Node.js 20 or later"),
-    "Should contain the required error message"
-  );
-  assert.ok(
-    wrapperContent.includes("https://nodejs.org"),
-    "Should contain the upgrade URL"
-  );
-  assert.ok(
-    wrapperContent.includes("process.exit(1)"),
-    "Should exit with code 1"
-  );
+test("version check exits with code 1 and correct message on old Node", () => {
+  const checkPortion = wrapperContent
+    .split('import("../dist/cli.js")')[0]
+    .split("\n")
+    .filter((line) => !line.startsWith("#!") && !line.startsWith("//"))
+    .join("\n");
+  const script = `Object.defineProperty(process.versions, "node", { value: "18.0.0", configurable: true });\n${checkPortion}`;
+  try {
+    execFileSync("node", ["--eval", script], {
+      encoding: "utf-8",
+    });
+    assert.fail("Should have exited with code 1");
+  } catch (err: any) {
+    assert.equal(err.status, 1);
+    assert.ok(
+      err.stderr.includes("canvas-cli requires Node.js 20 or later"),
+      "Should print the required error message"
+    );
+    assert.ok(
+      err.stderr.includes("https://nodejs.org"),
+      "Should include the upgrade URL"
+    );
+  }
 });
 
 test("version check wrapper loads the CLI on supported Node versions", () => {
