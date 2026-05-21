@@ -1,5 +1,6 @@
 import type { Config } from "../config/env.js";
 import { CanvasApiError } from "./errors.js";
+import { debugApiRequest, debugApiResponse, maskUrl } from "../debug.js";
 import { fetchWithRetry, type RetryOptions } from "./retry.js";
 import type {
   CanvasAssignment,
@@ -42,7 +43,10 @@ export class CanvasClient {
     let nextUrl: string | null = url;
 
     while (nextUrl) {
+      debugApiRequest("GET", nextUrl);
+      const start = Date.now();
       const response = await fetchWithRetry(nextUrl, { headers: this.headers }, this.retryOptions);
+      debugApiResponse("GET", nextUrl, response.status, Date.now() - start);
 
       if (!response.ok) {
         const err = new CanvasApiError(response.status, response.statusText);
@@ -60,7 +64,10 @@ export class CanvasClient {
   }
 
   private async fetchOne<T>(url: string): Promise<T> {
+    debugApiRequest("GET", url);
+    const start = Date.now();
     const response = await fetchWithRetry(url, { headers: this.headers }, this.retryOptions);
+    debugApiResponse("GET", url, response.status, Date.now() - start);
 
     if (!response.ok) {
       const err = new CanvasApiError(response.status, response.statusText);

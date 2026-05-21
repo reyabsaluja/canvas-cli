@@ -2,6 +2,7 @@
 
 import { createRequire } from "node:module";
 import { Command } from "commander";
+import { initDebug, debug } from "./debug.js";
 import { coursesCommand } from "./commands/courses.js";
 import { assignmentsCommand } from "./commands/assignments.js";
 import { showAssignmentCommand } from "./commands/show-assignment.js";
@@ -22,7 +23,15 @@ const program = new Command();
 program
   .name("canvas-cli")
   .description("A terminal interface for Canvas LMS")
-  .version(version, "-V, --version", "output the current version");
+  .version(version, "-V, --version", "output the current version")
+  .option("--debug", "Enable verbose debug output to stderr");
+
+program.hook("preAction", () => {
+  const opts = program.opts();
+  initDebug(Boolean(opts.debug));
+  debug("general", `canvas-cli v${version} starting`);
+  debug("config", "Node.js " + process.version);
+});
 
 program
   .command("courses")
@@ -99,6 +108,7 @@ const subcommands = [
   "-h",
   "--version",
   "-V",
+  "--debug",
 ];
 
 const hasSubcommand = args.length > 0 && subcommands.some(
@@ -107,6 +117,10 @@ const hasSubcommand = args.length > 0 && subcommands.some(
 
 if (!hasSubcommand && args.length === 0) {
   // Launch interactive TUI
+  import("./tui/app.js").then(({ launchApp }) => launchApp());
+} else if (hasSubcommand && args[0] === "--debug" && args.length === 1) {
+  // --debug alone without a subcommand: init debug then launch TUI
+  initDebug(true);
   import("./tui/app.js").then(({ launchApp }) => launchApp());
 } else {
   program.parse();
