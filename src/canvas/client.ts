@@ -1,5 +1,6 @@
 import type { Config } from "../config/env.js";
-import { CanvasApiError, fetchWithRetry, type RetryOptions } from "./retry.js";
+import { CanvasApiError } from "./errors.js";
+import { fetchWithRetry, type RetryOptions } from "./retry.js";
 import type {
   CanvasAssignment,
   CanvasAssignmentDetail,
