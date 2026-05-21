@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { hideCursor, showCursor, createBuffer, clearScreen, getTermSize, padAnsiToWidth, stripAnsi, CANVAS_TEXT, C, visibleWidth } from "./screen.js";
+import { hideCursor, showCursor, createBuffer, clearScreen, getTermSize, padAnsiToWidth, buildLogoBanner, C } from "./screen.js";
 import { USER_ABORT_EXIT_CODE } from "./chat-shell-exit.js";
 import type { Course } from "../domain/models.js";
 import type { UserCourse, CourseConfig } from "./course-config.js";
@@ -42,8 +42,9 @@ export function showMultiSelect(
       const cardWidth = cols - 6;
       const innerWidth = cardWidth - 2;
       const linesPerItem = 3;
-      const asciiLines = CANVAS_TEXT.length + 2;
-      const reservedRows = asciiLines + 8 + (message ? 2 : 0);
+      const bannerLines = buildLogoBanner(title, subtitle);
+      const bannerHeight = bannerLines.length + 2;
+      const reservedRows = bannerHeight + 8 + (message ? 2 : 0);
       const visibleCount = Math.max(2, Math.floor((rows - reservedRows) / linesPerItem));
 
       if (selected < windowStart) windowStart = selected;
@@ -54,11 +55,7 @@ export function showMultiSelect(
       const visibleItems = filtered.slice(windowStart, windowEnd);
 
       buf.push("");
-      const _artW = Math.max(...CANVAS_TEXT.map((l) => visibleWidth(l)));
-      for (const line of CANVAS_TEXT) {
-        const pad = Math.max(0, Math.floor((cols - _artW) / 2));
-        buf.push(" ".repeat(pad) + C.primary(line));
-      }
+      for (const line of bannerLines) buf.push(line);
       buf.push("");
 
       const isSearchActive = filter.length > 0;
@@ -127,6 +124,7 @@ export function showMultiSelect(
       buf.flush();
     }
 
+    clearScreen();
     hideCursor();
     render();
 
@@ -257,15 +255,9 @@ export async function promptRenames(
     const border = C.secondary;
 
     console.log("");
-    const artW = Math.max(...CANVAS_TEXT.map((l) => visibleWidth(l)));
-    for (const line of CANVAS_TEXT) {
-      const pad = Math.max(0, Math.floor((cols - artW) / 2));
-      console.log(" ".repeat(pad) + C.primary(line));
+    for (const line of buildLogoBanner("Rename your courses", "Give them short names, or press enter to keep the original")) {
+      console.log(line);
     }
-    console.log("");
-
-    console.log(C.bold("  Rename your courses"));
-    console.log(C.dim("  Give them short names, or press enter to keep the original"));
     console.log("");
 
     for (const done of result) {
@@ -302,13 +294,9 @@ export async function promptRenames(
   const { cols } = getTermSize();
 
   console.log("");
-  const artW2 = Math.max(...CANVAS_TEXT.map((l) => visibleWidth(l)));
-  for (const line of CANVAS_TEXT) {
-    const pad = Math.max(0, Math.floor((cols - artW2) / 2));
-    console.log(" ".repeat(pad) + C.primary(line));
+  for (const line of buildLogoBanner("Courses renamed")) {
+    console.log(line);
   }
-  console.log("");
-  console.log(C.bold("  Courses renamed"));
   console.log("");
   for (const done of result) {
     console.log(
@@ -366,25 +354,30 @@ export async function runCourseManagement(
 
   const action = await showPicker({
     title: "Manage courses",
+    subtitle: "Add, remove, or rename courses in your configuration",
     items: [
       {
         label: "Add courses",
-        sublabel: "select from Canvas",
+        description: "Browse and select from your Canvas enrollments",
         value: "add",
       },
       {
         label: "Remove a course",
-        sublabel: `${currentConfig.courses.length} configured`,
+        description: `Remove from your configured list (${currentConfig.courses.length} configured)`,
         value: "remove",
         dimmed: currentConfig.courses.length === 0,
       },
       {
         label: "Rename a course",
-        sublabel: "change display name",
+        description: "Set a custom display name for a course",
         value: "rename",
         dimmed: currentConfig.courses.length === 0,
       },
-      { label: "Back", value: "back" },
+      {
+        label: "Back",
+        description: "Return to the home screen",
+        value: "back",
+      },
     ],
     backLabel: "back",
   });
@@ -472,14 +465,9 @@ export async function runCourseManagement(
         const border = C.secondary;
 
         console.log("");
-        const artW3 = Math.max(...CANVAS_TEXT.map((l) => visibleWidth(l)));
-        for (const line of CANVAS_TEXT) {
-          const pad = Math.max(0, Math.floor((cols - artW3) / 2));
-          console.log(" ".repeat(pad) + C.primary(line));
+        for (const line of buildLogoBanner("Rename course")) {
+          console.log(line);
         }
-        console.log("");
-
-        console.log(C.bold("  Rename course"));
         console.log("");
 
         console.log(border("  ┌" + "─".repeat(cardWidth) + "┐"));
@@ -505,10 +493,8 @@ export async function runCourseManagement(
 
           clearScreen();
           console.log("");
-          const artW4 = Math.max(...CANVAS_TEXT.map((l) => visibleWidth(l)));
-          for (const line of CANVAS_TEXT) {
-            const pad = Math.max(0, Math.floor((cols - artW4) / 2));
-            console.log(" ".repeat(pad) + C.primary(line));
+          for (const line of buildLogoBanner("Course renamed")) {
+            console.log(line);
           }
           console.log("");
           console.log(

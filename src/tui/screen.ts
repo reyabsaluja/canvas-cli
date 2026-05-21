@@ -49,6 +49,37 @@ export const CANVAS_TEXT = [
 
 export const CANVAS_ASCII = CANVAS_TEXT.join("\n");
 
+export const CANVAS_LOGO = [
+  "  ⠀⠀⢀⣤⠀⠺⣿⣿⠗⠀⣠⣀⠀⠀",
+  "  ⠀⣴⣿⠟⣀⠀⠰⡆⠀⢀⠻⣿⣧⠀",
+  "  ⣠⡀⠀⠈⠛⠀⠀⠀⠀⠛⠃⠀⢀⣠",
+  "  ⣿⣿⠰⠶⠀⠀⠀⠀⠀⠀⠰⠆⢾⣿",
+  "  ⠙⠁⠀⢀⣤⠀⠀⠀⠀⣠⡄⠀⠈⠛",
+  "  ⠀⠺⣿⣦⠉⠀⠰⠆⠀⠈⣱⣾⡿⠀",
+  "  ⠀⠀⠈⠛⠀⣰⣾⣿⣦⠀⠙⠋⠀⠀",
+];
+
+export function buildLogoBanner(title: string, subtitle?: string): string[] {
+  const logoWidth = Math.max(...CANVAS_LOGO.map((l) => [...l].length));
+  const textLines: string[] = [
+    C.pureWhiteBold(title),
+    subtitle ? C.dimmer(subtitle) : "",
+  ].filter(Boolean);
+  const textStart = 2;
+
+  const bannerLines: string[] = [];
+  for (let i = 0; i < CANVAS_LOGO.length; i++) {
+    const logoLine = CANVAS_LOGO[i]!;
+    const pad = " ".repeat(Math.max(0, logoWidth - [...logoLine].length));
+    const textIndex = i - textStart;
+    const rightText = textIndex >= 0 && textIndex < textLines.length
+      ? "   " + textLines[textIndex]!
+      : "";
+    bannerLines.push(" " + C.primary(logoLine) + pad + rightText);
+  }
+  return bannerLines;
+}
+
 /**
  * Screen buffer — collects lines, then flushes all at once.
  * Avoids flicker by writing a single large chunk to stdout.
