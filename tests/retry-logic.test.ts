@@ -216,3 +216,22 @@ test("fetchWithRetry respects Retry-After header over base delay", async () => {
     mock.restore();
   }
 });
+
+test("fetchWithRetry clamps past-date Retry-After to minimum delay", async () => {
+  const pastDate = new Date(Date.now() - 60000).toUTCString();
+  const mock = mockFetch([
+    { status: 429, headers: { "retry-after": pastDate } },
+    { status: 200 },
+  ]);
+  try {
+    const start = Date.now();
+    const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
+    const elapsed = Date.now() - start;
+    assert.equal(res.status, 200);
+    assert.equal(mock.callCount, 2);
+    assert.ok(elapsed >= 500, "Past-date Retry-After should be clamped to MIN_RETRY_DELAY_MS (500ms)");
+    assert.ok(elapsed < 1500, "Should not wait longer than necessary");
+  } finally {
+    mock.restore();
+  }
+});
