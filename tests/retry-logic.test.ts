@@ -1,21 +1,19 @@
 import assert from "node:assert/strict";
-import test, { afterEach } from "node:test";
+import test, { afterEach, mock } from "node:test";
 import { fetchWithRetry, DEFAULT_MAX_DELAY_MS, type RetryOptions, type SleepFn } from "../src/canvas/retry.js";
 import { CanvasClient } from "../src/canvas/client.js";
 
 const noopSleep: SleepFn = async () => {};
 const FAST: RetryOptions = { baseDelayMs: 1, log: () => {}, sleepFn: noopSleep };
 
-const originalFetch = globalThis.fetch;
-
 afterEach(() => {
-  globalThis.fetch = originalFetch;
+  mock.restoreAll();
 });
 
 function mockFetch(responses: Array<{ status: number; headers?: Record<string, string> } | { error: string; causeCode?: string }>) {
   let callCount = 0;
 
-  globalThis.fetch = (async () => {
+  mock.method(globalThis, "fetch", async () => {
     const entry = responses[callCount++];
     if (!entry) throw new Error("No more mock responses");
     if ("error" in entry) {
@@ -32,7 +30,7 @@ function mockFetch(responses: Array<{ status: number; headers?: Record<string, s
       json: async () => ({}),
       text: async () => "",
     } as unknown as Response;
-  }) as typeof fetch;
+  });
 
   return {
     get callCount() { return callCount; },
@@ -220,10 +218,10 @@ test("fetchWithRetry does not retry unknown errors", async () => {
 
 test("fetchWithRetry does not retry non-Error throws", async () => {
   let callCount = 0;
-  globalThis.fetch = (async () => {
+  mock.method(globalThis, "fetch", async () => {
     callCount++;
     throw "string error";
-  }) as typeof fetch;
+  });
   await assert.rejects(
     () => fetchWithRetry("http://test.com/api", undefined, FAST),
     (err: unknown) => err === "string error"
@@ -328,7 +326,7 @@ test("fetchWithRetry aborts sleep when signal is aborted", async () => {
 test("fetchWithRetry passes same url and init on every attempt", async () => {
   const calls: Array<{ url: string | URL | Request; init?: RequestInit }> = [];
   let callCount = 0;
-  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+  mock.method(globalThis, "fetch", async (url: string | URL | Request, init?: RequestInit) => {
     calls.push({ url, init });
     callCount++;
     if (callCount < 3) {
@@ -347,7 +345,7 @@ test("fetchWithRetry passes same url and init on every attempt", async () => {
       headers: new Headers(),
       body: { cancel: async () => {} },
     } as unknown as Response;
-  }) as typeof fetch;
+  });
 
   const customHeaders = { Authorization: "Bearer tok", Accept: "application/json" };
   const res = await fetchWithRetry(
@@ -365,7 +363,7 @@ test("fetchWithRetry passes same url and init on every attempt", async () => {
 
 test("CanvasClient retries 503 during pagination and continues", async () => {
   let callCount = 0;
-  globalThis.fetch = (async () => {
+  mock.method(globalThis, "fetch", async () => {
     callCount++;
     if (callCount === 1) {
       return {
@@ -395,7 +393,7 @@ test("CanvasClient retries 503 during pagination and continues", async () => {
       body: { cancel: async () => {} },
       json: async () => [{ id: 2 }],
     } as unknown as Response;
-  }) as typeof fetch;
+  });
 
   const client = new CanvasClient({ baseUrl: "http://test.com", accessToken: "token" }, FAST);
   const courses = await (client as any).fetchPaginated("http://test.com/api?page=1");
@@ -404,7 +402,7 @@ test("CanvasClient retries 503 during pagination and continues", async () => {
 });
 
 test("CanvasClient fetchPaginatedSafe returns [] after retry exhaustion on 503", async () => {
-  globalThis.fetch = (async () => {
+  mock.method(globalThis, "fetch", async () => {
     return {
       ok: false,
       status: 503,
@@ -413,7 +411,7 @@ test("CanvasClient fetchPaginatedSafe returns [] after retry exhaustion on 503",
       body: { cancel: async () => {} },
       json: async () => ({}),
     } as unknown as Response;
-  }) as typeof fetch;
+  });
 
   const client = new CanvasClient({ baseUrl: "http://test.com", accessToken: "token" }, FAST);
   const result = await (client as any).fetchPaginatedSafe("http://test.com/api?page=1");
@@ -421,7 +419,7 @@ test("CanvasClient fetchPaginatedSafe returns [] after retry exhaustion on 503",
 });
 
 test("CanvasClient fetchPaginatedSafe returns [] after retry exhaustion on 500", async () => {
-  globalThis.fetch = (async () => {
+  mock.method(globalThis, "fetch", async () => {
     return {
       ok: false,
       status: 500,
@@ -430,7 +428,7 @@ test("CanvasClient fetchPaginatedSafe returns [] after retry exhaustion on 500",
       body: { cancel: async () => {} },
       json: async () => ({}),
     } as unknown as Response;
-  }) as typeof fetch;
+  });
 
   const client = new CanvasClient({ baseUrl: "http://test.com", accessToken: "token" }, FAST);
   const result = await (client as any).fetchPaginatedSafe("http://test.com/api?page=1");
