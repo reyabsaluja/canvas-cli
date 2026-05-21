@@ -76,6 +76,7 @@ async function callModelWithRetry(
     );
     if (!isTimeout) throw error;
     if (emittedTextDelta) throw error;
+    await new Promise((r) => setTimeout(r, 1000));
     return await callModel(config, systemPrompt, userMessage, options);
   }
 }
