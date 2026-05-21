@@ -446,6 +446,7 @@ export async function runCourseManagement(
 
     const toRename = await showPicker({
       title: "Rename a course",
+      subtitle: "Select a course to rename",
       items: currentConfig.courses.map((c) => ({
         label: c.displayName,
         sublabel: c.originalCode !== c.displayName ? c.originalCode : c.originalName,
