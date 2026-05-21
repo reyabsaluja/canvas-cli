@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createRequire } from "node:module";
 import { Command } from "commander";
 import { coursesCommand } from "./commands/courses.js";
 import { assignmentsCommand } from "./commands/assignments.js";
@@ -9,12 +10,19 @@ import { ingestCourseCommand } from "./commands/ingest-course.js";
 import { workCommand } from "./commands/work.js";
 import { askCommand } from "./commands/ask.js";
 
+let version = "0.0.0";
+try {
+  const require = createRequire(import.meta.url);
+  const pkg: { version: string } = require("../package.json");
+  version = pkg.version;
+} catch {}
+
 const program = new Command();
 
 program
   .name("canvas-cli")
   .description("A terminal interface for Canvas LMS")
-  .version("0.1.0");
+  .version(version, "-V, --version", "output the current version");
 
 program
   .command("courses")
