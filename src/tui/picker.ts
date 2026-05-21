@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import {
+  buildLogoBanner,
   clearScreen,
   createBuffer,
   C,
@@ -74,7 +75,7 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
       const { rows, cols } = getTermSize();
       const cardWidth = cols - 6;
       const linesPerItem = hasCards ? 4 : 1;
-      const reservedRows = 8 + (subtitle ? 1 : 0);
+      const reservedRows = 13;
       const visibleCount = Math.max(2, Math.floor((rows - reservedRows) / linesPerItem));
       if (selected >= windowStart + visibleCount) {
         windowStart = selected - visibleCount + 1;
@@ -85,11 +86,7 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
       const visibleItems = filtered.slice(windowStart, windowEnd);
 
       buf.push("");
-      buf.push("  " + C.primaryBold("▎") + " " + P.whiteBold(title));
-      if (subtitle) buf.push("    " + P.dim(subtitle));
-      const dividerWidth = Math.max(24, cols - 4);
-      const accentWidth = Math.min(6, dividerWidth);
-      buf.push("  " + C.primary("─".repeat(accentWidth)) + C.dimmer("─".repeat(dividerWidth - accentWidth)));
+      for (const line of buildLogoBanner(title, subtitle)) buf.push(line);
       buf.push("");
 
       if (filterable) {
