@@ -38,6 +38,7 @@ export interface PickerOptions {
   items: PickerItem[];
   filterable?: boolean;
   backLabel?: string;
+  cards?: boolean;
 }
 
 /**
@@ -62,7 +63,7 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
       );
     }
 
-    const hasCards = items.some((item) => item.description);
+    const hasCards = options.cards || items.some((item) => item.description);
 
     function render(): void {
       const buf = createBuffer();
@@ -74,7 +75,8 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
 
       const { rows, cols } = getTermSize();
       const cardWidth = cols - 6;
-      const linesPerItem = hasCards ? 4 : 1;
+      const hasDescriptions = items.some((item) => item.description || item.rightLabel);
+      const linesPerItem = hasCards ? (hasDescriptions ? 4 : 3) : 1;
       const reservedRows = 13;
       const visibleCount = Math.max(2, Math.floor((rows - reservedRows) / linesPerItem));
       if (selected >= windowStart + visibleCount) {
@@ -132,22 +134,23 @@ export function showPicker(options: PickerOptions): Promise<string | null> {
             const innerWidth = cardWidth - 2;
             const labelLine = padAnsiToWidth(`${label}${sub}`, innerWidth);
 
-            const desc = item.description
-              ? (isSelected ? P.white(item.description) : P.dim(item.description))
-              : "";
-            const right = item.rightLabel
-              ? (isSelected ? P.white(item.rightLabel) : P.dim(item.rightLabel))
-              : "";
-            const rightPlain = item.rightLabel ?? "";
-            const descPlain = item.description ?? "";
-            const gapNeeded = innerWidth - descPlain.length - rightPlain.length;
-            const descLine = gapNeeded > 0
-              ? desc + " ".repeat(gapNeeded) + right
-              : padAnsiToWidth(desc, innerWidth);
-
             buf.push(topBorder);
             buf.push(`  ${edge} ${labelLine} ${edge}`);
-            buf.push(`  ${edge} ${descLine} ${edge}`);
+            if (item.description || item.rightLabel) {
+              const desc = item.description
+                ? (isSelected ? P.white(item.description) : P.dim(item.description))
+                : "";
+              const right = item.rightLabel
+                ? (isSelected ? P.white(item.rightLabel) : P.dim(item.rightLabel))
+                : "";
+              const rightPlain = item.rightLabel ?? "";
+              const descPlain = item.description ?? "";
+              const gapNeeded = innerWidth - descPlain.length - rightPlain.length;
+              const descLine = gapNeeded > 0
+                ? desc + " ".repeat(gapNeeded) + right
+                : padAnsiToWidth(desc, innerWidth);
+              buf.push(`  ${edge} ${descLine} ${edge}`);
+            }
             buf.push(botBorder);
           } else {
             const pointer = isSelected ? P.white("❯ ") : "  ";

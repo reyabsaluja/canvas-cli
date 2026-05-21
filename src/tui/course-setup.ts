@@ -118,7 +118,7 @@ export function showMultiSelect(
         ? C.pureWhite("d") + C.success(` done (${count} selected)`)
         : C.pureWhite("d") + C.dimmer(` done (${count} selected)`);
       buf.push(
-        "  " + C.pureWhite("enter/space") + C.dimmer(" toggle  ") + C.pureWhite("↑↓") + C.dimmer(" navigate  ") + doneHint + "  " + C.dimmer("type to filter")
+        "  " + C.pureWhite("enter/space") + C.dimmer(" toggle  ") + C.pureWhite("↑↓") + C.dimmer(" navigate  ") + doneHint + "  " + C.pureWhite("esc") + C.dimmer(" back") + "  " + C.dimmer("type to filter")
       );
 
       buf.flush();
@@ -425,6 +425,7 @@ export async function runCourseManagement(
         sublabel: c.originalCode !== c.displayName ? c.originalCode : c.originalName,
         value: String(c.id),
       })),
+      cards: true,
       backLabel: "cancel",
     });
 
@@ -452,6 +453,7 @@ export async function runCourseManagement(
         sublabel: c.originalCode !== c.displayName ? c.originalCode : c.originalName,
         value: String(c.id),
       })),
+      cards: true,
       backLabel: "cancel",
     });
 
