@@ -1,5 +1,6 @@
 export const DEFAULT_MAX_RETRIES = 3;
 export const DEFAULT_BASE_DELAY_MS = 1000;
+export const DEFAULT_MAX_DELAY_MS = 30_000;
 
 const RETRIABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 
@@ -28,15 +29,19 @@ function addJitter(ms: number): number {
   return ms * (1 + (Math.random() - 0.5) * 0.4);
 }
 
-function getRetryDelay(response: Response, attempt: number, baseDelay: number): number {
+function clampDelay(ms: number, maxDelay: number): number {
+  return Math.min(maxDelay, Math.max(MIN_RETRY_DELAY_MS, ms));
+}
+
+function getRetryDelay(response: Response, attempt: number, baseDelay: number, maxDelay: number): number {
   const retryAfter = response.headers.get("retry-after");
   if (retryAfter) {
     const seconds = Number(retryAfter);
-    if (!Number.isNaN(seconds)) return Math.max(MIN_RETRY_DELAY_MS, seconds * 1000);
+    if (!Number.isNaN(seconds)) return clampDelay(seconds * 1000, maxDelay);
     const date = Date.parse(retryAfter);
-    if (!Number.isNaN(date)) return Math.max(MIN_RETRY_DELAY_MS, date - Date.now());
+    if (!Number.isNaN(date)) return clampDelay(date - Date.now(), maxDelay);
   }
-  return addJitter(baseDelay * 2 ** (attempt - 1));
+  return Math.min(maxDelay, addJitter(baseDelay * 2 ** (attempt - 1)));
 }
 
 function sleep(ms: number): Promise<void> {
@@ -46,6 +51,7 @@ function sleep(ms: number): Promise<void> {
 export interface RetryOptions {
   maxRetries?: number;
   baseDelayMs?: number;
+  maxDelayMs?: number;
 }
 
 export async function fetchWithRetry(
@@ -55,6 +61,7 @@ export async function fetchWithRetry(
 ): Promise<Response> {
   const maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
   const baseDelay = options?.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
+  const maxDelay = options?.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
   let lastError: unknown = new Error("fetchWithRetry: retries exhausted");
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -66,7 +73,7 @@ export async function fetchWithRetry(
       }
 
       if (RETRIABLE_STATUS_CODES.has(response.status) && attempt < maxRetries) {
-        const delay = getRetryDelay(response, attempt + 1, baseDelay);
+        const delay = getRetryDelay(response, attempt + 1, baseDelay, maxDelay);
         await response.body?.cancel();
         console.error(
           `Canvas API returned ${response.status}, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${maxRetries})...`
@@ -80,7 +87,7 @@ export async function fetchWithRetry(
       lastError = err;
 
       if (isRetriableNetworkError(err) && attempt < maxRetries) {
-        const delay = addJitter(baseDelay * 2 ** attempt);
+        const delay = Math.min(maxDelay, addJitter(baseDelay * 2 ** attempt));
         console.error(
           `Network error, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${maxRetries})...`
         );
