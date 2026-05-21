@@ -792,25 +792,26 @@ export function getRenderedMessageLines(
           message.toolTarget ?? ""
         )}`
       );
-      const wrappedContentLines = message.content
-        .split("\n")
-        .flatMap((line) => wrapLines(line, innerWidth));
-      const showLines = expanded
-        ? wrappedContentLines
-        : wrappedContentLines.slice(0, 8);
-      const remaining = expanded
-        ? 0
-        : Math.max(0, wrappedContentLines.length - 8);
-      lines.push("");
-      for (const line of showLines) {
-        lines.push(`  ${marker} ${chalk.white(line)}`);
-      }
-      if (remaining > 0) {
-        lines.push(
-          `  ${marker} ${C.dim(`... (${remaining} more lines, `)}${C.dimmer(
-            "ctrl+o"
-          )}${C.dim(" to expand)")}`
-        );
+      if (message.content.trim()) {
+        const wrappedContentLines = message.content
+          .split("\n")
+          .flatMap((line) => wrapLines(line, innerWidth));
+        const showLines = expanded
+          ? wrappedContentLines
+          : wrappedContentLines.slice(0, 5);
+        const remaining = expanded
+          ? 0
+          : Math.max(0, wrappedContentLines.length - 5);
+        for (const line of showLines) {
+          lines.push(`  ${marker} ${chalk.white(line)}`);
+        }
+        if (remaining > 0) {
+          lines.push(
+            `  ${marker} ${C.dim(`... (${remaining} more lines, `)}${C.dimmer(
+              "ctrl+o"
+            )}${C.dim(" to expand)")}`
+          );
+        }
       }
       break;
     }
