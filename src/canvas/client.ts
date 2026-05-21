@@ -281,6 +281,10 @@ export class CanvasClient {
           err.message.includes("unauthorized") ||
           err.message.includes("disabled"))
       ) {
+        const is5xx = /\b5\d{2}\b/.test(err.message);
+        if (is5xx) {
+          console.error(`Warning: Canvas API returned a server error after retries, skipping endpoint: ${err.message}`);
+        }
         return [];
       }
       throw err;
