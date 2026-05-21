@@ -167,9 +167,11 @@ export function buildPartialWorkup(
   verification: WorkVerificationResult,
   errorMessage: string
 ): AssignmentWorkup {
-  const overview = state.evidenceNotes.length > 0
-    ? `Partial investigation (AI failed mid-run): ${state.evidenceNotes.slice(0, 3).join("; ")}`
+  const evidenceSummary = state.evidenceNotes.slice(0, 3).join("; ");
+  const rawOverview = state.evidenceNotes.length > 0
+    ? `Partial investigation (AI failed mid-run): ${evidenceSummary}`
     : `AI failed before completing investigation: ${errorMessage}`;
+  const overview = rawOverview.length > 300 ? rawOverview.slice(0, 297) + "..." : rawOverview;
 
   const uncertainties = [
     `AI error prevented full investigation: ${errorMessage}`,
