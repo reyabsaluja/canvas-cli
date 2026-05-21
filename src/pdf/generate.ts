@@ -55,8 +55,18 @@ async function callModelWithRetry(
   userMessage: string,
   options: { maxTokens: number; timeoutMs: number; abortSignal?: AbortSignal; onTextDelta?: (delta: string) => void }
 ): Promise<string> {
+  let emittedTextDelta = false;
+  const callOptions = options.onTextDelta
+    ? {
+        ...options,
+        onTextDelta: (delta: string) => {
+          emittedTextDelta = true;
+          options.onTextDelta?.(delta);
+        },
+      }
+    : options;
   try {
-    return await callModel(config, systemPrompt, userMessage, options);
+    return await callModel(config, systemPrompt, userMessage, callOptions);
   } catch (error) {
     if (options.abortSignal?.aborted) throw error;
     const isTimeout = error instanceof Error && (
@@ -65,6 +75,7 @@ async function callModelWithRetry(
       error.message.includes("ETIMEDOUT")
     );
     if (!isTimeout) throw error;
+    if (emittedTextDelta) throw error;
     return await callModel(config, systemPrompt, userMessage, options);
   }
 }
