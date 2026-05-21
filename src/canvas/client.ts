@@ -1,4 +1,5 @@
 import type { Config } from "../config/env.js";
+import { fetchWithRetry } from "./retry.js";
 import type {
   CanvasAssignment,
   CanvasAssignmentDetail,
@@ -29,7 +30,7 @@ export class CanvasClient {
     let nextUrl: string | null = url;
 
     while (nextUrl) {
-      const response = await fetch(nextUrl, { headers: this.headers });
+      const response = await fetchWithRetry(nextUrl, { headers: this.headers });
 
       if (response.status === 401) {
         throw new Error(
@@ -52,7 +53,7 @@ export class CanvasClient {
   }
 
   private async fetchOne<T>(url: string): Promise<T> {
-    const response = await fetch(url, { headers: this.headers });
+    const response = await fetchWithRetry(url, { headers: this.headers });
 
     if (response.status === 401) {
       throw new Error(
@@ -185,7 +186,7 @@ export class CanvasClient {
    */
   async downloadFile(downloadUrl: string): Promise<Buffer | null> {
     try {
-      const response = await fetch(downloadUrl, {
+      const response = await fetchWithRetry(downloadUrl, {
         headers: this.headers,
         redirect: "follow",
       });
