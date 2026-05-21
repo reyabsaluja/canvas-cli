@@ -229,6 +229,7 @@ test("buildPartialWorkup produces a valid workup from gathered evidence", async 
 
   assert.match(workup.overview, /Found grading rubric/);
   assert.equal(workup.confidence, "low");
+  assert.equal(workup.partial, true);
   assert.equal(workup.relevantResources.length, 2);
   assert.equal(workup.relevantResources[0].title, "syllabus.pdf");
   assert.ok(workup.uncertainties.some((u: string) => u.includes("Network error")));
@@ -247,6 +248,43 @@ test("rate limit error suggests wait time", () => {
   });
   const formatted = formatAIError(error);
   assert.match(formatted, /\d+s/);
+});
+
+test("parseRetryAfter uses numeric retry-after header", () => {
+  const error = new APICallError({
+    message: "Rate limited",
+    url: "https://api.example.com/v1/chat",
+    requestBodyValues: {},
+    statusCode: 429,
+    responseHeaders: { "retry-after": "60" },
+  });
+  const classified = classifyAIError(error);
+  assert.equal(classified.retryAfterMs, 60000);
+  assert.match(classified.userMessage, /~60s/);
+});
+
+test("parseRetryAfter clamps small values to 1000ms minimum", () => {
+  const error = new APICallError({
+    message: "Rate limited",
+    url: "https://api.example.com/v1/chat",
+    requestBodyValues: {},
+    statusCode: 429,
+    responseHeaders: { "retry-after": "0.5" },
+  });
+  const classified = classifyAIError(error);
+  assert.equal(classified.retryAfterMs, 1000);
+});
+
+test("parseRetryAfter falls back to default when header is missing", () => {
+  const error = new APICallError({
+    message: "Rate limited",
+    url: "https://api.example.com/v1/chat",
+    requestBodyValues: {},
+    statusCode: 429,
+    responseHeaders: {},
+  });
+  const classified = classifyAIError(error);
+  assert.equal(classified.retryAfterMs, 30000);
 });
 
 // --- Auth error shows setup instructions ---
