@@ -350,10 +350,11 @@ export async function runCourseSetup(
  * Course management menu — add, remove, rename.
  */
 export async function runCourseManagement(
-  currentConfig: CourseConfig,
+  initialConfig: CourseConfig,
   allCanvasCourses: Course[]
 ): Promise<CourseConfig> {
   const { showPicker } = await import("./picker.js");
+  let currentConfig = initialConfig;
 
   while (true) {
     const action = await showPicker({
