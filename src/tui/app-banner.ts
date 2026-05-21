@@ -310,7 +310,7 @@ function formatAssignmentSummary(services: AppServices): string {
   const now = Date.now();
   const oneWeek = 7 * 24 * 60 * 60 * 1000;
 
-  for (const [, assignments] of services.resolvedAssignments) {
+  for (const [, assignments] of services.resolvedAssignments ?? []) {
     total += assignments.length;
     upcoming += assignments.filter(
       (a) => a.dueAt && a.dueAt.getTime() > now && a.dueAt.getTime() - now < oneWeek
