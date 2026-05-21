@@ -127,6 +127,12 @@ export async function fetchCourseContent(
     warnings.push("Pages API not accessible — page index will be empty");
   }
 
+  if (client.skippedEndpoints.length > 0) {
+    warnings.push(
+      `${client.skippedEndpoints.length} endpoint(s) returned errors after retries — some data may be incomplete`
+    );
+  }
+
   // Fetch front page (course home page content)
   let frontPageBody: string | null = null;
   if (frontPage?.body) {

@@ -17,6 +17,7 @@ export class CanvasClient {
   private baseUrl: string;
   private headers: Record<string, string>;
   private retryOptions?: RetryOptions;
+  private _skippedEndpoints: string[] = [];
 
   constructor(config: Config, retryOptions?: RetryOptions) {
     this.baseUrl = config.baseUrl;
@@ -25,6 +26,10 @@ export class CanvasClient {
       Accept: "application/json",
     };
     this.retryOptions = retryOptions;
+  }
+
+  get skippedEndpoints(): readonly string[] {
+    return this._skippedEndpoints;
   }
 
   private async fetchPaginated<T>(url: string): Promise<T[]> {
@@ -260,8 +265,9 @@ export class CanvasClient {
       if (err instanceof CanvasApiError) {
         const s = err.status;
         if (s === 401 || s === 403 || s === 404 || (s >= 500 && s < 600)) {
+          this._skippedEndpoints.push(url);
           if (s >= 500) {
-            console.error(`Warning: Canvas API returned a server error after retries, skipping endpoint: ${err.message}`);
+            console.error(`Warning: Canvas API returned ${s} after retries, skipping: ${url}`);
           }
           return [];
         }
