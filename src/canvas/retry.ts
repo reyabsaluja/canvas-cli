@@ -84,7 +84,7 @@ function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
 
 export type SleepFn = (ms: number, signal?: AbortSignal | null) => Promise<void>;
 
-export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 export interface RetryOptions {
   maxRetries?: number;
