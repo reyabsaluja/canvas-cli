@@ -183,9 +183,8 @@ test("formatAIError classifies and formats raw errors", () => {
 
 // --- Partial workup builder (via orchestrator) ---
 
-test("buildPartialWorkup produces a valid workup structure", async () => {
-  // We import the orchestrator module to test the exported interface
-  const { createInvestigationState, verifyInvestigationState } = await import(
+test("buildPartialWorkup produces a valid workup from gathered evidence", async () => {
+  const { createInvestigationState, verifyInvestigationState, buildPartialWorkup } = await import(
     "../src/work/orchestrator.js"
   );
 
@@ -225,11 +224,15 @@ test("buildPartialWorkup produces a valid workup structure", async () => {
   state.evidenceNotes.push("Found grading rubric");
 
   const verification = verifyInvestigationState(state);
+  const workup = buildPartialWorkup(detail, state, verification, "Network error");
 
-  // Verify the state is tracked correctly
-  assert.equal(state.visitedSources.length, 2);
-  assert.equal(verification.ok, false);
-  assert.ok(verification.missing.includes("primary_instruction"));
+  assert.match(workup.overview, /Found grading rubric/);
+  assert.equal(workup.confidence, "low");
+  assert.equal(workup.relevantResources.length, 2);
+  assert.equal(workup.relevantResources[0].title, "syllabus.pdf");
+  assert.ok(workup.uncertainties.some((u: string) => u.includes("Network error")));
+  assert.equal(workup.dueDate, "2025-12-01T00:00:00.000Z");
+  assert.equal(workup.actionPlan.length, 2);
 });
 
 // --- Rate limit retry suggestion ---

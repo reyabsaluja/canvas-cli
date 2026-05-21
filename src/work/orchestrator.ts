@@ -161,7 +161,7 @@ export async function runInvestigation(
   }
 }
 
-function buildPartialWorkup(
+export function buildPartialWorkup(
   detail: AssignmentDetail,
   state: InvestigationState,
   verification: WorkVerificationResult,
