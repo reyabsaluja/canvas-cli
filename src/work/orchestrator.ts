@@ -207,6 +207,7 @@ export function buildPartialWorkup(
       conclusion: "Partially investigated",
       source,
     })),
+    partial: true,
   };
 }
 
