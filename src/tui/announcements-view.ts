@@ -218,6 +218,12 @@ export function showAnnouncementsView(
     stdin.resume();
     stdin.setEncoding("utf8");
 
+    function onResize(): void {
+      clearScreen();
+      render();
+    }
+    process.stdout.on("resize", onResize);
+
     function onData(key: string): void {
       if (loading) return;
 
@@ -314,6 +320,7 @@ export function showAnnouncementsView(
 
     function cleanup(): void {
       stdin.removeListener("data", onData);
+      process.stdout.removeListener("resize", onResize);
       try { stdin.setRawMode(false); } catch {}
       try { stdin.pause(); } catch {}
       try { leaveAlternateScreen(); } catch {}
