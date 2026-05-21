@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import {
   C,
+  CANVAS_LOGO,
   createBuffer,
   getTermSize,
   invalidateScreenRows,
@@ -81,15 +82,6 @@ export function resetChatShellRenderCache(): void {
   lastInputStartRow = 0;
 }
 
-const CANVAS_LOGO = [
-  "  ⠀⠀⢀⣤⠀⠺⣿⣿⠗⠀⣠⣀⠀⠀",
-  "  ⠀⣴⣿⠟⣀⠀⠰⡆⠀⢀⠻⣿⣧⠀",
-  "  ⣠⡀⠀⠈⠛⠀⠀⠀⠀⠛⠃⠀⢀⣠",
-  "  ⣿⣿⠰⠶⠀⠀⠀⠀⠀⠀⠰⠆⢾⣿",
-  "  ⠙⠁⠀⢀⣤⠀⠀⠀⠀⣠⡄⠀⠈⠛",
-  "  ⠀⠺⣿⣦⠉⠀⠰⠆⠀⠈⣱⣾⡿⠀",
-  "  ⠀⠀⠈⠛⠀⣰⣾⣿⣦⠀⠙⠋⠀⠀",
-];
 
 function logoCodePointLength(line: string): number {
   return [...line].length;
