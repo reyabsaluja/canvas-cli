@@ -11,14 +11,15 @@ const RETRIABLE_NETWORK_CODES = new Set([
   "UND_ERR_CONNECT_TIMEOUT",
 ]);
 
+const RETRIABLE_MESSAGE_PATTERNS = [...RETRIABLE_NETWORK_CODES].map(
+  (code) => new RegExp(`\\b${code}\\b`)
+);
+
 function isRetriableNetworkError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const cause = (err as { cause?: { code?: string } }).cause;
   if (cause?.code && RETRIABLE_NETWORK_CODES.has(cause.code)) return true;
-  // Match messages like "read ECONNRESET" or "connect ETIMEDOUT" where code is a word boundary
-  return [...RETRIABLE_NETWORK_CODES].some((code) =>
-    new RegExp(`\\b${code}\\b`).test(err.message)
-  );
+  return RETRIABLE_MESSAGE_PATTERNS.some((pattern) => pattern.test(err.message));
 }
 
 function isPermanentStatus(status: number): boolean {
