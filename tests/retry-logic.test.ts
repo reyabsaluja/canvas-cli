@@ -330,3 +330,37 @@ test("CanvasClient retries 503 during pagination and continues", async () => {
   assert.equal(callCount, 3);
   assert.deepEqual(courses, [{ id: 1 }, { id: 2 }]);
 });
+
+test("CanvasClient fetchPaginatedSafe returns [] after retry exhaustion on 503", async () => {
+  globalThis.fetch = (async () => {
+    return {
+      ok: false,
+      status: 503,
+      statusText: "Service Unavailable",
+      headers: new Headers(),
+      body: { cancel: async () => {} },
+      json: async () => ({}),
+    } as unknown as Response;
+  }) as typeof fetch;
+
+  const client = new CanvasClient({ baseUrl: "http://test.com", accessToken: "token" }, FAST);
+  const result = await (client as any).fetchPaginatedSafe("http://test.com/api?page=1");
+  assert.deepEqual(result, []);
+});
+
+test("CanvasClient fetchPaginatedSafe returns [] after retry exhaustion on 500", async () => {
+  globalThis.fetch = (async () => {
+    return {
+      ok: false,
+      status: 500,
+      statusText: "Internal Server Error",
+      headers: new Headers(),
+      body: { cancel: async () => {} },
+      json: async () => ({}),
+    } as unknown as Response;
+  }) as typeof fetch;
+
+  const client = new CanvasClient({ baseUrl: "http://test.com", accessToken: "token" }, FAST);
+  const result = await (client as any).fetchPaginatedSafe("http://test.com/api?page=1");
+  assert.deepEqual(result, []);
+});
