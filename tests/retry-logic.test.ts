@@ -3,7 +3,7 @@ import test, { afterEach } from "node:test";
 import { fetchWithRetry, DEFAULT_MAX_DELAY_MS, type RetryOptions } from "../src/canvas/retry.js";
 import { CanvasClient } from "../src/canvas/client.js";
 
-const FAST: RetryOptions = { baseDelayMs: 1 };
+const FAST: RetryOptions = { baseDelayMs: 1, log: () => {} };
 
 const originalFetch = globalThis.fetch;
 
@@ -183,7 +183,7 @@ test("fetchWithRetry respects Retry-After header over base delay", async () => {
     { status: 200 },
   ]);
   const start = Date.now();
-  const res = await fetchWithRetry("http://test.com/api", undefined, { baseDelayMs: 5000 });
+  const res = await fetchWithRetry("http://test.com/api", undefined, { baseDelayMs: 5000, log: () => {} });
   const elapsed = Date.now() - start;
   assert.equal(res.status, 200);
   assert.ok(elapsed >= 1000 && elapsed < 5000, "Should use Retry-After: 1 (1000ms) not base delay (5000ms)");
@@ -210,7 +210,7 @@ test("fetchWithRetry caps large Retry-After to maxDelayMs", async () => {
     { status: 200 },
   ]);
   const start = Date.now();
-  const res = await fetchWithRetry("http://test.com/api", undefined, { baseDelayMs: 0, maxDelayMs: 1000 });
+  const res = await fetchWithRetry("http://test.com/api", undefined, { baseDelayMs: 0, maxDelayMs: 1000, log: () => {} });
   const elapsed = Date.now() - start;
   assert.equal(res.status, 200);
   assert.equal(mock.callCount, 2);
@@ -228,7 +228,7 @@ test("fetchWithRetry applies jitter to retry delay", async () => {
   ]);
   const baseDelayMs = 1000;
   const start = Date.now();
-  const res = await fetchWithRetry("http://test.com/api", undefined, { baseDelayMs });
+  const res = await fetchWithRetry("http://test.com/api", undefined, { baseDelayMs, log: () => {} });
   const elapsed = Date.now() - start;
   assert.equal(res.status, 200);
   const minExpected = baseDelayMs * 0.7;
@@ -247,7 +247,7 @@ test("fetchWithRetry aborts sleep when signal is aborted", async () => {
   const controller = new AbortController();
   setTimeout(() => controller.abort(), 50);
   await assert.rejects(
-    () => fetchWithRetry("http://test.com/api", { signal: controller.signal }, { baseDelayMs: 10_000 }),
+    () => fetchWithRetry("http://test.com/api", { signal: controller.signal }, { baseDelayMs: 10_000, log: () => {} }),
     (err: Error) => err.name === "AbortError"
   );
   assert.equal(mock.callCount, 1);
