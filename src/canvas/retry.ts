@@ -96,7 +96,7 @@ export async function fetchWithRetry(
   const maxDelay = options?.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
   const log = options?.log ?? defaultLog;
   const signal = init?.signal ?? null;
-  let lastError: unknown = new Error("fetchWithRetry: retries exhausted");
+  let lastError: unknown;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -132,6 +132,5 @@ export async function fetchWithRetry(
     }
   }
 
-  // Unreachable: final iteration always returns or throws, but satisfies TypeScript
-  throw lastError;
+  throw new Error("unreachable");
 }
