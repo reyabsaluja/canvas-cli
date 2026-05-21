@@ -1,5 +1,5 @@
-const MAX_RETRIES = 3;
-const BASE_DELAY_MS = 1000;
+export const DEFAULT_MAX_RETRIES = 3;
+export const DEFAULT_BASE_DELAY_MS = 1000;
 
 const RETRIABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 
@@ -24,7 +24,7 @@ function isPermanentStatus(status: number): boolean {
   return status === 401 || status === 403 || status === 404;
 }
 
-function getRetryDelay(response: Response, attempt: number): number {
+function getRetryDelay(response: Response, attempt: number, baseDelay: number): number {
   const retryAfter = response.headers.get("retry-after");
   if (retryAfter) {
     const seconds = Number(retryAfter);
@@ -32,20 +32,28 @@ function getRetryDelay(response: Response, attempt: number): number {
     const date = Date.parse(retryAfter);
     if (!Number.isNaN(date)) return Math.max(0, date - Date.now());
   }
-  return BASE_DELAY_MS * 2 ** (attempt - 1);
+  return baseDelay * 2 ** (attempt - 1);
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export interface RetryOptions {
+  maxRetries?: number;
+  baseDelayMs?: number;
+}
+
 export async function fetchWithRetry(
   url: string,
-  init?: RequestInit
+  init?: RequestInit,
+  options?: RetryOptions
 ): Promise<Response> {
+  const maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const baseDelay = options?.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
   let lastError: unknown;
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const response = await fetch(url, init);
 
@@ -53,11 +61,11 @@ export async function fetchWithRetry(
         return response;
       }
 
-      if (isRetriableStatus(response.status) && attempt < MAX_RETRIES) {
-        const delay = getRetryDelay(response, attempt + 1);
+      if (isRetriableStatus(response.status) && attempt < maxRetries) {
+        const delay = getRetryDelay(response, attempt + 1, baseDelay);
         await response.body?.cancel();
         console.error(
-          `Canvas API returned ${response.status}, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${MAX_RETRIES})...`
+          `Canvas API returned ${response.status}, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${maxRetries})...`
         );
         await sleep(delay);
         continue;
@@ -67,10 +75,10 @@ export async function fetchWithRetry(
     } catch (err) {
       lastError = err;
 
-      if (isRetriableNetworkError(err) && attempt < MAX_RETRIES) {
-        const delay = BASE_DELAY_MS * 2 ** attempt;
+      if (isRetriableNetworkError(err) && attempt < maxRetries) {
+        const delay = baseDelay * 2 ** attempt;
         console.error(
-          `Network error, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${MAX_RETRIES})...`
+          `Network error, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${maxRetries})...`
         );
         await sleep(delay);
         continue;
