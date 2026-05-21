@@ -46,7 +46,7 @@ function getRetryDelay(response: Response, attempt: number, baseDelay: number, m
     const date = Date.parse(retryAfter);
     if (!Number.isNaN(date)) return clampDelay(date - Date.now(), maxDelay);
   }
-  return Math.min(maxDelay, addJitter(baseDelay * 2 ** (attempt - 1)));
+  return clampDelay(addJitter(baseDelay * 2 ** (attempt - 1)), maxDelay);
 }
 
 function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
@@ -108,7 +108,7 @@ export async function fetchWithRetry(
       lastError = err;
 
       if (isRetriableNetworkError(err) && attempt < maxRetries) {
-        const delay = Math.min(maxDelay, addJitter(baseDelay * 2 ** attempt));
+        const delay = clampDelay(addJitter(baseDelay * 2 ** attempt), maxDelay);
         log(
           `Network error, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${maxRetries})...`
         );
