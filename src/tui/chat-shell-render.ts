@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import {
   C,
+  buildLogoBanner,
   createBuffer,
   getTermSize,
   invalidateScreenRows,
@@ -31,14 +32,21 @@ let lastStickyBottomScreenSize = "";
 let lastOverlayRows: string[] | null = null;
 let lastOverlayStartRow = -1;
 let lastOverlayScreenSize = "";
+let lastOverlayPaintedStart = -1;
+let lastOverlayPaintedEnd = -1;
 
 const BASE_STICKY_ROWS = 4;
 let currentStickyRows = BASE_STICKY_ROWS;
 export function getStickyBottomRows(): number { return currentStickyRows; }
 export const STICKY_BOTTOM_ROWS = BASE_STICKY_ROWS;
-const CHAT_GAP_ROWS = 2;
+export const CHAT_GAP_ROWS = 1;
 const MAX_OVERLAY_ROWS = 8;
 export const MAIN_VIEW_BOTTOM_RESERVE = BASE_STICKY_ROWS + CHAT_GAP_ROWS;
+
+type InputMode = "sticky" | "flowing";
+let currentInputMode: InputMode = "sticky";
+let lastInputStartRow: number = 0;
+export function getInputMode(): InputMode { return currentInputMode; }
 
 export interface RenderChatFrameOptions {
   runtime: ScopeRuntime;
@@ -68,6 +76,10 @@ export function resetChatShellRenderCache(): void {
   lastOverlayRows = null;
   lastOverlayStartRow = -1;
   lastOverlayScreenSize = "";
+  lastOverlayPaintedStart = -1;
+  lastOverlayPaintedEnd = -1;
+  currentInputMode = "sticky";
+  lastInputStartRow = 0;
 }
 
 export function buildBannerLines(options: {
@@ -84,51 +96,12 @@ export function buildBannerLines(options: {
     return lines;
   }
 
-  const { cols } = getTermSize();
   const title = options.runtime.title;
   const subtitle = options.runtime.subtitle ?? "";
-  const description = options.runtime.description ?? "";
 
-  const chip = C.primaryBold("▎");
-  const chipPlainWidth = 2; // "▎ "
-  const left =
-    chip +
-    " " +
-    C.pureWhiteBold(title) +
-    (subtitle ? "  " + statusBarGrey(subtitle) : "");
-  const leftPlainWidth =
-    chipPlainWidth + title.length + (subtitle ? 2 + subtitle.length : 0);
-
-  const statusText = options.runtime.statusLabel?.replace(/^Status:\s*/, "") ?? "";
-  const maxRightWidth = Math.max(0, cols - 4 - leftPlainWidth - 4);
-  let rightText = "";
-  if (description && maxRightWidth >= 12) {
-    rightText = description.length > maxRightWidth
-      ? description.slice(0, maxRightWidth - 3) + "..."
-      : description;
-    if (statusText) {
-      const combined = `${rightText} · ${statusText}`;
-      rightText = combined.length > maxRightWidth
-        ? rightText
-        : combined;
-    }
-  } else {
-    rightText = statusText;
-  }
-  const right = rightText ? statusBarGrey(rightText) : "";
-  const rightPlain = rightText;
-
-  const gap = Math.max(2, cols - 4 - leftPlainWidth - rightPlain.length);
-  const headerLine = "  " + left + " ".repeat(gap) + right;
-
-  const dividerWidth = Math.max(24, cols - 4);
-  const accentWidth = Math.min(6, dividerWidth);
-  const divider =
-    "  " +
-    C.primary("─".repeat(accentWidth)) +
-    C.dimmer("─".repeat(dividerWidth - accentWidth));
-
-  return [headerLine, divider];
+  return buildLogoBanner(title, undefined, {
+    styledSubtitle: subtitle ? statusBarGrey(subtitle) : "",
+  });
 }
 
 export function renderChatFrame(
@@ -145,8 +118,106 @@ export function renderChatFrame(
 
   const buf = createBuffer();
   const { cols, rows } = getTermSize();
-  const contentWidth = Math.min(cols - 4, 100);
+  const isGlobalScope = options.runtime.scope.type === "global";
   const baseHeaderLines = ["", "", ...options.bannerLines, ""];
+  const spinnerLines =
+    options.isProcessing && options.currentSpinnerLine
+      ? ["", `  ${options.currentSpinnerLine}`]
+      : [];
+
+  if (!isGlobalScope) {
+    const rawContentHeight =
+      baseHeaderLines.length +
+      options.transcriptTotalLines +
+      spinnerLines.length +
+      CHAT_GAP_ROWS +
+      stickyRows.length;
+
+    if (rawContentHeight <= rows) {
+      // --- FLOWING MODE: input inline, no scroll ---
+      const wasSticky = currentInputMode === "sticky";
+      currentInputMode = "flowing";
+      currentStickyRows = 0;
+
+      for (const line of baseHeaderLines) buf.push(line);
+      const transcriptLines = options.getTranscriptLines(0, options.transcriptTotalLines);
+      for (const line of transcriptLines) buf.push(line);
+      for (const line of spinnerLines) buf.push(line);
+      for (let i = 0; i < CHAT_GAP_ROWS; i++) buf.push("");
+      lastInputStartRow = baseHeaderLines.length + transcriptLines.length + spinnerLines.length + CHAT_GAP_ROWS + 1;
+      for (const line of stickyRows) buf.push(line);
+
+      if (wasSticky) {
+        lastStickyBottomRows = null;
+        lastStickyBottomScreenSize = "";
+      }
+
+      const overlayRows = buildAutocompleteOverlayRows(
+        options.slashMatches,
+        options.openMatches,
+        options.pinMatches,
+        options.slashSelected,
+        options.openSelected,
+        options.pinSelected,
+        options.inputBuffer
+      );
+      clearOverlayPaintedRows();
+      buf.flush(0, 0);
+      writeAutocompleteOverlay(overlayRows);
+
+      return { chatScrollOffset: 0, maxScroll: 0 };
+    }
+
+    // --- STICKY MODE (non-global, no centering) ---
+    currentInputMode = "sticky";
+    const olderHintLines =
+      options.chatScrollOffset > 0
+        ? [
+            `  ${C.dim("↑ Older ·")} ${C.white("PgUp")} ${C.dim("/")} ${C.white("PgDn")} ${C.dim("·")} ${C.white("Ctrl+P")} ${C.dim("up /")} ${C.white("Ctrl+N")} ${C.dim("down ·")} ${C.white("End")} ${C.dim("latest ·")} ${C.white("Home")} ${C.dim("oldest")}`,
+          ]
+        : [];
+    const headerLines = baseHeaderLines;
+    const transcriptLines = options.getTranscriptLines(0, options.transcriptTotalLines);
+
+    for (const line of headerLines) buf.push(line);
+    for (const line of olderHintLines) buf.push(line);
+    for (const line of transcriptLines) buf.push(line);
+    for (const line of spinnerLines) buf.push(line);
+    for (let i = 0; i < CHAT_GAP_ROWS; i++) buf.push("");
+
+    const totalVirtualLines =
+      headerLines.length +
+      olderHintLines.length +
+      transcriptLines.length +
+      spinnerLines.length +
+      CHAT_GAP_ROWS;
+    const maxContent = Math.max(1, rows - currentStickyRows);
+    const maxScroll = Math.max(0, totalVirtualLines - maxContent);
+    const chatScrollOffset = Math.min(
+      Math.max(0, options.chatScrollOffset),
+      maxScroll
+    );
+
+    const overlayRows = buildAutocompleteOverlayRows(
+      options.slashMatches,
+      options.openMatches,
+      options.pinMatches,
+      options.slashSelected,
+      options.openSelected,
+      options.pinSelected,
+      options.inputBuffer
+    );
+    clearOverlayPaintedRows();
+    lastInputStartRow = rows - currentStickyRows + 1;
+    buf.flush(currentStickyRows, chatScrollOffset);
+    writeStickyBottom(stickyRows);
+    writeAutocompleteOverlay(overlayRows);
+
+    return { chatScrollOffset, maxScroll };
+  }
+
+  // --- GLOBAL SCOPE: existing behavior with centering ---
+  currentInputMode = "sticky";
   const olderHintLines =
     options.chatScrollOffset > 0
       ? [
@@ -155,11 +226,7 @@ export function renderChatFrame(
           ),
         ]
       : [];
-  const spinnerLines =
-    options.isProcessing && options.currentSpinnerLine
-      ? ["", `  ${options.currentSpinnerLine}`]
-      : [];
-  const maxContent = Math.max(1, rows - currentStickyRows - CHAT_GAP_ROWS);
+  const maxContent = Math.max(1, rows - currentStickyRows);
   const baseContentHeight =
     baseHeaderLines.length +
     olderHintLines.length +
@@ -168,25 +235,26 @@ export function renderChatFrame(
     CHAT_GAP_ROWS;
   const topPadding = Math.floor(Math.max(0, maxContent - baseContentHeight) / 2);
   const headerLines = [...new Array<string>(topPadding).fill(""), ...baseHeaderLines];
+  const transcriptLines = options.getTranscriptLines(0, options.transcriptTotalLines);
+
+  for (const line of headerLines) buf.push(line);
+  for (const line of olderHintLines) buf.push(line);
+  for (const line of transcriptLines) buf.push(line);
+  for (const line of spinnerLines) buf.push(line);
+  for (let i = 0; i < CHAT_GAP_ROWS; i++) buf.push("");
+
   const totalVirtualLines =
     headerLines.length +
     olderHintLines.length +
-    options.transcriptTotalLines +
+    transcriptLines.length +
     spinnerLines.length +
     CHAT_GAP_ROWS;
-
   const maxScroll = Math.max(0, totalVirtualLines - maxContent);
   const chatScrollOffset = Math.min(
     Math.max(0, options.chatScrollOffset),
     maxScroll
   );
-  const end = totalVirtualLines - chatScrollOffset;
-  const start = Math.max(0, end - maxContent);
-  const transcriptSectionStart = headerLines.length + olderHintLines.length;
-  const transcriptLines = options.getTranscriptLines(
-    Math.max(0, start - transcriptSectionStart),
-    Math.max(0, end - transcriptSectionStart)
-  );
+
   const overlayRows = buildAutocompleteOverlayRows(
     options.slashMatches,
     options.openMatches,
@@ -196,37 +264,8 @@ export function renderChatFrame(
     options.pinSelected,
     options.inputBuffer
   );
-  if (overlayRows === null && lastOverlayRows) {
-    invalidateScreenRows(
-      lastOverlayStartRow,
-      lastOverlayStartRow + lastOverlayRows.length - 1
-    );
-    lastOverlayRows = null;
-    lastOverlayStartRow = -1;
-    lastOverlayScreenSize = "";
-  }
-
-  appendVisibleLines(buf, headerLines, start, end, 0);
-  appendVisibleLines(buf, olderHintLines, start, end, headerLines.length);
-  appendVisibleLines(buf, transcriptLines, 0, transcriptLines.length, 0);
-  appendVisibleLines(
-    buf,
-    spinnerLines,
-    start,
-    end,
-    transcriptSectionStart + options.transcriptTotalLines
-  );
-  appendVisibleBlankSection(
-    buf,
-    CHAT_GAP_ROWS,
-    start,
-    end,
-    headerLines.length +
-      olderHintLines.length +
-      options.transcriptTotalLines +
-      spinnerLines.length
-  );
-
+  clearOverlayPaintedRows();
+  lastInputStartRow = rows - currentStickyRows + 1;
   buf.flush(currentStickyRows, chatScrollOffset);
   writeStickyBottom(stickyRows);
   writeAutocompleteOverlay(overlayRows);
@@ -248,6 +287,9 @@ export function renderInputFooter(options: {
   pinSelected: number;
   availableCommands?: CommandDefinition[];
 }): void {
+  if (currentInputMode === "flowing") {
+    return;
+  }
   writeStickyBottom(
     buildStickyBottomRows(
       options.placeholder,
@@ -281,7 +323,9 @@ function buildAutocompleteOverlayRows(
 ): string[] | null {
   const { cols, rows } = getTermSize();
   const maxVisibleCols = Math.max(1, cols - 1);
-  const lastRowAboveInput = rows - currentStickyRows;
+  const lastRowAboveInput = currentInputMode === "flowing"
+    ? lastInputStartRow - 1
+    : rows - currentStickyRows;
   if (lastRowAboveInput < 1) return null;
   const hasOverlay =
     openMatches.length > 0 || pinMatches.length > 0 || slashMatches.length > 0;
@@ -349,12 +393,14 @@ function buildAutocompleteOverlayRows(
     0,
     Math.min(slashSelected - Math.floor(maxShow / 2), slashMatches.length - maxShow)
   );
+  const maxNameLen = Math.max(...slashMatches.slice(start, start + maxShow).map((c) => c.name.length));
   const firstRow = lastRowAboveInput - maxShow + 1;
   for (let index = 0; index < maxShow; index++) {
     const command = slashMatches[start + index]!;
     const selected = start + index === slashSelected;
     const pointer = selected ? C.bold("❯ ") : "  ";
-    const name = selected ? C.bold(command.name) : C.text(command.name);
+    const padded = command.name + " ".repeat(maxNameLen - command.name.length);
+    const name = selected ? C.bold(padded) : C.text(padded);
     overlayRows[firstRow + index - clearStartRow] = fitToRow(
       ` ${pointer}${name}  ${C.muted(command.description)}`
     );
@@ -421,7 +467,7 @@ function buildStickyBottomRows(
         : placeholder.slice(0, maxPlaceholder);
     const styled = inputPlaceholderFg(trimmed);
     const displayText = padTo(cursor + styled, firstLineWidth);
-    contentRows.push(`  ${b("│")} ${inputPromptColor(">")} ${displayText} ${b("│")}`);
+    contentRows.push(`  ${b("│")} ${inputPromptColor("❯")} ${displayText} ${b("│")}`);
   } else {
     const ghost = getInlineCommandGhost(inputBuffer, availableCommands);
     const textWithCursor = inputBuffer + "█";
@@ -446,12 +492,26 @@ function buildStickyBottomRows(
       const w = isFirstVisible ? firstLineWidth : contLineWidth;
       const hasCursor = chunk.endsWith("█");
       const rawText = hasCursor ? chunk.slice(0, -1) : chunk;
-      const colored = rawText.replace(/@\S+/g, (match) => C.warm(match));
-      const ghostSuffix = hasCursor && ghost ? inputPlaceholderFg(ghost) : "";
-      const display = hasCursor ? colored + cursor + ghostSuffix : colored;
+      const colored = rawText
+        .replace(/@\S+/g, (match) => C.warm(match))
+        .replace(/\/\S+/g, (match) => {
+          const cmd = match.toLowerCase();
+          if (availableCommands?.some((c) => c.name === cmd || (c.aliases ?? []).includes(cmd))) {
+            return C.warm(match);
+          }
+          return match;
+        });
+      let display: string;
+      if (hasCursor && ghost) {
+        const ghostCursor = chalk.bgHex("#505050").hex("#808080")(ghost[0]!);
+        const ghostRest = ghost.length > 1 ? inputPlaceholderFg(ghost.slice(1)) : "";
+        display = colored + ghostCursor + ghostRest;
+      } else {
+        display = hasCursor ? colored + cursor : colored;
+      }
       const padded = padTo(display, w);
       if (isFirstVisible) {
-        contentRows.push(`  ${b("│")} ${inputPromptColor(">")} ${padded} ${b("│")}`);
+        contentRows.push(`  ${b("│")} ${inputPromptColor("❯")} ${padded} ${b("│")}`);
       } else {
         contentRows.push(`  ${b("│")} ${padded} ${b("│")}`);
       }
@@ -533,6 +593,31 @@ function writeStickyBottom(rows: string[]): void {
   lastStickyBottomRows = rows.slice();
 }
 
+function clearOverlayPaintedRows(): void {
+  if (lastOverlayPaintedStart < 1 || lastOverlayPaintedEnd < lastOverlayPaintedStart) {
+    lastOverlayRows = null;
+    return;
+  }
+  const { rows: totalRows } = getTermSize();
+  const clampedEnd = Math.min(lastOverlayPaintedEnd, totalRows);
+  if (lastOverlayPaintedStart > clampedEnd) {
+    lastOverlayPaintedStart = -1;
+    lastOverlayPaintedEnd = -1;
+    lastOverlayRows = null;
+    return;
+  }
+  const writes: string[] = ["\x1B[0m"];
+  for (let row = lastOverlayPaintedStart; row <= clampedEnd; row++) {
+    writes.push(`\x1B[${row};1H\x1B[2K`);
+  }
+  writes.push("\x1B[0m");
+  process.stdout.write(writes.join(""));
+  invalidateScreenRows(lastOverlayPaintedStart, clampedEnd);
+  lastOverlayPaintedStart = -1;
+  lastOverlayPaintedEnd = -1;
+  lastOverlayRows = null;
+}
+
 function writeAutocompleteOverlay(rows: string[] | null): void {
   const { rows: totalRows, cols } = getTermSize();
   const screenSizeKey = `${totalRows}:${cols}`;
@@ -543,34 +628,54 @@ function writeAutocompleteOverlay(rows: string[] | null): void {
     return;
   }
 
-  const startRow = Math.max(1, totalRows - currentStickyRows - rows.length + 1);
-  if (
+  const startRow = currentInputMode === "flowing"
+    ? Math.max(1, lastInputStartRow - rows.length)
+    : Math.max(1, totalRows - currentStickyRows - rows.length + 1);
+
+  const positionChanged =
     lastOverlayScreenSize !== screenSizeKey ||
     lastOverlayStartRow !== startRow ||
     !lastOverlayRows ||
-    lastOverlayRows.length !== rows.length
-  ) {
-    lastOverlayRows = null;
-    lastOverlayStartRow = startRow;
-    lastOverlayScreenSize = screenSizeKey;
+    lastOverlayRows.length !== rows.length;
+
+  if (positionChanged) {
+    clearOverlayPaintedRows();
   }
 
   const writes: string[] = [];
+  let paintedStart = -1;
+  let paintedEnd = -1;
   for (let index = 0; index < rows.length; index++) {
-    if (lastOverlayRows?.[index] === rows[index]) {
+    if (rows[index] === "") {
+      if (!positionChanged && lastOverlayRows?.[index] && lastOverlayRows[index] !== "") {
+        if (writes.length === 0) writes.push("\x1B[0m");
+        writes.push(`\x1B[${startRow + index};1H\x1B[2K`);
+      }
+      continue;
+    }
+    if (!positionChanged && lastOverlayRows?.[index] === rows[index]) {
+      if (paintedStart < 0) paintedStart = startRow + index;
+      paintedEnd = startRow + index;
       continue;
     }
     if (writes.length === 0) {
       writes.push("\x1B[0m");
     }
     writes.push(`\x1B[${startRow + index};1H\x1B[0m\x1B[2K${rows[index]!}`);
+    if (paintedStart < 0) paintedStart = startRow + index;
+    paintedEnd = startRow + index;
   }
   if (writes.length > 0) {
     writes.push("\x1B[0m");
     process.stdout.write(writes.join(""));
+    invalidateScreenRows(startRow, startRow + rows.length - 1);
   }
 
+  lastOverlayPaintedStart = paintedStart;
+  lastOverlayPaintedEnd = paintedEnd;
   lastOverlayRows = rows.slice();
+  lastOverlayStartRow = startRow;
+  lastOverlayScreenSize = screenSizeKey;
 }
 
 export function getRenderedMessageLines(
@@ -596,13 +701,9 @@ export function getRenderedMessageLines(
     case "user": {
       const trimmed = message.content.trim();
       if (trimmed.startsWith("/")) {
-        const cmdBarWidth = Math.max(24, cols - 4);
-        const cmdInnerWidth = Math.max(1, cmdBarWidth - 2);
-        const rendered = wrapLines(trimmed, Math.max(12, cmdInnerWidth)).map((line) => {
-          const visible = visibleWidth(line);
-          const pad = " ".repeat(Math.max(0, cmdInnerWidth - visible));
-          return `  ${commandBg(` ${chalk.white.bold(line)}${pad} `)}`;
-        });
+        const rendered = wrapLines(trimmed, Math.max(12, maxWidth - 2)).map(
+          (line) => `  ${commandBg(chalk.white.bold(line))}`
+        );
         cache.set(cacheKey, ["", ...rendered]);
         return ["", ...rendered];
       }
@@ -615,15 +716,18 @@ export function getRenderedMessageLines(
         const visible = visibleWidth(line);
         return line + " ".repeat(Math.max(0, innerWidth - visible));
       };
-      const rendered: string[] = [];
+      const rendered: string[] = [
+        `  ${bar}${userBoxBg(" ".repeat(innerWidth + 2))}`,
+      ];
       for (const line of wrappedLines) {
         rendered.push(`  ${bar}${userBoxBg(` ${chalk.white(padInner(line))} `)}`);
       }
+      rendered.push(`  ${bar}${userBoxBg(" ".repeat(innerWidth + 2))}`);
       cache.set(cacheKey, ["", ...rendered]);
       return ["", ...rendered];
     }
     case "assistant": {
-      renderWrappedContent(message.content, lines, maxWidth);
+      renderWrappedContent(message.content, lines, maxWidth, cols);
       if (message.bulletPoints?.length) {
         lines.push("");
         for (const point of message.bulletPoints) {
@@ -672,25 +776,26 @@ export function getRenderedMessageLines(
           message.toolTarget ?? ""
         )}`
       );
-      const wrappedContentLines = message.content
-        .split("\n")
-        .flatMap((line) => wrapLines(line, innerWidth));
-      const showLines = expanded
-        ? wrappedContentLines
-        : wrappedContentLines.slice(0, 8);
-      const remaining = expanded
-        ? 0
-        : Math.max(0, wrappedContentLines.length - 8);
-      lines.push("");
-      for (const line of showLines) {
-        lines.push(`  ${marker} ${chalk.white(line)}`);
-      }
-      if (remaining > 0) {
-        lines.push(
-          `  ${marker} ${C.dim(`... (${remaining} more lines, `)}${C.dimmer(
-            "ctrl+o"
-          )}${C.dim(" to expand)")}`
-        );
+      if (message.content.trim()) {
+        const wrappedContentLines = message.content
+          .split("\n")
+          .flatMap((line) => wrapLines(line, innerWidth));
+        const showLines = expanded
+          ? wrappedContentLines
+          : wrappedContentLines.slice(0, 5);
+        const remaining = expanded
+          ? 0
+          : Math.max(0, wrappedContentLines.length - 5);
+        for (const line of showLines) {
+          lines.push(`  ${marker} ${chalk.white(line)}`);
+        }
+        if (remaining > 0) {
+          lines.push(
+            `  ${marker} ${C.dim(`... (${remaining} more lines, `)}${C.dimmer(
+              "ctrl+o"
+            )}${C.dim(" to expand)")}`
+          );
+        }
       }
       break;
     }
@@ -716,7 +821,12 @@ export function buildTranscriptLines(options: {
   );
 }
 
-function renderWrappedContent(content: string, lines: string[], maxWidth: number): void {
+function renderWrappedContent(
+  content: string,
+  lines: string[],
+  maxWidth: number,
+  cols: number
+): void {
   const rawLines = content.split("\n");
   for (let index = 0; index < rawLines.length; index++) {
     const line = rawLines[index]!;
@@ -730,7 +840,7 @@ function renderWrappedContent(content: string, lines: string[], maxWidth: number
       lines.push("");
       continue;
     }
-    const tableConsumed = tryRenderTable(rawLines, index, lines, maxWidth);
+    const tableConsumed = tryRenderTable(rawLines, index, lines, maxWidth, cols);
     if (tableConsumed > 0) {
       index += tableConsumed - 1;
       continue;
@@ -1126,11 +1236,33 @@ function isTableSeparatorRow(cells: string[]): boolean {
   return cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, "")));
 }
 
+interface TableLayout {
+  fullWidth: boolean;
+  columnWeights: number[];
+}
+
+// Matches only the exact headers emitted by /files and /modules formatters.
+function detectTableLayout(header: string[]): TableLayout | null {
+  const key = header.map((cell) => cell.trim().toLowerCase()).join("|");
+
+  switch (key) {
+    case "name|type|size":
+      return { fullWidth: true, columnWeights: [0.64, 0.12, 0.24] };
+    case "name|size":
+      return { fullWidth: true, columnWeights: [0.72, 0.28] };
+    case "#|module|items":
+      return { fullWidth: true, columnWeights: [0.07, 0.69, 0.24] };
+    default:
+      return null;
+  }
+}
+
 function tryRenderTable(
   rawLines: string[],
   startIndex: number,
   out: string[],
-  maxWidth: number
+  maxWidth: number,
+  cols: number
 ): number {
   const headerCells = splitTableRow(rawLines[startIndex] ?? "");
   if (!headerCells || headerCells.length < 2) return 0;
@@ -1149,7 +1281,7 @@ function tryRenderTable(
     cursor++;
   }
 
-  renderMarkdownTable(headerCells, bodyRows, out, maxWidth);
+  renderMarkdownTable(headerCells, bodyRows, out, maxWidth, cols);
   return cursor - startIndex;
 }
 
@@ -1157,63 +1289,87 @@ function renderMarkdownTable(
   header: string[],
   rows: string[][],
   out: string[],
-  maxWidth: number
+  maxWidth: number,
+  cols: number
 ): void {
   const colCount = header.length;
-  const available = Math.max(20, maxWidth - 2);
-  // Subtract vertical borders (colCount + 1) and padding (2 per col).
+  const layout = detectTableLayout(header);
+  const useFullWidth = layout?.fullWidth || colCount >= 5;
+  const tableWidth = useFullWidth
+    ? Math.max(32, cols - 4)
+    : Math.max(20, maxWidth - 2);
   const borderOverhead = colCount + 1 + colCount * 2;
-  const usableContent = Math.max(colCount, available - borderOverhead);
+  const usableContent = Math.max(colCount, tableWidth - borderOverhead);
 
   const headerParsed = header.map((cell) => parseAndStripFormatting(cell));
   const rowsParsed = rows.map((row) => row.map((cell) => parseAndStripFormatting(cell)));
 
-  const naturalWidths = headerParsed.map((parsed, i) => {
-    let widest = visibleWidth(parsed.plain);
-    for (const row of rowsParsed) {
-      const cellPlain = row[i]?.plain ?? "";
-      for (const piece of cellPlain.split(/\s+/)) {
-        widest = Math.max(widest, visibleWidth(piece));
-      }
-      widest = Math.max(widest, Math.min(visibleWidth(cellPlain), 24));
-    }
-    return Math.max(3, widest);
-  });
-
-  const totalNatural = naturalWidths.reduce((a, b) => a + b, 0) || 1;
   let colWidths: number[];
-  if (totalNatural <= usableContent) {
-    colWidths = naturalWidths.slice();
-    let remaining = usableContent - totalNatural;
-    let i = 0;
-    while (remaining > 0) {
-      colWidths[i % colCount]!++;
-      remaining--;
-      i++;
-    }
-  } else {
-    colWidths = naturalWidths.map((w) =>
-      Math.max(3, Math.floor((w / totalNatural) * usableContent))
+  if (layout?.columnWeights.length === colCount) {
+    colWidths = layout.columnWeights.map((weight) =>
+      Math.max(3, Math.floor(usableContent * weight))
     );
-    let diff = usableContent - colWidths.reduce((a, b) => a + b, 0);
-    let i = 0;
+    let diff = usableContent - colWidths.reduce((sum, width) => sum + width, 0);
+    let index = 0;
     while (diff > 0) {
-      colWidths[i % colCount]!++;
+      colWidths[index % colCount]!++;
       diff--;
-      i++;
+      index++;
     }
     while (diff < 0) {
-      const idx = i % colCount;
-      if (colWidths[idx]! > 3) {
-        colWidths[idx]!--;
-        diff++;
+      const shrinkIndex = colWidths.findIndex((width) => width > 3);
+      if (shrinkIndex < 0) break;
+      colWidths[shrinkIndex]!--;
+      diff++;
+    }
+  } else {
+    const naturalWidths = headerParsed.map((parsed, i) => {
+      let widest = visibleWidth(parsed.plain);
+      for (const row of rowsParsed) {
+        const cellPlain = row[i]?.plain ?? "";
+        for (const piece of cellPlain.split(/\s+/)) {
+          widest = Math.max(widest, visibleWidth(piece));
+        }
+        widest = Math.max(widest, Math.min(visibleWidth(cellPlain), 24));
       }
-      i++;
-      if (i > colCount * 10) break;
+      return Math.max(3, widest);
+    });
+
+    const totalNatural = naturalWidths.reduce((a, b) => a + b, 0) || 1;
+    if (totalNatural <= usableContent) {
+      colWidths = naturalWidths.slice();
+      let remaining = usableContent - totalNatural;
+      let i = 0;
+      while (remaining > 0) {
+        colWidths[i % colCount]!++;
+        remaining--;
+        i++;
+      }
+    } else {
+      colWidths = naturalWidths.map((w) =>
+        Math.max(3, Math.floor((w / totalNatural) * usableContent))
+      );
+      let diff = usableContent - colWidths.reduce((a, b) => a + b, 0);
+      let i = 0;
+      while (diff > 0) {
+        colWidths[i % colCount]!++;
+        diff--;
+        i++;
+      }
+      while (diff < 0) {
+        const idx = i % colCount;
+        if (colWidths[idx]! > 3) {
+          colWidths[idx]!--;
+          diff++;
+        }
+        i++;
+        if (i > colCount * 10) break;
+      }
     }
   }
 
-  const b = C.dimmer;
+  const border = useFullWidth ? C.secondary : C.dimmer;
+  const b = border;
   const top = b("┌") + colWidths.map((w) => b("─".repeat(w + 2))).join(b("┬")) + b("┐");
   const sep = b("├") + colWidths.map((w) => b("─".repeat(w + 2))).join(b("┼")) + b("┤");
   const bot = b("└") + colWidths.map((w) => b("─".repeat(w + 2))).join(b("┴")) + b("┘");

@@ -37,6 +37,7 @@ interface CachedThread {
 const LIST_TTL_MS = 60_000;
 const THREAD_TTL_MS = 300_000;
 const MAX_THREAD_ENTRIES = 200;
+const MAX_ANNOUNCEMENTS_PER_COURSE = 100;
 const RECENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 export class RadarService {
@@ -65,6 +66,29 @@ export class RadarService {
     const items = await this.fetchRadarItems(courseId, courseName, filter);
     this.listCache.set(cacheKey, { items, fetchedAt: Date.now() });
     return query ? filterByQuery(items, query) : items;
+  }
+
+  async getAllAnnouncements(
+    courseId: number,
+    courseName: string
+  ): Promise<RadarItem[]> {
+    const announcements = await this.client.getAnnouncementsSafe(courseId);
+    const items = announcements
+      .slice(0, MAX_ANNOUNCEMENTS_PER_COURSE)
+      .map((a) => normalizeTopicToRadarItem(a, courseId, courseName));
+    return sortRadarItems(items);
+  }
+
+  async getAllAnnouncementsMultiCourse(
+    courses: Array<{ id: number; name: string }>
+  ): Promise<RadarItem[]> {
+    if (courses.length === 0) return [];
+
+    const results = await Promise.all(
+      courses.map((course) => this.getAllAnnouncements(course.id, course.name))
+    );
+
+    return sortRadarItems(results.flat());
   }
 
   async getRadarItemsMultiCourse(
@@ -381,14 +405,9 @@ function buildAnnouncementItems(
   courseId: number,
   courseName: string
 ): RadarItem[] {
-  const cutoff = Date.now() - RECENT_WINDOW_MS;
-  return announcements.flatMap((announcement) => {
-    const posted = announcement.posted_at
-      ? new Date(announcement.posted_at).getTime()
-      : 0;
-    if (posted < cutoff) return [];
-    return [normalizeTopicToRadarItem(announcement, courseId, courseName)];
-  });
+  return announcements.map((announcement) =>
+    normalizeTopicToRadarItem(announcement, courseId, courseName)
+  );
 }
 
 function buildDiscussionItems(

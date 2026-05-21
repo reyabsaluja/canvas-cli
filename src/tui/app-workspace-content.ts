@@ -63,9 +63,17 @@ export function buildCourseIntroMessages(
   _hasCache: boolean
 ): ChatMessage[] {
   const actionableUpcoming = filterActionableUpcomingAssignments(assignments);
-  if (actionableUpcoming.length === 0) return [];
+  const visibleAssignments = actionableUpcoming.length > 0
+    ? actionableUpcoming
+    : assignments.filter((assignment) => !assignment.submitted && assignment.dueAt === null);
+  if (visibleAssignments.length === 0) {
+    return [{
+      role: "assistant",
+      content: `Course ready for ${course.name}. Use /help for course commands.`,
+    }];
+  }
   const lines = ["**Upcoming work**"];
-  for (const assignment of actionableUpcoming.slice(0, 5)) {
+  for (const assignment of visibleAssignments.slice(0, 5)) {
     lines.push(`• ${assignment.name} — ${formatDueCompact(assignment.dueAt)}`);
   }
   return [{ role: "assistant", content: lines.join("\n") }];

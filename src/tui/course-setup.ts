@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { hideCursor, showCursor, createBuffer, clearScreen, getTermSize, padAnsiToWidth, stripAnsi, CANVAS_TEXT, C } from "./screen.js";
+import { hideCursor, showCursor, createBuffer, clearScreen, enterAlternateScreen, leaveAlternateScreen, getTermSize, padAnsiToWidth, buildLogoBanner, C } from "./screen.js";
 import { USER_ABORT_EXIT_CODE } from "./chat-shell-exit.js";
 import type { Course } from "../domain/models.js";
 import type { UserCourse, CourseConfig } from "./course-config.js";
@@ -42,8 +42,9 @@ export function showMultiSelect(
       const cardWidth = cols - 6;
       const innerWidth = cardWidth - 2;
       const linesPerItem = 3;
-      const asciiLines = CANVAS_TEXT.length + 2;
-      const reservedRows = asciiLines + 8 + (message ? 2 : 0);
+      const bannerLines = buildLogoBanner(title, subtitle);
+      const bannerHeight = bannerLines.length + 2;
+      const reservedRows = bannerHeight + 8 + (message ? 2 : 0);
       const visibleCount = Math.max(2, Math.floor((rows - reservedRows) / linesPerItem));
 
       if (selected < windowStart) windowStart = selected;
@@ -54,11 +55,7 @@ export function showMultiSelect(
       const visibleItems = filtered.slice(windowStart, windowEnd);
 
       buf.push("");
-      for (const line of CANVAS_TEXT) {
-        const lineWidth = stripAnsi(line).length;
-        const pad = Math.max(0, Math.floor((cols - lineWidth) / 2));
-        buf.push(" ".repeat(pad) + C.primary(line));
-      }
+      for (const line of bannerLines) buf.push(line);
       buf.push("");
 
       const isSearchActive = filter.length > 0;
@@ -118,15 +115,17 @@ export function showMultiSelect(
       }
       const count = checked.size;
       const doneHint = count > 0
-        ? C.success(`d done (${count} selected)`)
-        : C.dimmer(`d done (${count} selected)`);
+        ? C.pureWhite("d") + C.success(` done (${count} selected)`)
+        : C.pureWhite("d") + C.dimmer(` done (${count} selected)`);
       buf.push(
-        C.dimmer("  enter/space toggle  ↑↓ navigate  ") + doneHint + C.dimmer("  type to filter")
+        "  " + C.pureWhite("enter/space") + C.dimmer(" toggle  ") + C.pureWhite("↑↓") + C.dimmer(" navigate  ") + doneHint + "  " + C.pureWhite("esc") + C.dimmer(" back") + "  " + C.dimmer("type to filter")
       );
 
       buf.flush();
     }
 
+    enterAlternateScreen();
+    clearScreen();
     hideCursor();
     render();
 
@@ -227,6 +226,8 @@ export function showMultiSelect(
       try {
         stdin.pause();
       } catch {}
+      leaveAlternateScreen();
+      clearScreen();
       showCursor();
     }
 
@@ -257,15 +258,9 @@ export async function promptRenames(
     const border = C.secondary;
 
     console.log("");
-    for (const line of CANVAS_TEXT) {
-      const lineWidth = stripAnsi(line).length;
-      const pad = Math.max(0, Math.floor((cols - lineWidth) / 2));
-      console.log(" ".repeat(pad) + C.primary(line));
+    for (const line of buildLogoBanner("Rename your courses", "Give them short names, or press enter to keep the original")) {
+      console.log(line);
     }
-    console.log("");
-
-    console.log(C.bold("  Rename your courses"));
-    console.log(C.dim("  Give them short names, or press enter to keep the original"));
     console.log("");
 
     for (const done of result) {
@@ -302,13 +297,9 @@ export async function promptRenames(
   const { cols } = getTermSize();
 
   console.log("");
-  for (const line of CANVAS_TEXT) {
-    const lineWidth = stripAnsi(line).length;
-    const pad = Math.max(0, Math.floor((cols - lineWidth) / 2));
-    console.log(" ".repeat(pad) + C.primary(line));
+  for (const line of buildLogoBanner("Courses renamed")) {
+    console.log(line);
   }
-  console.log("");
-  console.log(C.bold("  Courses renamed"));
   console.log("");
   for (const done of result) {
     console.log(
@@ -359,174 +350,197 @@ export async function runCourseSetup(
  * Course management menu — add, remove, rename.
  */
 export async function runCourseManagement(
-  currentConfig: CourseConfig,
+  initialConfig: CourseConfig,
   allCanvasCourses: Course[]
 ): Promise<CourseConfig> {
   const { showPicker } = await import("./picker.js");
+  let currentConfig = initialConfig;
 
-  const action = await showPicker({
-    title: "Manage courses",
-    items: [
-      {
-        label: "Add courses",
-        sublabel: "select from Canvas",
-        value: "add",
-      },
-      {
-        label: "Remove a course",
-        sublabel: `${currentConfig.courses.length} configured`,
-        value: "remove",
-        dimmed: currentConfig.courses.length === 0,
-      },
-      {
-        label: "Rename a course",
-        sublabel: "change display name",
-        value: "rename",
-        dimmed: currentConfig.courses.length === 0,
-      },
-      { label: "Back", value: "back" },
-    ],
-    backLabel: "back",
-  });
-
-  if (!action || action === "back") return currentConfig;
-
-  if (action === "add") {
-    const existingIds = new Set(currentConfig.courses.map((c) => c.id));
-    const available = allCanvasCourses.filter((c) => !existingIds.has(c.id));
-
-    if (available.length === 0) {
-      clearScreen();
-      console.log(C.dim("\n  All Canvas courses are already added.\n"));
-      await sleep(1500);
-      return currentConfig;
-    }
-
-    const selected = await showMultiSelect(
-      "Add courses",
-      "Select courses to add — space to toggle, enter when done",
-      available
-    );
-
-    if (selected.length === 0) return currentConfig;
-
-    const userCourses = await promptRenames(selected);
-    const updated: CourseConfig = {
-      courses: [...currentConfig.courses, ...userCourses],
-    };
-    await saveCourseConfig(updated);
-    return updated;
-  }
-
-  if (action === "remove") {
-    if (currentConfig.courses.length === 0) return currentConfig;
-
-    const toRemove = await showPicker({
-      title: "Remove a course",
-      subtitle: "Select a course to remove from your list",
-      items: currentConfig.courses.map((c) => ({
-        label: c.displayName,
-        sublabel: c.originalCode !== c.displayName ? c.originalCode : c.originalName,
-        value: String(c.id),
-      })),
-      backLabel: "cancel",
+  while (true) {
+    const action = await showPicker({
+      title: "Manage courses",
+      subtitle: "Add, remove, or rename courses in your configuration",
+      items: [
+        {
+          label: "Add courses",
+          description: "Browse and select from your Canvas enrollments",
+          value: "add",
+        },
+        {
+          label: "Remove a course",
+          description: `Remove from your configured list (${currentConfig.courses.length} configured)`,
+          value: "remove",
+          dimmed: currentConfig.courses.length === 0,
+        },
+        {
+          label: "Rename a course",
+          description: "Set a custom display name for a course",
+          value: "rename",
+          dimmed: currentConfig.courses.length === 0,
+        },
+        {
+          label: "Back",
+          description: "Return to the home screen",
+          value: "back",
+        },
+      ],
+      backLabel: "back",
     });
 
-    if (toRemove) {
-      const updated: CourseConfig = {
-        courses: currentConfig.courses.filter(
-          (c) => String(c.id) !== toRemove
-        ),
-      };
-      await saveCourseConfig(updated);
-      return updated;
-    }
+    if (!action || action === "back") return currentConfig;
 
-    return currentConfig;
-  }
+    if (action === "add") {
+      const existingIds = new Set(currentConfig.courses.map((c) => c.id));
+      const available = allCanvasCourses.filter((c) => !existingIds.has(c.id));
 
-  if (action === "rename") {
-    if (currentConfig.courses.length === 0) return currentConfig;
-
-    const toRename = await showPicker({
-      title: "Rename a course",
-      items: currentConfig.courses.map((c) => ({
-        label: c.displayName,
-        sublabel: c.originalCode !== c.displayName ? c.originalCode : c.originalName,
-        value: String(c.id),
-      })),
-      backLabel: "cancel",
-    });
-
-    if (toRename) {
-      const course = currentConfig.courses.find(
-        (c) => String(c.id) === toRename
-      );
-      if (course) {
+      if (available.length === 0) {
         clearScreen();
-        showCursor();
+        console.log(C.dim("\n  All Canvas courses are already added.\n"));
+        await sleep(1500);
+        continue;
+      }
 
-        const { cols } = getTermSize();
-        const cardWidth = Math.min(cols - 6, 70);
-        const innerWidth = cardWidth - 2;
-        const border = C.secondary;
+      const selected = await showMultiSelect(
+        "Add courses",
+        "Select courses to add — space to toggle, enter when done",
+        available
+      );
 
-        console.log("");
-        for (const line of CANVAS_TEXT) {
-          const lineWidth = stripAnsi(line).length;
-          const pad = Math.max(0, Math.floor((cols - lineWidth) / 2));
-          console.log(" ".repeat(pad) + C.primary(line));
-        }
-        console.log("");
+      if (selected.length === 0) continue;
 
-        console.log(C.bold("  Rename course"));
-        console.log("");
+      const userCourses = await promptRenames(selected);
+      const updated: CourseConfig = {
+        courses: [...currentConfig.courses, ...userCourses],
+      };
+      try {
+        await saveCourseConfig(updated);
+        currentConfig = updated;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : "unknown error";
+        clearScreen();
+        console.log(C.warn(`\n  Failed to save course config: ${msg}\n`));
+        await sleep(1500);
+      }
+      continue;
+    }
 
-        console.log(border("  ┌" + "─".repeat(cardWidth) + "┐"));
-        const courseInfo = C.bold(course.displayName) +
-          (course.originalCode !== course.displayName ? C.dim(` (${course.originalCode})`) : "");
-        console.log(`  ${border("│")} ${padAnsiToWidth(courseInfo, innerWidth)} ${border("│")}`);
-        console.log(border("  └" + "─".repeat(cardWidth) + "┘"));
-        console.log("");
+    if (action === "remove") {
+      if (currentConfig.courses.length === 0) continue;
 
-        const newName = await promptLine(
-          "  " + C.primary("❯ ") + C.dim("new name: ")
-        );
+      const toRemove = await showPicker({
+        title: "Remove a course",
+        subtitle: "Select a course to remove from your list",
+        items: currentConfig.courses.map((c) => ({
+          label: c.displayName,
+          sublabel: c.originalCode !== c.displayName ? c.originalCode : c.originalName,
+          value: String(c.id),
+        })),
+        cards: true,
+        filterable: true,
+        backLabel: "back",
+      });
 
-        if (newName.trim()) {
-          const updated: CourseConfig = {
-            courses: currentConfig.courses.map((c) =>
-              String(c.id) === toRename
-                ? { ...c, displayName: newName.trim() }
-                : c
-            ),
-          };
+      if (toRemove) {
+        const updated: CourseConfig = {
+          courses: currentConfig.courses.filter(
+            (c) => String(c.id) !== toRemove
+          ),
+        };
+        try {
           await saveCourseConfig(updated);
-
+          currentConfig = updated;
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : "unknown error";
           clearScreen();
-          console.log("");
-          for (const line of CANVAS_TEXT) {
-            const lineWidth = stripAnsi(line).length;
-            const pad = Math.max(0, Math.floor((cols - lineWidth) / 2));
-            console.log(" ".repeat(pad) + C.primary(line));
-          }
-          console.log("");
-          console.log(
-            "  " + C.success("✓ ") +
-            C.text("Renamed to ") + C.success(newName.trim())
-          );
-          console.log("");
-          await sleep(1200);
-
-          return updated;
+          console.log(C.warn(`\n  Failed to save course config: ${msg}\n`));
+          await sleep(1500);
         }
       }
+      continue;
     }
 
-    return currentConfig;
-  }
+    if (action === "rename") {
+      if (currentConfig.courses.length === 0) continue;
 
-  return currentConfig;
+      const toRename = await showPicker({
+        title: "Rename a course",
+        subtitle: "Select a course to rename",
+        items: currentConfig.courses.map((c) => ({
+          label: c.displayName,
+          sublabel: c.originalCode !== c.displayName ? c.originalCode : c.originalName,
+          value: String(c.id),
+        })),
+        cards: true,
+        filterable: true,
+        backLabel: "back",
+      });
+
+      if (toRename) {
+        const course = currentConfig.courses.find(
+          (c) => String(c.id) === toRename
+        );
+        if (course) {
+          clearScreen();
+          showCursor();
+
+          const { cols } = getTermSize();
+          const cardWidth = Math.min(cols - 6, 70);
+          const innerWidth = cardWidth - 2;
+          const border = C.secondary;
+
+          console.log("");
+          for (const line of buildLogoBanner("Rename course")) {
+            console.log(line);
+          }
+          console.log("");
+
+          console.log(border("  ┌" + "─".repeat(cardWidth) + "┐"));
+          const courseInfo = C.bold(course.displayName) +
+            (course.originalCode !== course.displayName ? C.dim(` (${course.originalCode})`) : "");
+          console.log(`  ${border("│")} ${padAnsiToWidth(courseInfo, innerWidth)} ${border("│")}`);
+          console.log(border("  └" + "─".repeat(cardWidth) + "┘"));
+          console.log("");
+
+          const newName = await promptLine(
+            "  " + C.primary("❯ ") + C.dim("new name: ")
+          );
+
+          if (newName.trim()) {
+            const updated: CourseConfig = {
+              courses: currentConfig.courses.map((c) =>
+                String(c.id) === toRename
+                  ? { ...c, displayName: newName.trim() }
+                  : c
+              ),
+            };
+            try {
+              await saveCourseConfig(updated);
+              currentConfig = updated;
+
+              clearScreen();
+              console.log("");
+              for (const line of buildLogoBanner("Course renamed")) {
+                console.log(line);
+              }
+              console.log("");
+              console.log(
+                "  " + C.success("✓ ") +
+                C.text("Renamed to ") + C.success(newName.trim())
+              );
+              console.log("");
+              await sleep(1200);
+            } catch (error) {
+              const msg = error instanceof Error ? error.message : "unknown error";
+              clearScreen();
+              console.log(C.warn(`\n  Failed to save course config: ${msg}\n`));
+              await sleep(1500);
+            }
+          }
+        }
+      }
+      continue;
+    }
+  }
 }
 
 // --- Helpers ---

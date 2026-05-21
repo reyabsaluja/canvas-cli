@@ -1,5 +1,3 @@
-import { existsSync } from "node:fs";
-import { cpus, totalmem } from "node:os";
 import {
   CANVAS_TEXT,
   C,
@@ -40,7 +38,7 @@ export function renderGlobalBanner(
       ["/manage-courses", "add, remove, or rename the courses shown in canvas-cli"],
       ["/recent", "reopen a recent course or workspace session"],
       ["/open", "jump directly to a course or recent workspace by name"],
-      ["/radar", "show recent announcements and discussions across courses"],
+      ["/announcements", "browse course announcements"],
       ["/clear", "clear this chat and reset the current context"],
       ["/quit", "exit canvas-cli"],
       ["/help", "full command list for the current scope"],
@@ -76,8 +74,9 @@ function renderInfoBox(
       ? `${displayCourses.length} active · ${availability.unavailable.length} unavailable`
       : `${displayCourses.length} active`;
   const workspaceCount = `${recent.length} active`;
-  const systemSummary = formatSystemSummary();
-  const toolAgentSummary = "9 tools · 2 agents";
+  const activeCourseIds = new Set(displayCourses.map((c) => c.id));
+  const systemSummary = formatAssignmentSummary(services, activeCourseIds);
+  const toolAgentSummary = `${displayCourses.length} course${displayCourses.length === 1 ? "" : "s"} connected`;
 
   const boxInner = Math.min(termCols - 5, 98);
 
@@ -175,7 +174,7 @@ function renderInfoBox(
   pushLeft(formatInfoRow("courses", courseCount), "kvMuted");
   pushLeft(formatInfoRow("workspaces", workspaceCount), "kvMuted");
   padLeftToRow(systemRow);
-  pushLeft(formatInfoRow("system", systemSummary), "kvMuted");
+  pushLeft(formatInfoRow("status", systemSummary), "kvMuted");
   padLeftToRow(openRow);
   pushLeft(toolAgentSummary, "dim");
 
@@ -306,24 +305,24 @@ function wrapWords(text: string, maxLen: number): string[] {
   return lines;
 }
 
-function formatSystemSummary(): string {
-  const memoryGb = Math.round(totalmem() / 1024 ** 3);
-  const runtime = detectRuntimeLabel();
-  return `${cpus().length} cores · ${memoryGb}GB · ${runtime}`;
-}
+function formatAssignmentSummary(services: AppServices, activeCourseIds: Set<number>): string {
+  let total = 0;
+  let upcoming = 0;
+  const now = Date.now();
+  const oneWeek = 7 * 24 * 60 * 60 * 1000;
 
-function detectRuntimeLabel(): string {
-  if (
-    existsSync("/.dockerenv") ||
-    process.env.CONTAINER ||
-    process.env.DOCKER_CONTAINER
-  ) {
-    return "docker";
+  for (const [courseId, assignments] of services.resolvedAssignments ?? []) {
+    if (!activeCourseIds.has(courseId)) continue;
+    total += assignments.length;
+    upcoming += assignments.filter(
+      (a) => a.dueAt && a.dueAt.getTime() > now && a.dueAt.getTime() - now < oneWeek
+    ).length;
   }
 
-  if (process.platform === "darwin") return "macOS";
-  if (process.platform === "win32") return "windows";
-  return process.platform;
+  if (total === 0) return "synced just now";
+  return upcoming > 0
+    ? `${total} assignments · ${upcoming} upcoming`
+    : `${total} assignments`;
 }
 
 type InfoBoxPalette = {

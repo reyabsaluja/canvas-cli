@@ -51,6 +51,8 @@ export interface ChatSessionMetadata {
   workspacePath?: string;
   sessionSlug?: string;
   lastOpenedAt?: string;
+  /** Most recent /pdf export in this chat session (for open it). */
+  lastExportedPdfPath?: string;
 }
 
 export interface ChatSession {
@@ -81,6 +83,8 @@ export interface CommandDefinition {
   description: string;
   scopes: ScopeType[];
   aliases?: string[];
+  /** Navigation commands are not persisted to chat transcript. */
+  navigation?: boolean;
 }
 
 export interface ScopeRuntime {

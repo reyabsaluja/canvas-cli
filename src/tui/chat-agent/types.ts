@@ -25,6 +25,8 @@ export interface ChatAgentContext {
   conversationHistory: ChatAgentConversationEntry[];
   /** Minimal serialized working memory for grounding and retrieval gating. */
   runState: RunState;
+  /** Latest /pdf export from this chat session. */
+  lastExportedPdfPath?: string | null;
 }
 
 export interface ChatAgentConversationEntry {
@@ -40,6 +42,7 @@ export interface ChatAgentExtraContext {
   courseName?: string | null;
   assignments?: Assignment[];
   radar?: RadarService | null;
+  lastExportedPdfPath?: string | null;
 }
 
 export interface ToolCallEvent {

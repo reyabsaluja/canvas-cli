@@ -16,6 +16,8 @@ import {
   resolveAndRenderThread,
 } from "./radar-commands.js";
 import { handleLectureQuery } from "./lecture-resources.js";
+import { formatCourseFilesList } from "./format-course-files.js";
+import { formatCourseModulesList } from "./format-course-modules.js";
 
 export async function handleCommand(
   command: string,
@@ -100,23 +102,13 @@ export async function handleCommand(
       }
       return { type: "recent-picker" };
     }
-    if (command === "/radar") {
+    if (command === "/announcements") {
       const courses = getDisplayCourses(services);
       if (courses.length === 0) {
         await api.addMessage({ role: "system", content: "No courses configured." });
         return;
       }
-      const { filter, query: radarQuery } = parseRadarArgs(args);
-      const items = await services.radar.getRadarItemsMultiCourse(
-        courses.map((c) => ({ id: c.id, name: c.name })),
-        filter,
-        radarQuery || undefined
-      );
-      await api.addMessage({
-        role: items.length > 0 ? "assistant" : "system",
-        content: formatRadarItems(items, filter, radarQuery),
-      });
-      return;
+      return { type: "announcements" } as const;
     }
     if (command === "/thread") {
       const trimmed = args.trim();
@@ -174,11 +166,7 @@ export async function handleCommand(
       }
       await api.addMessage({
         role: "assistant",
-        content: cache.modules
-          .map(
-            (module, index) => `${index + 1}. ${module.name} (${module.itemCount} items)`
-          )
-          .join("\n"),
+        content: formatCourseModulesList(cache),
       });
       return;
     }
@@ -192,40 +180,15 @@ export async function handleCommand(
         });
         return;
       }
-      const downloaded = cache.attachments
-        .filter(
-          (attachment) =>
-            attachment.status === "downloaded" || attachment.status === "skipped"
-        )
-        .slice(0, 20)
-        .map((attachment) => `• ${attachment.originalFilename}`);
-      const indexed = cache.files.slice(0, 12).map((file) => `• ${file.displayName}`);
       await api.addMessage({
         role: "assistant",
-        content: [
-          `Downloaded attachments (${downloaded.length || 0})`,
-          downloaded.length > 0 ? downloaded.join("\n") : "• none yet",
-          "",
-          `Course file index (${cache.files.length})`,
-          indexed.length > 0 ? indexed.join("\n") : "• none indexed",
-        ].join("\n"),
+        content: formatCourseFilesList(cache),
       });
       return;
     }
 
-    if (command === "/radar") {
-      const { filter, query: radarQuery } = parseRadarArgs(args);
-      const items = await services.radar.getRadarItems(
-        course.id,
-        course.name,
-        filter,
-        radarQuery || undefined
-      );
-      await api.addMessage({
-        role: items.length > 0 ? "assistant" : "system",
-        content: formatRadarItems(items, filter, radarQuery),
-      });
-      return;
+    if (command === "/announcements") {
+      return { type: "announcements", courseId: course.id, courseName: course.name } as const;
     }
 
     if (command === "/thread") {
