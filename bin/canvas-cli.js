@@ -15,4 +15,7 @@ if (major < 20) {
   process.exit(1);
 }
 
-import("../dist/cli.js");
+import("../dist/cli.js").catch(function (err) {
+  console.error(err);
+  process.exit(1);
+});
