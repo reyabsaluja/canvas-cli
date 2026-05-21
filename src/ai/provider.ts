@@ -15,6 +15,9 @@ export interface AIProviderConfig {
 export const AI_PROVIDER_SETUP_HINT =
   "Set AI_PROVIDER to anthropic, openai, google/gemini, or bedrock and add the matching credentials to your .env file (see .env.example).";
 
+const DEFAULT_RATE_LIMIT_RETRY_MS = 30_000;
+const DEFAULT_UNAVAILABLE_RETRY_MS = 15_000;
+
 const DEFAULT_MODEL_BY_PROVIDER: Record<AIProviderName, string> = {
   anthropic: "claude-sonnet-4-20250514",
   openai: "gpt-4o",
@@ -463,7 +466,7 @@ export function classifyAIError(error: unknown): AIError {
         "Rate limited by the AI provider.",
         "rate_limit",
         {
-          retryAfterMs: retryAfterMs ?? 30_000,
+          retryAfterMs: retryAfterMs ?? DEFAULT_RATE_LIMIT_RETRY_MS,
           setupHint: null,
         }
       );
@@ -495,14 +498,14 @@ export function classifyAIError(error: unknown): AIError {
       return new AIError(
         "AI provider is temporarily unavailable.",
         "provider_unavailable",
-        { retryAfterMs: 15_000 }
+        { retryAfterMs: DEFAULT_UNAVAILABLE_RETRY_MS }
       );
     }
     if (status && status >= 500) {
       return new AIError(
         `AI provider returned server error (${status}).`,
         "provider_unavailable",
-        { retryAfterMs: 15_000 }
+        { retryAfterMs: DEFAULT_UNAVAILABLE_RETRY_MS }
       );
     }
     if (status) {
