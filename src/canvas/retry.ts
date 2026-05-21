@@ -24,6 +24,10 @@ function isPermanentStatus(status: number): boolean {
 
 const MIN_RETRY_DELAY_MS = 500;
 
+function addJitter(ms: number): number {
+  return ms * (1 + (Math.random() - 0.5) * 0.4);
+}
+
 function getRetryDelay(response: Response, attempt: number, baseDelay: number): number {
   const retryAfter = response.headers.get("retry-after");
   if (retryAfter) {
@@ -32,7 +36,7 @@ function getRetryDelay(response: Response, attempt: number, baseDelay: number): 
     const date = Date.parse(retryAfter);
     if (!Number.isNaN(date)) return Math.max(MIN_RETRY_DELAY_MS, date - Date.now());
   }
-  return baseDelay * 2 ** (attempt - 1);
+  return addJitter(baseDelay * 2 ** (attempt - 1));
 }
 
 function sleep(ms: number): Promise<void> {
@@ -76,7 +80,7 @@ export async function fetchWithRetry(
       lastError = err;
 
       if (isRetriableNetworkError(err) && attempt < maxRetries) {
-        const delay = baseDelay * 2 ** attempt;
+        const delay = addJitter(baseDelay * 2 ** attempt);
         console.error(
           `Network error, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${maxRetries})...`
         );
