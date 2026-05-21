@@ -35,7 +35,9 @@ export class CanvasClient {
       const response = await fetchWithRetry(nextUrl, { headers: this.headers }, this.retryOptions);
 
       if (!response.ok) {
-        throw new CanvasApiError(response.status, response.statusText);
+        const err = new CanvasApiError(response.status, response.statusText);
+        if (err.userHint) err.message += ` — ${err.userHint}`;
+        throw err;
       }
 
       const data = (await response.json()) as T[];
@@ -51,7 +53,9 @@ export class CanvasClient {
     const response = await fetchWithRetry(url, { headers: this.headers }, this.retryOptions);
 
     if (!response.ok) {
-      throw new CanvasApiError(response.status, response.statusText);
+      const err = new CanvasApiError(response.status, response.statusText);
+      if (err.userHint) err.message += ` — ${err.userHint}`;
+      throw err;
     }
 
     return (await response.json()) as T;
