@@ -415,9 +415,10 @@ export async function runCourseManagement(
       try {
         await saveCourseConfig(updated);
         currentConfig = updated;
-      } catch {
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : "unknown error";
         clearScreen();
-        console.log(C.warn("\n  Failed to save course config. Changes were not applied.\n"));
+        console.log(C.warn(`\n  Failed to save course config: ${msg}\n`));
         await sleep(1500);
       }
       continue;
@@ -448,9 +449,10 @@ export async function runCourseManagement(
         try {
           await saveCourseConfig(updated);
           currentConfig = updated;
-        } catch {
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : "unknown error";
           clearScreen();
-          console.log(C.warn("\n  Failed to save course config. Changes were not applied.\n"));
+          console.log(C.warn(`\n  Failed to save course config: ${msg}\n`));
           await sleep(1500);
         }
       }
@@ -527,9 +529,10 @@ export async function runCourseManagement(
               );
               console.log("");
               await sleep(1200);
-            } catch {
+            } catch (error) {
+              const msg = error instanceof Error ? error.message : "unknown error";
               clearScreen();
-              console.log(C.warn("\n  Failed to save course config. Changes were not applied.\n"));
+              console.log(C.warn(`\n  Failed to save course config: ${msg}\n`));
               await sleep(1500);
             }
           }
