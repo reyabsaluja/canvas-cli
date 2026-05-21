@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fetchWithRetry } from "../src/canvas/retry.js";
+import { fetchWithRetry, type RetryOptions } from "../src/canvas/retry.js";
+
+const FAST: RetryOptions = { baseDelayMs: 0 };
 
 function mockFetch(responses: Array<{ status: number; headers?: Record<string, string> } | { error: string }>) {
   let callCount = 0;
@@ -29,7 +31,7 @@ function mockFetch(responses: Array<{ status: number; headers?: Record<string, s
 test("fetchWithRetry succeeds on first try for 200", async () => {
   const mock = mockFetch([{ status: 200 }]);
   try {
-    const res = await fetchWithRetry("http://test.com/api");
+    const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
     assert.equal(res.status, 200);
     assert.equal(mock.callCount, 1);
   } finally {
@@ -40,7 +42,7 @@ test("fetchWithRetry succeeds on first try for 200", async () => {
 test("fetchWithRetry does not retry 401", async () => {
   const mock = mockFetch([{ status: 401 }]);
   try {
-    const res = await fetchWithRetry("http://test.com/api");
+    const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
     assert.equal(res.status, 401);
     assert.equal(mock.callCount, 1);
   } finally {
@@ -51,7 +53,7 @@ test("fetchWithRetry does not retry 401", async () => {
 test("fetchWithRetry does not retry 403", async () => {
   const mock = mockFetch([{ status: 403 }]);
   try {
-    const res = await fetchWithRetry("http://test.com/api");
+    const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
     assert.equal(res.status, 403);
     assert.equal(mock.callCount, 1);
   } finally {
@@ -62,7 +64,7 @@ test("fetchWithRetry does not retry 403", async () => {
 test("fetchWithRetry does not retry 404", async () => {
   const mock = mockFetch([{ status: 404 }]);
   try {
-    const res = await fetchWithRetry("http://test.com/api");
+    const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
     assert.equal(res.status, 404);
     assert.equal(mock.callCount, 1);
   } finally {
@@ -76,7 +78,7 @@ test("fetchWithRetry retries 429 and succeeds", async () => {
     { status: 200 },
   ]);
   try {
-    const res = await fetchWithRetry("http://test.com/api");
+    const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
     assert.equal(res.status, 200);
     assert.equal(mock.callCount, 2);
   } finally {
@@ -90,7 +92,7 @@ test("fetchWithRetry retries 500 and succeeds", async () => {
     { status: 200 },
   ]);
   try {
-    const res = await fetchWithRetry("http://test.com/api");
+    const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
     assert.equal(res.status, 200);
     assert.equal(mock.callCount, 2);
   } finally {
@@ -104,7 +106,7 @@ test("fetchWithRetry retries 502 and succeeds", async () => {
     { status: 200 },
   ]);
   try {
-    const res = await fetchWithRetry("http://test.com/api");
+    const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
     assert.equal(res.status, 200);
     assert.equal(mock.callCount, 2);
   } finally {
@@ -119,7 +121,7 @@ test("fetchWithRetry retries 503 and succeeds", async () => {
     { status: 200 },
   ]);
   try {
-    const res = await fetchWithRetry("http://test.com/api");
+    const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
     assert.equal(res.status, 200);
     assert.equal(mock.callCount, 3);
   } finally {
@@ -135,7 +137,7 @@ test("fetchWithRetry gives up after MAX_RETRIES", async () => {
     { status: 503 },
   ]);
   try {
-    const res = await fetchWithRetry("http://test.com/api");
+    const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
     assert.equal(res.status, 503);
     assert.equal(mock.callCount, 4);
   } finally {
@@ -149,7 +151,7 @@ test("fetchWithRetry retries network errors", async () => {
     { status: 200 },
   ]);
   try {
-    const res = await fetchWithRetry("http://test.com/api");
+    const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
     assert.equal(res.status, 200);
     assert.equal(mock.callCount, 2);
   } finally {
@@ -163,7 +165,7 @@ test("fetchWithRetry retries ECONNRESET", async () => {
     { status: 200 },
   ]);
   try {
-    const res = await fetchWithRetry("http://test.com/api");
+    const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
     assert.equal(res.status, 200);
     assert.equal(mock.callCount, 2);
   } finally {
@@ -177,7 +179,7 @@ test("fetchWithRetry retries ETIMEDOUT", async () => {
     { status: 200 },
   ]);
   try {
-    const res = await fetchWithRetry("http://test.com/api");
+    const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
     assert.equal(res.status, 200);
     assert.equal(mock.callCount, 2);
   } finally {
@@ -189,7 +191,7 @@ test("fetchWithRetry does not retry unknown errors", async () => {
   const mock = mockFetch([{ error: "something completely unexpected" }]);
   try {
     await assert.rejects(
-      () => fetchWithRetry("http://test.com/api"),
+      () => fetchWithRetry("http://test.com/api", undefined, FAST),
       { message: "something completely unexpected" }
     );
     assert.equal(mock.callCount, 1);
@@ -205,7 +207,7 @@ test("fetchWithRetry respects Retry-After header", async () => {
   ]);
   try {
     const start = Date.now();
-    const res = await fetchWithRetry("http://test.com/api");
+    const res = await fetchWithRetry("http://test.com/api", undefined, { baseDelayMs: 5000 });
     const elapsed = Date.now() - start;
     assert.equal(res.status, 200);
     assert.ok(elapsed < 500, "Should respect Retry-After: 0 and not use default backoff");
