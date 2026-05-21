@@ -253,6 +253,44 @@ test("fetchWithRetry aborts sleep when signal is aborted", async () => {
   assert.equal(mock.callCount, 1);
 });
 
+test("fetchWithRetry passes same url and init on every attempt", async () => {
+  const calls: Array<{ url: string | URL | Request; init?: RequestInit }> = [];
+  let callCount = 0;
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url, init });
+    callCount++;
+    if (callCount < 3) {
+      return {
+        ok: false,
+        status: 503,
+        statusText: "Service Unavailable",
+        headers: new Headers(),
+        body: { cancel: async () => {} },
+      } as unknown as Response;
+    }
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: new Headers(),
+      body: { cancel: async () => {} },
+    } as unknown as Response;
+  }) as typeof fetch;
+
+  const customHeaders = { Authorization: "Bearer tok", Accept: "application/json" };
+  const res = await fetchWithRetry(
+    "http://test.com/api/v1/courses",
+    { headers: customHeaders },
+    FAST
+  );
+  assert.equal(res.status, 200);
+  assert.equal(calls.length, 3);
+  for (const call of calls) {
+    assert.equal(call.url, "http://test.com/api/v1/courses");
+    assert.deepEqual(call.init?.headers, customHeaders);
+  }
+});
+
 test("CanvasClient retries 503 during pagination and continues", async () => {
   let callCount = 0;
   globalThis.fetch = (async () => {
