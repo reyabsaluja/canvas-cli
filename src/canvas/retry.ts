@@ -51,7 +51,7 @@ export async function fetchWithRetry(
 ): Promise<Response> {
   const maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
   const baseDelay = options?.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
-  let lastError: unknown;
+  let lastError: unknown = new Error("fetchWithRetry: retries exhausted");
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
