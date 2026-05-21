@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { debugFs, debugCache } from "../debug.js";
 import { extractAttachmentContents } from "./attachment-extraction.js";
 import {
   getExtractedAssignmentPath,
@@ -61,6 +62,7 @@ export async function writeIngestionArtifacts(
   rawDiscussionThreads?: RawDiscussionThread[],
   capturedExternalLinks?: CapturedExternalLink[]
 ): Promise<void> {
+  debugFs("write", coursePath, "writing ingestion artifacts");
   // Ensure directory structure
   await fs.mkdir(path.join(coursePath, "extracted"), { recursive: true });
   await fs.mkdir(path.join(coursePath, "attachments"), { recursive: true });

@@ -4,6 +4,7 @@ import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { debugAI } from "../debug.js";
 
 export type AIProviderName = "anthropic" | "openai" | "google" | "bedrock";
 
@@ -152,6 +153,13 @@ export async function callModel(
   userMessage: string,
   options?: { maxTokens?: number; timeoutMs?: number; abortSignal?: AbortSignal; onTextDelta?: (delta: string) => void }
 ): Promise<string> {
+  debugAI(config.provider, config.model, "callModel starting", {
+    maxTokens: options?.maxTokens ?? null,
+    streaming: Boolean(options?.onTextDelta),
+    promptLength: systemPrompt.length + userMessage.length,
+  });
+  const startTime = Date.now();
+
   const signals: AbortSignal[] = [];
   if (options?.abortSignal) signals.push(options.abortSignal);
   if (options?.timeoutMs) signals.push(AbortSignal.timeout(options.timeoutMs));
@@ -172,6 +180,10 @@ export async function callModel(
       text += delta;
       options.onTextDelta(delta);
     }
+    debugAI(config.provider, config.model, "callModel completed (stream)", {
+      durationMs: Date.now() - startTime,
+      responseLength: text.length,
+    });
     return text;
   }
 
@@ -181,6 +193,12 @@ export async function callModel(
     messages: [{ role: "user", content: userMessage }],
     ...(options?.maxTokens != null ? { maxTokens: options.maxTokens } : {}),
     ...(combinedSignal ? { abortSignal: combinedSignal } : {}),
+  });
+
+  debugAI(config.provider, config.model, "callModel completed", {
+    durationMs: Date.now() - startTime,
+    responseLength: result.text.length,
+    usage: result.usage ?? null,
   });
 
   return result.text;
@@ -217,12 +235,20 @@ export async function generateWithTools(
   onToolCall?: (name: string, input: Record<string, unknown>, result: string) => void,
   maxSteps: number = 10
 ): Promise<GenerateWithToolsResult> {
+  debugAI(config.provider, config.model, "generateWithTools starting", {
+    tools: toolDefs.map((t) => t.name),
+    messageCount: messages.length,
+    maxSteps,
+  });
+  const startTime = Date.now();
+
   const aiTools: Record<string, any> = {};
   for (const t of toolDefs) {
     aiTools[t.name] = tool({
       description: t.description,
       inputSchema: jsonSchema(t.parameters as any),
       execute: async (input: any) => {
+        debugAI(config.provider, config.model, `tool call: ${t.name}`);
         const result = await executeTool(t.name, input);
         onToolCall?.(t.name, input, result);
         return result;
@@ -237,6 +263,12 @@ export async function generateWithTools(
     tools: aiTools,
     stopWhen: stepCountIs(maxSteps),
   } as any);
+
+  debugAI(config.provider, config.model, "generateWithTools completed", {
+    durationMs: Date.now() - startTime,
+    responseLength: result.text.length,
+    usage: result.usage ?? null,
+  });
 
   return {
     text: result.text,
@@ -263,6 +295,12 @@ export async function streamWithTools(
   },
   maxSteps: number = 10
 ): Promise<string> {
+  debugAI(config.provider, config.model, "streamWithTools starting", {
+    tools: toolDefs.map((t) => t.name),
+    messageCount: messages.length,
+    maxSteps,
+  });
+  const streamStartTime = Date.now();
   const STREAM_TEXT_FLUSH_MS = 16;
   const STREAM_TEXT_MAX_HOLD_MS = 40;
   const STREAM_TEXT_FORCE_FLUSH_CHARS = 64;
@@ -414,6 +452,10 @@ export async function streamWithTools(
   if (capturedStreamError && !fullText) {
     throw capturedStreamError;
   }
+  debugAI(config.provider, config.model, "streamWithTools completed", {
+    durationMs: Date.now() - streamStartTime,
+    responseLength: fullText.length,
+  });
   return fullText;
 }
 
