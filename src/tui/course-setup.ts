@@ -412,8 +412,14 @@ export async function runCourseManagement(
       const updated: CourseConfig = {
         courses: [...currentConfig.courses, ...userCourses],
       };
-      await saveCourseConfig(updated);
-      currentConfig = updated;
+      try {
+        await saveCourseConfig(updated);
+        currentConfig = updated;
+      } catch {
+        clearScreen();
+        console.log(C.warn("\n  Failed to save course config. Changes were not applied.\n"));
+        await sleep(1500);
+      }
       continue;
     }
 
@@ -439,8 +445,14 @@ export async function runCourseManagement(
             (c) => String(c.id) !== toRemove
           ),
         };
-        await saveCourseConfig(updated);
-        currentConfig = updated;
+        try {
+          await saveCourseConfig(updated);
+          currentConfig = updated;
+        } catch {
+          clearScreen();
+          console.log(C.warn("\n  Failed to save course config. Changes were not applied.\n"));
+          await sleep(1500);
+        }
       }
       continue;
     }
@@ -499,21 +511,27 @@ export async function runCourseManagement(
                   : c
               ),
             };
-            await saveCourseConfig(updated);
-            currentConfig = updated;
+            try {
+              await saveCourseConfig(updated);
+              currentConfig = updated;
 
-            clearScreen();
-            console.log("");
-            for (const line of buildLogoBanner("Course renamed")) {
-              console.log(line);
+              clearScreen();
+              console.log("");
+              for (const line of buildLogoBanner("Course renamed")) {
+                console.log(line);
+              }
+              console.log("");
+              console.log(
+                "  " + C.success("✓ ") +
+                C.text("Renamed to ") + C.success(newName.trim())
+              );
+              console.log("");
+              await sleep(1200);
+            } catch {
+              clearScreen();
+              console.log(C.warn("\n  Failed to save course config. Changes were not applied.\n"));
+              await sleep(1500);
             }
-            console.log("");
-            console.log(
-              "  " + C.success("✓ ") +
-              C.text("Renamed to ") + C.success(newName.trim())
-            );
-            console.log("");
-            await sleep(1200);
           }
         }
       }
