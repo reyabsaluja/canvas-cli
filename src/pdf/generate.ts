@@ -76,7 +76,13 @@ async function callModelWithRetry(
     );
     if (!isTimeout) throw error;
     if (emittedTextDelta) throw error;
-    await new Promise((r) => setTimeout(r, 1000));
+    await new Promise((r) => {
+      const timer = setTimeout(r, 1000);
+      if (options.abortSignal) {
+        options.abortSignal.addEventListener("abort", () => { clearTimeout(timer); r(undefined); }, { once: true });
+      }
+    });
+    if (options.abortSignal?.aborted) throw error;
     return await callModel(config, systemPrompt, userMessage, options);
   }
 }
