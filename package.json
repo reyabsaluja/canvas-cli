@@ -15,6 +15,7 @@
     "url": "https://github.com/reyabsaluja/canvas-cli/issues"
   },
   "files": [
+    "bin",
     "dist",
     "README.md"
   ],
@@ -34,7 +35,7 @@
     "node": ">=20"
   },
   "bin": {
-    "canvas-cli": "./dist/cli.js"
+    "canvas-cli": "./bin/canvas-cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
