@@ -262,8 +262,9 @@ export class CanvasClient {
   }
 
   /**
-   * Like fetchPaginated but returns [] on auth/access errors instead of throwing.
-   * Used for endpoints that may be blocked for some users/courses.
+   * Like fetchPaginated but returns [] on auth/access/5xx errors instead of throwing.
+   * Used for endpoints that may be blocked or temporarily unavailable — after retries
+   * are exhausted, we prefer partial data over crashing the entire ingest.
    */
   private async fetchPaginatedSafe<T>(url: string): Promise<T[]> {
     try {
