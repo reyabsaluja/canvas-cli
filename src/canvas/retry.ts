@@ -134,5 +134,5 @@ export async function fetchWithRetry(
     }
   }
 
-  throw new Error("unreachable");
+  throw new Error("fetchWithRetry: exhausted retries without returning");
 }
