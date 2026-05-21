@@ -80,11 +80,14 @@ function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
   });
 }
 
+export type SleepFn = (ms: number, signal?: AbortSignal | null) => Promise<void>;
+
 export interface RetryOptions {
   maxRetries?: number;
   baseDelayMs?: number;
   maxDelayMs?: number;
   log?: LogFn;
+  sleepFn?: SleepFn;
 }
 
 export async function fetchWithRetry(
@@ -96,6 +99,7 @@ export async function fetchWithRetry(
   const baseDelay = options?.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
   const maxDelay = options?.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
   const log = options?.log ?? defaultLog;
+  const sleepImpl = options?.sleepFn ?? sleep;
   const signal = init?.signal ?? null;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -115,14 +119,14 @@ export async function fetchWithRetry(
       log(
         `Canvas API returned ${response.status}, retrying in ${Math.round(delay / 1000)}s (retry ${attempt + 1} of ${maxRetries})...`
       );
-      await sleep(delay, signal);
+      await sleepImpl(delay, signal);
     } catch (err) {
       if (isRetriableNetworkError(err) && attempt < maxRetries) {
         const delay = exponentialDelay(attempt, baseDelay, maxDelay);
         log(
           `Network error, retrying in ${Math.round(delay / 1000)}s (retry ${attempt + 1} of ${maxRetries})...`
         );
-        await sleep(delay, signal);
+        await sleepImpl(delay, signal);
         continue;
       }
 
