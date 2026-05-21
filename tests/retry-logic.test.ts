@@ -168,6 +168,46 @@ test("fetchWithRetry retries ETIMEDOUT", async () => {
   assert.equal(mock.callCount, 2);
 });
 
+test("fetchWithRetry retries ECONNREFUSED", async () => {
+  const mock = mockFetch([
+    { error: "connect ECONNREFUSED 127.0.0.1:443" },
+    { status: 200 },
+  ]);
+  const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
+  assert.equal(res.status, 200);
+  assert.equal(mock.callCount, 2);
+});
+
+test("fetchWithRetry retries ECONNREFUSED via cause code", async () => {
+  const mock = mockFetch([
+    { error: "fetch failed", causeCode: "ECONNREFUSED" },
+    { status: 200 },
+  ]);
+  const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
+  assert.equal(res.status, 200);
+  assert.equal(mock.callCount, 2);
+});
+
+test("fetchWithRetry retries UND_ERR_CONNECT_TIMEOUT", async () => {
+  const mock = mockFetch([
+    { error: "fetch failed", causeCode: "UND_ERR_CONNECT_TIMEOUT" },
+    { status: 200 },
+  ]);
+  const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
+  assert.equal(res.status, 200);
+  assert.equal(mock.callCount, 2);
+});
+
+test("fetchWithRetry retries UND_ERR_CONNECT_TIMEOUT in message", async () => {
+  const mock = mockFetch([
+    { error: "UND_ERR_CONNECT_TIMEOUT: connect timeout" },
+    { status: 200 },
+  ]);
+  const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
+  assert.equal(res.status, 200);
+  assert.equal(mock.callCount, 2);
+});
+
 test("fetchWithRetry does not retry unknown errors", async () => {
   const mock = mockFetch([{ error: "something completely unexpected" }]);
   await assert.rejects(
@@ -175,6 +215,19 @@ test("fetchWithRetry does not retry unknown errors", async () => {
     { message: "something completely unexpected" }
   );
   assert.equal(mock.callCount, 1);
+});
+
+test("fetchWithRetry does not retry non-Error throws", async () => {
+  let callCount = 0;
+  globalThis.fetch = (async () => {
+    callCount++;
+    throw "string error";
+  }) as typeof fetch;
+  await assert.rejects(
+    () => fetchWithRetry("http://test.com/api", undefined, FAST),
+    (err: unknown) => err === "string error"
+  );
+  assert.equal(callCount, 1);
 });
 
 test("fetchWithRetry respects Retry-After header over base delay", async () => {
