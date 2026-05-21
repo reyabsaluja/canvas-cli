@@ -716,13 +716,9 @@ export function getRenderedMessageLines(
     case "user": {
       const trimmed = message.content.trim();
       if (trimmed.startsWith("/")) {
-        const cmdBarWidth = Math.max(24, cols - 4);
-        const cmdInnerWidth = Math.max(1, cmdBarWidth - 2);
-        const rendered = wrapLines(trimmed, Math.max(12, cmdInnerWidth)).map((line) => {
-          const visible = visibleWidth(line);
-          const pad = " ".repeat(Math.max(0, cmdInnerWidth - visible));
-          return `  ${commandBg(` ${chalk.white.bold(line)}${pad} `)}`;
-        });
+        const rendered = wrapLines(trimmed, Math.max(12, maxWidth - 2)).map(
+          (line) => `  ${commandBg(chalk.white.bold(line))}`
+        );
         cache.set(cacheKey, ["", ...rendered]);
         return ["", ...rendered];
       }
@@ -735,10 +731,13 @@ export function getRenderedMessageLines(
         const visible = visibleWidth(line);
         return line + " ".repeat(Math.max(0, innerWidth - visible));
       };
-      const rendered: string[] = [];
+      const rendered: string[] = [
+        `  ${bar}${userBoxBg(" ".repeat(innerWidth + 2))}`,
+      ];
       for (const line of wrappedLines) {
         rendered.push(`  ${bar}${userBoxBg(` ${chalk.white(padInner(line))} `)}`);
       }
+      rendered.push(`  ${bar}${userBoxBg(" ".repeat(innerWidth + 2))}`);
       cache.set(cacheKey, ["", ...rendered]);
       return ["", ...rendered];
     }
