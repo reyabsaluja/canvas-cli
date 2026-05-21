@@ -33,9 +33,8 @@ function isPermanentStatus(status: number): boolean {
 
 export const MIN_RETRY_DELAY_MS = 500;
 
-// ±20% jitter to decorrelate concurrent retries
 function addJitter(ms: number): number {
-  return ms * (1 + (Math.random() - 0.5) * 0.4);
+  return ms * Math.random() * 2;
 }
 
 function clampDelay(ms: number, maxDelay: number): number {
