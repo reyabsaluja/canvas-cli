@@ -259,10 +259,37 @@ export function formatLatexErrorSummary(errors: string[]): string {
 
 /** Escape stray underscores inside \\texttt{...} blocks (common model mistake). */
 export function fixCommonLatexIssues(body: string): string {
-  return body.replace(/\\texttt\{([^}]*)\}/g, (_match, content: string) => {
-    const fixed = content.replace(/(?<!\\)_/g, "\\_");
-    return `\\texttt{${fixed}}`;
-  });
+  const marker = "\\texttt{";
+  let result = "";
+  let cursor = 0;
+
+  while (cursor < body.length) {
+    const idx = body.indexOf(marker, cursor);
+    if (idx < 0) {
+      result += body.slice(cursor);
+      break;
+    }
+    result += body.slice(cursor, idx);
+    const contentStart = idx + marker.length;
+    let depth = 1;
+    let i = contentStart;
+    while (i < body.length && depth > 0) {
+      if (body[i] === "{" && body[i - 1] !== "\\") depth++;
+      else if (body[i] === "}" && body[i - 1] !== "\\") depth--;
+      i++;
+    }
+    if (depth !== 0) {
+      result += marker;
+      cursor = contentStart;
+    } else {
+      const content = body.slice(contentStart, i - 1);
+      const fixed = content.replace(/(?<!\\)_/g, "\\_");
+      result += `\\texttt{${fixed}}`;
+      cursor = i;
+    }
+  }
+
+  return result;
 }
 
 export async function compileLatex(
