@@ -209,7 +209,7 @@ test("RadarService.getRadarItems returns recent announcements", async () => {
   assert.ok(items.some((i) => i.title === "Welcome" && i.kind === "announcement"));
 });
 
-test("RadarService.getRadarItems filters old items outside 7-day window", async () => {
+test("RadarService.getRadarItems includes old announcements", async () => {
   const old = makeTopic({
     id: 20,
     title: "Old Post",
@@ -220,7 +220,7 @@ test("RadarService.getRadarItems filters old items outside 7-day window", async 
   const service = new RadarService(client);
 
   const items = await service.getRadarItems(1, "CS 101", "announcements");
-  assert.equal(items.length, 0);
+  assert.ok(items.some((i) => i.title === "Old Post" && i.kind === "announcement"));
 });
 
 test("RadarService.getRadarItems includes unread discussions regardless of age", async () => {
