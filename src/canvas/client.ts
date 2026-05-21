@@ -33,6 +33,10 @@ export class CanvasClient {
     return this._skippedEndpoints;
   }
 
+  resetSkippedEndpoints(): void {
+    this._skippedEndpoints = [];
+  }
+
   private async fetchPaginated<T>(url: string): Promise<T[]> {
     const results: T[] = [];
     let nextUrl: string | null = url;

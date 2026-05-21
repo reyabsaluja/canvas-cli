@@ -52,6 +52,7 @@ export async function fetchCourseContent(
   courseId: number
 ): Promise<RawCourseContent> {
   const warnings: string[] = [];
+  client.resetSkippedEndpoints();
 
   // Fetch course detail (with syllabus) and assignments in parallel
   let courseDetail, assignmentSummaries;
