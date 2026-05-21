@@ -482,8 +482,8 @@ export async function runChatShell<TExit>(
     const transcriptIndex = getActiveTranscriptIndex();
     const inputState = getInputState();
 
-    // Keep viewport stable when user is scrolled up and content grows
-    if (chatScrollOffset > 0 && transcriptIndex.totalLines > lastTranscriptTotalLines) {
+    // Keep viewport stable when user is scrolled up and content grows (skip during streaming to avoid jitter)
+    if (chatScrollOffset > 0 && transcriptIndex.totalLines > lastTranscriptTotalLines && !isProcessing) {
       chatScrollOffset += transcriptIndex.totalLines - lastTranscriptTotalLines;
     }
     lastTranscriptTotalLines = transcriptIndex.totalLines;
@@ -774,7 +774,7 @@ export async function runChatShell<TExit>(
       const abortPromise = new Promise<never>((_, reject) => {
         processingAbort!.signal.addEventListener("abort", () => {
           reject(new DOMException("User interrupted", "AbortError"));
-        });
+        }, { once: true });
       });
 
       try {
@@ -1108,15 +1108,68 @@ export async function runChatShell<TExit>(
           render();
           startSpinner();
 
-          const result = await executeMakePdf({
-            instruction,
-            session,
-            runtime: options.runtime,
-            getLoadedWorkspace: options.getLoadedWorkspace,
-            getCourseCache: options.getCourseCache,
-            abortSignal: processingAbort!.signal,
-            renderMode,
-          });
+          let lastPdfProgressAction = "";
+          let pdfContentDirty = false;
+          let pdfContentTimer: ReturnType<typeof setTimeout> | null = null;
+          const flushPdfContent = () => {
+            if (pdfContentDirty) {
+              pdfContentDirty = false;
+              markTranscriptDirty(messages.length - 1);
+              scheduleRender();
+            }
+            pdfContentTimer = null;
+          };
+          let result;
+          try {
+            result = await executeMakePdf({
+              instruction,
+              session,
+              runtime: options.runtime,
+              getLoadedWorkspace: options.getLoadedWorkspace,
+              getCourseCache: options.getCourseCache,
+              abortSignal: processingAbort!.signal,
+              renderMode,
+              onProgress: (event) => {
+                if (event.action === lastPdfProgressAction) {
+                  const last = messages[messages.length - 1];
+                  if (last?.role === "tool") {
+                    if (event.content != null) {
+                      last.content = event.content;
+                    }
+                    if (event.target !== last.toolTarget) {
+                      last.toolTarget = event.target;
+                    }
+                    pdfContentDirty = true;
+                    if (!pdfContentTimer) {
+                      pdfContentTimer = setTimeout(flushPdfContent, 80);
+                    }
+                    return;
+                  }
+                }
+                if (pdfContentTimer) {
+                  clearTimeout(pdfContentTimer);
+                  pdfContentTimer = null;
+                }
+                pdfContentDirty = false;
+                lastPdfProgressAction = event.action;
+                messages.push({
+                  role: "tool",
+                  content: event.content ?? "",
+                  toolAction: event.action,
+                  toolTarget: event.target,
+                  toolColor: "green",
+                });
+                markTranscriptDirty(messages.length - 1);
+                currentSpinnerLine = buildSpinnerLine();
+                scheduleRender();
+              },
+            });
+          } finally {
+            if (pdfContentTimer) {
+              clearTimeout(pdfContentTimer);
+              flushPdfContent();
+            }
+          }
 
           stopSpinner();
           const elapsed = formatElapsed(Date.now() - processingStartTime);
@@ -1153,7 +1206,7 @@ export async function runChatShell<TExit>(
           openFile(result.pdfPath, (msg) => {
             void appendPersistedMessage({ role: "system", content: msg });
           });
-        } catch (error) {
+        } catch (error: unknown) {
           stopSpinner();
           if (error instanceof DOMException && error.name === "AbortError") {
             await appendPersistedMessage({
@@ -1161,17 +1214,20 @@ export async function runChatShell<TExit>(
               content: "PDF generation cancelled.",
             });
           } else {
+            const msg = error instanceof Error
+              ? error.message
+              : typeof error === "string" ? error : "unknown error";
             await appendPersistedMessage({
               role: "system",
-              content: `PDF generation failed: ${error instanceof Error ? error.message : "unknown error"}`,
+              content: `PDF generation failed: ${msg}`,
             });
           }
+        } finally {
+          isProcessing = false;
+          processingAbort = null;
+          currentSpinnerLine = "";
+          render();
         }
-
-        isProcessing = false;
-        processingAbort = null;
-        currentSpinnerLine = "";
-        render();
       })();
     }
 
@@ -1245,7 +1301,8 @@ export async function runChatShell<TExit>(
 
         if (inputState.activeOpenPartial !== null) {
           if (inputState.openMatches.length > 0) {
-            const selected = inputState.openMatches[openSelected]!;
+            const clampedOpen = Math.min(openSelected, inputState.openMatches.length - 1);
+            const selected = inputState.openMatches[clampedOpen]!;
             await handleCommandInput(
               `/open ${selected.query}`,
               "/open",
@@ -1260,7 +1317,8 @@ export async function runChatShell<TExit>(
             (pin) => pin.label === inputState.activePinPartial
           );
           if (!isComplete && inputState.pinMatches.length > 0) {
-            const selected = inputState.pinMatches[pinSelected]!;
+            const clampedPin = Math.min(pinSelected, inputState.pinMatches.length - 1);
+            const selected = inputState.pinMatches[clampedPin]!;
             inputBuffer = inputBuffer.replace(
               /@\S*$/,
               `@${selected.label}`
@@ -1272,7 +1330,8 @@ export async function runChatShell<TExit>(
         }
 
         if (inputState.slashMatches.length > 0) {
-          inputBuffer = inputState.slashMatches[slashSelected]!.name;
+          const clampedSlash = Math.min(slashSelected, inputState.slashMatches.length - 1);
+          inputBuffer = inputState.slashMatches[clampedSlash]!.name;
           showSlashMenu = false;
         }
 
@@ -1490,11 +1549,7 @@ export async function runChatShell<TExit>(
           continue;
         }
         flushTextBuffer();
-        if (isProcessing) {
-          void handleKey(char);
-        } else {
-          keyQueue.enqueue(() => handleKey(char));
-        }
+        keyQueue.enqueue(() => handleKey(char));
       }
 
       flushTextBuffer();
@@ -1538,11 +1593,7 @@ export async function runChatShell<TExit>(
                 render();
               }
             };
-            if (isProcessing) {
-              void handleMouse();
-            } else {
-              keyQueue.enqueue(handleMouse);
-            }
+            keyQueue.enqueue(handleMouse);
             input = input.slice(mouseMatch[0].length);
             continue;
           }
@@ -1550,11 +1601,7 @@ export async function runChatShell<TExit>(
           const match = input.match(/^\x1b\[[\d;]*[~A-Za-z]/);
           if (match) {
             const key = match[0];
-            if (isProcessing) {
-              void handleKey(key);
-            } else {
-              keyQueue.enqueue(() => handleKey(key));
-            }
+            keyQueue.enqueue(() => handleKey(key));
             input = input.slice(match[0].length);
             continue;
           }
@@ -1565,21 +1612,13 @@ export async function runChatShell<TExit>(
 
         if (input[1] === "O" && input.length >= 3) {
           const key = input.slice(0, 3);
-          if (isProcessing) {
-            void handleKey(key);
-          } else {
-            keyQueue.enqueue(() => handleKey(key));
-          }
+          keyQueue.enqueue(() => handleKey(key));
           input = input.slice(3);
           continue;
         }
 
         const key = input.slice(0, 2);
-        if (isProcessing) {
-          void handleKey(key);
-        } else {
-          keyQueue.enqueue(() => handleKey(key));
-        }
+        keyQueue.enqueue(() => handleKey(key));
         input = input.slice(2);
       }
     }

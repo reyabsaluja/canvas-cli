@@ -1,5 +1,5 @@
 import { getAIConfig } from "../ai/provider.js";
-import { generatePdfExport, type PdfExportResult } from "../pdf/generate.js";
+import { generatePdfExport, type PdfExportResult, type PdfProgressCallback } from "../pdf/generate.js";
 import type { PdfContextInput } from "../pdf/context.js";
 import type { LoadedWorkspace } from "../ask/types.js";
 import type { CourseCache } from "../enrich/cache-loader.js";
@@ -14,6 +14,7 @@ export interface MakePdfRequest {
   getCourseCache?: () => CourseCache | null;
   abortSignal?: AbortSignal;
   renderMode?: PdfRenderMode;
+  onProgress?: PdfProgressCallback;
 }
 
 const MAKE_PDF_PATTERN = /\/(?:make-pdf|pdf)\b/i;
@@ -59,6 +60,9 @@ export async function executeMakePdf(
 
   return generatePdfExport(
     input,
-    request.renderMode ? { renderMode: request.renderMode } : undefined
+    {
+      renderMode: request.renderMode,
+      onProgress: request.onProgress,
+    }
   );
 }
