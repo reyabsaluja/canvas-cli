@@ -1,5 +1,3 @@
-import { existsSync } from "node:fs";
-import { cpus, totalmem } from "node:os";
 import {
   CANVAS_TEXT,
   C,
@@ -76,8 +74,11 @@ function renderInfoBox(
       ? `${displayCourses.length} active · ${availability.unavailable.length} unavailable`
       : `${displayCourses.length} active`;
   const workspaceCount = `${recent.length} active`;
-  const systemSummary = formatSystemSummary();
-  const toolAgentSummary = "9 tools · 2 agents";
+  const systemSummary = formatSyncAge(services.syncedAt);
+  const unreadCount = services.unreadAnnouncementCount;
+  const toolAgentSummary = unreadCount > 0
+    ? `${unreadCount} unread announcement${unreadCount === 1 ? "" : "s"}`
+    : "no unread announcements";
 
   const boxInner = Math.min(termCols - 5, 98);
 
@@ -175,7 +176,7 @@ function renderInfoBox(
   pushLeft(formatInfoRow("courses", courseCount), "kvMuted");
   pushLeft(formatInfoRow("workspaces", workspaceCount), "kvMuted");
   padLeftToRow(systemRow);
-  pushLeft(formatInfoRow("system", systemSummary), "kvMuted");
+  pushLeft(formatInfoRow("status", systemSummary), "kvMuted");
   padLeftToRow(openRow);
   pushLeft(toolAgentSummary, "dim");
 
@@ -306,24 +307,13 @@ function wrapWords(text: string, maxLen: number): string[] {
   return lines;
 }
 
-function formatSystemSummary(): string {
-  const memoryGb = Math.round(totalmem() / 1024 ** 3);
-  const runtime = detectRuntimeLabel();
-  return `${cpus().length} cores · ${memoryGb}GB · ${runtime}`;
-}
-
-function detectRuntimeLabel(): string {
-  if (
-    existsSync("/.dockerenv") ||
-    process.env.CONTAINER ||
-    process.env.DOCKER_CONTAINER
-  ) {
-    return "docker";
-  }
-
-  if (process.platform === "darwin") return "macOS";
-  if (process.platform === "win32") return "windows";
-  return process.platform;
+function formatSyncAge(syncedAt: number): string {
+  const elapsed = Math.max(0, Date.now() - syncedAt);
+  if (elapsed < 60_000) return "synced just now";
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 60) return `synced ${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return `synced ${hours}h ago`;
 }
 
 type InfoBoxPalette = {
