@@ -1,3 +1,10 @@
+export class CanvasApiError extends Error {
+  constructor(public readonly status: number, statusText: string) {
+    super(`Canvas API error: ${status} ${statusText}`);
+    this.name = "CanvasApiError";
+  }
+}
+
 export const DEFAULT_MAX_RETRIES = 3;
 export const DEFAULT_BASE_DELAY_MS = 1000;
 export const DEFAULT_MAX_DELAY_MS = 30_000;

@@ -1,5 +1,5 @@
 import type { Config } from "../config/env.js";
-import { fetchWithRetry, type RetryOptions } from "./retry.js";
+import { CanvasApiError, fetchWithRetry, type RetryOptions } from "./retry.js";
 import type {
   CanvasAssignment,
   CanvasAssignmentDetail,
@@ -34,15 +34,8 @@ export class CanvasClient {
     while (nextUrl) {
       const response = await fetchWithRetry(nextUrl, { headers: this.headers }, this.retryOptions);
 
-      if (response.status === 401) {
-        throw new Error(
-          "Canvas API returned 401 Unauthorized. Check your CANVAS_ACCESS_TOKEN."
-        );
-      }
       if (!response.ok) {
-        throw new Error(
-          `Canvas API error: ${response.status} ${response.statusText}`
-        );
+        throw new CanvasApiError(response.status, response.statusText);
       }
 
       const data = (await response.json()) as T[];
@@ -57,18 +50,8 @@ export class CanvasClient {
   private async fetchOne<T>(url: string): Promise<T> {
     const response = await fetchWithRetry(url, { headers: this.headers }, this.retryOptions);
 
-    if (response.status === 401) {
-      throw new Error(
-        "Canvas API returned 401 Unauthorized. Check your CANVAS_ACCESS_TOKEN."
-      );
-    }
-    if (response.status === 404) {
-      throw new Error("Assignment not found on Canvas.");
-    }
     if (!response.ok) {
-      throw new Error(
-        `Canvas API error: ${response.status} ${response.statusText}`
-      );
+      throw new CanvasApiError(response.status, response.statusText);
     }
 
     return (await response.json()) as T;
@@ -270,23 +253,14 @@ export class CanvasClient {
     try {
       return await this.fetchPaginated<T>(url);
     } catch (err) {
-      if (
-        err instanceof Error &&
-        (err.message.includes("401") ||
-          err.message.includes("403") ||
-          err.message.includes("404") ||
-          err.message.includes("500") ||
-          err.message.includes("502") ||
-          err.message.includes("503") ||
-          err.message.includes("504") ||
-          err.message.includes("unauthorized") ||
-          err.message.includes("disabled"))
-      ) {
-        const is5xx = /\b5\d{2}\b/.test(err.message);
-        if (is5xx) {
-          console.error(`Warning: Canvas API returned a server error after retries, skipping endpoint: ${err.message}`);
+      if (err instanceof CanvasApiError) {
+        const s = err.status;
+        if (s === 401 || s === 403 || s === 404 || (s >= 500 && s < 600)) {
+          if (s >= 500) {
+            console.error(`Warning: Canvas API returned a server error after retries, skipping endpoint: ${err.message}`);
+          }
+          return [];
         }
-        return [];
       }
       throw err;
     }
