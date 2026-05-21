@@ -40,7 +40,7 @@ export function renderGlobalBanner(
       ["/manage-courses", "add, remove, or rename the courses shown in canvas-cli"],
       ["/recent", "reopen a recent course or workspace session"],
       ["/open", "jump directly to a course or recent workspace by name"],
-      ["/radar", "show recent announcements and discussions across courses"],
+      ["/announcements", "browse course announcements"],
       ["/clear", "clear this chat and reset the current context"],
       ["/quit", "exit canvas-cli"],
       ["/help", "full command list for the current scope"],

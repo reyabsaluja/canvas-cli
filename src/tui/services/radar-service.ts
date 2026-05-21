@@ -67,6 +67,28 @@ export class RadarService {
     return query ? filterByQuery(items, query) : items;
   }
 
+  async getAllAnnouncements(
+    courseId: number,
+    courseName: string
+  ): Promise<RadarItem[]> {
+    const announcements = await this.client.getAnnouncementsSafe(courseId);
+    return sortRadarItems(
+      announcements.map((a) => normalizeTopicToRadarItem(a, courseId, courseName))
+    );
+  }
+
+  async getAllAnnouncementsMultiCourse(
+    courses: Array<{ id: number; name: string }>
+  ): Promise<RadarItem[]> {
+    if (courses.length === 0) return [];
+
+    const results = await Promise.all(
+      courses.map((course) => this.getAllAnnouncements(course.id, course.name))
+    );
+
+    return sortRadarItems(results.flat());
+  }
+
   async getRadarItemsMultiCourse(
     courses: Array<{ id: number; name: string }>,
     filter: RadarFilter,

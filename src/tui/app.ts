@@ -1,5 +1,6 @@
 import { clearScreen, hideCursor, showCursor, C } from "./screen.js";
 import {
+  getDisplayCourses,
   invalidateAssignmentCache,
   initServices,
   type AppServices,
@@ -23,6 +24,7 @@ import {
   refreshWorkspaceScope,
 } from "./app-navigation.js";
 import { renderSplashLoading } from "./app-banner.js";
+import { showAnnouncementsView } from "./announcements-view.js";
 
 export async function launchApp(): Promise<void> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -158,6 +160,18 @@ export async function resolveShellResult(
 
   if (result.type === "recent-picker") {
     return (await pickRecentScope(services)) ?? runtimeScope;
+  }
+
+  if (result.type === "announcements") {
+    const courses = result.courseId != null && result.courseName
+      ? [{ id: result.courseId, name: result.courseName }]
+      : getDisplayCourses(services).map((c) => ({ id: c.id, name: c.name }));
+    const isGlobal = result.courseId == null;
+    const items = isGlobal
+      ? await services.radar.getAllAnnouncementsMultiCourse(courses)
+      : await services.radar.getAllAnnouncements(result.courseId!, result.courseName!);
+    await showAnnouncementsView(items, isGlobal ? "global" : "course", result.courseName, services.radar);
+    return runtimeScope;
   }
 
   if (result.type === "assignment-picker") {

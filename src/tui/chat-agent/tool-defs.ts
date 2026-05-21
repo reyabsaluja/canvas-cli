@@ -120,10 +120,10 @@ const OPEN_LECTURE_TOOL: ToolDefinition = {
   },
 };
 
-const LIST_RADAR_TOOL: ToolDefinition = {
-  name: "list_radar",
+const LIST_ANNOUNCEMENTS_TOOL: ToolDefinition = {
+  name: "list_announcements",
   description:
-    "List recent announcements and discussion topics for this course. Optionally filter by type and search by keyword. Use when the student asks about announcements, discussions, posts, or what's new in the course.",
+    "List announcements and discussion topics for this course. Optionally filter by type and search by keyword. Use when the student asks about announcements, discussions, posts, or what's new in the course.",
   parameters: {
     type: "object",
     properties: {
@@ -144,7 +144,7 @@ const LIST_RADAR_TOOL: ToolDefinition = {
 const READ_THREAD_TOOL: ToolDefinition = {
   name: "read_thread",
   description:
-    "Read a full discussion or announcement thread including all replies. Identify the thread by numeric topic ID or partial title. Use after list_radar surfaces a candidate, or when the student references a specific post or announcement.",
+    "Read a full discussion or announcement thread including all replies. Identify the thread by numeric topic ID or partial title. Use after list_announcements surfaces a candidate, or when the student references a specific post or announcement.",
   parameters: {
     type: "object",
     properties: {
@@ -191,7 +191,7 @@ export function buildChatTools(
   }
 
   if (ctx.radar && ctx.courseId != null) {
-    tools.push(LIST_RADAR_TOOL);
+    tools.push(LIST_ANNOUNCEMENTS_TOOL);
     tools.push(READ_THREAD_TOOL);
   }
 
@@ -243,8 +243,8 @@ export function mapToolCall(
         target: (input.query as string) ?? "lecture",
         color: "green",
       };
-    case "list_radar":
-      return { action: "list", target: "radar", color: "green" };
+    case "list_announcements":
+      return { action: "list", target: "announcements", color: "green" };
     case "read_thread":
       return {
         action: "read",

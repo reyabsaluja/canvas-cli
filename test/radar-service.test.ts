@@ -648,7 +648,7 @@ test("resolveTopicByPartialTitle returns ambiguous from API search with multiple
 });
 
 // ---------------------------------------------------------------------------
-// Command-level: /radar and /thread via resolveAndRenderThread
+// Command-level: /announcements and /thread via resolveAndRenderThread
 // ---------------------------------------------------------------------------
 
 import { resolveAndRenderThread } from "../src/tui/radar-commands.js";
@@ -658,9 +658,9 @@ function makeServices(radarService: RadarService): AppServices {
   return { radar: radarService } as unknown as AppServices;
 }
 
-// -- /radar (tested via getRadarItems / getRadarItemsMultiCourse) --
+// -- /announcements (tested via getRadarItems / getRadarItemsMultiCourse) --
 
-test("/radar global scope: merges items from multiple courses", async () => {
+test("/announcements global scope: merges items from multiple courses", async () => {
   const now = new Date().toISOString();
   const client = stubClient({});
   client.getAnnouncementsForContexts = async () => [
@@ -694,7 +694,7 @@ test("/radar global scope: merges items from multiple courses", async () => {
   assert.ok(titles.includes("Math Announcement"));
 });
 
-test("/radar course scope: returns only that course's items", async () => {
+test("/announcements course scope: returns only that course's items", async () => {
   const now = new Date().toISOString();
   const client = stubClient({
     announcements: [makeTopic({ id: 10, title: "Only Mine", is_announcement: true, posted_at: now })],
@@ -707,7 +707,7 @@ test("/radar course scope: returns only that course's items", async () => {
   assert.equal(items[0]!.courseName, "BIO 300");
 });
 
-test("/radar discussions filter excludes announcements", async () => {
+test("/announcements discussions filter excludes announcements", async () => {
   const now = new Date().toISOString();
   const client = stubClient({
     announcements: [makeTopic({ id: 10, title: "Ann", is_announcement: true, posted_at: now })],
@@ -719,7 +719,7 @@ test("/radar discussions filter excludes announcements", async () => {
   assert.ok(items.every((i) => i.kind === "discussion"));
 });
 
-test("/radar announcements filter excludes discussions", async () => {
+test("/announcements announcements filter excludes discussions", async () => {
   const now = new Date().toISOString();
   const client = stubClient({
     announcements: [makeTopic({ id: 10, title: "Ann", is_announcement: true, posted_at: now })],
