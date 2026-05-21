@@ -9,7 +9,8 @@ import {
 import { showPicker } from "./picker.js";
 import { C, clearScreen } from "./screen.js";
 
-export type PdfRenderMode = "latex" | "basic";
+import type { PdfRenderMode } from "../pdf/generate.js";
+export type { PdfRenderMode } from "../pdf/generate.js";
 
 export interface PdfRenderModeInputControls {
   pauseInput: () => void;
