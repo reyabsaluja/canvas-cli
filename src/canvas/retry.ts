@@ -11,10 +11,6 @@ const RETRIABLE_NETWORK_ERRORS = [
   "UND_ERR_CONNECT_TIMEOUT",
 ];
 
-function isRetriableStatus(status: number): boolean {
-  return RETRIABLE_STATUS_CODES.has(status);
-}
-
 function isRetriableNetworkError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   return RETRIABLE_NETWORK_ERRORS.some((code) => err.message.includes(code));
@@ -61,7 +57,7 @@ export async function fetchWithRetry(
         return response;
       }
 
-      if (isRetriableStatus(response.status) && attempt < maxRetries) {
+      if (RETRIABLE_STATUS_CODES.has(response.status) && attempt < maxRetries) {
         const delay = getRetryDelay(response, attempt + 1, baseDelay);
         await response.body?.cancel();
         console.error(
