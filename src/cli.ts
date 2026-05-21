@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { Command } from "commander";
 import { coursesCommand } from "./commands/courses.js";
 import { assignmentsCommand } from "./commands/assignments.js";
@@ -12,14 +10,12 @@ import { ingestCourseCommand } from "./commands/ingest-course.js";
 import { workCommand } from "./commands/work.js";
 import { askCommand } from "./commands/ask.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const pkg: unknown = JSON.parse(
-  readFileSync(resolve(__dirname, "../package.json"), "utf-8"),
-);
-const version =
-  typeof pkg === "object" && pkg !== null && "version" in pkg && typeof (pkg as Record<string, unknown>).version === "string"
-    ? (pkg as Record<string, unknown>).version as string
-    : "0.0.0";
+let version = "0.0.0";
+try {
+  const require = createRequire(import.meta.url);
+  const pkg: { version: string } = require("../package.json");
+  version = pkg.version;
+} catch {}
 
 const program = new Command();
 
