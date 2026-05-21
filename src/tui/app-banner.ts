@@ -74,11 +74,8 @@ function renderInfoBox(
       ? `${displayCourses.length} active · ${availability.unavailable.length} unavailable`
       : `${displayCourses.length} active`;
   const workspaceCount = `${recent.length} active`;
-  const systemSummary = formatSyncAge(services.syncedAt);
-  const unreadCount = services.unreadAnnouncementCount;
-  const toolAgentSummary = unreadCount > 0
-    ? `${unreadCount} unread announcement${unreadCount === 1 ? "" : "s"}`
-    : "no unread announcements";
+  const systemSummary = formatAssignmentSummary(services);
+  const toolAgentSummary = `${displayCourses.length} course${displayCourses.length === 1 ? "" : "s"} connected`;
 
   const boxInner = Math.min(termCols - 5, 98);
 
@@ -307,13 +304,23 @@ function wrapWords(text: string, maxLen: number): string[] {
   return lines;
 }
 
-function formatSyncAge(syncedAt: number): string {
-  const elapsed = Math.max(0, Date.now() - syncedAt);
-  if (elapsed < 60_000) return "synced just now";
-  const minutes = Math.floor(elapsed / 60_000);
-  if (minutes < 60) return `synced ${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  return `synced ${hours}h ago`;
+function formatAssignmentSummary(services: AppServices): string {
+  let total = 0;
+  let upcoming = 0;
+  const now = Date.now();
+  const oneWeek = 7 * 24 * 60 * 60 * 1000;
+
+  for (const [, assignments] of services.resolvedAssignments) {
+    total += assignments.length;
+    upcoming += assignments.filter(
+      (a) => a.dueAt && a.dueAt.getTime() > now && a.dueAt.getTime() - now < oneWeek
+    ).length;
+  }
+
+  if (total === 0) return "synced just now";
+  return upcoming > 0
+    ? `${total} assignments · ${upcoming} upcoming`
+    : `${total} assignments`;
 }
 
 type InfoBoxPalette = {

@@ -26,8 +26,7 @@ export interface AppServices {
     { courseName: string; assignmentsPromise: Promise<Assignment[]> }
   >;
   radar: RadarService;
-  syncedAt: number;
-  unreadAnnouncementCount: number;
+  resolvedAssignments: Map<number, Assignment[]>;
 }
 
 export interface WorkspaceOpenResult {

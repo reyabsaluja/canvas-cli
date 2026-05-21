@@ -17,18 +17,6 @@ export async function initServices(): Promise<AppServices> {
     .map(normalizeCourse)
     .filter((course) => course.isCurrent && (course.name.trim() || course.courseCode.trim()));
 
-  const syncedAt = Date.now();
-
-  let unreadAnnouncementCount = 0;
-  try {
-    const allAnnouncements = await Promise.all(
-      allCourses.map((c) => client.getAnnouncementsSafe(c.id))
-    );
-    unreadAnnouncementCount = allAnnouncements
-      .flat()
-      .filter((a) => a.read_state === "unread" || a.unread_count > 0).length;
-  } catch {}
-
   return {
     config,
     client,
@@ -38,8 +26,7 @@ export async function initServices(): Promise<AppServices> {
     courseConfig: null,
     assignmentCache: new Map(),
     radar: new RadarService(client),
-    syncedAt,
-    unreadAnnouncementCount,
+    resolvedAssignments: new Map(),
   };
 }
 
@@ -113,7 +100,9 @@ export async function fetchAssignments(
         normalizeAssignment(assignment, courseName)
       );
       const filtered = filterRelevantAssignments(normalized, { all: true });
-      return sortByUrgency(filtered);
+      const sorted = sortByUrgency(filtered);
+      services.resolvedAssignments.set(courseId, sorted);
+      return sorted;
     })
     .catch((error) => {
       const current = services.assignmentCache.get(courseId);
