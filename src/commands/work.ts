@@ -85,17 +85,16 @@ export async function workCommand(
     process.exit(1);
   }
 
-  const { workup, result } = lifecycle;
-  const isPartial = "partial" in lifecycle && (lifecycle as any).partial === true;
+  const { workup, result, partial, aiErrorMessage } = lifecycle;
 
   // Phase 6: Render summary
   const relativePath = path.relative(process.cwd(), result.workspacePath);
 
   console.log("");
-  if (isPartial) {
+  if (partial) {
     console.log(chalk.bold.yellow("Workspace ready (partial — AI failed mid-investigation)"));
-    if ((lifecycle as any).aiErrorMessage) {
-      console.log(chalk.yellow(`  ${(lifecycle as any).aiErrorMessage}`));
+    if (aiErrorMessage) {
+      console.log(chalk.yellow(`  ${aiErrorMessage}`));
     }
   } else {
     console.log(chalk.bold.green("Workspace ready"));
