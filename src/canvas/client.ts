@@ -1,5 +1,5 @@
 import type { Config } from "../config/env.js";
-import { fetchWithRetry } from "./retry.js";
+import { fetchWithRetry, type RetryOptions } from "./retry.js";
 import type {
   CanvasAssignment,
   CanvasAssignmentDetail,
@@ -16,13 +16,15 @@ import type {
 export class CanvasClient {
   private baseUrl: string;
   private headers: Record<string, string>;
+  private retryOptions?: RetryOptions;
 
-  constructor(config: Config) {
+  constructor(config: Config, retryOptions?: RetryOptions) {
     this.baseUrl = config.baseUrl;
     this.headers = {
       Authorization: `Bearer ${config.accessToken}`,
       Accept: "application/json",
     };
+    this.retryOptions = retryOptions;
   }
 
   private async fetchPaginated<T>(url: string): Promise<T[]> {
@@ -30,7 +32,7 @@ export class CanvasClient {
     let nextUrl: string | null = url;
 
     while (nextUrl) {
-      const response = await fetchWithRetry(nextUrl, { headers: this.headers });
+      const response = await fetchWithRetry(nextUrl, { headers: this.headers }, this.retryOptions);
 
       if (response.status === 401) {
         throw new Error(
@@ -53,7 +55,7 @@ export class CanvasClient {
   }
 
   private async fetchOne<T>(url: string): Promise<T> {
-    const response = await fetchWithRetry(url, { headers: this.headers });
+    const response = await fetchWithRetry(url, { headers: this.headers }, this.retryOptions);
 
     if (response.status === 401) {
       throw new Error(
@@ -189,7 +191,7 @@ export class CanvasClient {
       const response = await fetchWithRetry(downloadUrl, {
         headers: this.headers,
         redirect: "follow",
-      });
+      }, this.retryOptions);
       if (!response.ok) return null;
       return Buffer.from(await response.arrayBuffer());
     } catch {
