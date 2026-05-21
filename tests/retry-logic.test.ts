@@ -250,7 +250,7 @@ test("fetchWithRetry respects Retry-After header over base delay", async () => {
   }
 });
 
-test("fetchWithRetry clamps past-date Retry-After to minimum delay", async () => {
+test("fetchWithRetry treats past-date Retry-After as immediate retry", async () => {
   const pastDate = new Date(Date.now() - 60000).toUTCString();
   const mock = mockFetch([
     { status: 429, headers: { "retry-after": pastDate } },
@@ -266,8 +266,28 @@ test("fetchWithRetry clamps past-date Retry-After to minimum delay", async () =>
     const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
     assert.equal(res.status, 200);
     assert.equal(mock.callCount, 2);
-    assert.ok(delays[0] >= 500, `Past-date Retry-After should be clamped to MIN_RETRY_DELAY_MS (500ms), got ${delays[0]}ms`);
-    assert.ok(delays[0] <= 1000, `Should not exceed 1000ms, got ${delays[0]}ms`);
+    assert.equal(delays[0], 0, "Past-date Retry-After should result in immediate retry (0ms)");
+  } finally {
+    globalThis.setTimeout = origSetTimeout;
+  }
+});
+
+test("fetchWithRetry treats Retry-After: 0 as immediate retry", async () => {
+  const mock = mockFetch([
+    { status: 429, headers: { "retry-after": "0" } },
+    { status: 200 },
+  ]);
+  const delays: number[] = [];
+  const origSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = ((fn: () => void, ms?: number) => {
+    delays.push(ms ?? 0);
+    return origSetTimeout(fn, 0);
+  }) as typeof setTimeout;
+  try {
+    const res = await fetchWithRetry("http://test.com/api", undefined, FAST);
+    assert.equal(res.status, 200);
+    assert.equal(mock.callCount, 2);
+    assert.equal(delays[0], 0, "Retry-After: 0 should result in immediate retry (0ms)");
   } finally {
     globalThis.setTimeout = origSetTimeout;
   }

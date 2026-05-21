@@ -47,9 +47,16 @@ function getRetryDelay(response: Response, attempt: number, baseDelay: number, m
   const retryAfter = response.headers.get("retry-after");
   if (retryAfter) {
     const seconds = Number(retryAfter);
-    if (!Number.isNaN(seconds)) return clampDelay(seconds * 1000, maxDelay);
+    if (!Number.isNaN(seconds)) {
+      if (seconds === 0) return 0;
+      return clampDelay(seconds * 1000, maxDelay);
+    }
     const date = Date.parse(retryAfter);
-    if (!Number.isNaN(date)) return clampDelay(date - Date.now(), maxDelay);
+    if (!Number.isNaN(date)) {
+      const ms = date - Date.now();
+      if (ms <= 0) return 0;
+      return clampDelay(ms, maxDelay);
+    }
   }
   return exponentialDelay(attempt, baseDelay, maxDelay);
 }
