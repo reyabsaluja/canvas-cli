@@ -10,6 +10,8 @@
 npm install -g @reyabsaluja/canvas-cli
 # or
 bun add -g @reyabsaluja/canvas-cli
+# or
+pnpm add -g @reyabsaluja/canvas-cli
 ```
 
 Or run directly:
