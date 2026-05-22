@@ -338,16 +338,6 @@ export class CanvasClient {
         }
         return [];
       }
-      if (err instanceof CanvasApiError) {
-        const s = err.status;
-        if (s === 401 || s === 403 || s === 404 || (s >= 500 && s < 600)) {
-          this._skippedEndpoints.push(url);
-          if (s >= 500) {
-            console.error(`Warning: Canvas API returned ${s} after retries, skipping: ${url}`);
-          }
-          return [];
-        }
-      }
       throw err;
     }
   }
