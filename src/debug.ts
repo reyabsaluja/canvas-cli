@@ -106,7 +106,7 @@ export function debug(category: DebugCategory, message: string, data?: Record<st
 }
 
 const SENSITIVE_KEY_PATTERNS = [
-  /token/i,
+  /token$/i,
   /api[_-]?key/i,
   /secret/i,
   /password/i,
