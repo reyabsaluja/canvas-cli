@@ -32,7 +32,7 @@ bun run check
 
 Tests are invoked through Bun scripts but still use Node's `node:test` runner because the suite uses nested subtests that Bun's native test runner does not yet support.
 
-The published CLI still targets Node through `dist/cli.js` and the `canvas-cli` package `bin`, so users can install released versions with npm even though this repository uses Bun for development.
+The published CLI still targets Node through `dist/cli.js` and the `@reyabsaluja/canvas-cli` package `bin`, so users can install released versions with `npm install -g @reyabsaluja/canvas-cli` even though this repository uses Bun for development.
 
 ## Local State
 
