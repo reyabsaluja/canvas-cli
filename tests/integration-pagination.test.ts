@@ -162,7 +162,7 @@ test("integration: pagination handling", async (t) => {
     await stopServer(server);
   });
 
-  await t.test("terminates pagination when next link repeats the same URL", async () => {
+  await t.test("terminates pagination when next link repeats the same URL", { timeout: 5000 }, async () => {
     let requestCount = 0;
     const maxRequests = 3;
     const loopServer = http.createServer((req, res) => {
