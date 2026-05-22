@@ -141,6 +141,18 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
       awsSecretKey = await promptSecret(`  ${C.dim("AWS Secret Access Key:")} `);
       console.log(`\n  ${C.dim("Enter the full Bedrock model ID:")}`);
       aiModel = await prompt(`  ${C.dim("→")} `);
+
+      // Effort level for Bedrock (Anthropic models)
+      console.log();
+      const effort = await horizontalPicker("Effort", [
+        { label: "low", value: "low" },
+        { label: "medium", value: "medium" },
+        { label: "high", value: "high" },
+        { label: "max", value: "max" },
+      ]);
+      if (effort) {
+        aiEffort = effort;
+      }
     } else {
       const keyName = getAiKeyName(aiProvider);
       if (keyName) {
