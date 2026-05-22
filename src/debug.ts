@@ -44,32 +44,35 @@ function maskSecrets(message: string): string {
   return masked;
 }
 
-export function maskUrl(url: string): string {
-  try {
-    const qIndex = url.indexOf("?");
-    if (qIndex === -1) return url;
+const SENSITIVE_URL_PARAM_PATTERNS = [
+  /token$/i,
+  /^access/i,
+  /api[_-]?key/i,
+  /secret/i,
+  /password/i,
+  /credential/i,
+];
 
-    const base = url.slice(0, qIndex);
-    const queryString = url.slice(qIndex + 1);
-    const masked = queryString.replace(
-      /([^&=]+)=([^&]*)/g,
-      (match, key: string, _value: string) => {
-        const lower = key.toLowerCase();
-        if (
-          lower.includes("token") ||
-          lower.includes("key") ||
-          lower.includes("secret") ||
-          lower.includes("access")
-        ) {
-          return `${key}=***`;
-        }
-        return match;
+function isSensitiveParam(key: string): boolean {
+  return SENSITIVE_URL_PARAM_PATTERNS.some((p) => p.test(key));
+}
+
+export function maskUrl(url: string): string {
+  const qIndex = url.indexOf("?");
+  if (qIndex === -1) return url;
+
+  const base = url.slice(0, qIndex);
+  const queryString = url.slice(qIndex + 1);
+  const masked = queryString.replace(
+    /([^&=]+)=([^&]*)/g,
+    (match, key: string, _value: string) => {
+      if (isSensitiveParam(key)) {
+        return `${key}=***`;
       }
-    );
-    return `${base}?${masked}`;
-  } catch {
-    return maskSecrets(url);
-  }
+      return match;
+    }
+  );
+  return `${base}?${masked}`;
 }
 
 export function maskEnvForDebug(): Record<string, string> {

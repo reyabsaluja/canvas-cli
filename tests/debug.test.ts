@@ -54,6 +54,14 @@ test("debug module", async (t) => {
     assert.strictEqual(masked, url);
   });
 
+  await t.test("maskUrl does not over-mask non-sensitive key params", () => {
+    const url = "https://canvas.example.com/api/v1/items?sort_key=name&primary_key=123&api_key=secret";
+    const masked = debugModule.maskUrl(url);
+    assert.ok(masked.includes("sort_key=name"), "sort_key should not be masked");
+    assert.ok(masked.includes("primary_key=123"), "primary_key should not be masked");
+    assert.ok(masked.includes("api_key=***"), "api_key should be masked");
+  });
+
   await t.test("maskUrl handles invalid URLs gracefully", () => {
     const result = debugModule.maskUrl("not-a-url");
     assert.strictEqual(typeof result, "string");
