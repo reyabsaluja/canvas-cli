@@ -115,7 +115,7 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
       }
       baseUrl = normalizeUrl(input);
       if (!baseUrl) {
-        console.error(`\n  ${C.error("✗")} ${C.text("Canvas URL is required.")}\n`);
+        console.error(`\n  ${C.error("✗")} ${C.text("Invalid or missing Canvas URL. HTTPS is required (except localhost).")}\n`);
         continue;
       }
       apiBaseUrl = `${baseUrl}/api/v1`;
@@ -391,6 +391,7 @@ function normalizeUrl(url: string): string {
   try {
     const parsed = new URL(url);
     if (!parsed.hostname.includes(".") && parsed.hostname !== "localhost") return "";
+    if (parsed.protocol === "http:" && parsed.hostname !== "localhost") return "";
   } catch {
     return "";
   }
@@ -555,17 +556,19 @@ function promptSecret(question: string): Promise<string | typeof ESCAPED> {
 
 function openBrowser(url: string): void {
   try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return;
     let cmd: string;
     let args: string[];
     if (platform() === "darwin") {
       cmd = "open";
-      args = [url];
+      args = [parsed.href];
     } else if (platform() === "linux") {
       cmd = "xdg-open";
-      args = [url];
+      args = [parsed.href];
     } else if (platform() === "win32") {
       cmd = "cmd";
-      args = ["/c", "start", "", url];
+      args = ["/c", "start", "", parsed.href];
     } else {
       return;
     }
