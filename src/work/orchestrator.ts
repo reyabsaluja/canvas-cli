@@ -22,7 +22,7 @@ import { executeToolDetailed } from "./tool-handlers.js";
 import { synthesizeWorkup } from "./synthesis.js";
 import { htmlToText } from "../format/html-to-text.js";
 
-class ToolRuntimeError extends Error {
+export class ToolRuntimeError extends Error {
   readonly toolName: string;
   constructor(toolName: string, cause: unknown) {
     const msg = cause instanceof Error ? cause.message : String(cause);
