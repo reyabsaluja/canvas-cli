@@ -463,10 +463,17 @@ function openBrowser(url: string): void {
       cmd = "cmd";
       args = ["/c", "start", "", parsed.href];
     } else {
+      console.log(`  ${C.dim("Open manually:")} ${C.muted(url)}`);
       return;
     }
-    spawn(cmd, args, { stdio: "ignore", detached: true }).unref();
-  } catch {}
+    const child = spawn(cmd, args, { stdio: "ignore", detached: true });
+    child.on("error", () => {
+      console.log(`  ${C.dim("Could not open browser. Visit:")} ${C.muted(url)}`);
+    });
+    child.unref();
+  } catch {
+    console.log(`  ${C.dim("Could not open browser. Visit:")} ${C.muted(url)}`);
+  }
 }
 
 function getAiKeyName(provider: string): string | null {
