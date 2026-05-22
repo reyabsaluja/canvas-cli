@@ -505,6 +505,7 @@ function promptSecret(question: string): Promise<string | typeof ESCAPED> {
     const rl = readline.createInterface({ input: process.stdin, terminal: false });
     return new Promise((resolve) => {
       rl.on("line", (line) => { rl.close(); resolve(line.trim()); });
+      rl.on("close", () => resolve(ESCAPED));
     });
   }
 
