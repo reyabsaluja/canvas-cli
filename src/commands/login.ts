@@ -25,27 +25,35 @@ const C = {
 };
 
 const LOGO = [
-  "  ⠀⠀⢀⣤⠀⠺⣿⣿⠗⠀⣠⣀⠀⠀",
-  "  ⠀⣴⣿⠟⣀⠀⠰⡆⠀⢀⠻⣿⣧⠀",
-  "  ⣠⡀⠀⠈⠛⠀⠀⠀⠀⠛⠃⠀⢀⣠",
-  "  ⣿⣿⠰⠶⠀⠀⠀⠀⠀⠀⠰⠆⢾⣿",
-  "  ⠙⠁⠀⢀⣤⠀⠀⠀⠀⣠⡄⠀⠈⠛",
-  "  ⠀⠺⣿⣦⠉⠀⠰⠆⠀⠈⣱⣾⡿⠀",
-  "  ⠀⠀⠈⠛⠀⣰⣾⣿⣦⠀⠙⠋⠀⠀",
+  "⠀⠀⢀⣤⠀⠺⣿⣿⠗⠀⣠⣀⠀⠀",
+  "⠀⣴⣿⠟⣀⠀⠰⡆⠀⢀⠻⣿⣧⠀",
+  "⣠⡀⠀⠈⠛⠀⠀⠀⠀⠛⠃⠀⢀⣠",
+  "⣿⣿⠰⠶⠀⠀⠀⠀⠀⠀⠰⠆⢾⣿",
+  "⠙⠁⠀⢀⣤⠀⠀⠀⠀⣠⡄⠀⠈⠛",
+  "⠀⠺⣿⣦⠉⠀⠰⠆⠀⠈⣱⣾⡿⠀",
+  "⠀⠀⠈⠛⠀⣰⣾⣿⣦⠀⠙⠋⠀⠀",
 ];
+
+const LOGO_WIDTH = Math.max(...LOGO.map((l) => [...l].length));
 
 export async function loginCommand(options: LoginOptions): Promise<void> {
   const profile = options.profile || "default";
 
-  // Header with logo
+  // Header with logo + title inline (like buildLogoBanner)
+  const titleLine = `${C.whiteBold("canvas-cli")} ${C.dim("·")} ${C.muted("login")}`;
+  const profileLine = profile !== "default" ? `${C.dim("profile:")} ${C.warm(profile)}` : "";
+  const rightLines = [titleLine, profileLine].filter(Boolean);
+  const textStart = 2; // which logo row the text starts on
+
   console.log();
-  for (const line of LOGO) {
-    console.log("  " + C.primary(line));
-  }
-  console.log();
-  console.log(`  ${C.whiteBold("canvas-cli")} ${C.dim("·")} ${C.muted("login")}`);
-  if (profile !== "default") {
-    console.log(`  ${C.dim("profile:")} ${C.warm(profile)}`);
+  for (let i = 0; i < LOGO.length; i++) {
+    const logoLine = LOGO[i]!;
+    const pad = " ".repeat(Math.max(0, LOGO_WIDTH - [...logoLine].length));
+    const textIdx = i - textStart;
+    const rightText = textIdx >= 0 && textIdx < rightLines.length
+      ? "   " + rightLines[textIdx]!
+      : "";
+    console.log("  " + C.primary(logoLine) + pad + rightText);
   }
   console.log();
 
