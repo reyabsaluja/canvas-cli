@@ -109,16 +109,20 @@ export async function horizontalPicker(
 ): Promise<PickerResult> {
   if (!process.stdin.isTTY) return options[0]?.value ?? null;
 
+  const fillCircles = ["○", "◔", "◑", "◕", "●"];
+
   let selected = 0;
   const renderLine = () => {
-    process.stdout.write("\x1b[2K\r");
-    const parts = options.map((opt, i) => {
-      if (i === selected) {
-        return C.whiteBold(`[${opt.label}]`);
-      }
-      return C.dim(opt.label);
-    });
-    process.stdout.write(`  ${C.text(label)}  ${parts.join(C.dim("  ·  "))}`);
+    const fillIndex = options.length <= 1
+      ? fillCircles.length - 1
+      : Math.round((selected / (options.length - 1)) * (fillCircles.length - 1));
+    const circle = C.primary(fillCircles[fillIndex]!);
+
+    const current = options[selected]!;
+    const capitalizedLabel = current.label.charAt(0).toUpperCase() + current.label.slice(1);
+
+    const line = `\x1b[2K\r  ${circle} ${C.text(`${capitalizedLabel} ${label.toLowerCase()}`)} ${C.dim("←/→ to adjust")}`;
+    process.stdout.write(line);
   };
 
   renderLine();
@@ -168,11 +172,9 @@ export async function horizontalPicker(
           return;
         }
         if (str === "\x1b[D" || str === "h") {
-          selected = (selected - 1 + options.length) % options.length;
-          renderLine();
+          if (selected > 0) { selected--; renderLine(); }
         } else if (str === "\x1b[C" || str === "l") {
-          selected = (selected + 1) % options.length;
-          renderLine();
+          if (selected < options.length - 1) { selected++; renderLine(); }
         }
       } catch {
         cleanup();
