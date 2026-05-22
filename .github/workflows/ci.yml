@@ -21,6 +21,8 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
+      - run: npm audit --audit-level=high
+
       - run: bun run typecheck
 
       - run: bun run test
