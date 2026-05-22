@@ -17,7 +17,8 @@ export function statusCommand(options: StatusOptions = {}): void {
   );
   const baseUrl = process.env.CANVAS_BASE_URL || stored?.canvasBaseUrl;
 
-  const label = (s: string) => C.dim(s.padEnd(14));
+  const PAD = 15;
+  const label = (s: string) => C.dim(s.padEnd(PAD));
 
   console.log(`\n  ${C.whiteBold("canvas-cli status")}\n`);
   console.log(`  ${label("Profile")}${C.primary(profile)}`);
