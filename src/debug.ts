@@ -50,20 +50,23 @@ export function maskUrl(url: string): string {
     if (qIndex === -1) return url;
 
     const base = url.slice(0, qIndex);
-    const params = new URLSearchParams(url.slice(qIndex + 1));
-    for (const key of params.keys()) {
-      const lower = key.toLowerCase();
-      if (
-        lower.includes("token") ||
-        lower.includes("key") ||
-        lower.includes("secret") ||
-        lower.includes("access")
-      ) {
-        params.set(key, "***");
+    const queryString = url.slice(qIndex + 1);
+    const masked = queryString.replace(
+      /([^&=]+)=([^&]*)/g,
+      (match, key: string, _value: string) => {
+        const lower = key.toLowerCase();
+        if (
+          lower.includes("token") ||
+          lower.includes("key") ||
+          lower.includes("secret") ||
+          lower.includes("access")
+        ) {
+          return `${key}=***`;
+        }
+        return match;
       }
-    }
-    const qs = params.toString();
-    return qs ? `${base}?${qs}` : base;
+    );
+    return `${base}?${masked}`;
   } catch {
     return maskSecrets(url);
   }
