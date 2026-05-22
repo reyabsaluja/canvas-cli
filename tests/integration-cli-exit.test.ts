@@ -8,6 +8,12 @@ import { buildDefaultServerData } from "./helpers/fixtures.js";
 const execFileAsync = promisify(execFile);
 const CLI_PATH = new URL("../bin/canvas-cli.js", import.meta.url).pathname;
 
+const baseEnv = {
+  PATH: process.env.PATH,
+  NODE_PATH: process.env.NODE_PATH,
+  DOTENV_CONFIG_PATH: "/dev/null",
+};
+
 test("integration: CLI exits with structured error output", async (t) => {
   const data = buildDefaultServerData();
   const server = createMockCanvasServer(data);
@@ -19,7 +25,7 @@ test("integration: CLI exits with structured error output", async (t) => {
     try {
       await execFileAsync("node", [CLI_PATH, "courses"], {
         env: {
-          ...process.env,
+          ...baseEnv,
           CANVAS_BASE_URL: `http://127.0.0.1:${port}/api/v1`,
           CANVAS_ACCESS_TOKEN: "expired-token",
         },
@@ -37,7 +43,7 @@ test("integration: CLI exits with structured error output", async (t) => {
     try {
       await execFileAsync("node", [CLI_PATH, "courses"], {
         env: {
-          ...process.env,
+          ...baseEnv,
           CANVAS_BASE_URL: "",
           CANVAS_ACCESS_TOKEN: "",
           HOME: "/tmp/canvas-cli-test-no-home",
