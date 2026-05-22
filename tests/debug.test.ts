@@ -6,9 +6,8 @@ test("debug module", async (t) => {
   let debugModule: typeof import("../src/debug.js");
 
   t.beforeEach(async () => {
-    // Re-import module fresh isn't possible in ESM without hacks,
-    // so we test the exported functions directly.
     debugModule = await import("../src/debug.js");
+    debugModule.resetDebug();
   });
 
   await t.test("isDebugEnabled returns false by default", () => {
@@ -130,10 +129,19 @@ test("debug module", async (t) => {
   });
 
   await t.test("debug does nothing when disabled", () => {
-    // initDebug(false) without env var won't enable
-    // But since enableDebug was called above, we can't truly test disabled state
-    // in the same module instance. At minimum, verify no crash with data.
-    debugModule.debug("general", "safe even if enabled", { key: "value" });
+    const chunks: Buffer[] = [];
+    const originalWrite = process.stderr.write;
+    process.stderr.write = (chunk: any) => {
+      chunks.push(Buffer.from(chunk));
+      return true;
+    };
+    try {
+      debugModule.debug("general", "should not appear", { key: "value" });
+      const output = Buffer.concat(chunks).toString();
+      assert.strictEqual(output, "", "no output when debug is disabled");
+    } finally {
+      process.stderr.write = originalWrite;
+    }
   });
 
   await t.test("debugApiRequest and debugApiResponse work", () => {

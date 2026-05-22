@@ -32,6 +32,10 @@ export function initDebug(flagValue: boolean): void {
   }
 }
 
+export function resetDebug(): void {
+  debugEnabled = false;
+}
+
 function maskSecrets(message: string): string {
   let masked = message;
   for (const pattern of SENSITIVE_PATTERNS) {
