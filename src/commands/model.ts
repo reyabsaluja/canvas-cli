@@ -76,106 +76,117 @@ function printHeader(): void {
   console.log();
 }
 
+function hideCursor(): void { process.stdout.write("\x1b[?25l"); }
+function showCursor(): void { process.stdout.write("\x1b[?25h"); }
+
 export async function modelCommand(): Promise<{ provider: string; model: string; effort: string } | null> {
-  const groups = buildModelGroups();
+  hideCursor();
+  try {
+    const groups = buildModelGroups();
 
-  const providerOptions: PickerOption[] = groups.map((g) => ({
-    label: g.label,
-    value: g.provider,
-    description: `${g.models.length} models`,
-  }));
+    const providerOptions: PickerOption[] = groups.map((g) => ({
+      label: g.label,
+      value: g.provider,
+      description: `${g.models.length} models`,
+    }));
 
-  clearScreen();
-  printHeader();
+    clearScreen();
+    printHeader();
 
-  const selectedProvider = await verticalPicker("Provider", providerOptions);
-  if (selectedProvider === BACK || selectedProvider === null) return null;
+    const selectedProvider = await verticalPicker("Provider", providerOptions);
+    if (selectedProvider === BACK || selectedProvider === null) return null;
 
-  const group = groups.find((g) => g.provider === selectedProvider);
-  if (!group) return null;
+    const group = groups.find((g) => g.provider === selectedProvider);
+    if (!group) return null;
 
-  const profile = getActiveProfile();
+    const profile = getActiveProfile();
 
-  // Check if credentials exist for this provider, prompt if missing
-  if (selectedProvider === "bedrock") {
-    const hasAccess = process.env.AWS_ACCESS_KEY_ID || loadCredential(profile, "aws-access-key");
-    const hasSecret = process.env.AWS_SECRET_ACCESS_KEY || loadCredential(profile, "aws-secret-key");
-    if (!hasAccess || !hasSecret) {
-      clearScreen();
-      printHeader();
-      console.log(`  ${C.success("✓")} ${C.dim("Provider")}  ${C.muted(group.label)}\n`);
-      console.log(`  ${C.dim("AWS credentials required:")}\n`);
+    if (selectedProvider === "bedrock") {
+      const hasAccess = process.env.AWS_ACCESS_KEY_ID || loadCredential(profile, "aws-access-key");
+      const hasSecret = process.env.AWS_SECRET_ACCESS_KEY || loadCredential(profile, "aws-secret-key");
+      if (!hasAccess || !hasSecret) {
+        clearScreen();
+        printHeader();
+        showCursor();
+        console.log(`  ${C.success("✓")} ${C.dim("Provider")}  ${C.muted(group.label)}\n`);
+        console.log(`  ${C.dim("AWS credentials required:")}\n`);
 
-      const region = await promptLine(`  ${C.dim("AWS Region (e.g., us-east-1):")} `);
-      if (region === ESCAPED) return null;
+        const region = await promptLine(`  ${C.dim("AWS Region (e.g., us-east-1):")} `);
+        if (region === ESCAPED) return null;
 
-      const accessKey = await promptSecret(`  ${C.dim("AWS Access Key ID:")} `);
-      if (accessKey === ESCAPED) return null;
+        const accessKey = await promptSecret(`  ${C.dim("AWS Access Key ID:")} `);
+        if (accessKey === ESCAPED) return null;
 
-      const secretKey = await promptSecret(`  ${C.dim("AWS Secret Access Key:")} `);
-      if (secretKey === ESCAPED) return null;
+        const secretKey = await promptSecret(`  ${C.dim("AWS Secret Access Key:")} `);
+        if (secretKey === ESCAPED) return null;
 
-      storeCredential(profile, "aws-access-key", accessKey);
-      storeCredential(profile, "aws-secret-key", secretKey);
-      process.env.AWS_ACCESS_KEY_ID = accessKey;
-      process.env.AWS_SECRET_ACCESS_KEY = secretKey;
-      process.env.AWS_REGION = region;
+        hideCursor();
+        storeCredential(profile, "aws-access-key", accessKey);
+        storeCredential(profile, "aws-secret-key", secretKey);
+        process.env.AWS_ACCESS_KEY_ID = accessKey;
+        process.env.AWS_SECRET_ACCESS_KEY = secretKey;
+        process.env.AWS_REGION = region;
 
-      const existing = readStoredConfig(profile);
-      if (existing) {
-        writeStoredConfig({ ...existing, awsRegion: region }, profile);
+        const existing = readStoredConfig(profile);
+        if (existing) {
+          writeStoredConfig({ ...existing, awsRegion: region }, profile);
+        }
+      }
+    } else {
+      const envKey = getAiKeyName(selectedProvider);
+      const credKey = getCredentialKey(selectedProvider);
+      const hasKey = (envKey && process.env[envKey]) || (credKey && loadCredential(profile, credKey));
+      if (!hasKey && envKey && credKey) {
+        clearScreen();
+        printHeader();
+        showCursor();
+        console.log(`  ${C.success("✓")} ${C.dim("Provider")}  ${C.muted(group.label)}\n`);
+        console.log(`  ${C.dim(`Requires ${envKey}:`)}\n`);
+
+        const key = await promptSecret(`  ${C.dim("→")} `);
+        if (key === ESCAPED) return null;
+
+        hideCursor();
+        storeCredential(profile, credKey, key);
+        process.env[envKey] = key;
       }
     }
-  } else {
-    const envKey = getAiKeyName(selectedProvider);
-    const credKey = getCredentialKey(selectedProvider);
-    const hasKey = (envKey && process.env[envKey]) || (credKey && loadCredential(profile, credKey));
-    if (!hasKey && envKey && credKey) {
-      clearScreen();
-      printHeader();
-      console.log(`  ${C.success("✓")} ${C.dim("Provider")}  ${C.muted(group.label)}\n`);
-      console.log(`  ${C.dim(`Requires ${envKey}:`)}\n`);
 
-      const key = await promptSecret(`  ${C.dim("→")} `);
-      if (key === ESCAPED) return null;
+    clearScreen();
+    printHeader();
+    console.log(`  ${C.success("✓")} ${C.dim("Provider")}  ${C.muted(group.label)}\n`);
 
-      storeCredential(profile, credKey, key);
-      process.env[envKey] = key;
+    const selectedModel = await verticalPicker("Model", group.models);
+    if (selectedModel === BACK || selectedModel === null) return null;
+
+    const modelLabel = group.models.find((m) => m.value === selectedModel)?.label ?? selectedModel;
+
+    clearScreen();
+    printHeader();
+    console.log(`  ${C.success("✓")} ${C.dim("Provider")}  ${C.muted(group.label)}`);
+    console.log(`  ${C.success("✓")} ${C.dim("Model")}     ${C.muted(modelLabel)}\n`);
+
+    const effort = await horizontalPicker("effort", EFFORT_OPTIONS);
+    if (effort === BACK || effort === null) return null;
+
+    const existing = readStoredConfig(profile);
+    if (existing) {
+      writeStoredConfig({
+        ...existing,
+        aiProvider: selectedProvider,
+        aiModel: selectedModel,
+        aiEffort: effort,
+      }, profile);
     }
+
+    process.env.AI_PROVIDER = selectedProvider;
+    process.env.AI_MODEL = selectedModel;
+    process.env.AI_EFFORT = effort;
+
+    console.log(`\n  ${C.success("✓")} ${C.text(`Switched to ${modelLabel}`)} ${C.dim(`(${effort} effort)`)}\n`);
+
+    return { provider: selectedProvider, model: selectedModel, effort };
+  } finally {
+    showCursor();
   }
-
-  clearScreen();
-  printHeader();
-  console.log(`  ${C.success("✓")} ${C.dim("Provider")}  ${C.muted(group.label)}\n`);
-
-  const selectedModel = await verticalPicker("Model", group.models);
-  if (selectedModel === BACK || selectedModel === null) return null;
-
-  const modelLabel = group.models.find((m) => m.value === selectedModel)?.label ?? selectedModel;
-
-  clearScreen();
-  printHeader();
-  console.log(`  ${C.success("✓")} ${C.dim("Provider")}  ${C.muted(group.label)}`);
-  console.log(`  ${C.success("✓")} ${C.dim("Model")}     ${C.muted(modelLabel)}\n`);
-
-  const effort = await horizontalPicker("effort", EFFORT_OPTIONS);
-  if (effort === BACK || effort === null) return null;
-
-  const existing = readStoredConfig(profile);
-  if (existing) {
-    writeStoredConfig({
-      ...existing,
-      aiProvider: selectedProvider,
-      aiModel: selectedModel,
-      aiEffort: effort,
-    }, profile);
-  }
-
-  process.env.AI_PROVIDER = selectedProvider;
-  process.env.AI_MODEL = selectedModel;
-  process.env.AI_EFFORT = effort;
-
-  console.log(`\n  ${C.success("✓")} ${C.text(`Switched to ${modelLabel}`)} ${C.dim(`(${effort} effort)`)}\n`);
-
-  return { provider: selectedProvider, model: selectedModel, effort };
 }
