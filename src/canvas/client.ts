@@ -332,7 +332,9 @@ export class CanvasClient {
         err instanceof CanvasServerError
       ) {
         this._skippedEndpoints.push(url);
-        if (err instanceof CanvasServerError) {
+        if (err instanceof CanvasRateLimitError) {
+          console.error(`Warning: rate-limited by Canvas API, skipping: ${url}`);
+        } else if (err instanceof CanvasServerError) {
           console.error(`Warning: Canvas API returned ${err.statusCode} after retries, skipping: ${url}`);
         }
         return [];
