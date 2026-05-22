@@ -2,20 +2,22 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "_comment": "Last updated: 2026-05 — refresh when providers ship new flagship models",
   "openai": [
-    { "label": "o3", "value": "o3", "description": "best reasoning" },
-    { "label": "o4-mini", "value": "o4-mini", "description": "fast reasoning" },
-    { "label": "gpt-4.1", "value": "gpt-4.1", "description": "flagship GPT" },
-    { "label": "gpt-4.1-mini", "value": "gpt-4.1-mini", "description": "fast + capable" },
-    { "label": "gpt-4.1-nano", "value": "gpt-4.1-nano", "description": "fastest" }
+    { "label": "GPT-5.5", "value": "gpt-5.5", "description": "most capable" },
+    { "label": "GPT-5.4 Pro", "value": "gpt-5.4-pro", "description": "balanced" },
+    { "label": "GPT-5.4", "value": "gpt-5.4", "description": "fast" },
+    { "label": "GPT-5.4 Mini", "value": "gpt-5.4-mini", "description": "fastest" }
   ],
   "anthropic": [
-    { "label": "Claude Opus 4", "value": "claude-opus-4-0-20250514", "description": "most capable" },
-    { "label": "Claude Sonnet 4", "value": "claude-sonnet-4-20250514", "description": "balanced" },
-    { "label": "Claude Haiku 3.5", "value": "claude-haiku-3-5-20241022", "description": "fastest" }
+    { "label": "Claude Opus 4.7", "value": "claude-opus-4-7", "description": "most capable" },
+    { "label": "Claude Opus 4.6", "value": "claude-opus-4-6", "description": "flagship" },
+    { "label": "Claude Sonnet 4.6", "value": "claude-sonnet-4-6", "description": "balanced" }
   ],
   "google": [
-    { "label": "Gemini 2.5 Pro", "value": "gemini-2.5-pro-preview-05-06", "description": "reasoning + large context" },
-    { "label": "Gemini 2.5 Flash", "value": "gemini-2.5-flash-preview-04-17", "description": "fast + reasoning" },
-    { "label": "Gemini 2.0 Flash", "value": "gemini-2.0-flash", "description": "fast general purpose" }
+    { "label": "Gemini 3.5 Flash", "value": "gemini-3.5-flash", "description": "fast + capable" },
+    { "label": "Gemini 3.1 Pro", "value": "gemini-3.1-pro-preview", "description": "reasoning" },
+    { "label": "Gemini 3 Flash", "value": "gemini-3-flash-preview", "description": "balanced" },
+    { "label": "Gemini 3.1 Flash Lite", "value": "gemini-3.1-flash-lite", "description": "lightweight" },
+    { "label": "Gemini 2.5 Pro", "value": "gemini-2.5-pro", "description": "legacy reasoning" },
+    { "label": "Gemini 2.5 Flash", "value": "gemini-2.5-flash", "description": "legacy fast" }
   ]
 }

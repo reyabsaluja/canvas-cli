@@ -66,9 +66,16 @@ export const COMMANDS: CommandDefinition[] = [
     aliases: ["/make-pdf"],
   },
   {
+    name: "/model",
+    description: "Switch AI model (or /model effort, /model key)",
+    scopes: ["global", "course", "workspace"],
+    navigation: true,
+  },
+  {
     name: "/login",
     description: "Re-run login setup",
     scopes: ["global", "course", "workspace"],
+    navigation: true,
   },
   {
     name: "/quit",

@@ -12,6 +12,10 @@ export interface StoredConfig {
   awsRegion?: string;
 }
 
+export function defaultStoredConfig(): StoredConfig {
+  return { canvasBaseUrl: "" };
+}
+
 export function readStoredConfig(profile: string = "default"): StoredConfig | null {
   const filePath = getConfigFilePath(profile);
   try {

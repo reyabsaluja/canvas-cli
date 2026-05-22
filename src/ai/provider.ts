@@ -9,9 +9,20 @@ import { ensureAICredentials } from "../config/load-credentials-to-env.js";
 
 export type AIProviderName = "anthropic" | "openai" | "google" | "bedrock";
 
+export type AIEffortLevel = "low" | "medium" | "high" | "max";
+
 export interface AIProviderConfig {
   provider: AIProviderName;
   model: string;
+  effort?: AIEffortLevel;
+}
+
+export interface EffortOptions {
+  providerOptions?: {
+    openai?: { reasoningEffort: string };
+    anthropic?: { thinking: { type: "enabled"; budgetTokens: number } };
+    bedrock?: { reasoningConfig: { type: "enabled"; budgetTokens: number } };
+  };
 }
 
 export const AI_PROVIDER_SETUP_HINT =
@@ -21,10 +32,10 @@ const DEFAULT_RATE_LIMIT_RETRY_MS = 30_000;
 const DEFAULT_UNAVAILABLE_RETRY_MS = 15_000;
 
 const DEFAULT_MODEL_BY_PROVIDER: Record<AIProviderName, string> = {
-  anthropic: "claude-sonnet-4-20250514",
-  openai: "gpt-4o",
-  google: "gemini-2.0-flash",
-  bedrock: "us.anthropic.claude-sonnet-4-20250514-v1:0",
+  anthropic: "claude-sonnet-4-6",
+  openai: "gpt-5.4",
+  google: "gemini-3.5-flash",
+  bedrock: "us.anthropic.claude-sonnet-4-6",
 };
 
 /**
@@ -84,9 +95,14 @@ function buildAIConfig(
   provider: AIProviderName,
   modelOverride?: string
 ): AIProviderConfig {
+  const effortRaw = process.env.AI_EFFORT?.toLowerCase();
+  const effort = (effortRaw === "low" || effortRaw === "medium" || effortRaw === "high" || effortRaw === "max")
+    ? effortRaw as AIEffortLevel
+    : undefined;
   return {
     provider,
     model: modelOverride ?? DEFAULT_MODEL_BY_PROVIDER[provider],
+    ...(effort && provider !== "google" ? { effort } : {}),
   };
 }
 
@@ -112,6 +128,58 @@ function getExplicitAIConfig(
         ? buildAIConfig(provider, modelOverride)
         : null;
   }
+}
+
+const EFFORT_TO_OPENAI_REASONING: Record<AIEffortLevel, string> = {
+  low: "low",
+  medium: "medium",
+  high: "high",
+  max: "high",
+};
+
+const EFFORT_TO_THINKING_BUDGET: Record<AIEffortLevel, number> = {
+  low: 2048,
+  medium: 4096,
+  high: 10000,
+  max: 32000,
+};
+
+export function getEffortOptions(config: AIProviderConfig): EffortOptions {
+  if (!config.effort) return {};
+
+  if (config.provider === "openai") {
+    const mapped = EFFORT_TO_OPENAI_REASONING[config.effort];
+    if (mapped !== config.effort) {
+      debugAI(config.provider, config.model, `effort "${config.effort}" clamped to "${mapped}"`);
+    }
+    return {
+      providerOptions: {
+        openai: { reasoningEffort: mapped },
+      },
+    };
+  }
+
+  if (config.provider === "anthropic") {
+    return {
+      providerOptions: {
+        anthropic: {
+          thinking: { type: "enabled", budgetTokens: EFFORT_TO_THINKING_BUDGET[config.effort] },
+        },
+      },
+    };
+  }
+
+  if (config.provider === "bedrock") {
+    return {
+      providerOptions: {
+        bedrock: {
+          reasoningConfig: { type: "enabled", budgetTokens: EFFORT_TO_THINKING_BUDGET[config.effort] },
+        },
+      },
+    };
+  }
+
+  return {};
 }
 
 function getModel(config: AIProviderConfig) {
@@ -169,6 +237,8 @@ export async function callModel(
     ? (signals.length === 1 ? signals[0]! : AbortSignal.any(signals))
     : undefined;
 
+  const effortOpts = getEffortOptions(config);
+
   if (options?.onTextDelta) {
     const stream = streamText({
       model: getModel(config),
@@ -176,6 +246,7 @@ export async function callModel(
       messages: [{ role: "user", content: userMessage }],
       ...(options.maxTokens != null ? { maxTokens: options.maxTokens } : {}),
       ...(combinedSignal ? { abortSignal: combinedSignal } : {}),
+      ...effortOpts,
     });
     let text = "";
     for await (const delta of stream.textStream) {
@@ -195,6 +266,7 @@ export async function callModel(
     messages: [{ role: "user", content: userMessage }],
     ...(options?.maxTokens != null ? { maxTokens: options.maxTokens } : {}),
     ...(combinedSignal ? { abortSignal: combinedSignal } : {}),
+    ...effortOpts,
   });
 
   debugAI(config.provider, config.model, "callModel completed", {
@@ -264,6 +336,7 @@ export async function generateWithTools(
     messages: messages as any,
     tools: aiTools,
     stopWhen: stepCountIs(maxSteps),
+    ...getEffortOptions(config),
   } as any);
 
   debugAI(config.provider, config.model, "generateWithTools completed", {
@@ -409,6 +482,7 @@ export async function streamWithTools(
     tools: aiTools,
     stopWhen: stepCountIs(maxSteps),
     abortSignal: signal,
+    ...getEffortOptions(config),
     onError: ({ error }: { error: unknown }) => {
       capturedStreamError = error;
     },
