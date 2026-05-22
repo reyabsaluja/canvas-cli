@@ -89,7 +89,7 @@ program
   .description("Ask a question about the current assignment workspace")
   .option("--workspace <path>", "Path to a specific workspace")
   .option("--json", "Output as JSON")
-  .option("--debug", "Show retrieval debug info")
+  .option("--show-retrieval", "Show retrieval debug info")
   .action(askCommand);
 
 program
