@@ -92,33 +92,11 @@ program
   .option("--debug", "Show retrieval debug info")
   .action(askCommand);
 
-// Default: launch interactive TUI when no subcommand is given
-// Check if any subcommand was provided
-const args = process.argv.slice(2);
-const subcommands = [
-  "courses",
-  "assignments",
-  "show",
-  "do",
-  "ingest",
-  "work",
-  "ask",
-  "help",
-  "--help",
-  "-h",
-  "--version",
-  "-V",
-];
+program
+  .command("tui", { isDefault: true, hidden: true })
+  .description("Launch interactive TUI")
+  .action(() => {
+    import("./tui/app.js").then(({ launchApp }) => launchApp());
+  });
 
-const hasSubcommand = args.length > 0 && subcommands.some(
-  (cmd) => args[0] === cmd
-);
-
-const isDebugOnly = args.every((a) => a === "--debug");
-
-if ((!hasSubcommand && args.length === 0) || isDebugOnly) {
-  if (isDebugOnly) initDebug(true);
-  import("./tui/app.js").then(({ launchApp }) => launchApp());
-} else {
-  program.parse();
-}
+program.parse();
