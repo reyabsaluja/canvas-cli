@@ -3,11 +3,8 @@
   "_comment": "Last updated: 2026-05 — refresh when providers ship new flagship models",
   "openai": [
     { "label": "GPT-5.5", "value": "gpt-5.5", "description": "most capable" },
-    { "label": "GPT-5.4", "value": "gpt-5.4", "description": "balanced flagship" },
-    { "label": "o3", "value": "o3", "description": "best reasoning" },
-    { "label": "o4-mini", "value": "o4-mini", "description": "fast reasoning" },
-    { "label": "gpt-4.1", "value": "gpt-4.1", "description": "previous gen" },
-    { "label": "gpt-4.1-mini", "value": "gpt-4.1-mini", "description": "fast + capable" }
+    { "label": "GPT-5.4", "value": "gpt-5.4", "description": "balanced" },
+    { "label": "GPT-5.4 Mini", "value": "gpt-5.4-mini", "description": "fast" }
   ],
   "anthropic": [
     { "label": "Claude Opus 4.7", "value": "claude-opus-4-7-20250219", "description": "most capable" },
