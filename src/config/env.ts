@@ -33,7 +33,8 @@ export function loadConfig(): Config {
   if (!baseUrl || !accessToken) {
     const stored = readStoredConfig(profile);
     if (stored && !baseUrl) {
-      baseUrl = stored.canvasBaseUrl;
+      const storedUrl = stored.canvasBaseUrl.replace(/\/+$/, "");
+      baseUrl = storedUrl.endsWith("/api/v1") ? storedUrl : `${storedUrl}/api/v1`;
     }
     if (!accessToken) {
       const token = loadCredential(profile, "canvas-token");

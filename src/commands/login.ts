@@ -236,7 +236,7 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
 
   writeStoredConfig(
     {
-      canvasBaseUrl: apiBaseUrl,
+      canvasBaseUrl: baseUrl,
       ...(finalProvider && { aiProvider: finalProvider }),
       ...(finalModel && { aiModel: finalModel }),
       ...(finalEffort && { aiEffort: finalEffort }),
@@ -261,7 +261,7 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
   console.log();
   console.log(`  ${C.success("✓")} ${C.whiteBold("Setup complete")}`);
   console.log();
-  console.log(`  ${C.dim("canvas")}    ${C.text(apiBaseUrl)}`);
+  console.log(`  ${C.dim("canvas")}    ${C.text(baseUrl)}`);
   if (finalProvider) {
     const modelStr = finalModel ? ` (${finalModel}${finalEffort ? `, ${finalEffort}` : ""})` : "";
     console.log(`  ${C.dim("ai")}        ${C.text(finalProvider)}${modelStr}`);
