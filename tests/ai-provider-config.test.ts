@@ -73,7 +73,7 @@ test("getAIConfig maps gemini to the google provider", () => {
     () => {
       assert.deepEqual(getAIConfig(), {
         provider: "google",
-        model: "gemini-2.0-flash",
+        model: "gemini-3.5-flash",
       });
     }
   );
@@ -132,7 +132,7 @@ test("getAIConfig includes effort when AI_EFFORT is set", () => {
     () => {
       assert.deepEqual(getAIConfig(), {
         provider: "anthropic",
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
         effort: "high",
       });
     }
@@ -149,7 +149,7 @@ test("getAIConfig ignores effort for google provider", () => {
     () => {
       assert.deepEqual(getAIConfig(), {
         provider: "google",
-        model: "gemini-2.0-flash",
+        model: "gemini-3.5-flash",
       });
     }
   );
@@ -165,7 +165,7 @@ test("getAIConfig ignores invalid AI_EFFORT values", () => {
     () => {
       assert.deepEqual(getAIConfig(), {
         provider: "openai",
-        model: "gpt-4o",
+        model: "gpt-5.4",
       });
     }
   );
