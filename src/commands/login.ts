@@ -5,13 +5,14 @@ import chalk from "chalk";
 import { writeStoredConfig, readStoredConfig } from "../config/store.js";
 import { storeCredential, loadCredential } from "../config/credentials.js";
 import { getConfigDir } from "../config/paths.js";
-import { verticalPicker, horizontalPicker, type PickerOption } from "./login-picker.js";
+import { verticalPicker, horizontalPicker, BACK, type PickerOption, type PickerResult } from "./login-picker.js";
 
 interface LoginOptions {
   profile?: string;
 }
 
-// Match the TUI color palette
+const ESCAPED = Symbol("escaped");
+
 const C = {
   primary: chalk.hex("#e82429"),
   primaryBold: chalk.hex("#e82429").bold,
@@ -37,94 +38,51 @@ const LOGO = [
 
 const LOGO_WIDTH = Math.max(...LOGO.map((l) => [...l].length));
 
+const ESC_HINT = C.dim("(esc to go back)");
+
 export async function loginCommand(options: LoginOptions): Promise<void> {
   const profile = options.profile || "default";
 
-  // Header with logo + title inline (like buildLogoBanner)
   const titleLine = `${C.whiteBold("canvas-cli")} ${C.dim("·")} ${C.muted("login")}`;
   const profileLine = profile !== "default" ? `${C.dim("profile:")} ${C.warm(profile)}` : "";
   const rightLines = [titleLine, profileLine].filter(Boolean);
-  const textStart = 2; // which logo row the text starts on
+  const textStart = 2;
 
-  console.log();
-  for (let i = 0; i < LOGO.length; i++) {
-    const logoLine = LOGO[i]!;
-    const pad = " ".repeat(Math.max(0, LOGO_WIDTH - [...logoLine].length));
-    const textIdx = i - textStart;
-    const rightText = textIdx >= 0 && textIdx < rightLines.length
-      ? "   " + rightLines[textIdx]!
-      : "";
-    console.log("  " + C.primary(logoLine) + pad + rightText);
-  }
-  console.log();
+  const printHeader = () => {
+    console.log();
+    for (let i = 0; i < LOGO.length; i++) {
+      const logoLine = LOGO[i]!;
+      const pad = " ".repeat(Math.max(0, LOGO_WIDTH - [...logoLine].length));
+      const textIdx = i - textStart;
+      const rightText = textIdx >= 0 && textIdx < rightLines.length
+        ? "   " + rightLines[textIdx]!
+        : "";
+      console.log("  " + C.primary(logoLine) + pad + rightText);
+    }
+    console.log();
+  };
+
+  printHeader();
 
   const existing = readStoredConfig(profile);
   const existingToken = loadCredential(profile, "canvas-token");
 
   if (existing && existingToken) {
     console.log(`  ${C.dim("Existing config found:")} ${C.muted(existing.canvasBaseUrl)}`);
-    const overwrite = await prompt(`  ${C.text("Overwrite?")} ${C.dim("(y/N)")} `);
-    if (overwrite.toLowerCase() !== "y") {
+    const overwrite = await promptLine(`  ${C.text("Overwrite?")} ${C.dim("(y/N)")} `);
+    if (overwrite === ESCAPED || overwrite.toLowerCase() !== "y") {
       console.log(`\n  ${C.muted("Cancelled.")}\n`);
       return;
     }
     console.log();
   }
 
-  // Step 1: Canvas base URL
-  console.log(`  ${C.whiteBold("1")} ${C.dim("·")} ${C.text("Canvas URL")}`);
-  console.log(`  ${C.dim("Your school's Canvas address (e.g., school.instructure.com)")}\n`);
-
-  let baseUrl = await prompt(`  ${C.dim("→")} `);
-  baseUrl = normalizeUrl(baseUrl);
-
-  if (!baseUrl) {
-    console.error(`\n  ${C.error("✗")} ${C.text("Canvas URL is required.")}\n`);
-    process.exit(1);
-  }
-
-  // The client expects baseUrl to include /api/v1
-  const apiBaseUrl = `${baseUrl}/api/v1`;
-
-  // Step 2: Canvas access token
-  console.log(`\n  ${C.whiteBold("2")} ${C.dim("·")} ${C.text("Access Token")}`);
-  console.log(`  ${C.dim("Generate one at:")} ${C.muted(`${baseUrl}/profile/settings`)}`);
-  console.log(`  ${C.dim("Click \"+ New Access Token\" and paste below.")}\n`);
-
-  const shouldOpen = await prompt(`  ${C.dim("Open in browser?")} ${C.dim("(Y/n)")} `);
-  if (shouldOpen.toLowerCase() !== "n") {
-    openBrowser(`${baseUrl}/profile/settings`);
-    console.log(`  ${C.dim("Opened. Paste your token when ready.")}\n`);
-  }
-
-  const token = await promptSecret(`  ${C.dim("→")} `);
-  if (!token) {
-    console.error(`\n  ${C.error("✗")} ${C.text("Access token is required.")}\n`);
-    process.exit(1);
-  }
-
-  // Validate
-  console.log(`\n  ${C.dim("Verifying...")}`);
-  const valid = await validateCredentials(apiBaseUrl, token);
-  if (!valid.ok) {
-    console.error(`\n  ${C.error("✗")} ${C.text(valid.error)}\n`);
-    process.exit(1);
-  }
-  console.log(`  ${C.success("✓")} ${C.text("Connected as")} ${C.whiteBold(valid.userName)}`);
-
-  // Step 3: AI provider (optional)
-  console.log(`\n  ${C.whiteBold("3")} ${C.dim("·")} ${C.text("AI Provider")} ${C.dim("(optional)")}`);
-  console.log(`  ${C.dim("Powers the 'ask' and 'work' commands.")}`);
-  console.log(`  ${C.dim("Use ↑↓ to select, Enter to confirm, q to skip.")}\n`);
-
-  const aiProvider = await verticalPicker("Provider", [
-    { label: "OpenAI", value: "openai" },
-    { label: "Anthropic", value: "anthropic" },
-    { label: "Google (Gemini)", value: "google" },
-    { label: "AWS Bedrock", value: "bedrock" },
-    { label: "Skip", value: "" },
-  ]);
-
+  let step = 1;
+  let baseUrl = "";
+  let apiBaseUrl = "";
+  let token = "";
+  let userName = "";
+  let aiProvider = "";
   let aiModel = "";
   let aiEffort = "";
   let aiKey = "";
@@ -132,56 +90,122 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
   let awsAccessKey = "";
   let awsSecretKey = "";
 
-  if (aiProvider) {
-    // API Key(s) — right after provider
-    if (aiProvider === "bedrock") {
-      console.log(`\n  ${C.dim("AWS credentials for Bedrock:")}`);
-      awsRegion = await prompt(`  ${C.dim("AWS Region (e.g., us-east-1):")} `);
-      awsAccessKey = await promptSecret(`  ${C.dim("AWS Access Key ID:")} `);
-      awsSecretKey = await promptSecret(`  ${C.dim("AWS Secret Access Key:")} `);
-      console.log(`\n  ${C.dim("Enter the full Bedrock model ID:")}`);
-      aiModel = await prompt(`  ${C.dim("→")} `);
+  while (step >= 1) {
+    if (step === 1) {
+      console.log(`  ${C.whiteBold("1")} ${C.dim("·")} ${C.text("Canvas URL")}  ${ESC_HINT}`);
+      console.log(`  ${C.dim("Your school's Canvas address (e.g., school.instructure.com)")}\n`);
 
-      // Effort level for Bedrock (Anthropic models)
+      const input = await promptLine(`  ${C.dim("→")} `);
+      if (input === ESCAPED) {
+        console.log(`\n  ${C.muted("Cancelled.")}\n`);
+        return;
+      }
+      baseUrl = normalizeUrl(input);
+      if (!baseUrl) {
+        console.error(`\n  ${C.error("✗")} ${C.text("Canvas URL is required.")}\n`);
+        continue;
+      }
+      apiBaseUrl = `${baseUrl}/api/v1`;
       console.log();
-      const effort = await horizontalPicker("Effort", [
-        { label: "low", value: "low" },
-        { label: "medium", value: "medium" },
-        { label: "high", value: "high" },
-        { label: "max", value: "max" },
+      step = 2;
+    } else if (step === 2) {
+      console.log(`  ${C.whiteBold("2")} ${C.dim("·")} ${C.text("Access Token")}  ${ESC_HINT}`);
+      console.log(`  ${C.dim("Generate one at:")} ${C.muted(`${baseUrl}/profile/settings`)}`);
+      console.log(`  ${C.dim("Click \"+ New Access Token\" and paste below.")}\n`);
+
+      const shouldOpen = await promptLine(`  ${C.dim("Open in browser?")} ${C.dim("(Y/n)")} `);
+      if (shouldOpen === ESCAPED) {
+        console.log();
+        step = 1;
+        continue;
+      }
+      if (shouldOpen.toLowerCase() !== "n") {
+        openBrowser(`${baseUrl}/profile/settings`);
+        console.log(`  ${C.dim("Opened. Paste your token when ready.")}\n`);
+      }
+
+      const tokenInput = await promptSecret(`  ${C.dim("→")} `);
+      if (tokenInput === ESCAPED) {
+        console.log();
+        step = 1;
+        continue;
+      }
+      if (!tokenInput) {
+        console.error(`\n  ${C.error("✗")} ${C.text("Access token is required.")}\n`);
+        continue;
+      }
+
+      console.log(`\n  ${C.dim("Verifying...")}`);
+      const valid = await validateCredentials(apiBaseUrl, tokenInput);
+      if (!valid.ok) {
+        console.error(`  ${C.error("✗")} ${C.text(valid.error)}\n`);
+        continue;
+      }
+      token = tokenInput;
+      userName = valid.userName;
+      console.log(`  ${C.success("✓")} ${C.text("Connected as")} ${C.whiteBold(userName)}\n`);
+      step = 3;
+    } else if (step === 3) {
+      console.log(`  ${C.whiteBold("3")} ${C.dim("·")} ${C.text("AI Provider")} ${C.dim("(optional)")}  ${ESC_HINT}`);
+      console.log(`  ${C.dim("Powers the 'ask' and 'work' commands.")}`);
+      console.log(`  ${C.dim("Use ↑↓ to select, Enter to confirm, q/esc to go back.")}\n`);
+
+      const result = await verticalPicker("Provider", [
+        { label: "OpenAI", value: "openai" },
+        { label: "Anthropic", value: "anthropic" },
+        { label: "Google (Gemini)", value: "google" },
+        { label: "AWS Bedrock", value: "bedrock" },
+        { label: "Skip", value: "" },
       ]);
-      if (effort) {
-        aiEffort = effort;
+
+      if (result === BACK) {
+        console.log();
+        step = 2;
+        continue;
       }
-    } else {
-      const keyName = getAiKeyName(aiProvider);
-      if (keyName) {
-        console.log(`\n  ${C.dim(`Requires ${keyName}:`)}`);
-        aiKey = await promptSecret(`  ${C.dim("→")} `);
+      if (result === null) {
+        console.log(`\n  ${C.muted("Cancelled.")}\n`);
+        return;
       }
 
-      // Model selection
-      const models = getModelOptions(aiProvider);
-      if (models.length > 0) {
-        console.log();
-        const selectedModel = await verticalPicker("Model", models);
-        if (selectedModel) aiModel = selectedModel;
+      aiProvider = result;
+      if (!aiProvider) {
+        step = 100; // skip to save
+        continue;
       }
-
-      // Effort level (OpenAI + Anthropic only)
-      if (aiProvider === "openai" || aiProvider === "anthropic") {
-        console.log();
-        const effort = await horizontalPicker("Effort", [
-          { label: "low", value: "low" },
-          { label: "medium", value: "medium" },
-          { label: "high", value: "high" },
-          { label: "max", value: "max" },
-        ]);
-        if (effort) {
-          aiEffort = effort;
+      step = 4;
+    } else if (step === 4) {
+      // AI credentials & model
+      if (aiProvider === "bedrock") {
+        const bedrockResult = await runBedrockSteps();
+        if (bedrockResult === ESCAPED) {
+          step = 3;
+          continue;
         }
+        awsRegion = bedrockResult.awsRegion;
+        awsAccessKey = bedrockResult.awsAccessKey;
+        awsSecretKey = bedrockResult.awsSecretKey;
+        aiModel = bedrockResult.aiModel;
+        aiEffort = bedrockResult.aiEffort;
+      } else {
+        const stdResult = await runStandardProviderSteps(aiProvider);
+        if (stdResult === ESCAPED) {
+          step = 3;
+          continue;
+        }
+        aiKey = stdResult.aiKey;
+        aiModel = stdResult.aiModel;
+        aiEffort = stdResult.aiEffort;
       }
+      step = 100; // done, go to save
     }
+
+    if (step === 100) break;
+  }
+
+  if (step < 1) {
+    console.log(`\n  ${C.muted("Cancelled.")}\n`);
+    return;
   }
 
   // Save
@@ -230,6 +254,117 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
   console.log();
 }
 
+interface BedrockResult {
+  awsRegion: string;
+  awsAccessKey: string;
+  awsSecretKey: string;
+  aiModel: string;
+  aiEffort: string;
+}
+
+async function runBedrockSteps(): Promise<BedrockResult | typeof ESCAPED> {
+  let subStep = 1;
+  let awsRegion = "";
+  let awsAccessKey = "";
+  let awsSecretKey = "";
+  let aiModel = "";
+  let aiEffort = "";
+
+  while (subStep >= 1) {
+    if (subStep === 1) {
+      console.log(`\n  ${C.dim("AWS credentials for Bedrock:")}  ${ESC_HINT}\n`);
+      const region = await promptLine(`  ${C.dim("AWS Region (e.g., us-east-1):")} `);
+      if (region === ESCAPED) return ESCAPED;
+      awsRegion = region;
+      subStep = 2;
+    } else if (subStep === 2) {
+      const accessKey = await promptSecret(`  ${C.dim("AWS Access Key ID:")} `);
+      if (accessKey === ESCAPED) { subStep = 1; continue; }
+      awsAccessKey = accessKey;
+      subStep = 3;
+    } else if (subStep === 3) {
+      const secretKey = await promptSecret(`  ${C.dim("AWS Secret Access Key:")} `);
+      if (secretKey === ESCAPED) { subStep = 2; continue; }
+      awsSecretKey = secretKey;
+      subStep = 4;
+    } else if (subStep === 4) {
+      console.log(`\n  ${C.dim("Enter the full Bedrock model ID:")}  ${ESC_HINT}`);
+      const model = await promptLine(`  ${C.dim("→")} `);
+      if (model === ESCAPED) { subStep = 3; continue; }
+      aiModel = model;
+      subStep = 5;
+    } else if (subStep === 5) {
+      console.log();
+      const effort = await horizontalPicker("Effort", [
+        { label: "low", value: "low" },
+        { label: "medium", value: "medium" },
+        { label: "high", value: "high" },
+        { label: "max", value: "max" },
+      ]);
+      if (effort === BACK) { subStep = 4; continue; }
+      if (effort === null) { subStep = 4; continue; }
+      aiEffort = effort;
+      break;
+    }
+  }
+
+  return { awsRegion, awsAccessKey, awsSecretKey, aiModel, aiEffort };
+}
+
+interface StandardResult {
+  aiKey: string;
+  aiModel: string;
+  aiEffort: string;
+}
+
+async function runStandardProviderSteps(provider: string): Promise<StandardResult | typeof ESCAPED> {
+  let subStep = 1;
+  let aiKey = "";
+  let aiModel = "";
+  let aiEffort = "";
+
+  const keyName = getAiKeyName(provider);
+  const models = getModelOptions(provider);
+  const hasEffort = provider === "openai" || provider === "anthropic";
+
+  while (subStep >= 1) {
+    if (subStep === 1) {
+      if (keyName) {
+        console.log(`\n  ${C.dim(`Requires ${keyName}:`)}  ${ESC_HINT}`);
+        const key = await promptSecret(`  ${C.dim("→")} `);
+        if (key === ESCAPED) return ESCAPED;
+        aiKey = key;
+      }
+      subStep = 2;
+    } else if (subStep === 2) {
+      if (models.length > 0) {
+        console.log();
+        const selectedModel = await verticalPicker("Model", models);
+        if (selectedModel === BACK) { subStep = 1; continue; }
+        if (selectedModel === null) { subStep = 1; continue; }
+        aiModel = selectedModel;
+      }
+      subStep = 3;
+    } else if (subStep === 3) {
+      if (hasEffort) {
+        console.log();
+        const effort = await horizontalPicker("Effort", [
+          { label: "low", value: "low" },
+          { label: "medium", value: "medium" },
+          { label: "high", value: "high" },
+          { label: "max", value: "max" },
+        ]);
+        if (effort === BACK) { subStep = 2; continue; }
+        if (effort === null) { subStep = 2; continue; }
+        aiEffort = effort;
+      }
+      break;
+    }
+  }
+
+  return { aiKey, aiModel, aiEffort };
+}
+
 function normalizeUrl(url: string): string {
   url = url.trim();
   if (!url) return "";
@@ -237,7 +372,6 @@ function normalizeUrl(url: string): string {
     url = "https://" + url;
   }
   url = url.replace(/\/+$/, "");
-  // Strip /api/v1 if user included it — we'll add it back ourselves
   url = url.replace(/\/api\/v1$/, "");
   return url;
 }
@@ -272,29 +406,73 @@ async function validateCredentials(baseUrl: string, token: string): Promise<{ ok
   }
 }
 
-function prompt(question: string): Promise<string> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.trim());
+function promptLine(question: string): Promise<string | typeof ESCAPED> {
+  if (!process.stdin.isTTY) {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    return new Promise((resolve) => {
+      rl.question(question, (answer) => { rl.close(); resolve(answer.trim()); });
     });
+  }
+
+  return new Promise((resolve) => {
+    process.stdout.write(question);
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+
+    let input = "";
+
+    const cleanup = () => {
+      process.stdin.setRawMode(false);
+      process.stdin.removeListener("data", onData);
+      process.stdin.pause();
+    };
+
+    const onData = (buf: Buffer) => {
+      const str = buf.toString();
+      for (const c of str) {
+        const code = c.charCodeAt(0);
+        if (c === "\r" || c === "\n") {
+          cleanup();
+          process.stdout.write("\n");
+          resolve(input.trim());
+          return;
+        }
+        if (code === 27) {
+          cleanup();
+          process.stdout.write("\n");
+          resolve(ESCAPED);
+          return;
+        }
+        if (code === 3) {
+          cleanup();
+          process.exit(1);
+        }
+        if (code === 127 || code === 8) {
+          if (input.length > 0) {
+            input = input.slice(0, -1);
+            process.stdout.write("\b \b");
+          }
+        } else if (code >= 32) {
+          input += c;
+          process.stdout.write(c);
+        }
+      }
+    };
+
+    process.stdin.on("data", onData);
   });
 }
 
-function promptSecret(question: string): Promise<string> {
+function promptSecret(question: string): Promise<string | typeof ESCAPED> {
+  if (!process.stdin.isTTY) {
+    const rl = readline.createInterface({ input: process.stdin, terminal: false });
+    return new Promise((resolve) => {
+      rl.on("line", (line) => { rl.close(); resolve(line.trim()); });
+    });
+  }
+
   return new Promise((resolve) => {
     process.stdout.write(question);
-
-    if (!process.stdin.isTTY) {
-      const rl = readline.createInterface({ input: process.stdin, terminal: false });
-      rl.on("line", (line) => { rl.close(); resolve(line.trim()); });
-      return;
-    }
-
     process.stdin.setRawMode(true);
     process.stdin.resume();
 
@@ -315,6 +493,12 @@ function promptSecret(question: string): Promise<string> {
           cleanup();
           process.stdout.write("\n");
           resolve(input.trim());
+          return;
+        }
+        if (code === 27) {
+          cleanup();
+          process.stdout.write("\n");
+          resolve(ESCAPED);
           return;
         }
         if (code === 3) {
