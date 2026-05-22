@@ -1,7 +1,6 @@
 # canvas-cli
 
 [![CI](https://github.com/reyabsaluja/canvas-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/reyabsaluja/canvas-cli/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@reyabsaluja/canvas-cli)](https://www.npmjs.com/package/@reyabsaluja/canvas-cli)
 
 `canvas-cli` is a TypeScript command-line interface for working with Canvas LMS from the terminal. It combines direct Canvas API access, local course ingestion, an interactive TUI, and optional AI-assisted assignment investigation.
 
