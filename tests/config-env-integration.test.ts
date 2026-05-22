@@ -13,7 +13,7 @@ const originalEnv = { ...process.env };
 const { writeStoredConfig, deleteStoredConfig } = await import("../src/config/store.js");
 const { storeCredential, deleteAllCredentials } = await import("../src/config/credentials.js");
 const { loadConfig, isConfigured } = await import("../src/config/env.js");
-const { loadStoredCredentialsToEnv } = await import("../src/config/load-credentials-to-env.js");
+const { loadStoredCredentialsToEnv, ensureAICredentials } = await import("../src/config/load-credentials-to-env.js");
 
 function resetEnv() {
   delete process.env.CANVAS_BASE_URL;
@@ -154,11 +154,12 @@ describe("loadStoredCredentialsToEnv", () => {
     assert.equal(process.env.AI_PROVIDER, "openai");
   });
 
-  test("injects API keys from credential store for configured provider", () => {
+  test("injects API keys from credential store via ensureAICredentials", () => {
     writeStoredConfig({ canvasBaseUrl: "https://test.com", aiProvider: "openai" }, profile);
     storeCredential(profile, "openai-key", "sk-test123");
 
     loadStoredCredentialsToEnv();
+    ensureAICredentials();
 
     assert.equal(process.env.OPENAI_API_KEY, "sk-test123");
   });
@@ -168,6 +169,7 @@ describe("loadStoredCredentialsToEnv", () => {
     storeCredential(profile, "openai-key", "sk-should-not-load");
 
     loadStoredCredentialsToEnv();
+    ensureAICredentials();
 
     assert.equal(process.env.OPENAI_API_KEY, undefined);
   });
