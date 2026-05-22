@@ -108,19 +108,16 @@ const subcommands = [
   "-h",
   "--version",
   "-V",
-  "--debug",
 ];
 
 const hasSubcommand = args.length > 0 && subcommands.some(
   (cmd) => args[0] === cmd
 );
 
-if (!hasSubcommand && args.length === 0) {
-  // Launch interactive TUI
-  import("./tui/app.js").then(({ launchApp }) => launchApp());
-} else if (hasSubcommand && args[0] === "--debug" && args.length === 1) {
-  // --debug alone without a subcommand: init debug then launch TUI
-  initDebug(true);
+const isDebugOnly = args.every((a) => a === "--debug");
+
+if ((!hasSubcommand && args.length === 0) || isDebugOnly) {
+  if (isDebugOnly) initDebug(true);
   import("./tui/app.js").then(({ launchApp }) => launchApp());
 } else {
   program.parse();
