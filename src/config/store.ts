@@ -47,7 +47,9 @@ export function deleteStoredConfig(profile: string = "default"): boolean {
 export function listProfiles(): string[] {
   const dir = getConfigDir();
   try {
-    const files = readdirSync(dir);
+    const files = readdirSync(dir).filter(
+      (f) => f === "config.json" || /^config\.[a-zA-Z0-9_-]+\.json$/.test(f)
+    );
     const profiles: string[] = [];
     for (const f of files) {
       if (f === "config.json") {
