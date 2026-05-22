@@ -105,6 +105,7 @@ program
   .command("tui", { isDefault: true, hidden: true })
   .description("Launch interactive TUI")
   .action(() => {
+    debug("general", "launching interactive TUI");
     import("./tui/app.js").then(({ launchApp }) => launchApp());
   });
 
