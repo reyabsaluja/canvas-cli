@@ -402,6 +402,12 @@ function normalizeUrl(url: string): string {
   }
   url = url.replace(/\/+$/, "");
   url = url.replace(/\/api\/v1$/, "");
+  try {
+    const parsed = new URL(url);
+    if (!parsed.hostname.includes(".")) return "";
+  } catch {
+    return "";
+  }
   return url;
 }
 
