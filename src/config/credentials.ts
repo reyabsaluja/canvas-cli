@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { platform } from "node:os";
@@ -40,17 +40,11 @@ export function storeCredential(profile: string, key: string, value: string): St
   }
   if (platform() === "darwin") {
     try {
-      // Delete existing entry first (ignore errors if it doesn't exist)
+      const account = keychainAccount(profile, key);
       try {
-        execSync(
-          `security delete-generic-password -s ${shellEscape(SERVICE_NAME)} -a ${shellEscape(keychainAccount(profile, key))}`,
-          { stdio: "ignore" }
-        );
+        execFileSync("security", ["delete-generic-password", "-s", SERVICE_NAME, "-a", account], { stdio: "ignore" });
       } catch {}
-      execSync(
-        `security add-generic-password -s ${shellEscape(SERVICE_NAME)} -a ${shellEscape(keychainAccount(profile, key))} -w ${shellEscape(value)}`,
-        { stdio: "ignore" }
-      );
+      execFileSync("security", ["add-generic-password", "-s", SERVICE_NAME, "-a", account, "-w", value], { stdio: "ignore" });
       debug("config", `Stored credential in keychain: ${key} (profile: ${profile})`);
       cache.set(cacheKey(profile, key), value);
       return "keychain";
@@ -80,8 +74,9 @@ export function loadCredential(profile: string, key: string): string | null {
 
   if (platform() === "darwin") {
     try {
-      const result = execSync(
-        `security find-generic-password -s ${shellEscape(SERVICE_NAME)} -a ${shellEscape(keychainAccount(profile, key))} -w`,
+      const result = execFileSync(
+        "security",
+        ["find-generic-password", "-s", SERVICE_NAME, "-a", keychainAccount(profile, key), "-w"],
         { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }
       );
       const trimmed = result.trim();
@@ -114,10 +109,7 @@ export function deleteCredential(profile: string, key: string): boolean {
 
   if (platform() === "darwin") {
     try {
-      execSync(
-        `security delete-generic-password -s ${shellEscape(SERVICE_NAME)} -a ${shellEscape(keychainAccount(profile, key))}`,
-        { stdio: "ignore" }
-      );
+      execFileSync("security", ["delete-generic-password", "-s", SERVICE_NAME, "-a", keychainAccount(profile, key)], { stdio: "ignore" });
       deleted = true;
     } catch {}
   }
@@ -144,8 +136,4 @@ export function deleteAllCredentials(profile: string): void {
 
 export function clearCredentialCache(): void {
   cache.clear();
-}
-
-function shellEscape(str: string): string {
-  return "'" + str.replace(/'/g, "'\\''") + "'";
 }
