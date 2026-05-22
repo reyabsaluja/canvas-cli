@@ -90,7 +90,16 @@ program
   .option("--workspace <path>", "Path to a specific workspace")
   .option("--json", "Output as JSON")
   .option("--show-retrieval", "Show retrieval debug info")
-  .action(askCommand);
+  .option("--debug", "(deprecated, use --show-retrieval)", false)
+  .action((question, opts) => {
+    if (opts.debug) {
+      process.stderr.write(
+        "Warning: --debug on 'ask' is deprecated. Use --show-retrieval instead.\n"
+      );
+      opts.showRetrieval = true;
+    }
+    return askCommand(question, opts);
+  });
 
 program
   .command("tui", { isDefault: true, hidden: true })
