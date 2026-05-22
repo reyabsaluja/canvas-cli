@@ -404,7 +404,7 @@ function normalizeUrl(url: string): string {
   url = url.replace(/\/api\/v1$/, "");
   try {
     const parsed = new URL(url);
-    if (!parsed.hostname.includes(".")) return "";
+    if (!parsed.hostname.includes(".") && parsed.hostname !== "localhost") return "";
   } catch {
     return "";
   }
