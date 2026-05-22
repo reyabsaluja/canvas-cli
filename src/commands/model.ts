@@ -206,7 +206,6 @@ async function modelEffortSubcommand(): Promise<ModelResult> {
 }
 
 async function modelKeySubcommand(): Promise<ModelResult> {
-  hideCursor();
   try {
     const profile = getActiveProfile();
     const current = readCurrentConfig();
@@ -222,7 +221,6 @@ async function modelKeySubcommand(): Promise<ModelResult> {
 
     clearScreen();
     printHeader();
-    showCursor();
 
     if (current.provider === "bedrock") {
       console.log(`  ${C.text("Rotate AWS credentials for")} ${C.white(providerLabel)}\n`);
