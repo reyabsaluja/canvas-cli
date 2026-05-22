@@ -264,9 +264,12 @@ async function modelKeySubcommand(): Promise<ModelResult> {
       console.log(`\n  ${C.success("✓")} ${C.text("API key updated")}\n`);
     }
 
-    return current.model
-      ? { provider: current.provider, model: current.model, effort: current.effort as AIEffortLevel | undefined }
-      : null;
+    if (!current.model) return null;
+    const validEfforts: string[] = ["low", "medium", "high", "max"];
+    const effort = validEfforts.includes(current.effort ?? "")
+      ? (current.effort as AIEffortLevel)
+      : undefined;
+    return { provider: current.provider, model: current.model, effort };
   } finally {
     showCursor();
   }
