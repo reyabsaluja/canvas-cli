@@ -212,15 +212,6 @@ export function classifyError(err: unknown): CanvasCliError {
 }
 
 /**
- * Format an error for display to the user.
- * Returns the user-facing message (no stack traces).
- */
-export function formatError(err: unknown): string {
-  const classified = classifyError(err);
-  return classified.userMessage;
-}
-
-/**
  * Handle an error in CLI (non-interactive) context: print message and exit.
  * Kept for backward compatibility during migration — new code should prefer
  * classifyError + custom handling.
