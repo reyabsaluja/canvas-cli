@@ -46,8 +46,11 @@ function maskSecrets(message: string): string {
 
 export function maskUrl(url: string): string {
   try {
-    const parsed = new URL(url);
-    const params = new URLSearchParams(parsed.search);
+    const qIndex = url.indexOf("?");
+    if (qIndex === -1) return url;
+
+    const base = url.slice(0, qIndex);
+    const params = new URLSearchParams(url.slice(qIndex + 1));
     for (const key of params.keys()) {
       const lower = key.toLowerCase();
       if (
@@ -59,8 +62,8 @@ export function maskUrl(url: string): string {
         params.set(key, "***");
       }
     }
-    parsed.search = params.toString();
-    return parsed.toString();
+    const qs = params.toString();
+    return qs ? `${base}?${qs}` : base;
   } catch {
     return maskSecrets(url);
   }
