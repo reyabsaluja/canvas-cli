@@ -13,9 +13,11 @@
     { "label": "Claude Sonnet 4.6", "value": "claude-sonnet-4-6", "description": "balanced" }
   ],
   "google": [
-    { "label": "Gemini 3.1 Pro", "value": "gemini-3.1-pro", "description": "most capable" },
-    { "label": "Gemini 2.5 Pro", "value": "gemini-2.5-pro-preview-05-06", "description": "reasoning + large context" },
-    { "label": "Gemini 2.5 Flash", "value": "gemini-2.5-flash-preview-04-17", "description": "fast + reasoning" },
-    { "label": "Gemini 2.0 Flash", "value": "gemini-2.0-flash", "description": "fast general purpose" }
+    { "label": "Gemini 3.1 Pro", "value": "gemini-3.1-pro-preview", "description": "most capable" },
+    { "label": "Gemini 3.5 Flash", "value": "gemini-3.5-flash", "description": "fast + capable" },
+    { "label": "Gemini 3 Flash", "value": "gemini-3-flash-preview", "description": "balanced" },
+    { "label": "Gemini 3.1 Flash Lite", "value": "gemini-3.1-flash-lite", "description": "lightweight" },
+    { "label": "Gemini 2.5 Flash", "value": "gemini-2.5-flash", "description": "fast" },
+    { "label": "Gemini 2.5 Pro", "value": "gemini-2.5-pro", "description": "reasoning" }
   ]
 }
