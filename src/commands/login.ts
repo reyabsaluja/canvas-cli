@@ -480,7 +480,13 @@ function promptLine(question: string): Promise<string | typeof ESCAPED> {
             resolve(input.trim());
             return;
           }
-          if (code === 27 || code === 3) {
+          if (code === 3) {
+            cleanup();
+            process.stdout.write("\n");
+            process.exit(130);
+            return;
+          }
+          if (code === 27) {
             cleanup();
             process.stdout.write("\n");
             resolve(ESCAPED);
@@ -540,7 +546,13 @@ function promptSecret(question: string): Promise<string | typeof ESCAPED> {
             resolve(input.trim());
             return;
           }
-          if (code === 27 || code === 3) {
+          if (code === 3) {
+            cleanup();
+            process.stdout.write("\n");
+            process.exit(130);
+            return;
+          }
+          if (code === 27) {
             cleanup();
             process.stdout.write("\n");
             resolve(ESCAPED);
