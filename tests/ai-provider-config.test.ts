@@ -190,10 +190,10 @@ test("getEffortOptions returns Anthropic thinking budget", () => {
   });
 });
 
-test("getEffortOptions returns Anthropic thinking for bedrock provider", () => {
+test("getEffortOptions returns Bedrock reasoningConfig for bedrock provider", () => {
   const config: AIProviderConfig = { provider: "bedrock", model: "us.anthropic.claude-opus-4-7", effort: "max" };
   assert.deepEqual(getEffortOptions(config), {
-    providerOptions: { anthropic: { thinking: { type: "enabled", budgetTokens: 32000 } } },
+    providerOptions: { bedrock: { reasoningConfig: { type: "enabled", budgetTokens: 32000 } } },
   });
 });
 
