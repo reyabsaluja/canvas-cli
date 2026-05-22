@@ -71,7 +71,12 @@ export async function verticalPicker(
           resolve(BACK);
           return;
         }
-        if (str === "\x03" || str === "q") {
+        if (str === "\x03") {
+          cleanup();
+          process.exit(130);
+          return;
+        }
+        if (str === "q") {
           cleanup();
           resolve(null);
           return;
@@ -139,7 +144,13 @@ export async function horizontalPicker(
           resolve(BACK);
           return;
         }
-        if (str === "\x03" || str === "q") {
+        if (str === "\x03") {
+          cleanup();
+          process.stdout.write("\n");
+          process.exit(130);
+          return;
+        }
+        if (str === "q") {
           cleanup();
           process.stdout.write("\n");
           resolve(null);
