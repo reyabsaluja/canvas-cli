@@ -39,7 +39,13 @@ test("isNetworkError", async (t) => {
     assert.equal(isNetworkError(err), true);
   });
 
-  await t.test("does not match generic fetch failed without code", () => {
+  await t.test("detects fetch failed with an Error cause (undici pattern)", () => {
+    const err = new TypeError("fetch failed");
+    (err as { cause?: unknown }).cause = new Error("connect ECONNREFUSED");
+    assert.equal(isNetworkError(err), true);
+  });
+
+  await t.test("does not match generic fetch failed without cause", () => {
     const err = new TypeError("fetch failed");
     assert.equal(isNetworkError(err), false);
   });
