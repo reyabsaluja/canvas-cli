@@ -1,5 +1,5 @@
 import * as readline from "node:readline";
-import { execSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { platform } from "node:os";
 import chalk from "chalk";
 import { writeStoredConfig, readStoredConfig } from "../config/store.js";
@@ -343,18 +343,22 @@ function promptSecret(question: string): Promise<string> {
 
 function openBrowser(url: string): void {
   try {
+    let cmd: string;
+    let args: string[];
     if (platform() === "darwin") {
-      execSync(`open ${shellEscape(url)}`, { stdio: "ignore" });
+      cmd = "open";
+      args = [url];
     } else if (platform() === "linux") {
-      execSync(`xdg-open ${shellEscape(url)}`, { stdio: "ignore" });
+      cmd = "xdg-open";
+      args = [url];
     } else if (platform() === "win32") {
-      execSync(`start "" ${shellEscape(url)}`, { stdio: "ignore" });
+      cmd = "cmd";
+      args = ["/c", "start", "", url];
+    } else {
+      return;
     }
+    spawn(cmd, args, { stdio: "ignore", detached: true }).unref();
   } catch {}
-}
-
-function shellEscape(str: string): string {
-  return "'" + str.replace(/'/g, "'\\''") + "'";
 }
 
 function getAiKeyName(provider: string): string | null {
