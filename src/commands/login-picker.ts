@@ -48,11 +48,16 @@ export async function verticalPicker(
   render();
 
   return new Promise((resolve) => {
-    process.stdin.setRawMode(true);
+    try {
+      process.stdin.setRawMode(true);
+    } catch {
+      resolve(null);
+      return;
+    }
     process.stdin.resume();
 
     const cleanup = () => {
-      process.stdin.setRawMode(false);
+      try { process.stdin.setRawMode(false); } catch {}
       process.stdin.removeListener("data", onData);
       process.stdin.pause();
     };
@@ -119,11 +124,17 @@ export async function horizontalPicker(
   renderLine();
 
   return new Promise((resolve) => {
-    process.stdin.setRawMode(true);
+    try {
+      process.stdin.setRawMode(true);
+    } catch {
+      process.stdout.write("\n");
+      resolve(null);
+      return;
+    }
     process.stdin.resume();
 
     const cleanup = () => {
-      process.stdin.setRawMode(false);
+      try { process.stdin.setRawMode(false); } catch {}
       process.stdin.removeListener("data", onData);
       process.stdin.pause();
     };

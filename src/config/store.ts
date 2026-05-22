@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, mkdirSync, unlinkSync, existsSync, readdirSync, openSync, writeSync, closeSync, constants as fsConstants } from "node:fs";
 import { dirname } from "node:path";
 import { getConfigDir, getConfigFilePath, validateProfileName } from "./paths.js";
 import { debug } from "../debug.js";
@@ -9,6 +9,7 @@ export interface StoredConfig {
   aiProvider?: string;
   aiModel?: string;
   aiEffort?: string;
+  awsRegion?: string;
 }
 
 export function readStoredConfig(profile: string = "default"): StoredConfig | null {
@@ -27,7 +28,9 @@ export function writeStoredConfig(config: StoredConfig, profile: string = "defau
   const filePath = getConfigFilePath(profile);
   const dir = dirname(filePath);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  writeFileSync(filePath, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
+  const fd = openSync(filePath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC, 0o600);
+  writeSync(fd, JSON.stringify(config, null, 2) + "\n");
+  closeSync(fd);
   debug("config", `Wrote config to ${filePath}`);
 }
 
