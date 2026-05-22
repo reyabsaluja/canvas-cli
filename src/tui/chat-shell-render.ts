@@ -716,13 +716,10 @@ export function getRenderedMessageLines(
         const visible = visibleWidth(line);
         return line + " ".repeat(Math.max(0, innerWidth - visible));
       };
-      const rendered: string[] = [
-        `  ${bar}${userBoxBg(" ".repeat(innerWidth + 2))}`,
-      ];
+      const rendered: string[] = [];
       for (const line of wrappedLines) {
         rendered.push(`  ${bar}${userBoxBg(` ${chalk.white(padInner(line))} `)}`);
       }
-      rendered.push(`  ${bar}${userBoxBg(" ".repeat(innerWidth + 2))}`);
       cache.set(cacheKey, ["", ...rendered]);
       return ["", ...rendered];
     }
