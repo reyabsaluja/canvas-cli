@@ -161,10 +161,24 @@ export async function modelCommand(): Promise<{ provider: string; model: string;
     printHeader();
     console.log(`  ${C.success("✓")} ${C.dim("Provider")}  ${C.muted(group.label)}\n`);
 
-    const selectedModel = await verticalPicker("Model", group.models);
+    const modelOptions: PickerOption[] = [
+      ...group.models,
+      { label: "Custom…", value: "__custom__", description: "enter model ID" },
+    ];
+    const selectedModel = await verticalPicker("Model", modelOptions);
     if (selectedModel === BACK || selectedModel === null) return null;
 
-    const modelLabel = group.models.find((m) => m.value === selectedModel)?.label ?? selectedModel;
+    let finalModel = selectedModel;
+    let modelLabel = group.models.find((m) => m.value === selectedModel)?.label ?? selectedModel;
+
+    if (selectedModel === "__custom__") {
+      showCursor();
+      const custom = await promptLine(`  ${C.dim("Model ID:")} `);
+      if (custom === ESCAPED || !custom.trim()) return null;
+      hideCursor();
+      finalModel = custom.trim();
+      modelLabel = finalModel;
+    }
 
     const hasEffort = selectedProvider !== "google";
     let effort = "";
@@ -186,14 +200,14 @@ export async function modelCommand(): Promise<{ provider: string; model: string;
     const updated = {
       ...base,
       aiProvider: selectedProvider,
-      aiModel: selectedModel,
+      aiModel: finalModel,
       ...(hasEffort ? { aiEffort: effort } : {}),
     };
     if (!hasEffort) delete updated.aiEffort;
     writeStoredConfig(updated, profile);
 
     process.env.AI_PROVIDER = selectedProvider;
-    process.env.AI_MODEL = selectedModel;
+    process.env.AI_MODEL = finalModel;
     if (hasEffort) {
       process.env.AI_EFFORT = effort;
     } else {
@@ -203,7 +217,7 @@ export async function modelCommand(): Promise<{ provider: string; model: string;
     const effortSuffix = hasEffort ? ` ${C.dim(`(${effort} effort)`)}` : "";
     console.log(`\n  ${C.success("✓")} ${C.text(`Switched to ${modelLabel}`)}${effortSuffix}\n`);
 
-    return { provider: selectedProvider, model: selectedModel, effort };
+    return { provider: selectedProvider, model: finalModel, effort };
   } finally {
     showCursor();
   }
