@@ -130,7 +130,7 @@ const EFFORT_TO_OPENAI_REASONING: Record<AIEffortLevel, string> = {
 };
 
 const EFFORT_TO_THINKING_BUDGET: Record<AIEffortLevel, number> = {
-  low: 1024,
+  low: 2048,
   medium: 4096,
   high: 10000,
   max: 32000,
