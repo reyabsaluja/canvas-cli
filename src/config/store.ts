@@ -4,6 +4,7 @@ import { getConfigDir, getConfigFilePath, validateProfileName } from "./paths.js
 import { debug } from "../debug.js";
 
 export interface StoredConfig {
+  /** Human-facing base URL without /api/v1 (e.g. "https://school.instructure.com"). loadConfig() appends /api/v1 at runtime. */
   canvasBaseUrl: string;
   aiProvider?: string;
   aiModel?: string;
