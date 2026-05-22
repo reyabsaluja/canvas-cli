@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from "node:fs";
+import { readFileSync, mkdirSync, unlinkSync, existsSync, openSync, writeSync, closeSync, constants as fsConstants } from "node:fs";
 import { join } from "node:path";
 import { platform } from "node:os";
 import { getConfigDir, validateProfileName } from "./paths.js";
@@ -12,7 +12,6 @@ export const ALL_CREDENTIAL_KEYS = [
   "openai-key",
   "anthropic-key",
   "google-key",
-  "aws-region",
   "aws-access-key",
   "aws-secret-key",
 ] as const;
@@ -53,11 +52,13 @@ export function storeCredential(profile: string, key: string, value: string): St
     }
   }
 
-  // Fallback: store in a file with restrictive permissions
+  // Fallback: store in a file with restrictive permissions (bypass umask)
   const filePath = credentialFilePath(profile, key);
   const dir = join(getConfigDir(), "credentials");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  writeFileSync(filePath, value, { mode: 0o600 });
+  const fd = openSync(filePath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC, 0o600);
+  writeSync(fd, value);
+  closeSync(fd);
   cache.set(cacheKey(profile, key), value);
   debug("config", `Stored credential in file: ${filePath}`);
   return "file";

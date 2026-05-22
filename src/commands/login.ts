@@ -248,6 +248,7 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
       ...(finalProvider && { aiProvider: finalProvider }),
       ...(finalModel && { aiModel: finalModel }),
       ...(finalEffort && { aiEffort: finalEffort }),
+      ...(awsRegion && { awsRegion }),
     },
     profile
   );
@@ -260,7 +261,6 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
     }
   }
   if (aiProvider === "bedrock") {
-    if (awsRegion) storeCredential(profile, "aws-region", awsRegion);
     if (awsAccessKey) storeCredential(profile, "aws-access-key", awsAccessKey);
     if (awsSecretKey) storeCredential(profile, "aws-secret-key", awsSecretKey);
   }
@@ -375,7 +375,13 @@ async function runStandardProviderSteps(provider: string, freshStep: () => void)
         const selectedModel = await verticalPicker("Model", models);
         if (selectedModel === BACK) { subStep = 1; continue; }
         if (selectedModel === null) { subStep = 1; continue; }
-        aiModel = selectedModel;
+        if (selectedModel === "__custom__") {
+          const custom = await promptLine(`\n  ${C.dim("Model ID →")} `);
+          if (custom === ESCAPED) { continue; }
+          aiModel = custom;
+        } else {
+          aiModel = selectedModel;
+        }
       }
       subStep = 3;
     } else if (subStep === 3) {
@@ -504,18 +510,21 @@ function getModelOptions(provider: string): PickerOption[] {
         { label: "gpt-4.1", value: "gpt-4.1", description: "flagship GPT" },
         { label: "gpt-4.1-mini", value: "gpt-4.1-mini", description: "fast + capable" },
         { label: "gpt-4.1-nano", value: "gpt-4.1-nano", description: "fastest" },
+        { label: "Custom", value: "__custom__", description: "enter model ID" },
       ];
     case "anthropic":
       return [
         { label: "Claude Opus 4", value: "claude-opus-4-0-20250514", description: "most capable" },
         { label: "Claude Sonnet 4", value: "claude-sonnet-4-20250514", description: "balanced" },
         { label: "Claude Haiku 3.5", value: "claude-haiku-3-5-20241022", description: "fastest" },
+        { label: "Custom", value: "__custom__", description: "enter model ID" },
       ];
     case "google":
       return [
         { label: "Gemini 2.5 Pro", value: "gemini-2.5-pro-preview-05-06", description: "reasoning + large context" },
         { label: "Gemini 2.5 Flash", value: "gemini-2.5-flash-preview-04-17", description: "fast + reasoning" },
         { label: "Gemini 2.0 Flash", value: "gemini-2.0-flash", description: "fast general purpose" },
+        { label: "Custom", value: "__custom__", description: "enter model ID" },
       ];
     default:
       return [];

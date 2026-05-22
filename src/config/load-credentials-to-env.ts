@@ -8,7 +8,6 @@ const PROVIDER_CREDENTIALS: Record<string, [credKey: string, envKey: string][]> 
   anthropic: [["anthropic-key", "ANTHROPIC_API_KEY"]],
   google: [["google-key", "GOOGLE_API_KEY"]],
   bedrock: [
-    ["aws-region", "AWS_REGION"],
     ["aws-access-key", "AWS_ACCESS_KEY_ID"],
     ["aws-secret-key", "AWS_SECRET_ACCESS_KEY"],
   ],
@@ -29,6 +28,10 @@ export function loadStoredCredentialsToEnv(): void {
   if (stored?.aiEffort && !process.env.AI_EFFORT) {
     process.env.AI_EFFORT = stored.aiEffort;
     debug("config", `Set AI_EFFORT from stored config: ${stored.aiEffort}`);
+  }
+  if (stored?.awsRegion && !process.env.AWS_REGION) {
+    process.env.AWS_REGION = stored.awsRegion;
+    debug("config", `Set AWS_REGION from stored config: ${stored.awsRegion}`);
   }
 
   const provider = process.env.AI_PROVIDER || stored?.aiProvider;
