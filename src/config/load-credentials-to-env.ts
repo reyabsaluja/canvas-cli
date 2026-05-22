@@ -13,6 +13,14 @@ const PROVIDER_CREDENTIALS: Record<string, [credKey: string, envKey: string][]> 
   ],
 };
 
+let aiCredentialsLoaded = false;
+
+/**
+ * Loads non-secret config values (provider, model, effort, region) from the
+ * stored config file into env vars. This is fast (file read only, no keychain).
+ * AI API keys are deferred to ensureAICredentials() to avoid blocking keychain
+ * calls on commands that don't use AI.
+ */
 export function loadStoredCredentialsToEnv(): void {
   const profile = getActiveProfile();
   const stored = readStoredConfig(profile);
@@ -34,6 +42,20 @@ export function loadStoredCredentialsToEnv(): void {
     debug("config", `Set AWS_REGION from stored config: ${stored.awsRegion}`);
   }
 
+  aiCredentialsLoaded = false;
+}
+
+/**
+ * Loads AI provider API keys from the credential store (keychain/file) into
+ * env vars. Called lazily on first AI provider use to avoid blocking keychain
+ * access on commands that don't need AI (e.g. `courses`, `assignments`).
+ */
+export function ensureAICredentials(): void {
+  if (aiCredentialsLoaded) return;
+  aiCredentialsLoaded = true;
+
+  const profile = getActiveProfile();
+  const stored = readStoredConfig(profile);
   const provider = process.env.AI_PROVIDER || stored?.aiProvider;
   const relevantCreds = provider ? PROVIDER_CREDENTIALS[provider] : undefined;
   if (!relevantCreds) return;
