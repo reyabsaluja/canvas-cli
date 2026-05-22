@@ -63,7 +63,7 @@ export class CanvasClient {
       debugApiResponse("GET", nextUrl, response.status, Date.now() - start);
 
       if (!response.ok) {
-        this.throwForStatus(response.status, response.statusText);
+        this.throwForStatus(response);
       }
 
       const data = (await response.json()) as T[];
@@ -87,13 +87,14 @@ export class CanvasClient {
     debugApiResponse("GET", url, response.status, Date.now() - start);
 
     if (!response.ok) {
-      this.throwForStatus(response.status, response.statusText);
+      this.throwForStatus(response);
     }
 
     return (await response.json()) as T;
   }
 
-  private throwForStatus(status: number, statusText: string): never {
+  private throwForStatus(response: Response): never {
+    const { status, statusText } = response;
     const apiErr = new CanvasApiError(status, statusText);
     switch (status) {
       case 401:
@@ -102,8 +103,11 @@ export class CanvasClient {
         throw new CanvasPermissionError(undefined, apiErr);
       case 404:
         throw new CanvasNotFoundError(undefined, apiErr);
-      case 429:
-        throw new CanvasRateLimitError(null, apiErr);
+      case 429: {
+        const retryAfter = response.headers.get("Retry-After");
+        const retryMs = retryAfter ? parseInt(retryAfter, 10) * 1000 || null : null;
+        throw new CanvasRateLimitError(retryMs, apiErr);
+      }
       default:
         if (status >= 500) throw new CanvasServerError(status, apiErr);
         throw apiErr;
