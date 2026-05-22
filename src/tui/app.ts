@@ -28,6 +28,7 @@ import { showAnnouncementsView } from "./announcements-view.js";
 import { isConfigured, getActiveProfile } from "../config/env.js";
 import { loginCommand } from "../commands/login.js";
 import { modelCommand } from "../commands/model.js";
+import { getAIConfig } from "../ai/provider.js";
 import { loadStoredCredentialsToEnv } from "../config/load-credentials-to-env.js";
 import { clearCredentialCache } from "../config/credentials.js";
 
@@ -121,7 +122,10 @@ export async function launchApp(): Promise<void> {
       if (result.type === "model") {
         showCursor();
         clearScreen();
-        await modelCommand();
+        const modelResult = await modelCommand();
+        if (modelResult) {
+          services.aiConfig = getAIConfig();
+        }
         clearScreen();
         hideCursor();
         continue;
