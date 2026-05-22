@@ -10,9 +10,11 @@ import {
   CanvasPermissionError,
   CanvasRateLimitError,
   CanvasServerError,
+  AIProviderError,
   ConfigError,
 } from "../src/errors.js";
 import { CanvasApiError } from "../src/canvas/errors.js";
+import { AIError } from "../src/ai/provider.js";
 
 test("isNetworkError", async (t) => {
   await t.test("returns false for non-Error values", () => {
@@ -127,6 +129,28 @@ test("classifyError", async (t) => {
     assert.equal(classified.kind, "unknown");
     const classified2 = classifyError(undefined);
     assert.equal(classified2.kind, "unknown");
+  });
+
+  await t.test("classifies AIError as AIProviderError", () => {
+    const aiErr = new AIError("Rate limited by the AI provider.", "rate_limit", {
+      retryAfterMs: 30000,
+      setupHint: null,
+    });
+    const classified = classifyError(aiErr);
+    assert.ok(classified instanceof AIProviderError);
+    assert.equal(classified.kind, "ai_provider");
+    assert.equal(classified.retriable, true);
+  });
+
+  await t.test("classifies AIError with auth kind as non-retriable", () => {
+    const aiErr = new AIError("Authentication failed.", "auth", {
+      setupHint: "Check your API key.",
+    });
+    const classified = classifyError(aiErr);
+    assert.ok(classified instanceof AIProviderError);
+    assert.equal(classified.kind, "ai_provider");
+    assert.equal(classified.retriable, false);
+    assert.ok(classified.recoveryHint?.includes("API key"));
   });
 });
 
