@@ -475,15 +475,11 @@ function promptLine(question: string): Promise<string | typeof ESCAPED> {
             resolve(input.trim());
             return;
           }
-          if (code === 27) {
+          if (code === 27 || code === 3) {
             cleanup();
             process.stdout.write("\n");
             resolve(ESCAPED);
             return;
-          }
-          if (code === 3) {
-            cleanup();
-            process.exit(1);
           }
           if (code === 127 || code === 8) {
             if (input.length > 0) {
@@ -539,15 +535,11 @@ function promptSecret(question: string): Promise<string | typeof ESCAPED> {
             resolve(input.trim());
             return;
           }
-          if (code === 27) {
+          if (code === 27 || code === 3) {
             cleanup();
             process.stdout.write("\n");
             resolve(ESCAPED);
             return;
-          }
-          if (code === 3) {
-            cleanup();
-            process.exit(1);
           }
           if (code === 127 || code === 8) {
             if (input.length > 0) {
