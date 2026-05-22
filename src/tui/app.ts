@@ -25,6 +25,9 @@ import {
 } from "./app-navigation.js";
 import { renderSplashLoading } from "./app-banner.js";
 import { showAnnouncementsView } from "./announcements-view.js";
+import { isConfigured } from "../config/env.js";
+import { loginCommand } from "../commands/login.js";
+import { loadStoredCredentialsToEnv } from "../config/load-credentials-to-env.js";
 
 export async function launchApp(): Promise<void> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -42,6 +45,18 @@ export async function launchApp(): Promise<void> {
 
   try {
     clearScreen();
+
+    if (!isConfigured()) {
+      showCursor();
+      console.log(C.dim("\n  No Canvas credentials found. Let's get you set up.\n"));
+      await loginCommand({});
+      loadStoredCredentialsToEnv();
+      if (!isConfigured()) {
+        process.exit(1);
+      }
+      clearScreen();
+    }
+
     hideCursor();
     renderSplashLoading();
 
@@ -117,7 +132,7 @@ async function connectServices(): Promise<AppServices> {
       )
     );
     console.error(
-      C.dim("  Check your CANVAS_BASE_URL and CANVAS_ACCESS_TOKEN in .env")
+      C.dim("  Run `canvas-cli login` to reconfigure, or check your environment variables.")
     );
     process.exit(1);
   }

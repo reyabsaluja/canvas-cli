@@ -14,6 +14,16 @@ export function getActiveProfile(): string {
   return process.env.CANVAS_CLI_PROFILE || "default";
 }
 
+export function isConfigured(): boolean {
+  const profile = getActiveProfile();
+  if (process.env.CANVAS_BASE_URL && process.env.CANVAS_ACCESS_TOKEN) {
+    return true;
+  }
+  const stored = readStoredConfig(profile);
+  const token = loadCredential(profile, "canvas-token");
+  return Boolean((process.env.CANVAS_BASE_URL || stored?.canvasBaseUrl) && (process.env.CANVAS_ACCESS_TOKEN || token));
+}
+
 export function loadConfig(): Config {
   const profile = getActiveProfile();
 

@@ -18,6 +18,7 @@ import {
 import { handleLectureQuery } from "./lecture-resources.js";
 import { formatCourseFilesList } from "./format-course-files.js";
 import { formatCourseModulesList } from "./format-course-modules.js";
+import { loginCommand } from "../commands/login.js";
 
 export async function handleCommand(
   command: string,
@@ -37,6 +38,13 @@ export async function handleCommand(
 
   if (command === "/quit" || command === "/exit" || command === "/q") {
     return { type: "quit" };
+  }
+
+  if (command === "/login") {
+    await api.addMessage({ role: "system", content: "Launching login setup..." });
+    await loginCommand({});
+    await api.addMessage({ role: "system", content: "Login complete. Restart canvas-cli to use new credentials." });
+    return;
   }
 
   if (command === "/home") {
