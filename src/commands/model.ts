@@ -5,6 +5,7 @@ import { getAiKeyName, getCredentialKey } from "./login-providers.js";
 import { readStoredConfig, writeStoredConfig } from "../config/store.js";
 import { getActiveProfile } from "../config/env.js";
 import { loadCredential, storeCredential } from "../config/credentials.js";
+import type { AIEffortLevel } from "../ai/provider.js";
 
 const require = createRequire(import.meta.url);
 const MODEL_CATALOG: Record<string, PickerOption[]> = require("../ai/models.json");
@@ -86,7 +87,7 @@ function printHeader(): void {
 function hideCursor(): void { process.stdout.write("\x1b[?25l"); }
 function showCursor(): void { process.stdout.write("\x1b[?25h"); }
 
-export async function modelCommand(): Promise<{ provider: string; model: string; effort: string } | null> {
+export async function modelCommand(): Promise<{ provider: string; model: string; effort?: AIEffortLevel } | null> {
   hideCursor();
   try {
     const groups = buildModelGroups();
@@ -180,10 +181,10 @@ export async function modelCommand(): Promise<{ provider: string; model: string;
       modelLabel = finalModel;
     }
 
-    const hasEffort = selectedProvider !== "google";
-    let effort = "";
+    const supportsEffort = selectedProvider !== "google";
+    let effort: AIEffortLevel | undefined;
 
-    if (hasEffort) {
+    if (supportsEffort) {
       clearScreen();
       printHeader();
       console.log(`  ${C.success("✓")} ${C.dim("Provider")}  ${C.muted(group.label)}`);
@@ -192,7 +193,7 @@ export async function modelCommand(): Promise<{ provider: string; model: string;
       const effortChoices = selectedProvider === "openai" ? EFFORT_OPTIONS_OPENAI : EFFORT_OPTIONS;
       const picked = await horizontalPicker("effort", effortChoices);
       if (picked === BACK || picked === null) return null;
-      effort = picked;
+      effort = picked as AIEffortLevel;
     }
 
     const base = readStoredConfig(profile) ?? { canvasBaseUrl: "" };
@@ -200,20 +201,20 @@ export async function modelCommand(): Promise<{ provider: string; model: string;
       ...base,
       aiProvider: selectedProvider,
       aiModel: finalModel,
-      ...(hasEffort ? { aiEffort: effort } : {}),
+      ...(effort ? { aiEffort: effort } : {}),
     };
-    if (!hasEffort) delete updated.aiEffort;
+    if (!effort) delete updated.aiEffort;
     writeStoredConfig(updated, profile);
 
     process.env.AI_PROVIDER = selectedProvider;
     process.env.AI_MODEL = finalModel;
-    if (hasEffort) {
+    if (effort) {
       process.env.AI_EFFORT = effort;
     } else {
       delete process.env.AI_EFFORT;
     }
 
-    const effortSuffix = hasEffort ? ` ${C.dim(`(${effort} effort)`)}` : "";
+    const effortSuffix = effort ? ` ${C.dim(`(${effort} effort)`)}` : "";
     console.log(`\n  ${C.success("✓")} ${C.text(`Switched to ${modelLabel}`)}${effortSuffix}\n`);
 
     return { provider: selectedProvider, model: finalModel, effort };
