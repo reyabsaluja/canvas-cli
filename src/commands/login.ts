@@ -40,6 +40,10 @@ const LOGO_WIDTH = Math.max(...LOGO.map((l) => [...l].length));
 
 const ESC_HINT = C.dim("(esc to go back)");
 
+function clearScreen(): void {
+  process.stdout.write("\x1b[2J\x1b[H");
+}
+
 export async function loginCommand(options: LoginOptions): Promise<void> {
   const profile = options.profile || "default";
 
@@ -62,6 +66,28 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
     console.log();
   };
 
+  const printProgress = () => {
+    if (baseUrl) {
+      console.log(`  ${C.success("✓")} ${C.dim("Canvas URL")}   ${C.muted(baseUrl)}`);
+    }
+    if (userName) {
+      console.log(`  ${C.success("✓")} ${C.dim("Connected as")} ${C.muted(userName)}`);
+    }
+    if (aiProvider) {
+      console.log(`  ${C.success("✓")} ${C.dim("Provider")}    ${C.muted(aiProvider)}`);
+    }
+    if (baseUrl || userName || aiProvider) {
+      console.log();
+    }
+  };
+
+  const freshStep = () => {
+    clearScreen();
+    printHeader();
+    printProgress();
+  };
+
+  clearScreen();
   printHeader();
 
   const existing = readStoredConfig(profile);
@@ -92,6 +118,7 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
 
   while (step >= 1) {
     if (step === 1) {
+      freshStep();
       console.log(`  ${C.whiteBold("1")} ${C.dim("·")} ${C.text("Canvas URL")}  ${ESC_HINT}`);
       console.log(`  ${C.dim("Your school's Canvas address (e.g., school.instructure.com)")}\n`);
 
@@ -106,16 +133,15 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
         continue;
       }
       apiBaseUrl = `${baseUrl}/api/v1`;
-      console.log();
       step = 2;
     } else if (step === 2) {
+      freshStep();
       console.log(`  ${C.whiteBold("2")} ${C.dim("·")} ${C.text("Access Token")}  ${ESC_HINT}`);
       console.log(`  ${C.dim("Generate one at:")} ${C.muted(`${baseUrl}/profile/settings`)}`);
       console.log(`  ${C.dim("Click \"+ New Access Token\" and paste below.")}\n`);
 
       const shouldOpen = await promptLine(`  ${C.dim("Open in browser?")} ${C.dim("(Y/n)")} `);
       if (shouldOpen === ESCAPED) {
-        console.log();
         step = 1;
         continue;
       }
@@ -126,7 +152,6 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
 
       const tokenInput = await promptSecret(`  ${C.dim("→")} `);
       if (tokenInput === ESCAPED) {
-        console.log();
         step = 1;
         continue;
       }
@@ -143,9 +168,9 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
       }
       token = tokenInput;
       userName = valid.userName;
-      console.log(`  ${C.success("✓")} ${C.text("Connected as")} ${C.whiteBold(userName)}\n`);
       step = 3;
     } else if (step === 3) {
+      freshStep();
       console.log(`  ${C.whiteBold("3")} ${C.dim("·")} ${C.text("AI Provider")} ${C.dim("(optional)")}  ${ESC_HINT}`);
       console.log(`  ${C.dim("Powers the 'ask' and 'work' commands.")}`);
       console.log(`  ${C.dim("Use ↑↓ to select, Enter to confirm, q/esc to go back.")}\n`);
@@ -159,7 +184,7 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
       ]);
 
       if (result === BACK) {
-        console.log();
+        userName = "";
         step = 2;
         continue;
       }
@@ -170,15 +195,16 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
 
       aiProvider = result;
       if (!aiProvider) {
-        step = 100; // skip to save
+        step = 100;
         continue;
       }
       step = 4;
     } else if (step === 4) {
-      // AI credentials & model
+      freshStep();
       if (aiProvider === "bedrock") {
-        const bedrockResult = await runBedrockSteps();
+        const bedrockResult = await runBedrockSteps(freshStep);
         if (bedrockResult === ESCAPED) {
+          aiProvider = "";
           step = 3;
           continue;
         }
@@ -188,8 +214,9 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
         aiModel = bedrockResult.aiModel;
         aiEffort = bedrockResult.aiEffort;
       } else {
-        const stdResult = await runStandardProviderSteps(aiProvider);
+        const stdResult = await runStandardProviderSteps(aiProvider, freshStep);
         if (stdResult === ESCAPED) {
+          aiProvider = "";
           step = 3;
           continue;
         }
@@ -197,7 +224,7 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
         aiModel = stdResult.aiModel;
         aiEffort = stdResult.aiEffort;
       }
-      step = 100; // done, go to save
+      step = 100;
     }
 
     if (step === 100) break;
@@ -262,7 +289,7 @@ interface BedrockResult {
   aiEffort: string;
 }
 
-async function runBedrockSteps(): Promise<BedrockResult | typeof ESCAPED> {
+async function runBedrockSteps(freshStep: () => void): Promise<BedrockResult | typeof ESCAPED> {
   let subStep = 1;
   let awsRegion = "";
   let awsAccessKey = "";
@@ -272,7 +299,8 @@ async function runBedrockSteps(): Promise<BedrockResult | typeof ESCAPED> {
 
   while (subStep >= 1) {
     if (subStep === 1) {
-      console.log(`\n  ${C.dim("AWS credentials for Bedrock:")}  ${ESC_HINT}\n`);
+      freshStep();
+      console.log(`  ${C.dim("AWS credentials for Bedrock:")}  ${ESC_HINT}\n`);
       const region = await promptLine(`  ${C.dim("AWS Region (e.g., us-east-1):")} `);
       if (region === ESCAPED) return ESCAPED;
       awsRegion = region;
@@ -317,7 +345,7 @@ interface StandardResult {
   aiEffort: string;
 }
 
-async function runStandardProviderSteps(provider: string): Promise<StandardResult | typeof ESCAPED> {
+async function runStandardProviderSteps(provider: string, freshStep: () => void): Promise<StandardResult | typeof ESCAPED> {
   let subStep = 1;
   let aiKey = "";
   let aiModel = "";
@@ -329,8 +357,9 @@ async function runStandardProviderSteps(provider: string): Promise<StandardResul
 
   while (subStep >= 1) {
     if (subStep === 1) {
+      freshStep();
       if (keyName) {
-        console.log(`\n  ${C.dim(`Requires ${keyName}:`)}  ${ESC_HINT}`);
+        console.log(`  ${C.dim(`Requires ${keyName}:`)}  ${ESC_HINT}\n`);
         const key = await promptSecret(`  ${C.dim("→")} `);
         if (key === ESCAPED) return ESCAPED;
         aiKey = key;
