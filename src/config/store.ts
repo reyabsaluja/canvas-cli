@@ -50,7 +50,7 @@ export function listProfiles(): string[] {
         profiles.push("default");
       } else {
         const match = f.match(/^config\.([a-zA-Z0-9_-]+)\.json$/);
-        if (match) profiles.push(match[1]);
+        if (match?.[1]) profiles.push(match[1]);
       }
     }
     return profiles;
