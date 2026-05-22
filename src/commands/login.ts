@@ -494,6 +494,7 @@ function getCredentialKey(provider: string): string | null {
   }
 }
 
+// Last updated: 2026-05 — refresh when providers ship new flagship models
 function getModelOptions(provider: string): PickerOption[] {
   switch (provider) {
     case "openai":
