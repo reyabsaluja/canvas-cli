@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 test("debug module", async (t) => {
-  // Reset module state between tests by dynamically importing
   let debugModule: typeof import("../src/debug.js");
 
   t.beforeEach(async () => {
     debugModule = await import("../src/debug.js");
+    // Module is cached by Node — resetDebug() is what actually clears state.
     debugModule.resetDebug();
   });
 
