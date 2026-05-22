@@ -126,17 +126,20 @@ function isSensitiveKey(key: string): boolean {
   return SENSITIVE_KEY_PATTERNS.some((p) => p.test(key));
 }
 
+function sanitizeValue(value: unknown): unknown {
+  if (typeof value === "string") return maskSecrets(value);
+  if (Array.isArray(value)) return value.map(sanitizeValue);
+  if (typeof value === "object" && value !== null) return sanitizeData(value as Record<string, unknown>);
+  return value;
+}
+
 function sanitizeData(data: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(data)) {
     if (isSensitiveKey(key)) {
       result[key] = "***";
-    } else if (typeof value === "string") {
-      result[key] = maskSecrets(value);
-    } else if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-      result[key] = sanitizeData(value as Record<string, unknown>);
     } else {
-      result[key] = value;
+      result[key] = sanitizeValue(value);
     }
   }
   return result;
