@@ -171,7 +171,7 @@ export function isNetworkError(err: unknown): boolean {
   if (causeCode && NETWORK_ERROR_CODES.has(causeCode)) return true;
   // Node's undici wraps connection errors as "fetch failed" with the real code in cause
   if (err.message === "fetch failed" && err.cause instanceof Error) {
-    const causeMsg = (err.cause as Error).message;
+    const causeMsg = err.cause.message;
     if (
       causeMsg.includes("ENOTFOUND") ||
       causeMsg.includes("ECONNREFUSED") ||
