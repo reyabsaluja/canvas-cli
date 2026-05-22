@@ -177,10 +177,6 @@ export function isNetworkError(err: unknown): boolean {
   );
 }
 
-/**
- * Classify any thrown error into a structured CanvasCliError.
- * Used by both CLI (to exit with proper codes) and TUI (to display inline).
- */
 export function classifyError(err: unknown): CanvasCliError {
   if (err instanceof CanvasCliError) return err;
 
@@ -222,11 +218,6 @@ export function classifyError(err: unknown): CanvasCliError {
   return new CanvasCliError("An unexpected error occurred.", "unknown", { cause: err });
 }
 
-/**
- * Handle an error in CLI (non-interactive) context: print message and exit.
- * Kept for backward compatibility during migration — new code should prefer
- * classifyError + custom handling.
- */
 export function handleError(err: unknown): never {
   const classified = classifyError(err);
   console.error(classified.userMessage);
