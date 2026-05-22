@@ -161,4 +161,48 @@ test("integration: pagination handling", async (t) => {
 
     await stopServer(server);
   });
+
+  await t.test("terminates pagination when next link repeats the same URL", async () => {
+    let requestCount = 0;
+    const maxRequests = 3;
+    const loopServer = http.createServer((req, res) => {
+      const authHeader = req.headers.authorization;
+      if (!authHeader?.startsWith("Bearer ")) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ errors: [{ message: "unauthorized" }] }));
+        return;
+      }
+
+      requestCount++;
+      const port = (loopServer.address() as { port: number }).port;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+
+      // Stop emitting next link after maxRequests to avoid hanging the test
+      if (requestCount < maxRequests) {
+        headers["Link"] = `<http://127.0.0.1:${port}/api/v1/courses?page=${requestCount + 1}&per_page=10>; rel="next"`;
+      }
+
+      res.writeHead(200, headers);
+      res.end(JSON.stringify([{ id: requestCount, name: `Course ${requestCount}`, course_code: `C${requestCount}`, enrollment_term_id: 1, workflow_state: "available", start_at: null, end_at: null }]));
+    });
+
+    const loopPort = await new Promise<number>((resolve) => {
+      loopServer.listen(0, "127.0.0.1", () => {
+        resolve((loopServer.address() as { port: number }).port);
+      });
+    });
+
+    const config: Config = {
+      baseUrl: `http://127.0.0.1:${loopPort}/api/v1`,
+      accessToken: "test-token-valid",
+    };
+
+    const client = new CanvasClient(config);
+    const result = await client.getCourses();
+
+    assert.equal(requestCount, maxRequests);
+    assert.equal(result.length, maxRequests);
+
+    await new Promise<void>((resolve) => { loopServer.close(() => resolve()); });
+  });
 });
