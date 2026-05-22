@@ -17,6 +17,14 @@ export interface AIProviderConfig {
   effort?: AIEffortLevel;
 }
 
+export interface EffortOptions {
+  providerOptions?: {
+    openai?: { reasoningEffort: string };
+    anthropic?: { thinking: { type: "enabled"; budgetTokens: number } };
+    bedrock?: { reasoningConfig: { type: "enabled"; budgetTokens: number } };
+  };
+}
+
 export const AI_PROVIDER_SETUP_HINT =
   "Set AI_PROVIDER to anthropic, openai, google/gemini, or bedrock and add the matching credentials to your .env file (see .env.example).";
 
@@ -136,7 +144,7 @@ const EFFORT_TO_THINKING_BUDGET: Record<AIEffortLevel, number> = {
   max: 32000,
 };
 
-export function getEffortOptions(config: AIProviderConfig): Record<string, unknown> {
+export function getEffortOptions(config: AIProviderConfig): EffortOptions {
   if (!config.effort) return {};
 
   if (config.provider === "openai") {
