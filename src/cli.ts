@@ -90,11 +90,11 @@ program
   .option("--workspace <path>", "Path to a specific workspace")
   .option("--json", "Output as JSON")
   .option("--show-retrieval", "Show retrieval debug info")
-  .option("--debug", "(deprecated, use --show-retrieval)", false)
+  .option("--show-debug", "(deprecated, use --show-retrieval)")
   .action((question, opts) => {
-    if (opts.debug) {
+    if (opts.showDebug) {
       process.stderr.write(
-        "Warning: --debug on 'ask' is deprecated. Use --show-retrieval instead.\n"
+        "Warning: --show-debug on 'ask' is deprecated. Use --show-retrieval instead.\n"
       );
       opts.showRetrieval = true;
     }
