@@ -858,7 +858,7 @@ export async function runChatShell<TExit>(
         if (streamingStarted) {
           messages[messages.length - 1] = {
             role: "assistant",
-            content: final.content || streamedText,
+            content: (final.content || streamedText).trimEnd(),
             bulletPoints: final.bulletPoints,
             sources: final.sources,
             confidence: final.confidence,
@@ -868,7 +868,7 @@ export async function runChatShell<TExit>(
         } else {
           messages.push({
             role: "assistant",
-            content: final.content,
+            content: final.content.trimEnd(),
             bulletPoints: final.bulletPoints,
             sources: final.sources,
             confidence: final.confidence,
