@@ -21,6 +21,8 @@ test("integration: command-level flows against mock API", async (t) => {
     accessToken: "test-token-valid",
   };
 
+  t.after(async () => { await stopServer(server); });
+
   await t.test("courses flow: list → normalize → render", async () => {
     const client = new CanvasClient(config);
     const rawCourses = await client.getCourses();
@@ -141,7 +143,4 @@ test("integration: command-level flows against mock API", async (t) => {
     assert.ok(output.includes("Lab 2"));
   });
 
-  await t.test("teardown", async () => {
-    await stopServer(server);
-  });
 });

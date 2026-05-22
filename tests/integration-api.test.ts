@@ -1,23 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import http from "node:http";
 import { CanvasClient } from "../src/canvas/client.js";
 import { createMockCanvasServer, startServer, stopServer } from "./helpers/mock-canvas-server.js";
 import { buildDefaultServerData } from "./helpers/fixtures.js";
 import type { Config } from "../src/config/env.js";
 
-let server: http.Server;
-let port: number;
-let config: Config;
-
 test("integration: mock Canvas API", async (t) => {
   const data = buildDefaultServerData();
-  server = createMockCanvasServer(data);
-  port = await startServer(server);
-  config = {
+  const server = createMockCanvasServer(data);
+  const port = await startServer(server);
+  const config: Config = {
     baseUrl: `http://127.0.0.1:${port}/api/v1`,
     accessToken: "test-token-valid",
   };
+
+  t.after(async () => { await stopServer(server); });
 
   await t.test("getCourses returns all courses", async () => {
     const client = new CanvasClient(config);
@@ -138,7 +135,4 @@ test("integration: mock Canvas API", async (t) => {
     assert.ok(detail.description?.includes("Hello World"));
   });
 
-  await t.test("teardown", async () => {
-    await stopServer(server);
-  });
 });

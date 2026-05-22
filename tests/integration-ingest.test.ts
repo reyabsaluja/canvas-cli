@@ -17,6 +17,8 @@ test("integration: ingest pipeline end-to-end with mock API", async (t) => {
     accessToken: "test-token-valid",
   };
 
+  t.after(async () => { await stopServer(server); });
+
   await t.test("fetchCourseContent retrieves all course data", async () => {
     const client = new CanvasClient(config, { maxRetries: 0 });
     const raw = await fetchCourseContent(client, 101);
@@ -93,9 +95,6 @@ test("integration: ingest pipeline end-to-end with mock API", async (t) => {
     }
   });
 
-  await t.test("teardown", async () => {
-    await stopServer(server);
-  });
 });
 
 test("integration: ingest pipeline with partially unavailable API", async (t) => {

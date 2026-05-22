@@ -12,6 +12,8 @@ test("integration: auth failure flows", async (t) => {
   const server = createMockCanvasServer(data);
   const port = await startServer(server);
 
+  t.after(async () => { await stopServer(server); });
+
   await t.test("expired token returns 401", async () => {
     const config: Config = {
       baseUrl: `http://127.0.0.1:${port}/api/v1`,
@@ -109,7 +111,4 @@ test("integration: auth failure flows", async (t) => {
     );
   });
 
-  await t.test("teardown", async () => {
-    await stopServer(server);
-  });
 });
