@@ -99,6 +99,27 @@ function buildModelGroups(): ModelGroup[] {
   return groups;
 }
 
+async function promptBedrockCredentials(profile: string): Promise<boolean> {
+  const region = await promptLine(`  ${C.dim("AWS Region (e.g., us-east-1):")} `);
+  if (region === ESCAPED) return false;
+
+  const accessKey = await promptSecret(`  ${C.dim("AWS Access Key ID:")} `);
+  if (accessKey === ESCAPED) return false;
+
+  const secretKey = await promptSecret(`  ${C.dim("AWS Secret Access Key:")} `);
+  if (secretKey === ESCAPED) return false;
+
+  storeCredential(profile, "aws-access-key", accessKey);
+  storeCredential(profile, "aws-secret-key", secretKey);
+  process.env.AWS_ACCESS_KEY_ID = accessKey;
+  process.env.AWS_SECRET_ACCESS_KEY = secretKey;
+  process.env.AWS_REGION = region;
+
+  const base = readStoredConfig(profile) ?? { canvasBaseUrl: "" };
+  writeStoredConfig({ ...base, awsRegion: region }, profile);
+  return true;
+}
+
 const EFFORT_OPTIONS: PickerOption[] = [
   { label: "low", value: "low" },
   { label: "medium", value: "medium" },
@@ -229,24 +250,9 @@ async function modelKeySubcommand(): Promise<ModelResult> {
       console.log(`  ${C.text("Rotate AWS credentials for")} ${C.white(providerLabel)}\n`);
 
       showCursor();
-      const region = await promptLine(`  ${C.dim("AWS Region (e.g., us-east-1):")} `);
-      if (region === ESCAPED) return null;
-
-      const accessKey = await promptSecret(`  ${C.dim("AWS Access Key ID:")} `);
-      if (accessKey === ESCAPED) return null;
-
-      const secretKey = await promptSecret(`  ${C.dim("AWS Secret Access Key:")} `);
-      if (secretKey === ESCAPED) return null;
+      const ok = await promptBedrockCredentials(profile);
       hideCursor();
-
-      storeCredential(profile, "aws-access-key", accessKey);
-      storeCredential(profile, "aws-secret-key", secretKey);
-      process.env.AWS_ACCESS_KEY_ID = accessKey;
-      process.env.AWS_SECRET_ACCESS_KEY = secretKey;
-      process.env.AWS_REGION = region;
-
-      const base = readStoredConfig(profile) ?? { canvasBaseUrl: "" };
-      writeStoredConfig({ ...base, awsRegion: region }, profile);
+      if (!ok) return null;
 
       console.log(`\n  ${C.success("✓")} ${C.text("AWS credentials updated")}\n`);
     } else {
@@ -314,24 +320,9 @@ async function modelFullFlow(): Promise<ModelResult> {
         console.log(`  ${C.success("✓")} ${C.dim("Provider")}  ${C.muted(group.label)}\n`);
         console.log(`  ${C.dim("AWS credentials required:")}\n`);
 
-        const region = await promptLine(`  ${C.dim("AWS Region (e.g., us-east-1):")} `);
-        if (region === ESCAPED) return null;
-
-        const accessKey = await promptSecret(`  ${C.dim("AWS Access Key ID:")} `);
-        if (accessKey === ESCAPED) return null;
-
-        const secretKey = await promptSecret(`  ${C.dim("AWS Secret Access Key:")} `);
-        if (secretKey === ESCAPED) return null;
-
+        const ok = await promptBedrockCredentials(profile);
+        if (!ok) return null;
         hideCursor();
-        storeCredential(profile, "aws-access-key", accessKey);
-        storeCredential(profile, "aws-secret-key", secretKey);
-        process.env.AWS_ACCESS_KEY_ID = accessKey;
-        process.env.AWS_SECRET_ACCESS_KEY = secretKey;
-        process.env.AWS_REGION = region;
-
-        const base = readStoredConfig(profile) ?? { canvasBaseUrl: "" };
-        writeStoredConfig({ ...base, awsRegion: region }, profile);
       }
     } else {
       const envKey = getAiKeyName(selectedProvider);
