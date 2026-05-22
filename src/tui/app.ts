@@ -25,7 +25,7 @@ import {
 } from "./app-navigation.js";
 import { renderSplashLoading } from "./app-banner.js";
 import { showAnnouncementsView } from "./announcements-view.js";
-import { isConfigured } from "../config/env.js";
+import { isConfigured, getActiveProfile } from "../config/env.js";
 import { loginCommand } from "../commands/login.js";
 import { loadStoredCredentialsToEnv } from "../config/load-credentials-to-env.js";
 
@@ -49,7 +49,7 @@ export async function launchApp(): Promise<void> {
     if (!isConfigured()) {
       showCursor();
       console.log(C.dim("\n  No Canvas credentials found. Let's get you set up.\n"));
-      await loginCommand({});
+      await loginCommand({ profile: getActiveProfile() });
       loadStoredCredentialsToEnv();
       if (!isConfigured()) {
         process.exit(1);
@@ -104,7 +104,7 @@ export async function launchApp(): Promise<void> {
       if (result.type === "login") {
         showCursor();
         clearScreen();
-        await loginCommand({});
+        await loginCommand({ profile: getActiveProfile() });
         loadStoredCredentialsToEnv();
         clearScreen();
         hideCursor();
