@@ -61,16 +61,24 @@ describe("loadConfig integration", () => {
     storeCredential(profile, "canvas-token", "stored-token");
 
     const config = loadConfig();
-    assert.equal(config.baseUrl, "https://stored.com");
+    assert.equal(config.baseUrl, "https://stored.com/api/v1");
     assert.equal(config.accessToken, "stored-token");
   });
 
-  test("strips trailing slash from stored base URL", () => {
+  test("strips trailing slash and appends /api/v1 from stored base URL", () => {
     writeStoredConfig({ canvasBaseUrl: "https://stored.com///" }, profile);
     storeCredential(profile, "canvas-token", "tok");
 
     const config = loadConfig();
-    assert.equal(config.baseUrl, "https://stored.com");
+    assert.equal(config.baseUrl, "https://stored.com/api/v1");
+  });
+
+  test("does not double-append /api/v1 if already present in stored config", () => {
+    writeStoredConfig({ canvasBaseUrl: "https://stored.com/api/v1" }, profile);
+    storeCredential(profile, "canvas-token", "tok");
+
+    const config = loadConfig();
+    assert.equal(config.baseUrl, "https://stored.com/api/v1");
   });
 });
 
