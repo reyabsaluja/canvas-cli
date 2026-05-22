@@ -9,6 +9,9 @@ const C = {
   whiteBold: chalk.hex("#ffffff").bold,
 };
 
+export const BACK = Symbol("back");
+export type PickerResult = string | null | typeof BACK;
+
 export interface PickerOption {
   label: string;
   value: string;
@@ -18,12 +21,11 @@ export interface PickerOption {
 export async function verticalPicker(
   label: string,
   options: PickerOption[]
-): Promise<string | null> {
+): Promise<PickerResult> {
   if (!process.stdin.isTTY) return options[0]?.value ?? null;
 
   let selected = 0;
   const render = () => {
-    // Move cursor up to clear previous render (except first time)
     process.stdout.write(`\x1b[${options.length + 1}A`);
     process.stdout.write(`  ${C.text(label)}\n`);
     for (let i = 0; i < options.length; i++) {
@@ -53,12 +55,16 @@ export async function verticalPicker(
         resolve(options[selected]!.value);
         return;
       }
+      if (str === "\x1b" && buf.length === 1) {
+        cleanup();
+        resolve(BACK);
+        return;
+      }
       if (str === "\x03" || str === "q") {
         cleanup();
         resolve(null);
         return;
       }
-      // Arrow keys: up = \x1b[A, down = \x1b[B
       if (str === "\x1b[A" || str === "k") {
         selected = (selected - 1 + options.length) % options.length;
         render();
@@ -81,7 +87,7 @@ export async function verticalPicker(
 export async function horizontalPicker(
   label: string,
   options: PickerOption[]
-): Promise<string | null> {
+): Promise<PickerResult> {
   if (!process.stdin.isTTY) return options[0]?.value ?? null;
 
   let selected = 0;
@@ -111,13 +117,18 @@ export async function horizontalPicker(
         resolve(options[selected]!.value);
         return;
       }
+      if (str === "\x1b" && buf.length === 1) {
+        cleanup();
+        process.stdout.write("\n");
+        resolve(BACK);
+        return;
+      }
       if (str === "\x03" || str === "q") {
         cleanup();
         process.stdout.write("\n");
         resolve(null);
         return;
       }
-      // Arrow keys: left = \x1b[D, right = \x1b[C
       if (str === "\x1b[D" || str === "h") {
         selected = (selected - 1 + options.length) % options.length;
         renderLine();
