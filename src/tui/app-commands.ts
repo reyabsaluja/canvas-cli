@@ -44,7 +44,7 @@ export async function handleCommand(
   }
 
   if (command === "/model") {
-    return { type: "model" };
+    return { type: "model", args: args.trim() || undefined };
   }
 
   if (command === "/home") {

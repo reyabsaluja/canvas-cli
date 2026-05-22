@@ -122,7 +122,7 @@ export async function launchApp(): Promise<void> {
       if (result.type === "model") {
         showCursor();
         clearScreen();
-        const modelResult = await modelCommand();
+        const modelResult = await modelCommand(result.args);
         if (modelResult) {
           loadStoredCredentialsToEnv();
           services.aiConfig = getAIConfig();

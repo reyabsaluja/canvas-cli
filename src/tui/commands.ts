@@ -67,7 +67,7 @@ export const COMMANDS: CommandDefinition[] = [
   },
   {
     name: "/model",
-    description: "Switch AI model and effort",
+    description: "Switch AI model (or /model effort, /model key)",
     scopes: ["global", "course", "workspace"],
     navigation: true,
   },
