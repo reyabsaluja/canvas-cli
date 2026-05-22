@@ -46,22 +46,23 @@ test("version check exits with code 1 and correct message on old Node", () => {
   }
 });
 
-test("version check wrapper passes the version gate on supported Node", (_, done) => {
-  // Verify the version check passes (does not exit with the version error)
-  // by running the wrapper. It will attempt to import ../dist/cli.js which
-  // may not exist in a clean checkout, but the key assertion is that we do
-  // NOT get the "requires Node.js 20" error — proving the gate passed.
-  execFile("node", [wrapperPath, "--version"], { encoding: "utf-8" }, (err, stdout, stderr) => {
-    if (err) {
-      // If it failed, it must NOT be because of the version check
-      assert.ok(
-        !stderr.includes("canvas-cli requires Node.js 20 or later"),
-        "Should not fail the version gate on a supported Node version"
-      );
-    } else {
-      // If it succeeded, we should get a semver version (dist was built)
-      assert.match(stdout.trim(), /^\d+\.\d+\.\d+$/);
-    }
-    done();
+test("version check wrapper passes the version gate on supported Node", async () => {
+  const { stdout, stderr } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+    execFile("node", [wrapperPath, "--version"], { encoding: "utf-8" }, (err, stdout, stderr) => {
+      if (err) {
+        resolve({ stdout: stdout ?? "", stderr: stderr ?? "" });
+      } else {
+        resolve({ stdout, stderr });
+      }
+    });
   });
+
+  if (stderr) {
+    assert.ok(
+      !stderr.includes("canvas-cli requires Node.js 20 or later"),
+      "Should not fail the version gate on a supported Node version"
+    );
+  } else {
+    assert.match(stdout.trim(), /^\d+\.\d+\.\d+$/);
+  }
 });
