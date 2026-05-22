@@ -98,9 +98,6 @@ test("integration: ingest pipeline end-to-end with mock API", async (t) => {
 });
 
 test("integration: ingest pipeline with partially unavailable API", async (t) => {
-  let server: http.Server;
-  let port: number;
-
   await t.test("ingest succeeds when files/pages APIs are blocked", async () => {
     const partialServer = http.createServer((req, res) => {
       const url = new URL(req.url ?? "/", "http://localhost");
@@ -198,7 +195,7 @@ test("integration: ingest pipeline with partially unavailable API", async (t) =>
       res.end(JSON.stringify({ errors: [{ message: "not found" }] }));
     });
 
-    port = await startServer(partialServer);
+    const port = await startServer(partialServer);
 
     const config: Config = {
       baseUrl: `http://127.0.0.1:${port}/api/v1`,
