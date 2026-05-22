@@ -105,8 +105,10 @@ export async function launchApp(): Promise<void> {
         showCursor();
         clearScreen();
         await loginCommand({});
-        console.log(C.dim("\n  Restart canvas-cli to use new credentials.\n"));
-        return;
+        loadStoredCredentialsToEnv();
+        clearScreen();
+        hideCursor();
+        continue;
       }
 
       const nextScope = await resolveShellResult(
