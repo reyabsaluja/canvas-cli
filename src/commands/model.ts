@@ -1,7 +1,7 @@
 import { verticalPicker, horizontalPicker, BACK, C, type PickerOption } from "./login-picker.js";
 import { promptSecret, promptLine, ESCAPED } from "./login-prompts.js";
 import { getAiKeyName, getCredentialKey } from "./login-providers.js";
-import { readStoredConfig, writeStoredConfig } from "../config/store.js";
+import { readStoredConfig, writeStoredConfig, defaultStoredConfig } from "../config/store.js";
 import { getActiveProfile } from "../config/env.js";
 import { loadCredential, storeCredential } from "../config/credentials.js";
 import type { AIEffortLevel } from "../ai/provider.js";
@@ -115,7 +115,7 @@ async function promptBedrockCredentials(profile: string): Promise<boolean> {
   process.env.AWS_SECRET_ACCESS_KEY = secretKey;
   process.env.AWS_REGION = region;
 
-  const base = readStoredConfig(profile) ?? { canvasBaseUrl: "" };
+  const base = readStoredConfig(profile) ?? defaultStoredConfig();
   writeStoredConfig({ ...base, awsRegion: region }, profile);
   return true;
 }
@@ -216,7 +216,7 @@ async function modelEffortSubcommand(): Promise<ModelResult> {
     if (picked === BACK || picked === null) return null;
 
     const effort = picked as AIEffortLevel;
-    const base = readStoredConfig(profile) ?? { canvasBaseUrl: "" };
+    const base = readStoredConfig(profile) ?? defaultStoredConfig();
     writeStoredConfig({ ...base, aiEffort: effort }, profile);
     process.env.AI_EFFORT = effort;
 
@@ -382,7 +382,7 @@ async function modelFullFlow(): Promise<ModelResult> {
       effort = picked as AIEffortLevel;
     }
 
-    const base = readStoredConfig(profile) ?? { canvasBaseUrl: "" };
+    const base = readStoredConfig(profile) ?? defaultStoredConfig();
     const updated: typeof base = { ...base, aiProvider: selectedProvider, aiModel: finalModel };
     if (effort) {
       updated.aiEffort = effort;
