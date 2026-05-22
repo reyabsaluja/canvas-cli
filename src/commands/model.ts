@@ -15,6 +15,7 @@ interface ModelGroup {
   models: PickerOption[];
 }
 
+// Bedrock IDs per AWS docs: Opus 4.6 uses -v1 suffix, others do not.
 const BEDROCK_MODELS: PickerOption[] = [
   { label: "Claude Opus 4.7", value: "us.anthropic.claude-opus-4-7", description: "most capable" },
   { label: "Claude Opus 4.6", value: "us.anthropic.claude-opus-4-6-v1", description: "flagship" },
