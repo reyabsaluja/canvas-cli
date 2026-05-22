@@ -70,7 +70,7 @@ export function loadCredential(profile: string, key: string): string | null {
   validateProfileName(profile);
   const ck = cacheKey(profile, key);
   if (cache.has(ck)) {
-    return cache.get(ck)!;
+    return cache.get(ck) ?? null;
   }
 
   let value: string | null = null;
