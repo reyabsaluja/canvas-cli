@@ -82,6 +82,9 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
     process.exit(1);
   }
 
+  // The client expects baseUrl to include /api/v1
+  const apiBaseUrl = `${baseUrl}/api/v1`;
+
   // Step 2: Canvas access token
   console.log(`\n  ${C.whiteBold("2")} ${C.dim("·")} ${C.text("Access Token")}`);
   console.log(`  ${C.dim("Generate one at:")} ${C.muted(`${baseUrl}/profile/settings`)}`);
@@ -101,7 +104,7 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
 
   // Validate
   console.log(`\n  ${C.dim("Verifying...")}`);
-  const valid = await validateCredentials(baseUrl, token);
+  const valid = await validateCredentials(apiBaseUrl, token);
   if (!valid.ok) {
     console.error(`\n  ${C.error("✗")} ${C.text(valid.error)}\n`);
     process.exit(1);
@@ -131,7 +134,7 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
   // Save
   writeStoredConfig(
     {
-      canvasBaseUrl: baseUrl,
+      canvasBaseUrl: apiBaseUrl,
       ...(aiProvider && { aiProvider }),
       ...(aiModel && { aiModel }),
     },
@@ -150,7 +153,7 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
   console.log();
   console.log(`  ${C.success("✓")} ${C.whiteBold("Setup complete")}`);
   console.log();
-  console.log(`  ${C.dim("canvas")}    ${C.text(baseUrl)}`);
+  console.log(`  ${C.dim("canvas")}    ${C.text(apiBaseUrl)}`);
   if (aiProvider) {
     console.log(`  ${C.dim("ai")}        ${C.text(aiProvider)}${aiModel ? ` (${aiModel})` : ""}`);
   }
@@ -169,12 +172,15 @@ function normalizeUrl(url: string): string {
   if (!url.startsWith("http://") && !url.startsWith("https://")) {
     url = "https://" + url;
   }
-  return url.replace(/\/+$/, "");
+  url = url.replace(/\/+$/, "");
+  // Strip /api/v1 if user included it — we'll add it back ourselves
+  url = url.replace(/\/api\/v1$/, "");
+  return url;
 }
 
 async function validateCredentials(baseUrl: string, token: string): Promise<{ ok: true; userName: string } | { ok: false; error: string }> {
   try {
-    const response = await fetch(`${baseUrl}/api/v1/users/self`, {
+    const response = await fetch(`${baseUrl}/users/self`, {
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: "application/json",
