@@ -48,6 +48,17 @@ export function storeCredential(profile: string, key: string, value: string): St
         execFileSync("security", ["delete-generic-password", "-s", SERVICE_NAME, "-a", account], { stdio: "ignore" });
       } catch {}
       execFileSync("security", ["add-generic-password", "-s", SERVICE_NAME, "-a", account, "-w", value], { stdio: "ignore" });
+      // Verify the write for the primary credential to catch silent truncation
+      if (key === "canvas-token") {
+        const readBack = execFileSync(
+          "security",
+          ["find-generic-password", "-s", SERVICE_NAME, "-a", account, "-w"],
+          { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }
+        ).trim();
+        if (readBack !== value) {
+          throw new Error("Keychain read-back mismatch");
+        }
+      }
       debug("config", `Stored credential in keychain: ${key} (profile: ${profile})`);
       cache.set(cacheKey(profile, key), value);
       return "keychain";
