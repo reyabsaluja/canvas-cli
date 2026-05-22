@@ -12,6 +12,14 @@ interface LoginOptions {
 
 const ESCAPED = Symbol("escaped");
 
+const enum Step {
+  URL = 1,
+  TOKEN = 2,
+  PROVIDER = 3,
+  PROVIDER_CONFIG = 4,
+  DONE = 100,
+}
+
 const LOGO = [
   "⠀⠀⢀⣤⠀⠺⣿⣿⠗⠀⣠⣀⠀⠀",
   "⠀⣴⣿⠟⣀⠀⠰⡆⠀⢀⠻⣿⣧⠀",
@@ -89,7 +97,7 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
     console.log();
   }
 
-  let step = 1;
+  let step: Step = Step.URL;
   let baseUrl = "";
   let apiBaseUrl = "";
   let token = "";
@@ -102,8 +110,8 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
   let awsAccessKey = "";
   let awsSecretKey = "";
 
-  while (step >= 1) {
-    if (step === 1) {
+  while (step >= Step.URL) {
+    if (step === Step.URL) {
       freshStep();
       console.log(`  ${C.whiteBold("1")} ${C.dim("·")} ${C.text("Canvas URL")}  ${ESC_HINT}`);
       console.log(`  ${C.dim("Your school's Canvas address (e.g., school.instructure.com)")}\n`);
@@ -119,8 +127,8 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
         continue;
       }
       apiBaseUrl = `${baseUrl}/api/v1`;
-      step = 2;
-    } else if (step === 2) {
+      step = Step.TOKEN;
+    } else if (step === Step.TOKEN) {
       freshStep();
       console.log(`  ${C.whiteBold("2")} ${C.dim("·")} ${C.text("Access Token")}  ${ESC_HINT}`);
       console.log(`  ${C.dim("Generate one at:")} ${C.muted(`${baseUrl}/profile/settings`)}`);
@@ -128,7 +136,7 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
 
       const shouldOpen = await promptLine(`  ${C.dim("Open in browser?")} ${C.dim("(Y/n)")} `);
       if (shouldOpen === ESCAPED) {
-        step = 1;
+        step = Step.URL;
         continue;
       }
       if (shouldOpen.toLowerCase() !== "n") {
@@ -138,7 +146,7 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
 
       const tokenInput = await promptSecret(`  ${C.dim("→")} `);
       if (tokenInput === ESCAPED) {
-        step = 1;
+        step = Step.URL;
         continue;
       }
       if (!tokenInput) {
@@ -154,8 +162,8 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
       }
       token = tokenInput;
       userName = valid.userName;
-      step = 3;
-    } else if (step === 3) {
+      step = Step.PROVIDER;
+    } else if (step === Step.PROVIDER) {
       freshStep();
       console.log(`  ${C.whiteBold("3")} ${C.dim("·")} ${C.text("AI Provider")} ${C.dim("(optional)")}  ${ESC_HINT}`);
       console.log(`  ${C.dim("Powers the 'ask' and 'work' commands.")}`);
@@ -171,7 +179,7 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
 
       if (result === BACK) {
         userName = "";
-        step = 2;
+        step = Step.TOKEN;
         continue;
       }
       if (result === null) {
@@ -181,17 +189,17 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
 
       aiProvider = result;
       if (!aiProvider) {
-        step = 100;
+        step = Step.DONE;
         continue;
       }
-      step = 4;
-    } else if (step === 4) {
+      step = Step.PROVIDER_CONFIG;
+    } else if (step === Step.PROVIDER_CONFIG) {
       freshStep();
       if (aiProvider === "bedrock") {
         const bedrockResult = await runBedrockSteps(freshStep);
         if (bedrockResult === ESCAPED) {
           aiProvider = "";
-          step = 3;
+          step = Step.PROVIDER;
           continue;
         }
         awsRegion = bedrockResult.awsRegion;
@@ -203,20 +211,20 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
         const stdResult = await runStandardProviderSteps(aiProvider, freshStep);
         if (stdResult === ESCAPED) {
           aiProvider = "";
-          step = 3;
+          step = Step.PROVIDER;
           continue;
         }
         aiKey = stdResult.aiKey;
         aiModel = stdResult.aiModel;
         aiEffort = stdResult.aiEffort;
       }
-      step = 100;
+      step = Step.DONE;
     }
 
-    if (step === 100) break;
+    if (step === Step.DONE) break;
   }
 
-  if (step < 1) {
+  if (step < Step.URL) {
     console.log(`\n  ${C.muted("Cancelled.")}\n`);
     return;
   }
