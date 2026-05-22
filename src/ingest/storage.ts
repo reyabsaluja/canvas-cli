@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { debugFs, debugCache } from "../debug.js";
+import { debugFs } from "../debug.js";
 import { extractAttachmentContents } from "./attachment-extraction.js";
 import {
   getExtractedAssignmentPath,
