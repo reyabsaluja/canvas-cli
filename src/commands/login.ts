@@ -39,6 +39,11 @@ function clearScreen(): void {
 }
 
 export async function loginCommand(options: LoginOptions): Promise<void> {
+  if (!process.stdin.isTTY) {
+    console.error("Error: `canvas-cli login` requires an interactive terminal.");
+    process.exit(1);
+  }
+
   const restoreTerminal = () => {
     try { process.stdin.setRawMode?.(false); } catch {}
   };
