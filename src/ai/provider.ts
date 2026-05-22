@@ -5,6 +5,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { debugAI } from "../debug.js";
+import { ensureAICredentials } from "../config/load-credentials-to-env.js";
 
 export type AIProviderName = "anthropic" | "openai" | "google" | "bedrock";
 
@@ -32,6 +33,7 @@ const DEFAULT_MODEL_BY_PROVIDER: Record<AIProviderName, string> = {
  * Model can be overridden with AI_MODEL env var.
  */
 export function getAIConfig(): AIProviderConfig | null {
+  ensureAICredentials();
   const providerOverride = normalizeAIProvider(process.env.AI_PROVIDER);
   const modelOverride = process.env.AI_MODEL;
   const hasExplicitProvider =

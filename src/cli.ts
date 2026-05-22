@@ -10,6 +10,10 @@ import { doAssignmentCommand } from "./commands/do-assignment.js";
 import { ingestCourseCommand } from "./commands/ingest-course.js";
 import { workCommand } from "./commands/work.js";
 import { askCommand } from "./commands/ask.js";
+import { loginCommand } from "./commands/login.js";
+import { logoutCommand } from "./commands/logout.js";
+import { statusCommand } from "./commands/status.js";
+import { loadStoredCredentialsToEnv } from "./config/load-credentials-to-env.js";
 
 let version = "0.0.0";
 try {
@@ -26,11 +30,17 @@ program
   .version(version, "-V, --version", "output the current version")
   .option("--debug", "Enable verbose debug output to stderr");
 
-program.hook("preAction", () => {
+const SKIP_CREDENTIAL_LOADING = new Set(["login", "logout", "status"]);
+
+program.hook("preAction", (_thisCommand, actionCommand) => {
   const opts = program.opts();
   initDebug(Boolean(opts.debug));
   debug("general", `canvas-cli v${version} starting`);
   debug("config", "Node.js " + process.version);
+
+  if (!SKIP_CREDENTIAL_LOADING.has(actionCommand.name())) {
+    loadStoredCredentialsToEnv();
+  }
 });
 
 program
@@ -100,6 +110,24 @@ program
     }
     return askCommand(question, opts);
   });
+
+program
+  .command("login")
+  .description("Set up Canvas credentials interactively")
+  .option("--profile <name>", "Profile name for multiple Canvas instances")
+  .action(loginCommand);
+
+program
+  .command("logout")
+  .description("Remove stored credentials")
+  .option("--profile <name>", "Profile to remove")
+  .action(logoutCommand);
+
+program
+  .command("status")
+  .description("Show current configuration and connection status")
+  .option("--profile <name>", "Profile to inspect")
+  .action(statusCommand);
 
 program
   .command("tui", { isDefault: true, hidden: true })

@@ -66,6 +66,11 @@ export const COMMANDS: CommandDefinition[] = [
     aliases: ["/make-pdf"],
   },
   {
+    name: "/login",
+    description: "Re-run login setup",
+    scopes: ["global", "course", "workspace"],
+  },
+  {
     name: "/quit",
     description: "Exit canvas-cli",
     scopes: ["global", "course", "workspace"],
