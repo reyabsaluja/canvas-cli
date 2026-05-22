@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CanvasClient } from "../src/canvas/client.js";
+import { CanvasNotFoundError } from "../src/errors.js";
 import { createMockCanvasServer, startServer, stopServer } from "./helpers/mock-canvas-server.js";
 import { buildDefaultServerData } from "./helpers/fixtures.js";
 import type { Config } from "../src/config/env.js";
@@ -46,11 +47,15 @@ test("integration: mock Canvas API", async (t) => {
     assert.equal(detail.points_possible, 10);
   });
 
-  await t.test("getAssignmentDetail throws for non-existent assignment", async () => {
+  await t.test("getAssignmentDetail throws CanvasNotFoundError for non-existent assignment", async () => {
     const client = new CanvasClient(config);
     await assert.rejects(
       () => client.getAssignmentDetail(101, 9999),
-      (err: Error) => err.message.includes("404")
+      (err: unknown) => {
+        assert.ok(err instanceof CanvasNotFoundError);
+        assert.equal(err.kind, "not_found");
+        return true;
+      }
     );
   });
 
