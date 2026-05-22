@@ -185,6 +185,8 @@ export function isNetworkError(err: unknown): boolean {
 export function classifyError(err: unknown): CanvasCliError {
   if (err instanceof CanvasCliError) return err;
 
+  // Safety net: CanvasClient.throwForStatus maps known codes to typed errors,
+  // but raw CanvasApiError can still reach here via its default branch (e.g. 400/409).
   if (err instanceof CanvasApiError) {
     switch (err.status) {
       case 401:
