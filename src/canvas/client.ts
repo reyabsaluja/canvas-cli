@@ -1,10 +1,8 @@
 import type { Config } from "../config/env.js";
 import { CanvasApiError } from "./errors.js";
 import {
-  CanvasAuthError,
+  CanvasCliError,
   CanvasNetworkError,
-  CanvasNotFoundError,
-  CanvasPermissionError,
   CanvasRateLimitError,
   CanvasServerError,
   classifyError,
@@ -315,13 +313,7 @@ export class CanvasClient {
     try {
       return await this.fetchPaginated<T>(url);
     } catch (err) {
-      if (
-        err instanceof CanvasAuthError ||
-        err instanceof CanvasPermissionError ||
-        err instanceof CanvasNotFoundError ||
-        err instanceof CanvasRateLimitError ||
-        err instanceof CanvasServerError
-      ) {
+      if (err instanceof CanvasCliError && err.kind !== "network" && err.kind !== "unknown") {
         this._skippedEndpoints.push(url);
         if (err instanceof CanvasRateLimitError) {
           console.error(`Warning: rate-limited by Canvas API, skipping: ${url}`);
