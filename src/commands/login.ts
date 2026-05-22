@@ -425,8 +425,8 @@ async function validateCredentials(baseUrl: string, token: string): Promise<{ ok
       return { ok: false, error: `Canvas returned HTTP ${response.status}. Please check your URL and token.` };
     }
 
-    const user = (await response.json()) as { name: string };
-    return { ok: true, userName: user.name };
+    const user = (await response.json()) as { name?: string };
+    return { ok: true, userName: user?.name || "Unknown" };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes("ENOTFOUND") || message.includes("getaddrinfo")) {
