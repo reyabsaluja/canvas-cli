@@ -163,9 +163,7 @@ async function connectServices(): Promise<AppServices> {
     if (classified.recoveryHint) {
       console.error(C.dim(`  ${classified.recoveryHint}`));
     } else {
-      console.error(
-        C.dim("  Run `canvas-cli login` to reconfigure, or check your environment variables.")
-      );
+      console.error(C.dim("  Check your configuration and try again."));
     }
     process.exit(classified.exitCode);
   }
