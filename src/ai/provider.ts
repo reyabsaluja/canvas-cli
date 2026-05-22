@@ -24,7 +24,7 @@ const DEFAULT_MODEL_BY_PROVIDER: Record<AIProviderName, string> = {
   anthropic: "claude-sonnet-4-20250514",
   openai: "gpt-4o",
   google: "gemini-2.0-flash",
-  bedrock: "us.anthropic.claude-sonnet-4-20250514-v1:0",
+  bedrock: "us.anthropic.claude-sonnet-4-6-v1",
 };
 
 /**
