@@ -327,6 +327,7 @@ export class CanvasClient {
         err instanceof CanvasAuthError ||
         err instanceof CanvasPermissionError ||
         err instanceof CanvasNotFoundError ||
+        err instanceof CanvasRateLimitError ||
         err instanceof CanvasServerError
       ) {
         this._skippedEndpoints.push(url);
