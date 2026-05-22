@@ -69,11 +69,13 @@ export const COMMANDS: CommandDefinition[] = [
     name: "/model",
     description: "Switch AI model and effort",
     scopes: ["global", "course", "workspace"],
+    navigation: true,
   },
   {
     name: "/login",
     description: "Re-run login setup",
     scopes: ["global", "course", "workspace"],
+    navigation: true,
   },
   {
     name: "/quit",
