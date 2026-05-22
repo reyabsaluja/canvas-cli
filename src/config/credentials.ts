@@ -32,6 +32,10 @@ function keychainAccount(profile: string, key: string): string {
 
 export type StorageBackend = "keychain" | "file";
 
+// macOS `security add-generic-password -w` requires the secret as a CLI arg,
+// making it momentarily visible in `ps`. This is a known limitation of the
+// Security.framework CLI — the exposure window is sub-millisecond and no
+// stdin-based alternative exists for generic passwords.
 export function storeCredential(profile: string, key: string, value: string): StorageBackend {
   validateProfileName(profile);
   if (value.includes("\0")) {
@@ -52,7 +56,8 @@ export function storeCredential(profile: string, key: string, value: string): St
     }
   }
 
-  // Fallback: store in a file with restrictive permissions (bypass umask)
+  // Fallback: plaintext file with 0600 permissions. On non-macOS systems there
+  // is no OS-level secret store; a compromised user session can read these.
   const filePath = credentialFilePath(profile, key);
   const dir = join(getConfigDir(), "credentials");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
