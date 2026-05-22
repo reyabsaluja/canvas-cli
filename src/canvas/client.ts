@@ -319,6 +319,8 @@ export class CanvasClient {
           console.error(`Warning: rate-limited by Canvas API, skipping: ${url}`);
         } else if (err instanceof CanvasServerError) {
           console.error(`Warning: Canvas API returned ${err.statusCode} after retries, skipping: ${url}`);
+        } else {
+          console.error(`Warning: Canvas API error (${err.kind}), skipping: ${url}`);
         }
         return [];
       }
