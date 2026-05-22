@@ -119,7 +119,14 @@ function paginatedResponse(
 }
 
 export function createMockCanvasServer(data: MockServerData): http.Server {
+  let baseApiUrl = "";
+
   const server = http.createServer((req, res) => {
+    if (!baseApiUrl) {
+      const port = (server.address() as { port: number })?.port ?? 0;
+      baseApiUrl = `http://localhost:${port}/api/v1`;
+    }
+
     const url = new URL(req.url ?? "/", `http://localhost`);
     const path = url.pathname.replace(/^\/api\/v1/, "");
 
@@ -152,7 +159,7 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
         data.courses,
         page,
         effectivePerPage,
-        `http://localhost:${(server.address() as { port: number })?.port ?? 0}/api/v1`,
+        baseApiUrl,
         "/courses"
       );
       res.writeHead(200, headers);
@@ -185,7 +192,7 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
         assignments,
         page,
         effectivePerPage,
-        `http://localhost:${(server.address() as { port: number })?.port ?? 0}/api/v1`,
+        baseApiUrl,
         `/courses/${courseId}/assignments`
       );
       res.writeHead(200, headers);
@@ -219,7 +226,7 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
         modules.map(({ items: _items, ...m }) => m),
         page,
         effectivePerPage,
-        `http://localhost:${(server.address() as { port: number })?.port ?? 0}/api/v1`,
+        baseApiUrl,
         `/courses/${courseId}/modules`
       );
       res.writeHead(200, headers);
@@ -239,7 +246,7 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
         items,
         page,
         effectivePerPage,
-        `http://localhost:${(server.address() as { port: number })?.port ?? 0}/api/v1`,
+        baseApiUrl,
         `/courses/${courseId}/modules/${moduleId}/items`
       );
       res.writeHead(200, headers);
@@ -256,7 +263,7 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
         pages.map(({ body: _body, ...p }) => p),
         page,
         effectivePerPage,
-        `http://localhost:${(server.address() as { port: number })?.port ?? 0}/api/v1`,
+        baseApiUrl,
         `/courses/${courseId}/pages`
       );
       res.writeHead(200, headers);
@@ -306,7 +313,7 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
         files,
         page,
         effectivePerPage,
-        `http://localhost:${(server.address() as { port: number })?.port ?? 0}/api/v1`,
+        baseApiUrl,
         `/courses/${courseId}/files`
       );
       res.writeHead(200, headers);
