@@ -5,8 +5,12 @@ import { readStoredConfig, listProfiles } from "../config/store.js";
 import { loadCredential } from "../config/credentials.js";
 import { getConfigDir } from "../config/paths.js";
 
-export async function statusCommand(): Promise<void> {
-  const profile = getActiveProfile();
+interface StatusOptions {
+  profile?: string;
+}
+
+export async function statusCommand(options: StatusOptions = {}): Promise<void> {
+  const profile = options.profile || getActiveProfile();
   const stored = readStoredConfig(profile);
   const hasToken = Boolean(
     process.env.CANVAS_ACCESS_TOKEN || loadCredential(profile, "canvas-token")

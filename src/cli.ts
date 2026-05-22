@@ -126,6 +126,7 @@ program
 program
   .command("status")
   .description("Show current configuration and connection status")
+  .option("--profile <name>", "Profile to inspect")
   .action(statusCommand);
 
 program
