@@ -40,11 +40,7 @@ export async function handleCommand(
   }
 
   if (command === "/login") {
-    await api.addMessage({
-      role: "system",
-      content: "To reconfigure credentials, exit and run:\n\n  canvas-cli login\n\nThis requires an interactive terminal session outside the TUI.",
-    });
-    return;
+    return { type: "login" };
   }
 
   if (command === "/home") {
