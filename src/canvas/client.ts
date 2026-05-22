@@ -59,7 +59,7 @@ export class CanvasClient {
       try {
         response = await fetchWithRetry(nextUrl, { headers: this.headers }, this.retryOptions);
       } catch (err) {
-        throw this.wrapNetworkError(err);
+        throw this.toNetworkError(err);
       }
       debugApiResponse("GET", nextUrl, response.status, Date.now() - start);
 
@@ -83,7 +83,7 @@ export class CanvasClient {
     try {
       response = await fetchWithRetry(url, { headers: this.headers }, this.retryOptions);
     } catch (err) {
-      throw this.wrapNetworkError(err);
+      throw this.toNetworkError(err);
     }
     debugApiResponse("GET", url, response.status, Date.now() - start);
 
@@ -106,7 +106,7 @@ export class CanvasClient {
     throw classifyError(apiErr);
   }
 
-  private wrapNetworkError(err: unknown): Error {
+  private toNetworkError(err: unknown): Error {
     if (isNetworkError(err)) {
       return new CanvasNetworkError(undefined, err);
     }
