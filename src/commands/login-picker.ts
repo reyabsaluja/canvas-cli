@@ -37,15 +37,9 @@ export async function verticalPicker(
     }
   };
 
-  // Initial render
-  process.stdout.write(`  ${C.text(label)}\n`);
-  for (let i = 0; i < options.length; i++) {
-    const opt = options[i]!;
-    const marker = i === selected ? C.primary("▸") : " ";
-    const text = i === selected ? C.whiteBold(opt.label) : C.muted(opt.label);
-    const desc = opt.description ? " " + C.dim(opt.description) : "";
-    process.stdout.write(`  ${marker} ${text}${desc}\n`);
-  }
+  // Print placeholder lines so the first render() can cursor-up over them
+  process.stdout.write("\n".repeat(options.length + 1));
+  render();
 
   return new Promise((resolve) => {
     process.stdin.setRawMode(true);
