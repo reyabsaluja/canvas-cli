@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import http from "node:http";
 import { CanvasClient } from "../src/canvas/client.js";
 import { createMockCanvasServer, startServer, stopServer } from "./helpers/mock-canvas-server.js";
 import { buildDefaultServerData } from "./helpers/fixtures.js";
