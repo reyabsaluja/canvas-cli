@@ -139,6 +139,10 @@ export function deleteAllCredentials(profile: string): void {
   }
 }
 
+export function clearCredentialCache(): void {
+  cache.clear();
+}
+
 function shellEscape(str: string): string {
   return "'" + str.replace(/'/g, "'\\''") + "'";
 }
