@@ -60,7 +60,7 @@ export async function launchApp(): Promise<void> {
     hideCursor();
     renderSplashLoading();
 
-    const services = await connectServices();
+    let services = await connectServices();
     await ensureCourseConfig(services);
 
     let scope: AppScope = { type: "global" };
@@ -108,6 +108,9 @@ export async function launchApp(): Promise<void> {
         loadStoredCredentialsToEnv();
         clearScreen();
         hideCursor();
+        services = await connectServices();
+        await ensureCourseConfig(services);
+        scope = { type: "global" };
         continue;
       }
 
