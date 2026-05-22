@@ -7,6 +7,7 @@ import {
   CanvasPermissionError,
   CanvasRateLimitError,
   CanvasServerError,
+  isNetworkError,
 } from "../errors.js";
 import { debugApiRequest, debugApiResponse, maskUrl } from "../debug.js";
 import { fetchWithRetry, type RetryOptions } from "./retry.js";
@@ -110,16 +111,8 @@ export class CanvasClient {
   }
 
   private wrapNetworkError(err: unknown): Error {
-    if (err instanceof Error) {
-      if (
-        err.message.includes("ENOTFOUND") ||
-        err.message.includes("fetch failed") ||
-        err.message.includes("ECONNREFUSED") ||
-        err.message.includes("ECONNRESET") ||
-        err.message.includes("ETIMEDOUT")
-      ) {
-        return new CanvasNetworkError(undefined, err);
-      }
+    if (isNetworkError(err)) {
+      return new CanvasNetworkError(undefined, err);
     }
     return err instanceof Error ? err : new Error(String(err));
   }
