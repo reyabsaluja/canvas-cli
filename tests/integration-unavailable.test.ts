@@ -12,9 +12,21 @@ function create503Server(): http.Server {
   });
 }
 
-function createConnectionRefusingConfig(): Config {
+async function getRefusedPort(): Promise<number> {
+  const srv = http.createServer();
+  const port = await new Promise<number>((resolve) => {
+    srv.listen(0, "127.0.0.1", () => {
+      resolve((srv.address() as { port: number }).port);
+    });
+  });
+  await new Promise<void>((resolve) => { srv.close(() => resolve()); });
+  return port;
+}
+
+async function createConnectionRefusingConfig(): Promise<Config> {
+  const port = await getRefusedPort();
   return {
-    baseUrl: "http://127.0.0.1:1/api/v1",
+    baseUrl: `http://127.0.0.1:${port}/api/v1`,
     accessToken: "test-token-valid",
   };
 }
@@ -85,7 +97,7 @@ test("integration: Canvas API unavailable", async (t) => {
   });
 
   await t.test("connection refused throws network error", async () => {
-    const config = createConnectionRefusingConfig();
+    const config = await createConnectionRefusingConfig();
 
     const client = new CanvasClient(config, {
       maxRetries: 0,
@@ -102,7 +114,7 @@ test("integration: Canvas API unavailable", async (t) => {
   });
 
   await t.test("safe endpoints return empty on connection refused", async () => {
-    const config = createConnectionRefusingConfig();
+    const config = await createConnectionRefusingConfig();
 
     const client = new CanvasClient(config, {
       maxRetries: 0,
