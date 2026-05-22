@@ -20,6 +20,8 @@
   "files": [
     "bin",
     "dist",
+    "!dist/**/*.d.ts",
+    "!dist/**/*.js.map",
     "README.md"
   ],
   "keywords": [
