@@ -2,7 +2,7 @@ import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { platform } from "node:os";
-import { getConfigDir } from "./paths.js";
+import { getConfigDir, validateProfileName } from "./paths.js";
 import { debug } from "../debug.js";
 
 const SERVICE_NAME = "canvas-cli";
@@ -32,6 +32,7 @@ function keychainAccount(profile: string, key: string): string {
 }
 
 export function storeCredential(profile: string, key: string, value: string): void {
+  validateProfileName(profile);
   if (value.includes("\0")) {
     throw new Error(`Credential value for "${key}" contains a null byte`);
   }
@@ -66,6 +67,7 @@ export function storeCredential(profile: string, key: string, value: string): vo
 }
 
 export function loadCredential(profile: string, key: string): string | null {
+  validateProfileName(profile);
   const ck = cacheKey(profile, key);
   if (cache.has(ck)) {
     return cache.get(ck)!;
@@ -104,6 +106,7 @@ export function loadCredential(profile: string, key: string): string | null {
 }
 
 export function deleteCredential(profile: string, key: string): boolean {
+  validateProfileName(profile);
   let deleted = false;
 
   if (platform() === "darwin") {
