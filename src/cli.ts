@@ -30,15 +30,15 @@ program
   .version(version, "-V, --version", "output the current version")
   .option("--debug", "Enable verbose debug output to stderr");
 
+const SKIP_CREDENTIAL_LOADING = new Set(["login", "logout", "status"]);
+
 program.hook("preAction", (_thisCommand, actionCommand) => {
   const opts = program.opts();
   initDebug(Boolean(opts.debug));
   debug("general", `canvas-cli v${version} starting`);
   debug("config", "Node.js " + process.version);
 
-  // login/logout/status manage credentials themselves; loading here would error or be stale
-  const cmdName = actionCommand.name();
-  if (cmdName !== "login" && cmdName !== "logout" && cmdName !== "status") {
+  if (!SKIP_CREDENTIAL_LOADING.has(actionCommand.name())) {
     loadStoredCredentialsToEnv();
   }
 });
