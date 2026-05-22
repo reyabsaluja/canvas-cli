@@ -363,7 +363,12 @@ async function modelFullFlow(): Promise<ModelResult> {
       const custom = await promptLine(`  ${C.dim("Model ID:")} `);
       if (custom === ESCAPED || !custom.trim()) return null;
       hideCursor();
-      finalModel = custom.trim();
+      const trimmed = custom.trim();
+      if (!/^[\w.\-/:]+$/.test(trimmed)) {
+        console.log(`\n  ${C.error("✗")} ${C.text("Invalid model ID — only letters, digits, dots, hyphens, underscores, colons, and slashes are allowed.")}\n`);
+        return null;
+      }
+      finalModel = trimmed;
       modelLabel = finalModel;
     }
 
