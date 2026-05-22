@@ -504,7 +504,6 @@ function promptSecret(question: string): Promise<string | typeof ESCAPED> {
     process.stdin.resume();
 
     let input = "";
-    let dotCount = 0;
 
     const cleanup = () => {
       process.stdin.setRawMode(false);
@@ -536,14 +535,10 @@ function promptSecret(question: string): Promise<string | typeof ESCAPED> {
           if (code === 127 || code === 8) {
             if (input.length > 0) {
               input = input.slice(0, -1);
-              if (dotCount > 0) {
-                dotCount--;
-                process.stdout.write("\b \b");
-              }
+              process.stdout.write("\b \b");
             }
           } else if (code >= 32) {
             input += c;
-            dotCount++;
             process.stdout.write("•");
           }
         }
