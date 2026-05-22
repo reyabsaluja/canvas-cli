@@ -1,6 +1,7 @@
 import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
 
@@ -10,6 +11,17 @@ process.env.XDG_CONFIG_HOME = tempDir;
 
 const { storeCredential, loadCredential, deleteCredential, deleteAllCredentials } = await import("../src/config/credentials.js");
 const { getConfigDir } = await import("../src/config/paths.js");
+
+function keychainAvailable(): boolean {
+  if (platform() !== "darwin") return false;
+  if (process.env.CI) return false;
+  try {
+    execSync("security show-keychain-info login.keychain 2>/dev/null", { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 describe("credentials (file fallback)", () => {
   const testProfile = "test-file-creds";
@@ -23,7 +35,7 @@ describe("credentials (file fallback)", () => {
     deleteAllCredentials(testProfile);
   });
 
-  if (platform() === "darwin") {
+  if (keychainAvailable()) {
     test("stores and retrieves credential via keychain", () => {
       const testValue = `test-token-${Date.now()}`;
       storeCredential(testProfile, "canvas-token", testValue);
