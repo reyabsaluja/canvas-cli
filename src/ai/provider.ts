@@ -136,7 +136,7 @@ const EFFORT_TO_THINKING_BUDGET: Record<AIEffortLevel, number> = {
   max: 32000,
 };
 
-function getEffortOptions(config: AIProviderConfig): Record<string, unknown> {
+export function getEffortOptions(config: AIProviderConfig): Record<string, unknown> {
   if (!config.effort) return {};
 
   if (config.provider === "openai") {

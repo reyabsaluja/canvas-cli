@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { APICallError } from "@ai-sdk/provider";
-import { formatAIError, getAIConfig } from "../src/ai/provider.js";
+import { formatAIError, getAIConfig, getEffortOptions } from "../src/ai/provider.js";
+import type { AIProviderConfig } from "../src/ai/provider.js";
 
 const AI_ENV_KEYS = [
   "AI_PROVIDER",
   "AI_MODEL",
+  "AI_EFFORT",
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
   "GOOGLE_API_KEY",
@@ -56,7 +58,7 @@ test("getAIConfig uses explicit Bedrock provider defaults", () => {
     () => {
       assert.deepEqual(getAIConfig(), {
         provider: "bedrock",
-        model: "us.anthropic.claude-sonnet-4-20250514-v1:0",
+        model: "us.anthropic.claude-sonnet-4-6",
       });
     }
   );
@@ -118,4 +120,84 @@ test("formatAIError surfaces provider details for bad requests", () => {
   const formatted = formatAIError(error);
   assert.match(formatted, /The provided model identifier is invalid/);
   assert.match(formatted, /AI_MODEL/);
+});
+
+test("getAIConfig includes effort when AI_EFFORT is set", () => {
+  withAIEnv(
+    {
+      AI_PROVIDER: "anthropic",
+      ANTHROPIC_API_KEY: "test-key",
+      AI_EFFORT: "high",
+    },
+    () => {
+      assert.deepEqual(getAIConfig(), {
+        provider: "anthropic",
+        model: "claude-sonnet-4-20250514",
+        effort: "high",
+      });
+    }
+  );
+});
+
+test("getAIConfig ignores effort for google provider", () => {
+  withAIEnv(
+    {
+      AI_PROVIDER: "google",
+      GOOGLE_API_KEY: "test-key",
+      AI_EFFORT: "high",
+    },
+    () => {
+      assert.deepEqual(getAIConfig(), {
+        provider: "google",
+        model: "gemini-2.0-flash",
+      });
+    }
+  );
+});
+
+test("getAIConfig ignores invalid AI_EFFORT values", () => {
+  withAIEnv(
+    {
+      AI_PROVIDER: "openai",
+      OPENAI_API_KEY: "test-key",
+      AI_EFFORT: "turbo",
+    },
+    () => {
+      assert.deepEqual(getAIConfig(), {
+        provider: "openai",
+        model: "gpt-4o",
+      });
+    }
+  );
+});
+
+test("getEffortOptions returns empty for no effort", () => {
+  const config: AIProviderConfig = { provider: "anthropic", model: "claude-sonnet-4-6" };
+  assert.deepEqual(getEffortOptions(config), {});
+});
+
+test("getEffortOptions returns OpenAI reasoningEffort", () => {
+  const config: AIProviderConfig = { provider: "openai", model: "gpt-5.5", effort: "medium" };
+  assert.deepEqual(getEffortOptions(config), {
+    providerOptions: { openai: { reasoningEffort: "medium" } },
+  });
+});
+
+test("getEffortOptions returns Anthropic thinking budget", () => {
+  const config: AIProviderConfig = { provider: "anthropic", model: "claude-opus-4-7", effort: "high" };
+  assert.deepEqual(getEffortOptions(config), {
+    providerOptions: { anthropic: { thinking: { type: "enabled", budgetTokens: 10000 } } },
+  });
+});
+
+test("getEffortOptions returns Anthropic thinking for bedrock provider", () => {
+  const config: AIProviderConfig = { provider: "bedrock", model: "us.anthropic.claude-opus-4-7", effort: "max" };
+  assert.deepEqual(getEffortOptions(config), {
+    providerOptions: { anthropic: { thinking: { type: "enabled", budgetTokens: 32000 } } },
+  });
+});
+
+test("getEffortOptions returns empty for google even if effort is set", () => {
+  const config: AIProviderConfig = { provider: "google", model: "gemini-3.5-flash", effort: "high" };
+  assert.deepEqual(getEffortOptions(config), {});
 });
