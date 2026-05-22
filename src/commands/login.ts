@@ -380,7 +380,7 @@ async function runStandardProviderSteps(provider: string, freshStep: () => void)
   return { aiKey, aiModel, aiEffort };
 }
 
-function normalizeUrl(url: string): string {
+export function normalizeUrl(url: string): string {
   url = url.trim();
   if (!url) return "";
   if (!url.startsWith("http://") && !url.startsWith("https://")) {
