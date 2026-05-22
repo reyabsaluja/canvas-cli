@@ -252,7 +252,7 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
     profile
   );
 
-  storeCredential(profile, "canvas-token", token);
+  const backend = storeCredential(profile, "canvas-token", token);
   if (aiKey && aiProvider) {
     const credKey = getCredentialKey(aiProvider);
     if (credKey) {
@@ -266,6 +266,7 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
   }
 
   // Summary
+  const storageLabel = backend === "keychain" ? "macOS Keychain" : getConfigDir();
   console.log();
   console.log(`  ${C.success("✓")} ${C.whiteBold("Setup complete")}`);
   console.log();
@@ -274,7 +275,7 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
     const modelStr = finalModel ? ` (${finalModel}${finalEffort ? `, ${finalEffort}` : ""})` : "";
     console.log(`  ${C.dim("ai")}        ${C.text(finalProvider)}${modelStr}`);
   }
-  console.log(`  ${C.dim("stored")}    ${C.muted(platform() === "darwin" ? "macOS Keychain" : getConfigDir())}`);
+  console.log(`  ${C.dim("stored")}    ${C.muted(storageLabel)}`);
 
   if (profile !== "default") {
     console.log(`\n  ${C.dim("Use this profile:")} ${C.muted(`export CANVAS_CLI_PROFILE=${profile}`)}`);
