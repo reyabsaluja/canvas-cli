@@ -45,6 +45,12 @@ test("isNetworkError", async (t) => {
     assert.equal(isNetworkError(err), true);
   });
 
+  await t.test("does not match fetch failed with non-network Error cause", () => {
+    const err = new TypeError("fetch failed");
+    (err as { cause?: unknown }).cause = new Error("unable to verify the first certificate");
+    assert.equal(isNetworkError(err), false);
+  });
+
   await t.test("does not match generic fetch failed without cause", () => {
     const err = new TypeError("fetch failed");
     assert.equal(isNetworkError(err), false);
