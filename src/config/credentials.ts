@@ -31,7 +31,9 @@ function keychainAccount(profile: string, key: string): string {
   return `${profile}/${key}`;
 }
 
-export function storeCredential(profile: string, key: string, value: string): void {
+export type StorageBackend = "keychain" | "file";
+
+export function storeCredential(profile: string, key: string, value: string): StorageBackend {
   validateProfileName(profile);
   if (value.includes("\0")) {
     throw new Error(`Credential value for "${key}" contains a null byte`);
@@ -51,7 +53,7 @@ export function storeCredential(profile: string, key: string, value: string): vo
       );
       debug("config", `Stored credential in keychain: ${key} (profile: ${profile})`);
       cache.set(cacheKey(profile, key), value);
-      return;
+      return "keychain";
     } catch {
       debug("config", "Keychain storage failed, falling back to file");
     }
@@ -64,6 +66,7 @@ export function storeCredential(profile: string, key: string, value: string): vo
   writeFileSync(filePath, value, { mode: 0o600 });
   cache.set(cacheKey(profile, key), value);
   debug("config", `Stored credential in file: ${filePath}`);
+  return "file";
 }
 
 export function loadCredential(profile: string, key: string): string | null {
