@@ -35,6 +35,47 @@ const LOGO = [
 
 const LOGO_WIDTH = Math.max(...LOGO.map((l) => [...l].length));
 
+const PROVIDER_DISPLAY: Record<string, string> = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  google: "Google",
+  bedrock: "AWS Bedrock",
+};
+
+const EFFORT_FILL: Record<string, string> = {
+  low: "○",
+  medium: "◔",
+  high: "◑",
+  max: "●",
+};
+
+interface CurrentConfig {
+  provider: string | null;
+  model: string | null;
+  effort: string | null;
+}
+
+function readCurrentConfig(): CurrentConfig {
+  const profile = getActiveProfile();
+  const stored = readStoredConfig(profile);
+  return {
+    provider: stored?.aiProvider ?? process.env.AI_PROVIDER ?? null,
+    model: stored?.aiModel ?? process.env.AI_MODEL ?? null,
+    effort: stored?.aiEffort ?? process.env.AI_EFFORT ?? null,
+  };
+}
+
+function resolveModelLabel(provider: string | null, modelId: string): string {
+  if (provider === "bedrock") {
+    const match = BEDROCK_MODELS.find((m) => m.value === modelId);
+    if (match) return match.label;
+  } else if (provider && MODEL_CATALOG[provider]) {
+    const match = MODEL_CATALOG[provider]!.find((m: PickerOption) => m.value === modelId);
+    if (match) return match.label;
+  }
+  return modelId;
+}
+
 function clearScreen(): void {
   process.stdout.write("\x1b[2J\x1b[H");
 }
@@ -70,15 +111,36 @@ const EFFORT_OPTIONS_OPENAI: PickerOption[] = [
 ];
 
 function printHeader(): void {
+  const current = readCurrentConfig();
   const titleLine = `${C.whiteBold("canvas-cli")} ${C.dim("·")} ${C.muted("model")}`;
-  const textStart = 2;
 
+  const rightLines: string[] = [];
+  rightLines.push(titleLine);
+  rightLines.push("");
+
+  if (current.model) {
+    const label = resolveModelLabel(current.provider, current.model);
+    const providerTag = current.provider
+      ? C.dim(PROVIDER_DISPLAY[current.provider] ?? current.provider)
+      : "";
+    const effortTag = current.effort
+      ? `  ${C.primary(EFFORT_FILL[current.effort] ?? "○")} ${C.dim(current.effort)}`
+      : "";
+    rightLines.push(`${C.muted("current")} ${C.white(label)}${effortTag}`);
+    if (providerTag) rightLines.push(`        ${providerTag}`);
+  } else {
+    rightLines.push(`${C.dim("no model configured")}`);
+  }
+
+  const textStart = 1;
   console.log();
   for (let i = 0; i < LOGO.length; i++) {
     const logoLine = LOGO[i]!;
     const pad = " ".repeat(Math.max(0, LOGO_WIDTH - [...logoLine].length));
     const textIdx = i - textStart;
-    const rightText = textIdx === 0 ? "   " + titleLine : "";
+    const rightText = textIdx >= 0 && textIdx < rightLines.length
+      ? "   " + rightLines[textIdx]!
+      : "";
     console.log("  " + C.primary(logoLine) + pad + rightText);
   }
   console.log();
