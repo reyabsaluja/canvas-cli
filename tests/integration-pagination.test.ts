@@ -186,11 +186,7 @@ test("integration: pagination handling", async (t) => {
       res.end(JSON.stringify([{ id: requestCount, name: `Course ${requestCount}`, course_code: `C${requestCount}`, enrollment_term_id: 1, workflow_state: "available", start_at: null, end_at: null }]));
     });
 
-    const loopPort = await new Promise<number>((resolve) => {
-      loopServer.listen(0, "127.0.0.1", () => {
-        resolve((loopServer.address() as { port: number }).port);
-      });
-    });
+    const loopPort = await startServer(loopServer);
 
     const config: Config = {
       baseUrl: `http://127.0.0.1:${loopPort}/api/v1`,
@@ -203,6 +199,6 @@ test("integration: pagination handling", async (t) => {
     assert.equal(requestCount, maxRequests);
     assert.equal(result.length, maxRequests);
 
-    await new Promise<void>((resolve) => { loopServer.close(() => resolve()); });
+    await stopServer(loopServer);
   });
 });

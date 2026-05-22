@@ -198,11 +198,7 @@ test("integration: ingest pipeline with partially unavailable API", async (t) =>
       res.end(JSON.stringify({ errors: [{ message: "not found" }] }));
     });
 
-    port = await new Promise<number>((resolve) => {
-      partialServer.listen(0, "127.0.0.1", () => {
-        resolve((partialServer.address() as { port: number }).port);
-      });
-    });
+    port = await startServer(partialServer);
 
     const config: Config = {
       baseUrl: `http://127.0.0.1:${port}/api/v1`,
@@ -218,6 +214,6 @@ test("integration: ingest pipeline with partially unavailable API", async (t) =>
     assert.equal(raw.pages.length, 0);
     assert.ok(raw.warnings.length > 0);
 
-    await new Promise<void>((resolve) => partialServer.close(() => resolve()));
+    await stopServer(partialServer);
   });
 });
