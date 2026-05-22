@@ -24,9 +24,9 @@ const DEFAULT_RATE_LIMIT_RETRY_MS = 30_000;
 const DEFAULT_UNAVAILABLE_RETRY_MS = 15_000;
 
 const DEFAULT_MODEL_BY_PROVIDER: Record<AIProviderName, string> = {
-  anthropic: "claude-sonnet-4-20250514",
-  openai: "gpt-4o",
-  google: "gemini-2.0-flash",
+  anthropic: "claude-sonnet-4-6",
+  openai: "gpt-5.4",
+  google: "gemini-3.5-flash",
   bedrock: "us.anthropic.claude-sonnet-4-6",
 };
 
