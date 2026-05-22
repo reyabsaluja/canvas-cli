@@ -6,7 +6,7 @@ interface LogoutOptions {
   profile?: string;
 }
 
-export async function logoutCommand(options: LogoutOptions): Promise<void> {
+export function logoutCommand(options: LogoutOptions): void {
   const profile = options.profile || "default";
 
   const existing = readStoredConfig(profile);

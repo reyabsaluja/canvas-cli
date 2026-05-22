@@ -9,7 +9,7 @@ interface StatusOptions {
   profile?: string;
 }
 
-export async function statusCommand(options: StatusOptions = {}): Promise<void> {
+export function statusCommand(options: StatusOptions = {}): void {
   const profile = options.profile || getActiveProfile();
   const stored = readStoredConfig(profile);
   const hasToken = Boolean(
