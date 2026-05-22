@@ -10,6 +10,7 @@ import type {
 
 export type ShellResult =
   | { type: "quit" }
+  | { type: "login" }
   | { type: "scope"; scope: AppScope }
   | { type: "course-management" }
   | { type: "course-picker" }

@@ -25,6 +25,10 @@ import {
 } from "./app-navigation.js";
 import { renderSplashLoading } from "./app-banner.js";
 import { showAnnouncementsView } from "./announcements-view.js";
+import { isConfigured, getActiveProfile } from "../config/env.js";
+import { loginCommand } from "../commands/login.js";
+import { loadStoredCredentialsToEnv } from "../config/load-credentials-to-env.js";
+import { clearCredentialCache } from "../config/credentials.js";
 
 export async function launchApp(): Promise<void> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -42,10 +46,23 @@ export async function launchApp(): Promise<void> {
 
   try {
     clearScreen();
+
+    if (!isConfigured()) {
+      showCursor();
+      console.log(C.dim("\n  No Canvas credentials found. Let's get you set up.\n"));
+      await loginCommand({ profile: getActiveProfile() });
+      clearCredentialCache();
+      loadStoredCredentialsToEnv();
+      if (!isConfigured()) {
+        process.exit(1);
+      }
+      clearScreen();
+    }
+
     hideCursor();
     renderSplashLoading();
 
-    const services = await connectServices();
+    let services = await connectServices();
     await ensureCourseConfig(services);
 
     let scope: AppScope = { type: "global" };
@@ -86,6 +103,20 @@ export async function launchApp(): Promise<void> {
         return;
       }
 
+      if (result.type === "login") {
+        showCursor();
+        clearScreen();
+        await loginCommand({ profile: getActiveProfile() });
+        clearCredentialCache();
+        loadStoredCredentialsToEnv();
+        clearScreen();
+        hideCursor();
+        services = await connectServices();
+        await ensureCourseConfig(services);
+        scope = { type: "global" };
+        continue;
+      }
+
       const nextScope = await resolveShellResult(
         services,
         scope,
@@ -117,7 +148,7 @@ async function connectServices(): Promise<AppServices> {
       )
     );
     console.error(
-      C.dim("  Check your CANVAS_BASE_URL and CANVAS_ACCESS_TOKEN in .env")
+      C.dim("  Run `canvas-cli login` to reconfigure, or check your environment variables.")
     );
     process.exit(1);
   }
