@@ -22,6 +22,9 @@ function keychainAccount(profile: string, key: string): string {
 }
 
 export function storeCredential(profile: string, key: string, value: string): void {
+  if (value.includes("\0")) {
+    throw new Error(`Credential value for "${key}" contains a null byte`);
+  }
   if (platform() === "darwin") {
     try {
       // Delete existing entry first (ignore errors if it doesn't exist)
