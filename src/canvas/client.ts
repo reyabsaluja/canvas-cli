@@ -105,7 +105,8 @@ export class CanvasClient {
         throw new CanvasNotFoundError(undefined, apiErr);
       case 429: {
         const retryAfter = response.headers.get("Retry-After");
-        const retryMs = retryAfter ? parseInt(retryAfter, 10) * 1000 || null : null;
+        const parsed = retryAfter ? parseInt(retryAfter, 10) : NaN;
+        const retryMs = Number.isFinite(parsed) ? parsed * 1000 : null;
         throw new CanvasRateLimitError(retryMs, apiErr);
       }
       default:
