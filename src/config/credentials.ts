@@ -7,6 +7,12 @@ import { debug } from "../debug.js";
 
 const SERVICE_NAME = "canvas-cli";
 
+const cache = new Map<string, string | null>();
+
+function cacheKey(profile: string, key: string): string {
+  return `${profile}\0${key}`;
+}
+
 function credentialFilePath(profile: string, key: string): string {
   return join(getConfigDir(), "credentials", `${profile}.${key}`);
 }
@@ -30,6 +36,7 @@ export function storeCredential(profile: string, key: string, value: string): vo
         { stdio: "ignore" }
       );
       debug("config", `Stored credential in keychain: ${key} (profile: ${profile})`);
+      cache.set(cacheKey(profile, key), value);
       return;
     } catch {
       debug("config", "Keychain storage failed, falling back to file");
@@ -41,35 +48,46 @@ export function storeCredential(profile: string, key: string, value: string): vo
   const dir = join(getConfigDir(), "credentials");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   writeFileSync(filePath, value, { mode: 0o600 });
+  cache.set(cacheKey(profile, key), value);
   debug("config", `Stored credential in file: ${filePath}`);
 }
 
 export function loadCredential(profile: string, key: string): string | null {
+  const ck = cacheKey(profile, key);
+  if (cache.has(ck)) {
+    return cache.get(ck)!;
+  }
+
+  let value: string | null = null;
+
   if (platform() === "darwin") {
     try {
       const result = execSync(
         `security find-generic-password -s ${shellEscape(SERVICE_NAME)} -a ${shellEscape(keychainAccount(profile, key))} -w`,
         { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }
       );
-      const value = result.trim();
-      if (value) {
+      const trimmed = result.trim();
+      if (trimmed) {
         debug("config", `Loaded credential from keychain: ${key} (profile: ${profile})`);
-        return value;
+        value = trimmed;
       }
     } catch {
       // Not found in keychain, try file fallback
     }
   }
 
-  // Fallback: read from file
-  const filePath = credentialFilePath(profile, key);
-  try {
-    const value = readFileSync(filePath, "utf-8").trim();
-    debug("config", `Loaded credential from file: ${key} (profile: ${profile})`);
-    return value;
-  } catch {
-    return null;
+  if (!value) {
+    const filePath = credentialFilePath(profile, key);
+    try {
+      value = readFileSync(filePath, "utf-8").trim();
+      debug("config", `Loaded credential from file: ${key} (profile: ${profile})`);
+    } catch {
+      value = null;
+    }
   }
+
+  cache.set(ck, value);
+  return value;
 }
 
 export function deleteCredential(profile: string, key: string): boolean {
@@ -90,6 +108,8 @@ export function deleteCredential(profile: string, key: string): boolean {
     unlinkSync(filePath);
     deleted = true;
   }
+
+  cache.delete(cacheKey(profile, key));
 
   if (deleted) {
     debug("config", `Deleted credential: ${key} (profile: ${profile})`);
