@@ -218,51 +218,56 @@ function prompt(question: string): Promise<string> {
 function promptSecret(question: string): Promise<string> {
   return new Promise((resolve) => {
     process.stdout.write(question);
-    const rl = readline.createInterface({
-      input: process.stdin,
-      terminal: false,
-    });
 
-    if (process.stdin.isTTY) {
-      process.stdin.setRawMode(true);
+    if (!process.stdin.isTTY) {
+      const rl = readline.createInterface({ input: process.stdin, terminal: false });
+      rl.on("line", (line) => { rl.close(); resolve(line.trim()); });
+      return;
     }
 
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+
     let input = "";
-    const onData = (char: Buffer) => {
-      const c = char.toString();
-      if (c === "\n" || c === "\r") {
-        if (process.stdin.isTTY) {
-          process.stdin.setRawMode(false);
+    let dotCount = 0;
+
+    const cleanup = () => {
+      process.stdin.setRawMode(false);
+      process.stdin.removeListener("data", onData);
+      process.stdin.pause();
+    };
+
+    const onData = (buf: Buffer) => {
+      const str = buf.toString();
+      for (const c of str) {
+        const code = c.charCodeAt(0);
+        if (c === "\r" || c === "\n") {
+          cleanup();
+          process.stdout.write("\n");
+          resolve(input.trim());
+          return;
         }
-        process.stdin.removeListener("data", onData);
-        process.stdout.write("\n");
-        rl.close();
-        resolve(input.trim());
-      } else if (c === "") {
-        if (process.stdin.isTTY) {
-          process.stdin.setRawMode(false);
+        if (code === 3) {
+          cleanup();
+          process.exit(1);
         }
-        process.exit(1);
-      } else if (c === "" || c === "\b") {
-        if (input.length > 0) {
-          input = input.slice(0, -1);
-          process.stdout.write("\b \b");
+        if (code === 127 || code === 8) {
+          if (input.length > 0) {
+            input = input.slice(0, -1);
+            if (dotCount > 0) {
+              dotCount--;
+              process.stdout.write("\b \b");
+            }
+          }
+        } else if (code >= 32) {
+          input += c;
+          dotCount++;
+          process.stdout.write("•");
         }
-      } else if (c.charCodeAt(0) >= 32) {
-        input += c;
-        process.stdout.write("•");
       }
     };
 
-    if (process.stdin.isTTY) {
-      process.stdin.resume();
-      process.stdin.on("data", onData);
-    } else {
-      rl.on("line", (line) => {
-        rl.close();
-        resolve(line.trim());
-      });
-    }
+    process.stdin.on("data", onData);
   });
 }
 
