@@ -1,5 +1,13 @@
 import type { Config } from "../config/env.js";
 import { CanvasApiError } from "./errors.js";
+import {
+  CanvasCliError,
+  CanvasNetworkError,
+  CanvasRateLimitError,
+  CanvasServerError,
+  classifyError,
+  isNetworkError,
+} from "../errors.js";
 import { debugApiRequest, debugApiResponse, maskUrl } from "../debug.js";
 import { fetchWithRetry, type RetryOptions } from "./retry.js";
 import type {
@@ -45,13 +53,16 @@ export class CanvasClient {
     while (nextUrl) {
       debugApiRequest("GET", nextUrl);
       const start = Date.now();
-      const response = await fetchWithRetry(nextUrl, { headers: this.headers }, this.retryOptions);
+      let response: Response;
+      try {
+        response = await fetchWithRetry(nextUrl, { headers: this.headers }, this.retryOptions);
+      } catch (err) {
+        throw this.toNetworkError(err);
+      }
       debugApiResponse("GET", nextUrl, response.status, Date.now() - start);
 
       if (!response.ok) {
-        const err = new CanvasApiError(response.status, response.statusText);
-        if (err.userHint) err.message += ` — ${err.userHint}`;
-        throw err;
+        this.throwForStatus(response);
       }
 
       const data = (await response.json()) as T[];
@@ -66,16 +77,38 @@ export class CanvasClient {
   private async fetchOne<T>(url: string): Promise<T> {
     debugApiRequest("GET", url);
     const start = Date.now();
-    const response = await fetchWithRetry(url, { headers: this.headers }, this.retryOptions);
+    let response: Response;
+    try {
+      response = await fetchWithRetry(url, { headers: this.headers }, this.retryOptions);
+    } catch (err) {
+      throw this.toNetworkError(err);
+    }
     debugApiResponse("GET", url, response.status, Date.now() - start);
 
     if (!response.ok) {
-      const err = new CanvasApiError(response.status, response.statusText);
-      if (err.userHint) err.message += ` — ${err.userHint}`;
-      throw err;
+      this.throwForStatus(response);
     }
 
     return (await response.json()) as T;
+  }
+
+  private throwForStatus(response: Response): never {
+    const { status, statusText } = response;
+    const apiErr = new CanvasApiError(status, statusText);
+    if (status === 429) {
+      const retryAfter = response.headers.get("Retry-After");
+      const parsed = retryAfter ? parseInt(retryAfter, 10) : NaN;
+      const retryMs = Number.isFinite(parsed) ? parsed * 1000 : null;
+      throw new CanvasRateLimitError(retryMs, apiErr);
+    }
+    throw classifyError(apiErr);
+  }
+
+  private toNetworkError(err: unknown): Error {
+    if (isNetworkError(err)) {
+      return new CanvasNetworkError(undefined, err);
+    }
+    return err instanceof Error ? err : new Error(String(err));
   }
 
   private parseNextLink(linkHeader: string | null): string | null {
@@ -280,15 +313,16 @@ export class CanvasClient {
     try {
       return await this.fetchPaginated<T>(url);
     } catch (err) {
-      if (err instanceof CanvasApiError) {
-        const s = err.status;
-        if (s === 401 || s === 403 || s === 404 || (s >= 500 && s < 600)) {
-          this._skippedEndpoints.push(url);
-          if (s >= 500) {
-            console.error(`Warning: Canvas API returned ${s} after retries, skipping: ${url}`);
-          }
-          return [];
+      if (err instanceof CanvasCliError && err.kind !== "network" && err.kind !== "unknown") {
+        this._skippedEndpoints.push(url);
+        if (err instanceof CanvasRateLimitError) {
+          console.error(`Warning: rate-limited by Canvas API, skipping: ${url}`);
+        } else if (err instanceof CanvasServerError) {
+          console.error(`Warning: Canvas API returned ${err.statusCode} after retries, skipping: ${url}`);
+        } else {
+          console.error(`Warning: Canvas API error (${err.kind}), skipping: ${url}`);
         }
+        return [];
       }
       throw err;
     }

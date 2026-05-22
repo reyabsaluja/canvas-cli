@@ -39,7 +39,6 @@ export async function workCommand(
     rawCourses = await client.getCourses();
   } catch (err) {
     handleError(err);
-    return;
   }
 
   let resolved;
@@ -47,7 +46,6 @@ export async function workCommand(
     resolved = await resolveAssignment(name, options, client, rawCourses);
   } catch (err) {
     handleError(err);
-    return;
   }
 
   const { detail, course } = resolved;

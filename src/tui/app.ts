@@ -31,6 +31,7 @@ import { modelCommand } from "../commands/model.js";
 import { getAIConfig } from "../ai/provider.js";
 import { loadStoredCredentialsToEnv } from "../config/load-credentials-to-env.js";
 import { clearCredentialCache } from "../config/credentials.js";
+import { CanvasCliError, classifyError } from "../errors.js";
 
 export async function launchApp(): Promise<void> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -157,15 +158,14 @@ async function connectServices(): Promise<AppServices> {
   } catch (error) {
     showCursor();
     clearScreen();
-    console.error(
-      C.error(
-        `\n  Failed to connect: ${error instanceof Error ? error.message : "unknown error"}`
-      )
-    );
-    console.error(
-      C.dim("  Run `canvas-cli login` to reconfigure, or check your environment variables.")
-    );
-    process.exit(1);
+    const classified = error instanceof CanvasCliError ? error : classifyError(error);
+    console.error(C.error(`\n  Failed to connect: ${classified.message}`));
+    if (classified.recoveryHint) {
+      console.error(C.dim(`  ${classified.recoveryHint}`));
+    } else {
+      console.error(C.dim("  Check your configuration and try again."));
+    }
+    process.exit(classified.exitCode);
   }
 }
 

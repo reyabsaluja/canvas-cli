@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import http from "node:http";
 import { CanvasClient } from "../src/canvas/client.js";
-import { CanvasApiError } from "../src/canvas/errors.js";
+import { CanvasServerError, CanvasNetworkError } from "../src/errors.js";
 import type { Config } from "../src/config/env.js";
 
 function create503Server(): http.Server {
@@ -87,8 +87,10 @@ test("integration: Canvas API unavailable", async (t) => {
     await assert.rejects(
       () => client.getCourses(),
       (err: unknown) => {
-        assert.ok(err instanceof CanvasApiError);
-        assert.equal(err.status, 503);
+        assert.ok(err instanceof CanvasServerError);
+        assert.equal(err.statusCode, 503);
+        assert.equal(err.kind, "server");
+        assert.equal(err.retriable, true);
         return true;
       }
     );
@@ -96,7 +98,7 @@ test("integration: Canvas API unavailable", async (t) => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
-  await t.test("connection refused throws network error", async () => {
+  await t.test("connection refused throws CanvasNetworkError", async () => {
     const config = await createConnectionRefusingConfig();
 
     const client = new CanvasClient(config, {
@@ -107,7 +109,9 @@ test("integration: Canvas API unavailable", async (t) => {
     await assert.rejects(
       () => client.getCourses(),
       (err: unknown) => {
-        assert.ok(err instanceof Error);
+        assert.ok(err instanceof CanvasNetworkError);
+        assert.equal(err.kind, "network");
+        assert.equal(err.retriable, true);
         return true;
       }
     );
