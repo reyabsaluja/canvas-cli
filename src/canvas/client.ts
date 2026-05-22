@@ -62,7 +62,7 @@ export class CanvasClient {
       debugApiResponse("GET", nextUrl, response.status, Date.now() - start);
 
       if (!response.ok) {
-        throw this.throwForStatus(response.status, response.statusText);
+        this.throwForStatus(response.status, response.statusText);
       }
 
       const data = (await response.json()) as T[];
