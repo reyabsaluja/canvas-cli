@@ -1,9 +1,9 @@
 const SENSITIVE_PATTERNS = [
-  /Bearer\s+[^\s*]+/gi,
-  /api[_-]?key[=:]\s*[^\s*]+/gi,
-  /(?<![A-Z_])token[=:]\s*[^\s*]+/gi,
-  /(?<![A-Z_])secret[=:]\s*[^\s*]+/gi,
-  /(?<![A-Z_])password[=:]\s*[^\s*]+/gi,
+  /Bearer\s+[^\s]+/gi,
+  /api[_-]?key[=:]\s*[^\s]+/gi,
+  /(?<![A-Z_])token[=:]\s*[^\s]+/gi,
+  /(?<![A-Z_])secret[=:]\s*[^\s]+/gi,
+  /(?<![A-Z_])password[=:]\s*[^\s]+/gi,
 ];
 
 const SENSITIVE_ENV_KEYS = new Set([
