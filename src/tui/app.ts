@@ -124,6 +124,7 @@ export async function launchApp(): Promise<void> {
         clearScreen();
         const modelResult = await modelCommand();
         if (modelResult) {
+          loadStoredCredentialsToEnv();
           services.aiConfig = getAIConfig();
         }
         clearScreen();
