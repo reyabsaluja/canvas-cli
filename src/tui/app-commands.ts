@@ -43,6 +43,10 @@ export async function handleCommand(
     return { type: "login" };
   }
 
+  if (command === "/model") {
+    return { type: "model" };
+  }
+
   if (command === "/home") {
     if (scope.type === "global") {
       await api.addMessage({
