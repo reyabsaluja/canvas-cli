@@ -102,6 +102,9 @@ export function deleteAllCredentials(profile: string): void {
   deleteCredential(profile, "openai-key");
   deleteCredential(profile, "anthropic-key");
   deleteCredential(profile, "google-key");
+  deleteCredential(profile, "aws-region");
+  deleteCredential(profile, "aws-access-key");
+  deleteCredential(profile, "aws-secret-key");
 }
 
 function shellEscape(str: string): string {
