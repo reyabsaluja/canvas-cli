@@ -17,26 +17,28 @@ export async function statusCommand(options: StatusOptions = {}): Promise<void> 
   );
   const baseUrl = process.env.CANVAS_BASE_URL || stored?.canvasBaseUrl;
 
+  const label = (s: string) => C.dim(s.padEnd(14));
+
   console.log(`\n  ${C.whiteBold("canvas-cli status")}\n`);
-  console.log(`  Profile:      ${C.primary(profile)}`);
-  console.log(`  Canvas URL:   ${baseUrl ? C.success(baseUrl) : C.error("not set")}`);
-  console.log(`  Access Token: ${hasToken ? C.success("configured") : C.error("not set")}`);
+  console.log(`  ${label("Profile")}${C.primary(profile)}`);
+  console.log(`  ${label("Canvas URL")}${baseUrl ? C.success(baseUrl) : C.error("not set")}`);
+  console.log(`  ${label("Access Token")}${hasToken ? C.success("configured") : C.error("not set")}`);
 
   if (stored?.aiProvider) {
     const model = stored.aiModel || "(default)";
-    console.log(`  AI Provider:  ${C.success(stored.aiProvider)} ${C.dim(`(model: ${model})`)}`);
+    console.log(`  ${label("AI Provider")}${C.success(stored.aiProvider)} ${C.dim(`(model: ${model})`)}`);
   } else if (process.env.AI_PROVIDER) {
-    console.log(`  AI Provider:  ${C.success(process.env.AI_PROVIDER)} ${C.dim("(from env)")}`);
+    console.log(`  ${label("AI Provider")}${C.success(process.env.AI_PROVIDER)} ${C.dim("(from env)")}`);
   } else {
-    console.log(`  AI Provider:  ${C.dim("not configured")}`);
+    console.log(`  ${label("AI Provider")}${C.dim("not configured")}`);
   }
 
-  console.log(`  Config Dir:   ${C.dim(getConfigDir())}`);
-  console.log(`  Credentials:  ${C.dim(platform() === "darwin" ? "macOS Keychain" : "file-based")}`);
+  console.log(`  ${label("Config Dir")}${C.dim(getConfigDir())}`);
+  console.log(`  ${label("Credentials")}${C.dim(platform() === "darwin" ? "macOS Keychain" : "file-based")}`);
 
   const profiles = listProfiles();
   if (profiles.length > 1) {
-    console.log(`\n  All profiles: ${C.muted(profiles.join(", "))}`);
+    console.log(`\n  ${label("All profiles")}${C.muted(profiles.join(", "))}`);
   }
 
   if (!baseUrl || !hasToken) {
