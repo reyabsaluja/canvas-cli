@@ -101,6 +101,14 @@ export async function launchApp(): Promise<void> {
         return;
       }
 
+      if (result.type === "login") {
+        showCursor();
+        clearScreen();
+        await loginCommand({});
+        console.log(C.dim("\n  Restart canvas-cli to use new credentials.\n"));
+        return;
+      }
+
       const nextScope = await resolveShellResult(
         services,
         scope,
