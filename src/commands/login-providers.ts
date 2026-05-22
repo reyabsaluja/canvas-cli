@@ -1,5 +1,9 @@
+import { createRequire } from "node:module";
 import { verticalPicker, horizontalPicker, BACK, C, type PickerOption } from "./login-picker.js";
 import { promptLine, promptSecret, ESCAPED } from "./login-prompts.js";
+
+const require = createRequire(import.meta.url);
+const MODEL_CATALOG: Record<string, PickerOption[]> = require("../ai/models.json");
 
 const ESC_HINT = C.dim("(esc to go back)");
 
@@ -140,33 +144,8 @@ export function getCredentialKey(provider: string): string | null {
   }
 }
 
-// Last updated: 2026-05 — refresh when providers ship new flagship models
 export function getModelOptions(provider: string): PickerOption[] {
-  switch (provider) {
-    case "openai":
-      return [
-        { label: "o3", value: "o3", description: "best reasoning" },
-        { label: "o4-mini", value: "o4-mini", description: "fast reasoning" },
-        { label: "gpt-4.1", value: "gpt-4.1", description: "flagship GPT" },
-        { label: "gpt-4.1-mini", value: "gpt-4.1-mini", description: "fast + capable" },
-        { label: "gpt-4.1-nano", value: "gpt-4.1-nano", description: "fastest" },
-        { label: "Custom", value: "__custom__", description: "enter model ID" },
-      ];
-    case "anthropic":
-      return [
-        { label: "Claude Opus 4", value: "claude-opus-4-0-20250514", description: "most capable" },
-        { label: "Claude Sonnet 4", value: "claude-sonnet-4-20250514", description: "balanced" },
-        { label: "Claude Haiku 3.5", value: "claude-haiku-3-5-20241022", description: "fastest" },
-        { label: "Custom", value: "__custom__", description: "enter model ID" },
-      ];
-    case "google":
-      return [
-        { label: "Gemini 2.5 Pro", value: "gemini-2.5-pro-preview-05-06", description: "reasoning + large context" },
-        { label: "Gemini 2.5 Flash", value: "gemini-2.5-flash-preview-04-17", description: "fast + reasoning" },
-        { label: "Gemini 2.0 Flash", value: "gemini-2.0-flash", description: "fast general purpose" },
-        { label: "Custom", value: "__custom__", description: "enter model ID" },
-      ];
-    default:
-      return [];
-  }
+  const models = MODEL_CATALOG[provider];
+  if (!models || models.length === 0) return [];
+  return [...models, { label: "Custom", value: "__custom__", description: "enter model ID" }];
 }
