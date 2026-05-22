@@ -3,20 +3,21 @@ import { readStoredConfig } from "./store.js";
 import { getActiveProfile } from "./env.js";
 import { debug } from "../debug.js";
 
-const CREDENTIAL_TO_ENV: Record<string, string> = {
-  "openai-key": "OPENAI_API_KEY",
-  "anthropic-key": "ANTHROPIC_API_KEY",
-  "google-key": "GOOGLE_API_KEY",
-  "aws-region": "AWS_REGION",
-  "aws-access-key": "AWS_ACCESS_KEY_ID",
-  "aws-secret-key": "AWS_SECRET_ACCESS_KEY",
+const PROVIDER_CREDENTIALS: Record<string, [credKey: string, envKey: string][]> = {
+  openai: [["openai-key", "OPENAI_API_KEY"]],
+  anthropic: [["anthropic-key", "ANTHROPIC_API_KEY"]],
+  google: [["google-key", "GOOGLE_API_KEY"]],
+  bedrock: [
+    ["aws-region", "AWS_REGION"],
+    ["aws-access-key", "AWS_ACCESS_KEY_ID"],
+    ["aws-secret-key", "AWS_SECRET_ACCESS_KEY"],
+  ],
 };
 
 export function loadStoredCredentialsToEnv(): void {
   const profile = getActiveProfile();
   const stored = readStoredConfig(profile);
 
-  // Inject AI provider/model from stored config if not already in env
   if (stored?.aiProvider && !process.env.AI_PROVIDER) {
     process.env.AI_PROVIDER = stored.aiProvider;
     debug("config", `Set AI_PROVIDER from stored config: ${stored.aiProvider}`);
@@ -30,8 +31,11 @@ export function loadStoredCredentialsToEnv(): void {
     debug("config", `Set AI_EFFORT from stored config: ${stored.aiEffort}`);
   }
 
-  // Inject API keys from credential store if not already in env
-  for (const [credKey, envKey] of Object.entries(CREDENTIAL_TO_ENV)) {
+  const provider = process.env.AI_PROVIDER || stored?.aiProvider;
+  const relevantCreds = provider ? PROVIDER_CREDENTIALS[provider] : undefined;
+  if (!relevantCreds) return;
+
+  for (const [credKey, envKey] of relevantCreds) {
     if (!process.env[envKey]) {
       const value = loadCredential(profile, credKey);
       if (value) {

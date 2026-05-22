@@ -113,13 +113,22 @@ describe("loadStoredCredentialsToEnv", () => {
     assert.equal(process.env.AI_PROVIDER, "openai");
   });
 
-  test("injects API keys from credential store", () => {
-    writeStoredConfig({ canvasBaseUrl: "https://test.com" }, profile);
+  test("injects API keys from credential store for configured provider", () => {
+    writeStoredConfig({ canvasBaseUrl: "https://test.com", aiProvider: "openai" }, profile);
     storeCredential(profile, "openai-key", "sk-test123");
 
     loadStoredCredentialsToEnv();
 
     assert.equal(process.env.OPENAI_API_KEY, "sk-test123");
+  });
+
+  test("does not load credentials for unconfigured providers", () => {
+    writeStoredConfig({ canvasBaseUrl: "https://test.com", aiProvider: "anthropic" }, profile);
+    storeCredential(profile, "openai-key", "sk-should-not-load");
+
+    loadStoredCredentialsToEnv();
+
+    assert.equal(process.env.OPENAI_API_KEY, undefined);
   });
 });
 
