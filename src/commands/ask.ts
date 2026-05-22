@@ -13,7 +13,7 @@ import chalk from "chalk";
 interface AskOptions {
   workspace?: string;
   json?: boolean;
-  debug?: boolean;
+  showRetrieval?: boolean;
 }
 
 export async function askCommand(
@@ -94,7 +94,7 @@ export async function askCommand(
     process.exit(1);
   }
 
-  if (options.debug) {
+  if (options.showRetrieval) {
     console.log(chalk.dim("\n--- Debug: Workspace agent ---"));
     console.log(chalk.dim(`  Workspace: ${ws.sessionSlug}`));
     console.log(chalk.dim(`  Course cache: ${cache ? "loaded" : "unavailable"}`));
