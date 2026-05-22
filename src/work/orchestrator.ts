@@ -16,6 +16,11 @@ import {
   isAIProviderError,
   type AIProviderConfig,
 } from "../ai/provider.js";
+import { appendObservation, createEmptyRunState } from "../agent/run-state.js";
+import { INVESTIGATION_TOOLS } from "./tools.js";
+import { executeToolDetailed } from "./tool-handlers.js";
+import { synthesizeWorkup } from "./synthesis.js";
+import { htmlToText } from "../format/html-to-text.js";
 
 class ToolRuntimeError extends Error {
   readonly toolName: string;
@@ -27,11 +32,6 @@ class ToolRuntimeError extends Error {
     this.cause = cause;
   }
 }
-import { appendObservation, createEmptyRunState } from "../agent/run-state.js";
-import { INVESTIGATION_TOOLS } from "./tools.js";
-import { executeToolDetailed } from "./tool-handlers.js";
-import { synthesizeWorkup } from "./synthesis.js";
-import { htmlToText } from "../format/html-to-text.js";
 
 /** Max tool-calling iterations before forcing synthesis. */
 const MAX_ITERATIONS = 15;
