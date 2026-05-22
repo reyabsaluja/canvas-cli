@@ -1,10 +1,14 @@
 import chalk from "chalk";
 
-const C = {
+export const C = {
   primary: chalk.hex("#e82429"),
+  primaryBold: chalk.hex("#e82429").bold,
   text: chalk.hex("#d4d4d4"),
   muted: chalk.hex("#a0a0a0"),
   dim: chalk.hex("#606060"),
+  success: chalk.hex("#6ec86a"),
+  error: chalk.hex("#ff6b6b"),
+  warm: chalk.hex("#e8a86d"),
   white: chalk.hex("#ffffff"),
   whiteBold: chalk.hex("#ffffff").bold,
 };

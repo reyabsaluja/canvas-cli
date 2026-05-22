@@ -1,30 +1,16 @@
 import * as readline from "node:readline";
 import { spawn } from "node:child_process";
 import { platform } from "node:os";
-import chalk from "chalk";
 import { writeStoredConfig, readStoredConfig } from "../config/store.js";
 import { storeCredential, loadCredential } from "../config/credentials.js";
 import { getConfigDir } from "../config/paths.js";
-import { verticalPicker, horizontalPicker, BACK, type PickerOption, type PickerResult } from "./login-picker.js";
+import { verticalPicker, horizontalPicker, BACK, C, type PickerOption, type PickerResult } from "./login-picker.js";
 
 interface LoginOptions {
   profile?: string;
 }
 
 const ESCAPED = Symbol("escaped");
-
-const C = {
-  primary: chalk.hex("#e82429"),
-  primaryBold: chalk.hex("#e82429").bold,
-  text: chalk.hex("#d4d4d4"),
-  muted: chalk.hex("#a0a0a0"),
-  dim: chalk.hex("#606060"),
-  success: chalk.hex("#6ec86a"),
-  error: chalk.hex("#ff6b6b"),
-  warm: chalk.hex("#e8a86d"),
-  white: chalk.hex("#ffffff"),
-  whiteBold: chalk.hex("#ffffff").bold,
-};
 
 const LOGO = [
   "⠀⠀⢀⣤⠀⠺⣿⣿⠗⠀⣠⣀⠀⠀",
