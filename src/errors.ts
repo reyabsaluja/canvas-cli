@@ -171,7 +171,6 @@ export function isNetworkError(err: unknown): boolean {
   if (causeCode && NETWORK_ERROR_CODES.has(causeCode)) return true;
   return (
     err.message.includes("ENOTFOUND") ||
-    err.message.includes("fetch failed") ||
     err.message.includes("ECONNREFUSED") ||
     err.message.includes("ECONNRESET") ||
     err.message.includes("ETIMEDOUT")
