@@ -1,4 +1,3 @@
-import { createRequire } from "node:module";
 import { verticalPicker, horizontalPicker, BACK, C, type PickerOption } from "./login-picker.js";
 import { promptSecret, promptLine, ESCAPED } from "./login-prompts.js";
 import { getAiKeyName, getCredentialKey } from "./login-providers.js";
@@ -6,9 +5,11 @@ import { readStoredConfig, writeStoredConfig } from "../config/store.js";
 import { getActiveProfile } from "../config/env.js";
 import { loadCredential, storeCredential } from "../config/credentials.js";
 import type { AIEffortLevel } from "../ai/provider.js";
+import catalogJson from "../ai/models.json";
 
-const require = createRequire(import.meta.url);
-const MODEL_CATALOG: Record<string, PickerOption[]> = require("../ai/models.json");
+const MODEL_CATALOG: Record<string, PickerOption[]> = Object.fromEntries(
+  Object.entries(catalogJson).filter(([k]) => !k.startsWith("$") && !k.startsWith("_"))
+) as Record<string, PickerOption[]>;
 
 interface ModelGroup {
   label: string;
