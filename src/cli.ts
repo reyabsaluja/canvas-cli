@@ -36,6 +36,7 @@ program.hook("preAction", (_thisCommand, actionCommand) => {
   debug("general", `canvas-cli v${version} starting`);
   debug("config", "Node.js " + process.version);
 
+  // login/logout/status manage credentials themselves; loading here would error or be stale
   const cmdName = actionCommand.name();
   if (cmdName !== "login" && cmdName !== "logout" && cmdName !== "status") {
     loadStoredCredentialsToEnv();
