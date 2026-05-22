@@ -6,8 +6,8 @@ test("debug module", async (t) => {
 
   t.beforeEach(async () => {
     debugModule = await import("../src/debug.js");
-    // Module is cached by Node — resetDebug() is what actually clears state.
-    debugModule.resetDebug();
+    // Module is cached by Node — __test__resetDebug() is what actually clears state.
+    debugModule.__test__resetDebug();
   });
 
   await t.test("isDebugEnabled returns false by default", () => {

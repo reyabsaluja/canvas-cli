@@ -32,7 +32,8 @@ export function initDebug(flagValue: boolean): void {
   }
 }
 
-export function resetDebug(): void {
+/** @internal Test-only. Resets debug state between test cases. */
+export function __test__resetDebug(): void {
   debugEnabled = false;
 }
 
