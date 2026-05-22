@@ -16,7 +16,8 @@ interface ModelGroup {
   models: PickerOption[];
 }
 
-// Bedrock model IDs may include version suffixes; formatAIError surfaces the fix if one is wrong.
+// Bedrock IDs: Opus 4.6 requires a "-v1" suffix; 4.7+ and Sonnet do not.
+// If AWS changes this, formatAIError will surface the correct ID from the API response.
 const BEDROCK_MODELS: PickerOption[] = [
   { label: "Claude Opus 4.7", value: "us.anthropic.claude-opus-4-7", description: "most capable" },
   { label: "Claude Opus 4.6", value: "us.anthropic.claude-opus-4-6-v1", description: "flagship" },
