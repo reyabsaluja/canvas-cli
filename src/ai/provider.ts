@@ -140,18 +140,32 @@ export function getEffortOptions(config: AIProviderConfig): Record<string, unkno
   if (!config.effort) return {};
 
   if (config.provider === "openai") {
+    const mapped = EFFORT_TO_OPENAI_REASONING[config.effort];
+    if (mapped !== config.effort) {
+      debugAI(config.provider, config.model, `effort "${config.effort}" clamped to "${mapped}"`);
+    }
     return {
       providerOptions: {
-        openai: { reasoningEffort: EFFORT_TO_OPENAI_REASONING[config.effort] },
+        openai: { reasoningEffort: mapped },
       },
     };
   }
 
-  if (config.provider === "anthropic" || config.provider === "bedrock") {
+  if (config.provider === "anthropic") {
     return {
       providerOptions: {
         anthropic: {
           thinking: { type: "enabled", budgetTokens: EFFORT_TO_THINKING_BUDGET[config.effort] },
+        },
+      },
+    };
+  }
+
+  if (config.provider === "bedrock") {
+    return {
+      providerOptions: {
+        bedrock: {
+          reasoningConfig: { type: "enabled", budgetTokens: EFFORT_TO_THINKING_BUDGET[config.effort] },
         },
       },
     };

@@ -16,8 +16,7 @@ interface ModelGroup {
   models: PickerOption[];
 }
 
-// Bedrock model ID suffixes are inconsistent across versions (-v1 on Opus 4.6 only).
-// If AWS changes these, the user will see a 400 with "invalid model identifier" — formatAIError surfaces the fix.
+// Bedrock model IDs may include version suffixes; formatAIError surfaces the fix if one is wrong.
 const BEDROCK_MODELS: PickerOption[] = [
   { label: "Claude Opus 4.7", value: "us.anthropic.claude-opus-4-7", description: "most capable" },
   { label: "Claude Opus 4.6", value: "us.anthropic.claude-opus-4-6-v1", description: "flagship" },
@@ -198,13 +197,12 @@ export async function modelCommand(): Promise<{ provider: string; model: string;
     }
 
     const base = readStoredConfig(profile) ?? { canvasBaseUrl: "" };
-    const updated = {
-      ...base,
-      aiProvider: selectedProvider,
-      aiModel: finalModel,
-      ...(effort ? { aiEffort: effort } : {}),
-    };
-    if (!effort) delete updated.aiEffort;
+    const updated: typeof base = { ...base, aiProvider: selectedProvider, aiModel: finalModel };
+    if (effort) {
+      updated.aiEffort = effort;
+    } else {
+      delete updated.aiEffort;
+    }
     writeStoredConfig(updated, profile);
 
     process.env.AI_PROVIDER = selectedProvider;
