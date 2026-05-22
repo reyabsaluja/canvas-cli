@@ -157,8 +157,18 @@ export class ConfigError extends CanvasCliError {
   }
 }
 
+const NETWORK_ERROR_CODES = new Set([
+  "ENOTFOUND",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "UND_ERR_CONNECT_TIMEOUT",
+]);
+
 export function isNetworkError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
+  const causeCode = (err.cause as { code?: string } | undefined)?.code;
+  if (causeCode && NETWORK_ERROR_CODES.has(causeCode)) return true;
   return (
     err.message.includes("ENOTFOUND") ||
     err.message.includes("fetch failed") ||
