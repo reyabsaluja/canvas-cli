@@ -16,8 +16,6 @@ const BEDROCK_MODELS: PickerOption[] = [
   { label: "Claude Opus 4.7", value: "us.anthropic.claude-opus-4-7-v1", description: "most capable" },
   { label: "Claude Opus 4.6", value: "us.anthropic.claude-opus-4-6-v1", description: "flagship" },
   { label: "Claude Sonnet 4.6", value: "us.anthropic.claude-sonnet-4-6", description: "balanced" },
-  { label: "Claude Sonnet 4", value: "us.anthropic.claude-sonnet-4", description: "previous gen" },
-  { label: "Claude Haiku 4.5", value: "us.anthropic.claude-haiku-4-5", description: "fastest" },
 ];
 
 const LOGO = [
