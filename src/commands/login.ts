@@ -39,6 +39,11 @@ function clearScreen(): void {
 }
 
 export async function loginCommand(options: LoginOptions): Promise<void> {
+  const restoreTerminal = () => {
+    try { process.stdin.setRawMode?.(false); } catch {}
+  };
+  process.on("exit", restoreTerminal);
+
   const profile = options.profile || "default";
 
   const titleLine = `${C.whiteBold("canvas-cli")} ${C.dim("·")} ${C.muted("login")}`;
@@ -273,6 +278,7 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
   }
 
   console.log();
+  process.removeListener("exit", restoreTerminal);
 }
 
 interface BedrockResult {
