@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import { debug, maskEnvForDebug } from "../debug.js";
 import { readStoredConfig } from "./store.js";
 import { loadCredential } from "./credentials.js";
+import { ConfigError } from "../errors.js";
 
 dotenv.config();
 
@@ -47,17 +48,17 @@ export function loadConfig(): Config {
   }
 
   if (!baseUrl) {
-    console.error(
-      "Error: Canvas URL is not configured.\nRun `canvas-cli login` to set up, or set CANVAS_BASE_URL in your environment."
+    throw new ConfigError(
+      "Canvas URL is not configured.",
+      "Run `canvas-cli login` to set up, or set CANVAS_BASE_URL in your environment."
     );
-    process.exit(1);
   }
 
   if (!accessToken) {
-    console.error(
-      "Error: Canvas access token is not configured.\nRun `canvas-cli login` to set up, or set CANVAS_ACCESS_TOKEN in your environment."
+    throw new ConfigError(
+      "Canvas access token is not configured.",
+      "Run `canvas-cli login` to set up, or set CANVAS_ACCESS_TOKEN in your environment."
     );
-    process.exit(1);
   }
 
   debug("config", `CANVAS_BASE_URL: ${baseUrl.replace(/\/+$/, "")}`);

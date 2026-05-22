@@ -28,7 +28,6 @@ export async function showAssignmentCommand(
     rawCourses = await client.getCourses();
   } catch (err) {
     handleError(err);
-    return;
   }
 
   try {

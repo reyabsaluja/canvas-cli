@@ -5,7 +5,6 @@ import {
   normalizeCourse,
 } from "./normalize.js";
 import { matchAssignments, matchCourses } from "./matching.js";
-import { handleError } from "../errors.js";
 import type { Assignment, AssignmentDetail, Course } from "./models.js";
 import type { CanvasCourse } from "../canvas/types.js";
 import chalk from "chalk";
