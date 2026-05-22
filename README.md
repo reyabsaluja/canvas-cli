@@ -4,6 +4,22 @@
 
 `canvas-cli` is a TypeScript command-line interface for working with Canvas LMS from the terminal. It combines direct Canvas API access, local course ingestion, an interactive TUI, and optional AI-assisted assignment investigation.
 
+## Install
+
+```bash
+npm install -g @reyabsaluja/canvas-cli
+# or
+bun add -g @reyabsaluja/canvas-cli
+# or
+pnpm add -g @reyabsaluja/canvas-cli
+```
+
+Or run directly:
+
+```bash
+npx @reyabsaluja/canvas-cli
+```
+
 ## Highlights
 
 - Browse Canvas courses and assignments without leaving the terminal
