@@ -20,9 +20,6 @@ function generateCourses(count: number): MockCourse[] {
 }
 
 test("integration: pagination handling", async (t) => {
-  let server: http.Server;
-  let port: number;
-
   await t.test("fetches all courses across multiple pages", async () => {
     const courses = generateCourses(7);
     const data: MockServerData = {
@@ -35,8 +32,8 @@ test("integration: pagination handling", async (t) => {
       pagePerPage: 3,
     };
 
-    server = createMockCanvasServer(data);
-    port = await startServer(server);
+    const server = createMockCanvasServer(data);
+    const port = await startServer(server);
 
     const config: Config = {
       baseUrl: `http://127.0.0.1:${port}/api/v1`,
@@ -81,8 +78,8 @@ test("integration: pagination handling", async (t) => {
       pagePerPage: 2,
     };
 
-    server = createMockCanvasServer(data);
-    port = await startServer(server);
+    const server = createMockCanvasServer(data);
+    const port = await startServer(server);
 
     const config: Config = {
       baseUrl: `http://127.0.0.1:${port}/api/v1`,
@@ -109,8 +106,8 @@ test("integration: pagination handling", async (t) => {
       pagePerPage: 50,
     };
 
-    server = createMockCanvasServer(data);
-    port = await startServer(server);
+    const server = createMockCanvasServer(data);
+    const port = await startServer(server);
 
     const config: Config = {
       baseUrl: `http://127.0.0.1:${port}/api/v1`,
@@ -146,8 +143,8 @@ test("integration: pagination handling", async (t) => {
       pagePerPage: 2,
     };
 
-    server = createMockCanvasServer(data);
-    port = await startServer(server);
+    const server = createMockCanvasServer(data);
+    const port = await startServer(server);
 
     const config: Config = {
       baseUrl: `http://127.0.0.1:${port}/api/v1`,
