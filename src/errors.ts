@@ -157,6 +157,17 @@ export class ConfigError extends CanvasCliError {
   }
 }
 
+export function isNetworkError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return (
+    err.message.includes("ENOTFOUND") ||
+    err.message.includes("fetch failed") ||
+    err.message.includes("ECONNREFUSED") ||
+    err.message.includes("ECONNRESET") ||
+    err.message.includes("ETIMEDOUT")
+  );
+}
+
 /**
  * Classify any thrown error into a structured CanvasCliError.
  * Used by both CLI (to exit with proper codes) and TUI (to display inline).
@@ -191,13 +202,7 @@ export function classifyError(err: unknown): CanvasCliError {
   }
 
   if (err instanceof Error) {
-    if (
-      err.message.includes("ENOTFOUND") ||
-      err.message.includes("fetch failed") ||
-      err.message.includes("ECONNREFUSED") ||
-      err.message.includes("ECONNRESET") ||
-      err.message.includes("ETIMEDOUT")
-    ) {
+    if (isNetworkError(err)) {
       return new CanvasNetworkError(undefined, err);
     }
     return new CanvasCliError(err.message, "unknown", { cause: err });
