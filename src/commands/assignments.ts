@@ -31,7 +31,6 @@ export async function assignmentsCommand(
     rawCourses = await client.getCourses();
   } catch (err) {
     handleError(err);
-    return;
   }
 
   const allCourses = rawCourses.map(normalizeCourse);

@@ -14,6 +14,7 @@ import { loginCommand } from "./commands/login.js";
 import { logoutCommand } from "./commands/logout.js";
 import { statusCommand } from "./commands/status.js";
 import { loadStoredCredentialsToEnv } from "./config/load-credentials-to-env.js";
+import { CanvasCliError, classifyError } from "./errors.js";
 
 let version = "0.0.0";
 try {
@@ -137,4 +138,8 @@ program
     import("./tui/app.js").then(({ launchApp }) => launchApp());
   });
 
-program.parse();
+program.parseAsync().catch((err: unknown) => {
+  const classified = err instanceof CanvasCliError ? err : classifyError(err);
+  console.error(classified.userMessage);
+  process.exit(classified.exitCode);
+});

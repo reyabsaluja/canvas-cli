@@ -18,7 +18,6 @@ export async function coursesCommand(options: CoursesOptions): Promise<void> {
     rawCourses = await client.getCourses();
   } catch (err) {
     handleError(err);
-    return;
   }
 
   const allCourses = rawCourses.map(normalizeCourse);

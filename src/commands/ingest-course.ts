@@ -28,7 +28,6 @@ export async function ingestCourseCommand(
     rawCourses = await client.getCourses();
   } catch (err) {
     handleError(err);
-    return;
   }
 
   const courses = rawCourses.map(normalizeCourse);
