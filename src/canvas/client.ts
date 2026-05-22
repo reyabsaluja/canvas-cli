@@ -87,7 +87,7 @@ export class CanvasClient {
     debugApiResponse("GET", url, response.status, Date.now() - start);
 
     if (!response.ok) {
-      throw this.throwForStatus(response.status, response.statusText);
+      this.throwForStatus(response.status, response.statusText);
     }
 
     return (await response.json()) as T;
