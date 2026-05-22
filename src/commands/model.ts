@@ -59,7 +59,13 @@ const EFFORT_OPTIONS: PickerOption[] = [
   { label: "low", value: "low" },
   { label: "medium", value: "medium" },
   { label: "high", value: "high" },
-  { label: "max", value: "max" },
+  { label: "max", value: "max", description: "extended thinking" },
+];
+
+const EFFORT_OPTIONS_OPENAI: PickerOption[] = [
+  { label: "low", value: "low" },
+  { label: "medium", value: "medium" },
+  { label: "high", value: "high" },
 ];
 
 function printHeader(): void {
@@ -169,7 +175,8 @@ export async function modelCommand(): Promise<{ provider: string; model: string;
       console.log(`  ${C.success("✓")} ${C.dim("Provider")}  ${C.muted(group.label)}`);
       console.log(`  ${C.success("✓")} ${C.dim("Model")}     ${C.muted(modelLabel)}\n`);
 
-      const picked = await horizontalPicker("effort", EFFORT_OPTIONS);
+      const effortChoices = selectedProvider === "openai" ? EFFORT_OPTIONS_OPENAI : EFFORT_OPTIONS;
+      const picked = await horizontalPicker("effort", effortChoices);
       if (picked === BACK || picked === null) return null;
       effort = picked;
     }
