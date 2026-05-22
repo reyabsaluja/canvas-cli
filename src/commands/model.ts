@@ -161,13 +161,19 @@ export async function modelCommand(): Promise<{ provider: string; model: string;
 
     const modelLabel = group.models.find((m) => m.value === selectedModel)?.label ?? selectedModel;
 
-    clearScreen();
-    printHeader();
-    console.log(`  ${C.success("✓")} ${C.dim("Provider")}  ${C.muted(group.label)}`);
-    console.log(`  ${C.success("✓")} ${C.dim("Model")}     ${C.muted(modelLabel)}\n`);
+    const hasEffort = selectedProvider !== "google";
+    let effort = "";
 
-    const effort = await horizontalPicker("effort", EFFORT_OPTIONS);
-    if (effort === BACK || effort === null) return null;
+    if (hasEffort) {
+      clearScreen();
+      printHeader();
+      console.log(`  ${C.success("✓")} ${C.dim("Provider")}  ${C.muted(group.label)}`);
+      console.log(`  ${C.success("✓")} ${C.dim("Model")}     ${C.muted(modelLabel)}\n`);
+
+      const picked = await horizontalPicker("effort", EFFORT_OPTIONS);
+      if (picked === BACK || picked === null) return null;
+      effort = picked;
+    }
 
     const existing = readStoredConfig(profile);
     if (existing) {
@@ -175,15 +181,20 @@ export async function modelCommand(): Promise<{ provider: string; model: string;
         ...existing,
         aiProvider: selectedProvider,
         aiModel: selectedModel,
-        aiEffort: effort,
+        ...(hasEffort ? { aiEffort: effort } : { aiEffort: undefined }),
       }, profile);
     }
 
     process.env.AI_PROVIDER = selectedProvider;
     process.env.AI_MODEL = selectedModel;
-    process.env.AI_EFFORT = effort;
+    if (hasEffort) {
+      process.env.AI_EFFORT = effort;
+    } else {
+      delete process.env.AI_EFFORT;
+    }
 
-    console.log(`\n  ${C.success("✓")} ${C.text(`Switched to ${modelLabel}`)} ${C.dim(`(${effort} effort)`)}\n`);
+    const effortSuffix = hasEffort ? ` ${C.dim(`(${effort} effort)`)}` : "";
+    console.log(`\n  ${C.success("✓")} ${C.text(`Switched to ${modelLabel}`)}${effortSuffix}\n`);
 
     return { provider: selectedProvider, model: selectedModel, effort };
   } finally {
