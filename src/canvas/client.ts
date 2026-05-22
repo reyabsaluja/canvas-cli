@@ -7,6 +7,7 @@ import {
   CanvasPermissionError,
   CanvasRateLimitError,
   CanvasServerError,
+  classifyError,
   isNetworkError,
 } from "../errors.js";
 import { debugApiRequest, debugApiResponse, maskUrl } from "../debug.js";
@@ -96,23 +97,13 @@ export class CanvasClient {
   private throwForStatus(response: Response): never {
     const { status, statusText } = response;
     const apiErr = new CanvasApiError(status, statusText);
-    switch (status) {
-      case 401:
-        throw new CanvasAuthError(undefined, apiErr);
-      case 403:
-        throw new CanvasPermissionError(undefined, apiErr);
-      case 404:
-        throw new CanvasNotFoundError(undefined, apiErr);
-      case 429: {
-        const retryAfter = response.headers.get("Retry-After");
-        const parsed = retryAfter ? parseInt(retryAfter, 10) : NaN;
-        const retryMs = Number.isFinite(parsed) ? parsed * 1000 : null;
-        throw new CanvasRateLimitError(retryMs, apiErr);
-      }
-      default:
-        if (status >= 500) throw new CanvasServerError(status, apiErr);
-        throw apiErr;
+    if (status === 429) {
+      const retryAfter = response.headers.get("Retry-After");
+      const parsed = retryAfter ? parseInt(retryAfter, 10) : NaN;
+      const retryMs = Number.isFinite(parsed) ? parsed * 1000 : null;
+      throw new CanvasRateLimitError(retryMs, apiErr);
     }
+    throw classifyError(apiErr);
   }
 
   private wrapNetworkError(err: unknown): Error {
