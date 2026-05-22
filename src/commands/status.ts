@@ -35,7 +35,8 @@ export function statusCommand(options: StatusOptions = {}): void {
   }
 
   console.log(`  ${label("Config Dir")}${C.dim(getConfigDir())}`);
-  console.log(`  ${label("Credentials")}${C.dim(platform() === "darwin" ? "macOS Keychain" : "file-based")}`);
+  const credBackend = platform() === "darwin" ? "macOS Keychain" : "file-based (plaintext, 0600)";
+  console.log(`  ${label("Credentials")}${C.dim(credBackend)}`);
 
   const profiles = listProfiles();
   if (profiles.length > 1) {
