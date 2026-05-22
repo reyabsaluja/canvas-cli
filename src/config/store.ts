@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync, readdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { getConfigDir, getConfigFilePath } from "./paths.js";
+import { getConfigDir, getConfigFilePath, validateProfileName } from "./paths.js";
 import { debug } from "../debug.js";
 
 export interface StoredConfig {
@@ -50,7 +50,12 @@ export function listProfiles(): string[] {
         profiles.push("default");
       } else {
         const match = f.match(/^config\.([a-zA-Z0-9_-]+)\.json$/);
-        if (match?.[1]) profiles.push(match[1]);
+        if (match?.[1]) {
+          try {
+            validateProfileName(match[1]);
+            profiles.push(match[1]);
+          } catch {}
+        }
       }
     }
     return profiles;
