@@ -270,14 +270,14 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
       const courseId = parseInt(pageSlugMatch[1], 10);
       const slug = pageSlugMatch[2];
       const pages = data.pages.get(courseId) ?? [];
-      const page = pages.find((p) => p.url === slug);
-      if (!page) {
+      const foundPage = pages.find((p) => p.url === slug);
+      if (!foundPage) {
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ errors: [{ message: "The specified resource does not exist" }] }));
         return;
       }
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(page));
+      res.end(JSON.stringify(foundPage));
       return;
     }
 
