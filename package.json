@@ -1,5 +1,5 @@
 {
-  "name": "canvas-cli",
+  "name": "@reyabsaluja/canvas-cli",
   "version": "0.1.0",
   "description": "A terminal interface for Canvas LMS",
   "license": "MIT",
@@ -13,6 +13,9 @@
   "homepage": "https://github.com/reyabsaluja/canvas-cli#readme",
   "bugs": {
     "url": "https://github.com/reyabsaluja/canvas-cli/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "files": [
     "bin",
