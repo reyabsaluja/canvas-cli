@@ -67,10 +67,7 @@ export function buildCourseIntroMessages(
     ? actionableUpcoming
     : assignments.filter((assignment) => !assignment.submitted && assignment.dueAt === null);
   if (visibleAssignments.length === 0) {
-    return [{
-      role: "assistant",
-      content: `Course ready for ${course.name}. Use /help for course commands.`,
-    }];
+    return [];
   }
   const lines = ["**Upcoming work**"];
   for (const assignment of visibleAssignments.slice(0, 5)) {
