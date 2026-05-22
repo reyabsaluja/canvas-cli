@@ -127,10 +127,8 @@ export async function modelCommand(): Promise<{ provider: string; model: string;
         process.env.AWS_SECRET_ACCESS_KEY = secretKey;
         process.env.AWS_REGION = region;
 
-        const existing = readStoredConfig(profile);
-        if (existing) {
-          writeStoredConfig({ ...existing, awsRegion: region }, profile);
-        }
+        const existing = readStoredConfig(profile) ?? { canvasBaseUrl: "" };
+        writeStoredConfig({ ...existing, awsRegion: region }, profile);
       }
     } else {
       const envKey = getAiKeyName(selectedProvider);
@@ -176,14 +174,15 @@ export async function modelCommand(): Promise<{ provider: string; model: string;
     }
 
     const existing = readStoredConfig(profile);
-    if (existing) {
-      writeStoredConfig({
-        ...existing,
-        aiProvider: selectedProvider,
-        aiModel: selectedModel,
-        ...(hasEffort ? { aiEffort: effort } : { aiEffort: undefined }),
-      }, profile);
-    }
+    const base = existing ?? { canvasBaseUrl: "" };
+    const updated = {
+      ...base,
+      aiProvider: selectedProvider,
+      aiModel: selectedModel,
+      ...(hasEffort ? { aiEffort: effort } : {}),
+    };
+    if (!hasEffort) delete updated.aiEffort;
+    writeStoredConfig(updated, profile);
 
     process.env.AI_PROVIDER = selectedProvider;
     process.env.AI_MODEL = selectedModel;
