@@ -201,3 +201,44 @@ test("getEffortOptions returns empty for google even if effort is set", () => {
   const config: AIProviderConfig = { provider: "google", model: "gemini-3.5-flash", effort: "high" };
   assert.deepEqual(getEffortOptions(config), {});
 });
+
+test("getEffortOptions clamps OpenAI max to high", () => {
+  const config: AIProviderConfig = { provider: "openai", model: "gpt-5.5", effort: "max" };
+  assert.deepEqual(getEffortOptions(config), {
+    providerOptions: { openai: { reasoningEffort: "high" } },
+  });
+});
+
+test("getAIConfig picks up AI_EFFORT=low for bedrock", () => {
+  withAIEnv(
+    {
+      AI_PROVIDER: "bedrock",
+      AWS_REGION: "us-east-1",
+      AI_EFFORT: "low",
+    },
+    () => {
+      assert.deepEqual(getAIConfig(), {
+        provider: "bedrock",
+        model: "us.anthropic.claude-sonnet-4-6",
+        effort: "low",
+      });
+    }
+  );
+});
+
+test("getAIConfig is case-insensitive for AI_EFFORT", () => {
+  withAIEnv(
+    {
+      AI_PROVIDER: "anthropic",
+      ANTHROPIC_API_KEY: "test-key",
+      AI_EFFORT: "HIGH",
+    },
+    () => {
+      assert.deepEqual(getAIConfig(), {
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        effort: "high",
+      });
+    }
+  );
+});
