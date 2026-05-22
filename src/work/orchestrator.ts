@@ -21,6 +21,9 @@ import { INVESTIGATION_TOOLS } from "./tools.js";
 import { executeToolDetailed } from "./tool-handlers.js";
 import { synthesizeWorkup } from "./synthesis.js";
 import { htmlToText } from "../format/html-to-text.js";
+import { ToolRuntimeError } from "./errors.js";
+
+export { ToolRuntimeError };
 
 /** Max tool-calling iterations before forcing synthesis. */
 const MAX_ITERATIONS = 15;
@@ -113,7 +116,12 @@ export async function runInvestigation(
         const label = input.query ?? input.filename ?? input.item_title ?? input.module_name ?? "";
         onProgress(`${name}${label ? ` (${label})` : ""}`);
 
-        const result = await executeToolDetailed(name, input, toolCtx);
+        let result;
+        try {
+          result = await executeToolDetailed(name, input, toolCtx);
+        } catch (toolErr) {
+          throw new ToolRuntimeError(name, toolErr);
+        }
         appendObservation(state.runState, result.observation);
         onProgress(`${name}${label ? ` (${label})` : ""}`, result.modelText);
         return result.modelText;
@@ -126,6 +134,10 @@ export async function runInvestigation(
       investigationSummary = result.text;
     }
   } catch (err) {
+    // Re-throw tool/runtime errors so they surface as real bugs rather than
+    // being silently downgraded to a "partial success" workup.
+    if (err instanceof ToolRuntimeError) throw err;
+    // Only swallow genuine AI provider failures (rate limits, auth, network).
     if (!isAIProviderError(err)) throw err;
     const classified = classifyAIError(err);
     aiErrorMessage = classified.userMessage;

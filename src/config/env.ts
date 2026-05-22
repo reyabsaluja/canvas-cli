@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import { debug, maskEnvForDebug } from "../debug.js";
 
 dotenv.config();
 
@@ -24,6 +25,10 @@ export function loadConfig(): Config {
     );
     process.exit(1);
   }
+
+  debug("config", `CANVAS_BASE_URL: ${baseUrl.replace(/\/+$/, "")}`);
+  debug("config", "CANVAS_ACCESS_TOKEN: ***");
+  debug("config", "Sensitive env vars present", maskEnvForDebug());
 
   // Strip trailing slash from base URL
   return {

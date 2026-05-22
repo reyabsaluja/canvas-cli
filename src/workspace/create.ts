@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { AssignmentDetail, Course } from "../domain/models.js";
 import type { Config } from "../config/env.js";
+import { debugFs } from "../debug.js";
 import {
   loadWorkspaceSessionMeta,
   saveWorkspaceSessionMeta,
@@ -109,6 +110,7 @@ async function writeWorkspaceArtifacts(
   const slug = makeSessionSlug(course.courseCode, detail.name, detail.id);
   const wsPath = getWorkspacePath(slug);
   const existed = await dirExists(wsPath);
+  debugFs(existed ? "update" : "create", wsPath, `workspace for "${detail.name}"`);
 
   // Ensure shared workspace structure first so every caller gets the same layout.
   await fs.mkdir(path.join(wsPath, "work"), { recursive: true });
