@@ -483,8 +483,8 @@ export async function runChatShell<TExit>(
     const transcriptIndex = getActiveTranscriptIndex();
     const inputState = getInputState();
 
-    // Keep viewport stable when user is scrolled up and content grows (skip during streaming to avoid jitter)
-    if (chatScrollOffset > 0 && transcriptIndex.totalLines > lastTranscriptTotalLines && !isProcessing) {
+    // Keep viewport stable when user is scrolled up and content grows
+    if (chatScrollOffset > 0 && transcriptIndex.totalLines > lastTranscriptTotalLines) {
       chatScrollOffset += transcriptIndex.totalLines - lastTranscriptTotalLines;
       const { rows } = getTermSize();
       const bannerLen = getCachedBannerLines().length + 3;
@@ -1375,8 +1375,7 @@ export async function runChatShell<TExit>(
           return;
         }
 
-        await handlePrompt(input);
-        render();
+        void handlePrompt(input);
         return;
       }
 
