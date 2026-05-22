@@ -7,6 +7,16 @@ import { debug } from "../debug.js";
 
 const SERVICE_NAME = "canvas-cli";
 
+export const ALL_CREDENTIAL_KEYS = [
+  "canvas-token",
+  "openai-key",
+  "anthropic-key",
+  "google-key",
+  "aws-region",
+  "aws-access-key",
+  "aws-secret-key",
+] as const;
+
 const cache = new Map<string, string | null>();
 
 function cacheKey(profile: string, key: string): string {
@@ -121,13 +131,9 @@ export function deleteCredential(profile: string, key: string): boolean {
 }
 
 export function deleteAllCredentials(profile: string): void {
-  deleteCredential(profile, "canvas-token");
-  deleteCredential(profile, "openai-key");
-  deleteCredential(profile, "anthropic-key");
-  deleteCredential(profile, "google-key");
-  deleteCredential(profile, "aws-region");
-  deleteCredential(profile, "aws-access-key");
-  deleteCredential(profile, "aws-secret-key");
+  for (const key of ALL_CREDENTIAL_KEYS) {
+    deleteCredential(profile, key);
+  }
 }
 
 function shellEscape(str: string): string {
