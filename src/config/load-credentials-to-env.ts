@@ -7,6 +7,9 @@ const CREDENTIAL_TO_ENV: Record<string, string> = {
   "openai-key": "OPENAI_API_KEY",
   "anthropic-key": "ANTHROPIC_API_KEY",
   "google-key": "GOOGLE_API_KEY",
+  "aws-region": "AWS_REGION",
+  "aws-access-key": "AWS_ACCESS_KEY_ID",
+  "aws-secret-key": "AWS_SECRET_ACCESS_KEY",
 };
 
 export function loadStoredCredentialsToEnv(): void {
@@ -21,6 +24,10 @@ export function loadStoredCredentialsToEnv(): void {
   if (stored?.aiModel && !process.env.AI_MODEL) {
     process.env.AI_MODEL = stored.aiModel;
     debug("config", `Set AI_MODEL from stored config: ${stored.aiModel}`);
+  }
+  if (stored?.aiEffort && !process.env.AI_EFFORT) {
+    process.env.AI_EFFORT = stored.aiEffort;
+    debug("config", `Set AI_EFFORT from stored config: ${stored.aiEffort}`);
   }
 
   // Inject API keys from credential store if not already in env

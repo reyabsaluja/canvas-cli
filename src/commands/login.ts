@@ -5,6 +5,7 @@ import chalk from "chalk";
 import { writeStoredConfig, readStoredConfig } from "../config/store.js";
 import { storeCredential, loadCredential } from "../config/credentials.js";
 import { getConfigDir } from "../config/paths.js";
+import { verticalPicker, horizontalPicker, type PickerOption } from "./login-picker.js";
 
 interface LoginOptions {
   profile?: string;
@@ -114,29 +115,74 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
   // Step 3: AI provider (optional)
   console.log(`\n  ${C.whiteBold("3")} ${C.dim("·")} ${C.text("AI Provider")} ${C.dim("(optional)")}`);
   console.log(`  ${C.dim("Powers the 'ask' and 'work' commands.")}`);
-  console.log(`  ${C.dim("Options: openai, anthropic, google, bedrock")}`);
-  console.log(`  ${C.dim("Press Enter to skip.")}\n`);
+  console.log(`  ${C.dim("Use ↑↓ to select, Enter to confirm, q to skip.")}\n`);
 
-  const aiProvider = await prompt(`  ${C.dim("→")} `);
+  const aiProvider = await verticalPicker("Provider", [
+    { label: "OpenAI", value: "openai" },
+    { label: "Anthropic", value: "anthropic" },
+    { label: "Google (Gemini)", value: "google" },
+    { label: "AWS Bedrock", value: "bedrock" },
+    { label: "Skip", value: "" },
+  ]);
+
   let aiModel = "";
+  let aiEffort = "";
   let aiKey = "";
+  let awsRegion = "";
+  let awsAccessKey = "";
+  let awsSecretKey = "";
 
   if (aiProvider) {
-    aiModel = await prompt(`  ${C.dim("Model (Enter for default):")} `);
+    // API Key(s) — right after provider
+    if (aiProvider === "bedrock") {
+      console.log(`\n  ${C.dim("AWS credentials for Bedrock:")}`);
+      awsRegion = await prompt(`  ${C.dim("AWS Region (e.g., us-east-1):")} `);
+      awsAccessKey = await promptSecret(`  ${C.dim("AWS Access Key ID:")} `);
+      awsSecretKey = await promptSecret(`  ${C.dim("AWS Secret Access Key:")} `);
+      console.log(`\n  ${C.dim("Enter the full Bedrock model ID:")}`);
+      aiModel = await prompt(`  ${C.dim("→")} `);
+    } else {
+      const keyName = getAiKeyName(aiProvider);
+      if (keyName) {
+        console.log(`\n  ${C.dim(`Requires ${keyName}:`)}`);
+        aiKey = await promptSecret(`  ${C.dim("→")} `);
+      }
 
-    const keyName = getAiKeyName(aiProvider);
-    if (keyName) {
-      console.log(`  ${C.dim(`Requires ${keyName}`)}`);
-      aiKey = await promptSecret(`  ${C.dim("→")} `);
+      // Model selection
+      const models = getModelOptions(aiProvider);
+      if (models.length > 0) {
+        console.log();
+        const selectedModel = await verticalPicker("Model", models);
+        if (selectedModel) aiModel = selectedModel;
+      }
+
+      // Effort level (OpenAI + Anthropic only)
+      if (aiProvider === "openai" || aiProvider === "anthropic") {
+        console.log();
+        const effort = await horizontalPicker("Effort", [
+          { label: "low", value: "low" },
+          { label: "medium", value: "medium" },
+          { label: "high", value: "high" },
+          { label: "max", value: "max" },
+        ]);
+        if (effort) {
+          aiEffort = effort;
+        }
+      }
     }
   }
 
   // Save
+  const finalProvider = aiProvider || undefined;
+  const finalModel = aiModel || undefined;
+  const finalEffort = aiEffort || undefined;
+
   writeStoredConfig(
     {
       canvasBaseUrl: apiBaseUrl,
-      ...(aiProvider && { aiProvider }),
-      ...(aiModel && { aiModel }),
+      ...(finalProvider && { aiProvider: finalProvider }),
+      ...(finalModel && { aiModel: finalModel }),
+      ...(finalEffort && { aiEffort: finalEffort }),
     },
     profile
   );
@@ -148,14 +194,20 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
       storeCredential(profile, credKey, aiKey);
     }
   }
+  if (aiProvider === "bedrock") {
+    if (awsRegion) storeCredential(profile, "aws-region", awsRegion);
+    if (awsAccessKey) storeCredential(profile, "aws-access-key", awsAccessKey);
+    if (awsSecretKey) storeCredential(profile, "aws-secret-key", awsSecretKey);
+  }
 
   // Summary
   console.log();
   console.log(`  ${C.success("✓")} ${C.whiteBold("Setup complete")}`);
   console.log();
   console.log(`  ${C.dim("canvas")}    ${C.text(apiBaseUrl)}`);
-  if (aiProvider) {
-    console.log(`  ${C.dim("ai")}        ${C.text(aiProvider)}${aiModel ? ` (${aiModel})` : ""}`);
+  if (finalProvider) {
+    const modelStr = finalModel ? ` (${finalModel}${finalEffort ? `, ${finalEffort}` : ""})` : "";
+    console.log(`  ${C.dim("ai")}        ${C.text(finalProvider)}${modelStr}`);
   }
   console.log(`  ${C.dim("stored")}    ${C.muted(platform() === "darwin" ? "macOS Keychain" : getConfigDir())}`);
 
@@ -308,5 +360,32 @@ function getCredentialKey(provider: string): string | null {
     case "anthropic": return "anthropic-key";
     case "google": return "google-key";
     default: return null;
+  }
+}
+
+function getModelOptions(provider: string): PickerOption[] {
+  switch (provider) {
+    case "openai":
+      return [
+        { label: "o3", value: "o3", description: "best reasoning" },
+        { label: "o4-mini", value: "o4-mini", description: "fast reasoning" },
+        { label: "gpt-4.1", value: "gpt-4.1", description: "flagship GPT" },
+        { label: "gpt-4.1-mini", value: "gpt-4.1-mini", description: "fast + capable" },
+        { label: "gpt-4.1-nano", value: "gpt-4.1-nano", description: "fastest" },
+      ];
+    case "anthropic":
+      return [
+        { label: "Claude Opus 4", value: "claude-opus-4-0-20250514", description: "most capable" },
+        { label: "Claude Sonnet 4", value: "claude-sonnet-4-20250514", description: "balanced" },
+        { label: "Claude Haiku 3.5", value: "claude-haiku-3-5-20241022", description: "fastest" },
+      ];
+    case "google":
+      return [
+        { label: "Gemini 2.5 Pro", value: "gemini-2.5-pro-preview-05-06", description: "reasoning + large context" },
+        { label: "Gemini 2.5 Flash", value: "gemini-2.5-flash-preview-04-17", description: "fast + reasoning" },
+        { label: "Gemini 2.0 Flash", value: "gemini-2.0-flash", description: "fast general purpose" },
+      ];
+    default:
+      return [];
   }
 }

@@ -7,6 +7,7 @@ export interface StoredConfig {
   canvasBaseUrl: string;
   aiProvider?: string;
   aiModel?: string;
+  aiEffort?: string;
 }
 
 export function readStoredConfig(profile: string = "default"): StoredConfig | null {
