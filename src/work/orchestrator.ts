@@ -21,17 +21,9 @@ import { INVESTIGATION_TOOLS } from "./tools.js";
 import { executeToolDetailed } from "./tool-handlers.js";
 import { synthesizeWorkup } from "./synthesis.js";
 import { htmlToText } from "../format/html-to-text.js";
+import { ToolRuntimeError } from "./errors.js";
 
-export class ToolRuntimeError extends Error {
-  readonly toolName: string;
-  constructor(toolName: string, cause: unknown) {
-    const msg = cause instanceof Error ? cause.message : String(cause);
-    super(`Tool "${toolName}" failed: ${msg}`);
-    this.name = "ToolRuntimeError";
-    this.toolName = toolName;
-    this.cause = cause;
-  }
-}
+export { ToolRuntimeError };
 
 /** Max tool-calling iterations before forcing synthesis. */
 const MAX_ITERATIONS = 15;
