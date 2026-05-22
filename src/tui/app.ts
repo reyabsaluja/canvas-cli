@@ -27,6 +27,7 @@ import { renderSplashLoading } from "./app-banner.js";
 import { showAnnouncementsView } from "./announcements-view.js";
 import { isConfigured, getActiveProfile } from "../config/env.js";
 import { loginCommand } from "../commands/login.js";
+import { modelCommand } from "../commands/model.js";
 import { loadStoredCredentialsToEnv } from "../config/load-credentials-to-env.js";
 import { clearCredentialCache } from "../config/credentials.js";
 
@@ -114,6 +115,15 @@ export async function launchApp(): Promise<void> {
         services = await connectServices();
         await ensureCourseConfig(services);
         scope = { type: "global" };
+        continue;
+      }
+
+      if (result.type === "model") {
+        showCursor();
+        clearScreen();
+        await modelCommand();
+        clearScreen();
+        hideCursor();
         continue;
       }
 
