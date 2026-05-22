@@ -47,37 +47,42 @@ export async function verticalPicker(
     process.stdin.setRawMode(true);
     process.stdin.resume();
 
-    const onData = (buf: Buffer) => {
-      const str = buf.toString();
-
-      if (str === "\r" || str === "\n") {
-        cleanup();
-        resolve(options[selected]!.value);
-        return;
-      }
-      if (str === "\x1b" && buf.length === 1) {
-        cleanup();
-        resolve(BACK);
-        return;
-      }
-      if (str === "\x03" || str === "q") {
-        cleanup();
-        resolve(null);
-        return;
-      }
-      if (str === "\x1b[A" || str === "k") {
-        selected = (selected - 1 + options.length) % options.length;
-        render();
-      } else if (str === "\x1b[B" || str === "j") {
-        selected = (selected + 1) % options.length;
-        render();
-      }
-    };
-
     const cleanup = () => {
       process.stdin.setRawMode(false);
       process.stdin.removeListener("data", onData);
       process.stdin.pause();
+    };
+
+    const onData = (buf: Buffer) => {
+      try {
+        const str = buf.toString();
+
+        if (str === "\r" || str === "\n") {
+          cleanup();
+          resolve(options[selected]!.value);
+          return;
+        }
+        if (str === "\x1b" && buf.length === 1) {
+          cleanup();
+          resolve(BACK);
+          return;
+        }
+        if (str === "\x03" || str === "q") {
+          cleanup();
+          resolve(null);
+          return;
+        }
+        if (str === "\x1b[A" || str === "k") {
+          selected = (selected - 1 + options.length) % options.length;
+          render();
+        } else if (str === "\x1b[B" || str === "j") {
+          selected = (selected + 1) % options.length;
+          render();
+        }
+      } catch {
+        cleanup();
+        resolve(null);
+      }
     };
 
     process.stdin.on("data", onData);
@@ -108,40 +113,46 @@ export async function horizontalPicker(
     process.stdin.setRawMode(true);
     process.stdin.resume();
 
-    const onData = (buf: Buffer) => {
-      const str = buf.toString();
-
-      if (str === "\r" || str === "\n") {
-        cleanup();
-        process.stdout.write("\n");
-        resolve(options[selected]!.value);
-        return;
-      }
-      if (str === "\x1b" && buf.length === 1) {
-        cleanup();
-        process.stdout.write("\n");
-        resolve(BACK);
-        return;
-      }
-      if (str === "\x03" || str === "q") {
-        cleanup();
-        process.stdout.write("\n");
-        resolve(null);
-        return;
-      }
-      if (str === "\x1b[D" || str === "h") {
-        selected = (selected - 1 + options.length) % options.length;
-        renderLine();
-      } else if (str === "\x1b[C" || str === "l") {
-        selected = (selected + 1) % options.length;
-        renderLine();
-      }
-    };
-
     const cleanup = () => {
       process.stdin.setRawMode(false);
       process.stdin.removeListener("data", onData);
       process.stdin.pause();
+    };
+
+    const onData = (buf: Buffer) => {
+      try {
+        const str = buf.toString();
+
+        if (str === "\r" || str === "\n") {
+          cleanup();
+          process.stdout.write("\n");
+          resolve(options[selected]!.value);
+          return;
+        }
+        if (str === "\x1b" && buf.length === 1) {
+          cleanup();
+          process.stdout.write("\n");
+          resolve(BACK);
+          return;
+        }
+        if (str === "\x03" || str === "q") {
+          cleanup();
+          process.stdout.write("\n");
+          resolve(null);
+          return;
+        }
+        if (str === "\x1b[D" || str === "h") {
+          selected = (selected - 1 + options.length) % options.length;
+          renderLine();
+        } else if (str === "\x1b[C" || str === "l") {
+          selected = (selected + 1) % options.length;
+          renderLine();
+        }
+      } catch {
+        cleanup();
+        process.stdout.write("\n");
+        resolve(null);
+      }
     };
 
     process.stdin.on("data", onData);

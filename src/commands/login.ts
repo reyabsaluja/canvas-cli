@@ -457,34 +457,40 @@ function promptLine(question: string): Promise<string | typeof ESCAPED> {
     };
 
     const onData = (buf: Buffer) => {
-      const str = buf.toString();
-      for (const c of str) {
-        const code = c.charCodeAt(0);
-        if (c === "\r" || c === "\n") {
-          cleanup();
-          process.stdout.write("\n");
-          resolve(input.trim());
-          return;
-        }
-        if (code === 27) {
-          cleanup();
-          process.stdout.write("\n");
-          resolve(ESCAPED);
-          return;
-        }
-        if (code === 3) {
-          cleanup();
-          process.exit(1);
-        }
-        if (code === 127 || code === 8) {
-          if (input.length > 0) {
-            input = input.slice(0, -1);
-            process.stdout.write("\b \b");
+      try {
+        const str = buf.toString();
+        for (const c of str) {
+          const code = c.charCodeAt(0);
+          if (c === "\r" || c === "\n") {
+            cleanup();
+            process.stdout.write("\n");
+            resolve(input.trim());
+            return;
           }
-        } else if (code >= 32) {
-          input += c;
-          process.stdout.write(c);
+          if (code === 27) {
+            cleanup();
+            process.stdout.write("\n");
+            resolve(ESCAPED);
+            return;
+          }
+          if (code === 3) {
+            cleanup();
+            process.exit(1);
+          }
+          if (code === 127 || code === 8) {
+            if (input.length > 0) {
+              input = input.slice(0, -1);
+              process.stdout.write("\b \b");
+            }
+          } else if (code >= 32) {
+            input += c;
+            process.stdout.write(c);
+          }
         }
+      } catch {
+        cleanup();
+        process.stdout.write("\n");
+        resolve(ESCAPED);
       }
     };
 
@@ -515,38 +521,44 @@ function promptSecret(question: string): Promise<string | typeof ESCAPED> {
     };
 
     const onData = (buf: Buffer) => {
-      const str = buf.toString();
-      for (const c of str) {
-        const code = c.charCodeAt(0);
-        if (c === "\r" || c === "\n") {
-          cleanup();
-          process.stdout.write("\n");
-          resolve(input.trim());
-          return;
-        }
-        if (code === 27) {
-          cleanup();
-          process.stdout.write("\n");
-          resolve(ESCAPED);
-          return;
-        }
-        if (code === 3) {
-          cleanup();
-          process.exit(1);
-        }
-        if (code === 127 || code === 8) {
-          if (input.length > 0) {
-            input = input.slice(0, -1);
-            if (dotCount > 0) {
-              dotCount--;
-              process.stdout.write("\b \b");
-            }
+      try {
+        const str = buf.toString();
+        for (const c of str) {
+          const code = c.charCodeAt(0);
+          if (c === "\r" || c === "\n") {
+            cleanup();
+            process.stdout.write("\n");
+            resolve(input.trim());
+            return;
           }
-        } else if (code >= 32) {
-          input += c;
-          dotCount++;
-          process.stdout.write("•");
+          if (code === 27) {
+            cleanup();
+            process.stdout.write("\n");
+            resolve(ESCAPED);
+            return;
+          }
+          if (code === 3) {
+            cleanup();
+            process.exit(1);
+          }
+          if (code === 127 || code === 8) {
+            if (input.length > 0) {
+              input = input.slice(0, -1);
+              if (dotCount > 0) {
+                dotCount--;
+                process.stdout.write("\b \b");
+              }
+            }
+          } else if (code >= 32) {
+            input += c;
+            dotCount++;
+            process.stdout.write("•");
+          }
         }
+      } catch {
+        cleanup();
+        process.stdout.write("\n");
+        resolve(ESCAPED);
       }
     };
 
