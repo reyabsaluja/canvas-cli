@@ -413,6 +413,7 @@ async function validateCredentials(baseUrl: string, token: string): Promise<{ ok
         Authorization: `Bearer ${token}`,
         Accept: "application/json",
       },
+      signal: AbortSignal.timeout(10_000),
     });
 
     if (response.status === 401) {
