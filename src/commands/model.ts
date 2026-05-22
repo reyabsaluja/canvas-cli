@@ -1,7 +1,10 @@
 import { createRequire } from "node:module";
 import { verticalPicker, horizontalPicker, BACK, C, type PickerOption } from "./login-picker.js";
+import { promptSecret, promptLine, ESCAPED } from "./login-prompts.js";
+import { getAiKeyName, getCredentialKey } from "./login-providers.js";
 import { readStoredConfig, writeStoredConfig } from "../config/store.js";
 import { getActiveProfile } from "../config/env.js";
+import { loadCredential, storeCredential } from "../config/credentials.js";
 
 const require = createRequire(import.meta.url);
 const MODEL_CATALOG: Record<string, PickerOption[]> = require("../ai/models.json");
@@ -91,6 +94,56 @@ export async function modelCommand(): Promise<{ provider: string; model: string;
   const group = groups.find((g) => g.provider === selectedProvider);
   if (!group) return null;
 
+  const profile = getActiveProfile();
+
+  // Check if credentials exist for this provider, prompt if missing
+  if (selectedProvider === "bedrock") {
+    const hasAccess = process.env.AWS_ACCESS_KEY_ID || loadCredential(profile, "aws-access-key");
+    const hasSecret = process.env.AWS_SECRET_ACCESS_KEY || loadCredential(profile, "aws-secret-key");
+    if (!hasAccess || !hasSecret) {
+      clearScreen();
+      printHeader();
+      console.log(`  ${C.success("✓")} ${C.dim("Provider")}  ${C.muted(group.label)}\n`);
+      console.log(`  ${C.dim("AWS credentials required:")}\n`);
+
+      const region = await promptLine(`  ${C.dim("AWS Region (e.g., us-east-1):")} `);
+      if (region === ESCAPED) return null;
+
+      const accessKey = await promptSecret(`  ${C.dim("AWS Access Key ID:")} `);
+      if (accessKey === ESCAPED) return null;
+
+      const secretKey = await promptSecret(`  ${C.dim("AWS Secret Access Key:")} `);
+      if (secretKey === ESCAPED) return null;
+
+      storeCredential(profile, "aws-access-key", accessKey);
+      storeCredential(profile, "aws-secret-key", secretKey);
+      process.env.AWS_ACCESS_KEY_ID = accessKey;
+      process.env.AWS_SECRET_ACCESS_KEY = secretKey;
+      process.env.AWS_REGION = region;
+
+      const existing = readStoredConfig(profile);
+      if (existing) {
+        writeStoredConfig({ ...existing, awsRegion: region }, profile);
+      }
+    }
+  } else {
+    const envKey = getAiKeyName(selectedProvider);
+    const credKey = getCredentialKey(selectedProvider);
+    const hasKey = (envKey && process.env[envKey]) || (credKey && loadCredential(profile, credKey));
+    if (!hasKey && envKey && credKey) {
+      clearScreen();
+      printHeader();
+      console.log(`  ${C.success("✓")} ${C.dim("Provider")}  ${C.muted(group.label)}\n`);
+      console.log(`  ${C.dim(`Requires ${envKey}:`)}\n`);
+
+      const key = await promptSecret(`  ${C.dim("→")} `);
+      if (key === ESCAPED) return null;
+
+      storeCredential(profile, credKey, key);
+      process.env[envKey] = key;
+    }
+  }
+
   clearScreen();
   printHeader();
   console.log(`  ${C.success("✓")} ${C.dim("Provider")}  ${C.muted(group.label)}\n`);
@@ -108,7 +161,6 @@ export async function modelCommand(): Promise<{ provider: string; model: string;
   const effort = await horizontalPicker("effort", EFFORT_OPTIONS);
   if (effort === BACK || effort === null) return null;
 
-  const profile = getActiveProfile();
   const existing = readStoredConfig(profile);
   if (existing) {
     writeStoredConfig({
