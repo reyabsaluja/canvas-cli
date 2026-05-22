@@ -12,7 +12,7 @@ const originalEnv = { ...process.env };
 
 const { writeStoredConfig, deleteStoredConfig } = await import("../src/config/store.js");
 const { storeCredential, deleteAllCredentials } = await import("../src/config/credentials.js");
-const { loadConfig } = await import("../src/config/env.js");
+const { loadConfig, isConfigured } = await import("../src/config/env.js");
 const { loadStoredCredentialsToEnv } = await import("../src/config/load-credentials-to-env.js");
 
 function resetEnv() {
@@ -79,6 +79,47 @@ describe("loadConfig integration", () => {
 
     const config = loadConfig();
     assert.equal(config.baseUrl, "https://stored.com/api/v1");
+  });
+});
+
+describe("isConfigured", () => {
+  const profile = "default";
+
+  beforeEach(() => {
+    resetEnv();
+  });
+
+  afterEach(() => {
+    resetEnv();
+    deleteAllCredentials(profile);
+    try { deleteStoredConfig(profile); } catch {}
+    Object.assign(process.env, originalEnv);
+  });
+
+  test("returns false when no config or env vars are set", () => {
+    assert.equal(isConfigured(), false);
+  });
+
+  test("returns true when env vars are set", () => {
+    process.env.CANVAS_BASE_URL = "https://school.instructure.com";
+    process.env.CANVAS_ACCESS_TOKEN = "tok123";
+    assert.equal(isConfigured(), true);
+  });
+
+  test("returns true when stored config and credentials exist", () => {
+    writeStoredConfig({ canvasBaseUrl: "https://school.instructure.com" }, profile);
+    storeCredential(profile, "canvas-token", "tok123");
+    assert.equal(isConfigured(), true);
+  });
+
+  test("returns false when only URL is set but token is missing", () => {
+    process.env.CANVAS_BASE_URL = "https://school.instructure.com";
+    assert.equal(isConfigured(), false);
+  });
+
+  test("returns false when only token is set but URL is missing", () => {
+    process.env.CANVAS_ACCESS_TOKEN = "tok123";
+    assert.equal(isConfigured(), false);
   });
 });
 

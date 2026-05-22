@@ -7,8 +7,9 @@ export function promptLine(question: string): Promise<string | typeof ESCAPED> {
   if (!process.stdin.isTTY) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     return new Promise((resolve) => {
-      rl.question(question, (answer) => { rl.close(); resolve(answer.trim()); });
-      rl.on("close", () => resolve(ESCAPED));
+      let settled = false;
+      rl.question(question, (answer) => { settled = true; rl.close(); resolve(answer.trim()); });
+      rl.on("close", () => { if (!settled) resolve(ESCAPED); });
     });
   }
 
@@ -73,8 +74,9 @@ export function promptSecret(question: string): Promise<string | typeof ESCAPED>
   if (!process.stdin.isTTY) {
     const rl = readline.createInterface({ input: process.stdin, terminal: false });
     return new Promise((resolve) => {
-      rl.on("line", (line) => { rl.close(); resolve(line.trim()); });
-      rl.on("close", () => resolve(ESCAPED));
+      let settled = false;
+      rl.on("line", (line) => { settled = true; rl.close(); resolve(line.trim()); });
+      rl.on("close", () => { if (!settled) resolve(ESCAPED); });
     });
   }
 
