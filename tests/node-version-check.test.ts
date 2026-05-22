@@ -46,9 +46,21 @@ test("version check exits with code 1 and correct message on old Node", () => {
   }
 });
 
-test("version check wrapper loads the CLI on supported Node versions", () => {
-  const output = execFileSync("node", [wrapperPath, "--version"], {
-    encoding: "utf-8",
-  }).trim();
-  assert.match(output, /^\d+\.\d+\.\d+$/);
+test("version check wrapper passes the version gate on supported Node", async () => {
+  const { code, stdout, stderr } = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+    execFile("node", [wrapperPath, "--version"], { encoding: "utf-8" }, (err, stdout, stderr) => {
+      resolve({
+        code: err ? (err as any).code ?? 1 : 0,
+        stdout: stdout ?? "",
+        stderr: stderr ?? "",
+      });
+    });
+  });
+
+  assert.ok(
+    !stderr.includes("canvas-cli requires Node.js 20 or later"),
+    "Should not fail the version gate on a supported Node version"
+  );
+  assert.strictEqual(code, 0, `CLI exited with code ${code}. stderr: ${stderr}`);
+  assert.match(stdout.trim(), /^\d+\.\d+\.\d+$/);
 });

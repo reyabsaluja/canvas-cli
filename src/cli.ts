@@ -2,6 +2,7 @@
 
 import { createRequire } from "node:module";
 import { Command } from "commander";
+import { initDebug, debug } from "./debug.js";
 import { coursesCommand } from "./commands/courses.js";
 import { assignmentsCommand } from "./commands/assignments.js";
 import { showAssignmentCommand } from "./commands/show-assignment.js";
@@ -22,7 +23,15 @@ const program = new Command();
 program
   .name("canvas-cli")
   .description("A terminal interface for Canvas LMS")
-  .version(version, "-V, --version", "output the current version");
+  .version(version, "-V, --version", "output the current version")
+  .option("--debug", "Enable verbose debug output to stderr");
+
+program.hook("preAction", () => {
+  const opts = program.opts();
+  initDebug(Boolean(opts.debug));
+  debug("general", `canvas-cli v${version} starting`);
+  debug("config", "Node.js " + process.version);
+});
 
 program
   .command("courses")
@@ -80,34 +89,24 @@ program
   .description("Ask a question about the current assignment workspace")
   .option("--workspace <path>", "Path to a specific workspace")
   .option("--json", "Output as JSON")
-  .option("--debug", "Show retrieval debug info")
-  .action(askCommand);
+  .option("--show-retrieval", "Show retrieval debug info")
+  .option("--show-debug", "(deprecated, use --show-retrieval)")
+  .action((question, opts) => {
+    if (opts.showDebug) {
+      process.stderr.write(
+        "Warning: --show-debug on 'ask' is deprecated. Use --show-retrieval instead.\n"
+      );
+      opts.showRetrieval = true;
+    }
+    return askCommand(question, opts);
+  });
 
-// Default: launch interactive TUI when no subcommand is given
-// Check if any subcommand was provided
-const args = process.argv.slice(2);
-const subcommands = [
-  "courses",
-  "assignments",
-  "show",
-  "do",
-  "ingest",
-  "work",
-  "ask",
-  "help",
-  "--help",
-  "-h",
-  "--version",
-  "-V",
-];
+program
+  .command("tui", { isDefault: true, hidden: true })
+  .description("Launch interactive TUI")
+  .action(() => {
+    debug("general", "launching interactive TUI");
+    import("./tui/app.js").then(({ launchApp }) => launchApp());
+  });
 
-const hasSubcommand = args.length > 0 && subcommands.some(
-  (cmd) => args[0] === cmd
-);
-
-if (!hasSubcommand && args.length === 0) {
-  // Launch interactive TUI
-  import("./tui/app.js").then(({ launchApp }) => launchApp());
-} else {
-  program.parse();
-}
+program.parse();

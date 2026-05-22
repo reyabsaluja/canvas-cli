@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { debugCache } from "../debug.js";
 import { makeCourseSlug, getCoursePath } from "../ingest/slug.js";
 import type {
   AssignmentIndexEntry,
@@ -48,8 +49,10 @@ export async function loadCourseCache(
   // Check if ingestion.json exists (marker that ingestion completed)
   const ingestionPath = path.join(coursePath, "ingestion.json");
   if (!(await fileExists(ingestionPath))) {
+    debugCache("loadCourseCache", slug, false);
     return null;
   }
+  debugCache("loadCourseCache", slug, true);
 
   try {
     const [
