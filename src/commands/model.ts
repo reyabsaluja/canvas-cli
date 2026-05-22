@@ -208,73 +208,69 @@ async function modelEffortSubcommand(): Promise<ModelResult> {
 }
 
 async function modelKeySubcommand(): Promise<ModelResult> {
-  try {
-    const profile = getActiveProfile();
-    const current = readCurrentConfig();
+  const profile = getActiveProfile();
+  const current = readCurrentConfig();
 
-    if (!current.provider) {
-      clearScreen();
-      printHeader();
-      console.log(`  ${C.error("✗")} ${C.text("No provider configured yet. Run")} ${C.muted("/model")} ${C.text("first.")}\n`);
+  if (!current.provider) {
+    clearScreen();
+    printHeader();
+    console.log(`  ${C.error("✗")} ${C.text("No provider configured yet. Run")} ${C.muted("/model")} ${C.text("first.")}\n`);
+    return null;
+  }
+
+  const providerLabel = PROVIDER_DISPLAY[current.provider] ?? current.provider;
+
+  clearScreen();
+  printHeader();
+
+  if (current.provider === "bedrock") {
+    console.log(`  ${C.text("Rotate AWS credentials for")} ${C.white(providerLabel)}\n`);
+
+    const region = await promptLine(`  ${C.dim("AWS Region (e.g., us-east-1):")} `);
+    if (region === ESCAPED) return null;
+
+    const accessKey = await promptSecret(`  ${C.dim("AWS Access Key ID:")} `);
+    if (accessKey === ESCAPED) return null;
+
+    const secretKey = await promptSecret(`  ${C.dim("AWS Secret Access Key:")} `);
+    if (secretKey === ESCAPED) return null;
+
+    storeCredential(profile, "aws-access-key", accessKey);
+    storeCredential(profile, "aws-secret-key", secretKey);
+    process.env.AWS_ACCESS_KEY_ID = accessKey;
+    process.env.AWS_SECRET_ACCESS_KEY = secretKey;
+    process.env.AWS_REGION = region;
+
+    const base = readStoredConfig(profile) ?? { canvasBaseUrl: "" };
+    writeStoredConfig({ ...base, awsRegion: region }, profile);
+
+    console.log(`\n  ${C.success("✓")} ${C.text("AWS credentials updated")}\n`);
+  } else {
+    const envKey = getAiKeyName(current.provider);
+    const credKey = getCredentialKey(current.provider);
+
+    if (!envKey || !credKey) {
+      console.log(`  ${C.error("✗")} ${C.text("No key rotation available for this provider.")}\n`);
       return null;
     }
 
-    const providerLabel = PROVIDER_DISPLAY[current.provider] ?? current.provider;
+    console.log(`  ${C.text("New API key for")} ${C.white(providerLabel)}\n`);
 
-    clearScreen();
-    printHeader();
+    const key = await promptSecret(`  ${C.dim(`${envKey}:`)} `);
+    if (key === ESCAPED) return null;
 
-    if (current.provider === "bedrock") {
-      console.log(`  ${C.text("Rotate AWS credentials for")} ${C.white(providerLabel)}\n`);
+    storeCredential(profile, credKey, key);
+    process.env[envKey] = key;
 
-      const region = await promptLine(`  ${C.dim("AWS Region (e.g., us-east-1):")} `);
-      if (region === ESCAPED) return null;
-
-      const accessKey = await promptSecret(`  ${C.dim("AWS Access Key ID:")} `);
-      if (accessKey === ESCAPED) return null;
-
-      const secretKey = await promptSecret(`  ${C.dim("AWS Secret Access Key:")} `);
-      if (secretKey === ESCAPED) return null;
-
-      storeCredential(profile, "aws-access-key", accessKey);
-      storeCredential(profile, "aws-secret-key", secretKey);
-      process.env.AWS_ACCESS_KEY_ID = accessKey;
-      process.env.AWS_SECRET_ACCESS_KEY = secretKey;
-      process.env.AWS_REGION = region;
-
-      const base = readStoredConfig(profile) ?? { canvasBaseUrl: "" };
-      writeStoredConfig({ ...base, awsRegion: region }, profile);
-
-      console.log(`\n  ${C.success("✓")} ${C.text("AWS credentials updated")}\n`);
-    } else {
-      const envKey = getAiKeyName(current.provider);
-      const credKey = getCredentialKey(current.provider);
-
-      if (!envKey || !credKey) {
-        console.log(`  ${C.error("✗")} ${C.text("No key rotation available for this provider.")}\n`);
-        return null;
-      }
-
-      console.log(`  ${C.text("New API key for")} ${C.white(providerLabel)}\n`);
-
-      const key = await promptSecret(`  ${C.dim(`${envKey}:`)} `);
-      if (key === ESCAPED) return null;
-
-      storeCredential(profile, credKey, key);
-      process.env[envKey] = key;
-
-      console.log(`\n  ${C.success("✓")} ${C.text("API key updated")}\n`);
-    }
-
-    if (!current.model) return null;
-    const validEfforts: string[] = ["low", "medium", "high", "max"];
-    const effort = validEfforts.includes(current.effort ?? "")
-      ? (current.effort as AIEffortLevel)
-      : undefined;
-    return { provider: current.provider, model: current.model, effort };
-  } finally {
-    showCursor();
+    console.log(`\n  ${C.success("✓")} ${C.text("API key updated")}\n`);
   }
+
+  if (!current.model) return null;
+  const validEfforts: string[] = ["low", "medium", "high", "max"];
+  const effort = validEfforts.includes(current.effort ?? "")
+    ? (current.effort as AIEffortLevel)
+    : undefined;
+  return { provider: current.provider, model: current.model, effort };
 }
 
 async function modelFullFlow(): Promise<ModelResult> {
