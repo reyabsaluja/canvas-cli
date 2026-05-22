@@ -13,11 +13,11 @@ interface ModelGroup {
 }
 
 const BEDROCK_MODELS: PickerOption[] = [
-  { label: "Claude Opus 4.7", value: "us.anthropic.claude-opus-4-7-20250219-v1:0", description: "most capable" },
-  { label: "Claude Opus 4.6", value: "us.anthropic.claude-opus-4-6-20250414-v1:0", description: "flagship" },
-  { label: "Claude Sonnet 4.6", value: "us.anthropic.claude-sonnet-4-6-20250414-v1:0", description: "balanced" },
-  { label: "Claude Sonnet 4", value: "us.anthropic.claude-sonnet-4-20250514-v1:0", description: "previous gen" },
-  { label: "Claude Haiku 4.5", value: "us.anthropic.claude-haiku-4-5-20251001-v1:0", description: "fastest" },
+  { label: "Claude Opus 4.7", value: "us.anthropic.claude-opus-4-7-v1", description: "most capable" },
+  { label: "Claude Opus 4.6", value: "us.anthropic.claude-opus-4-6-v1", description: "flagship" },
+  { label: "Claude Sonnet 4.6", value: "us.anthropic.claude-sonnet-4-6-v1", description: "balanced" },
+  { label: "Claude Sonnet 4", value: "us.anthropic.claude-sonnet-4-v1", description: "previous gen" },
+  { label: "Claude Haiku 4.5", value: "us.anthropic.claude-haiku-4-5-v1", description: "fastest" },
 ];
 
 const LOGO = [
