@@ -4,7 +4,8 @@
   "openai": [
     { "label": "GPT-5.5", "value": "gpt-5.5", "description": "most capable" },
     { "label": "GPT-5.4 Pro", "value": "gpt-5.4-pro", "description": "balanced" },
-    { "label": "GPT-5.4", "value": "gpt-5.4", "description": "fast" }
+    { "label": "GPT-5.4", "value": "gpt-5.4", "description": "fast" },
+    { "label": "GPT-5.4 Mini", "value": "gpt-5.4-mini", "description": "fastest" }
   ],
   "anthropic": [
     { "label": "Claude Opus 4.7", "value": "claude-opus-4-7-20250219", "description": "most capable" },
