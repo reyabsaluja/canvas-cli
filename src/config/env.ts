@@ -29,7 +29,11 @@ export function loadConfig(): Config {
   let baseUrl = process.env.CANVAS_BASE_URL;
   let accessToken = process.env.CANVAS_ACCESS_TOKEN;
 
-  // Fall back to stored config + credentials
+  // Fall back to stored config + credentials.
+  // StoredConfig.canvasBaseUrl is saved WITHOUT /api/v1 (normalizeUrl strips it
+  // during login). We append /api/v1 here so the rest of the app gets a ready-to-use
+  // API base URL. If someone manually edits config.json WITH /api/v1, the endsWith
+  // guard prevents double-appending.
   if (!baseUrl || !accessToken) {
     const stored = readStoredConfig(profile);
     if (stored && !baseUrl) {
