@@ -60,5 +60,5 @@ jobs:
           echo "Exit code: $CODE"
           # Should exit non-zero but not crash (segfault = 139, abort = 134)
           [ "$CODE" -ne 0 ] && [ "$CODE" -lt 128 ]
-          # Should mention how to fix (login or token)
-          echo "$OUTPUT" | grep -qi "login\|token\|credential\|configured"
+          # Should contain actionable guidance (any of these keywords)
+          echo "$OUTPUT" | grep -qiE "login|token|credential|configured|CANVAS_API_TOKEN|canvas-cli login"
