@@ -7,6 +7,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `prepublishOnly` script to prevent broken publishes
+- End-to-end smoke tests for npx installation flow
+
+### Changed
+
+- Scoped npm package name to `@reyabsaluja/canvas-cli`
+- Excluded source maps and declarations from published package
+
+### Fixed
+
+- Missing pdfkit dependencies breaking CI build
+- Generic fallback hint in TUI connect error handler
+- Rate-limited endpoints now skipped gracefully in paginated fetches
+- Network error detection improvements (undici `fetch failed`, cause chain)
+
 ## [0.1.0] - 2026-03-17
 
 ### Added
