@@ -26,13 +26,20 @@ jobs:
 
       - run: bun run build
 
-      - name: Pack and install globally
+      - name: Pack tarball
         run: |
           TARBALL=$(npm pack --json | jq -r '.[0].filename')
-          npm install -g "./$TARBALL"
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
 
-      - name: Verify bin resolves
-        run: which canvas-cli
+      - name: Verify npx execution
+        run: |
+          npx --yes "./$TARBALL" --version
+          npx --yes "./$TARBALL" --help
+
+      - name: Install globally and verify bin resolves
+        run: |
+          npm install -g "./$TARBALL"
+          which canvas-cli
 
       - name: Verify --version
         run: |
