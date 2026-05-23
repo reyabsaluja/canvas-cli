@@ -1,0 +1,57 @@
+name: Smoke Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run build
+
+      - name: Pack and install globally
+        run: |
+          npm pack
+          npm install -g ./reyabsaluja-canvas-cli-*.tgz
+
+      - name: Verify bin resolves
+        run: which canvas-cli
+
+      - name: Verify --version
+        run: |
+          VERSION=$(canvas-cli --version)
+          echo "canvas-cli version: $VERSION"
+          [ -n "$VERSION" ]
+
+      - name: Verify --help
+        run: canvas-cli --help
+
+      - name: Verify graceful error without credentials
+        run: |
+          set +e
+          OUTPUT=$(canvas-cli courses 2>&1)
+          CODE=$?
+          set -e
+          echo "$OUTPUT"
+          echo "Exit code: $CODE"
+          # Should exit non-zero but not crash (segfault = 139, abort = 134)
+          [ "$CODE" -ne 0 ] && [ "$CODE" -lt 128 ]
+          # Should mention how to fix (login or token)
+          echo "$OUTPUT" | grep -qi "login\|token\|credential\|configured"
