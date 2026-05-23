@@ -33,7 +33,7 @@ bun run check
 - Run `bun run check`
 - Update documentation when structure or behavior changes
 - Add or extend tests when touching TUI parsing, workspace behavior, or CLI command flows
-- Add a bullet under `[Unreleased]` in `CHANGELOG.md` for user-visible changes
+- Add a bullet under `[Unreleased]` in `CHANGELOG.md` for user-visible changes (new commands, bug fixes, breaking changes — skip CI-only or internal refactors)
 
 ## Versioning and Releases
 
