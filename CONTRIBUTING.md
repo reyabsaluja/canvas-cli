@@ -33,3 +33,8 @@ bun run check
 - Run `bun run check`
 - Update documentation when structure or behavior changes
 - Add or extend tests when touching TUI parsing, workspace behavior, or CLI command flows
+- Add a bullet under `[Unreleased]` in `CHANGELOG.md` for user-visible changes
+
+## Versioning and Releases
+
+This project follows [Semantic Versioning](https://semver.org/). See [RELEASING.md](./RELEASING.md) for the full release process, versioning strategy, and release checklist.
