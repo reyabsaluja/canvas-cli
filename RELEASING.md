@@ -77,7 +77,7 @@ This updates `package.json`, creates a git commit, and creates a `vX.Y.Z` tag.
 
 ### 4. Push
 
-The `postversion` script in package.json handles this automatically (`git push origin HEAD --follow-tags`). If you prefer to push manually, run:
+After `npm version` completes, review the commit and tag, then push:
 
 ```bash
 git push origin HEAD --follow-tags
@@ -123,7 +123,7 @@ git checkout main
 # make the fix
 bun run check
 npm version patch
-# postversion hook pushes the commit and tag automatically
+git push origin HEAD --follow-tags
 ```
 
 If a fix is needed for an older release, create a branch from that tag:
@@ -133,5 +133,5 @@ git checkout -b hotfix/v0.1.1 v0.1.0
 # make the fix
 bun run check
 npm version patch
-# postversion hook pushes the commit and tag from the current branch
+git push origin HEAD --follow-tags
 ```
