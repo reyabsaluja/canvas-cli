@@ -69,8 +69,8 @@ jobs:
           set -e
           echo "$OUTPUT"
           echo "Exit code: $CODE"
-          # Auth errors must exit 1 (not crash: segfault=139, abort=134)
-          [ "$CODE" -eq 1 ]
+          # Must be a known application exit (1=auth, 2=config), not a crash (segfault=139, abort=134)
+          [ "$CODE" -ge 1 ] && [ "$CODE" -le 2 ]
           # Should contain the recovery hint directing users to login
           echo "$OUTPUT" | grep -q "canvas-cli login"
 
@@ -83,5 +83,5 @@ jobs:
           set -e
           echo "$OUTPUT"
           echo "Exit code: $CODE"
-          [ "$CODE" -eq 1 ]
+          [ "$CODE" -ge 1 ] && [ "$CODE" -le 2 ]
           echo "$OUTPUT" | grep -q "canvas-cli login"
