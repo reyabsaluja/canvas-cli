@@ -28,8 +28,8 @@ jobs:
 
       - name: Pack and install globally
         run: |
-          npm pack
-          npm install -g ./reyabsaluja-canvas-cli-*.tgz
+          TARBALL=$(npm pack --json | jq -r '.[0].filename')
+          npm install -g "./$TARBALL"
 
       - name: Verify bin resolves
         run: which canvas-cli
