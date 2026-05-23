@@ -75,8 +75,10 @@ This updates `package.json`, creates a git commit, and creates a `vX.Y.Z` tag.
 
 ### 4. Push
 
+The `postversion` script in package.json handles this automatically (`git push origin HEAD --follow-tags`). If you prefer to push manually, run:
+
 ```bash
-git push origin main --follow-tags
+git push origin HEAD --follow-tags
 ```
 
 ### 5. Automated publishing

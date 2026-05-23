@@ -49,7 +49,7 @@
     "test": "node --import tsx --test test/*.test.ts tests/*.test.ts",
     "typecheck": "tsc --noEmit",
     "preversion": "bun run check",
-    "postversion": "git push origin main --follow-tags",
+    "postversion": "git push origin HEAD --follow-tags",
     "prepublishOnly": "bun run check"
   },
   "dependencies": {
