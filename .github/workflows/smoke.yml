@@ -29,24 +29,33 @@ jobs:
 
       - name: Pack tarball
         run: |
-          TARBALL=$(npm pack --json | jq -r '.[0].filename')
+          set -euo pipefail
+          PACK_JSON=$(npm pack --json)
+          TARBALL=$(echo "$PACK_JSON" | jq -r '.[0].filename')
+          VERSION=$(echo "$PACK_JSON" | jq -r '.[0].version')
           echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+          echo "EXPECTED_VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Verify npx execution
         run: |
-          npx --yes "./$TARBALL" --version
+          set -euo pipefail
+          NPX_VERSION=$(npx --yes "./$TARBALL" --version)
+          echo "npx --version output: $NPX_VERSION"
+          [ "$NPX_VERSION" = "$EXPECTED_VERSION" ]
           npx --yes "./$TARBALL" --help
 
       - name: Install globally and verify bin resolves
         run: |
+          set -euo pipefail
           npm install -g "./$TARBALL"
           which canvas-cli
 
       - name: Verify --version
         run: |
+          set -euo pipefail
           VERSION=$(canvas-cli --version)
           echo "canvas-cli version: $VERSION"
-          [ -n "$VERSION" ]
+          [ "$VERSION" = "$EXPECTED_VERSION" ]
 
       - name: Verify --help
         run: canvas-cli --help
