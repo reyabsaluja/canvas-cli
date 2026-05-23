@@ -28,6 +28,8 @@ Use pre-release tags when changes need broader testing before a stable release:
 
 Example: `npm version 0.2.0-beta.1`
 
+> **Note:** Pre-release tags (e.g., `v0.2.0-beta.1`) also trigger the publish workflow and will be published to npm with the `next` dist-tag. Install with `npx @reyabsaluja/canvas-cli@next`.
+
 ## Release Process
 
 ### 1. Prepare the release
