@@ -123,12 +123,15 @@ git checkout main
 # make the fix
 bun run check
 npm version patch
-git push origin main --follow-tags
+# postversion hook pushes the commit and tag automatically
 ```
 
 If a fix is needed for an older release, create a branch from that tag:
 
 ```bash
 git checkout -b hotfix/v0.1.1 v0.1.0
-# make the fix, then follow the normal release process on that branch
+# make the fix
+bun run check
+npm version patch
+# postversion hook pushes the commit and tag from the current branch
 ```
