@@ -135,3 +135,11 @@ bun run check
 npm version patch
 git push origin HEAD --follow-tags
 ```
+
+After the hotfix is published, cherry-pick the fix back to `main` so it isn't lost:
+
+```bash
+git checkout main
+git cherry-pick <fix-commit-sha>
+git push origin main
+```
