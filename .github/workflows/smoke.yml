@@ -60,15 +60,28 @@ jobs:
       - name: Verify --help
         run: canvas-cli --help
 
-      - name: Verify graceful error without credentials
+      - name: Verify graceful error without credentials (global install)
         run: |
+          # Disable errexit so the expected non-zero exit doesn't fail the step
           set +e
           OUTPUT=$(canvas-cli courses 2>&1)
           CODE=$?
           set -e
           echo "$OUTPUT"
           echo "Exit code: $CODE"
-          # Should exit non-zero but not crash (segfault = 139, abort = 134)
-          [ "$CODE" -ne 0 ] && [ "$CODE" -lt 128 ]
+          # Auth errors must exit 1 (not crash: segfault=139, abort=134)
+          [ "$CODE" -eq 1 ]
           # Should contain the recovery hint directing users to login
+          echo "$OUTPUT" | grep -q "canvas-cli login"
+
+      - name: Verify graceful error without credentials (npx)
+        run: |
+          # Exercises the npx resolution path users hit with `npx @reyabsaluja/canvas-cli`
+          set +e
+          OUTPUT=$(npx --yes "./$TARBALL" courses 2>&1)
+          CODE=$?
+          set -e
+          echo "$OUTPUT"
+          echo "Exit code: $CODE"
+          [ "$CODE" -eq 1 ]
           echo "$OUTPUT" | grep -q "canvas-cli login"
