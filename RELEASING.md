@@ -136,7 +136,8 @@ npm version patch
 git push origin HEAD --follow-tags
 ```
 
-After the hotfix is published, cherry-pick the fix back to `main` so it isn't lost:
+After the hotfix is published, cherry-pick the fix back to `main` so it isn't lost.
+Only cherry-pick the fix commit itself — the version bump commit stays on the hotfix branch since `main` will advance past that version independently.
 
 ```bash
 git checkout main
