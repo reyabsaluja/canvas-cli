@@ -1,0 +1,87 @@
+name: Smoke Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run build
+
+      - name: Pack tarball
+        run: |
+          set -euo pipefail
+          PACK_JSON=$(npm pack --json)
+          TARBALL=$(echo "$PACK_JSON" | jq -r '.[0].filename')
+          VERSION=$(echo "$PACK_JSON" | jq -r '.[0].version')
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+          echo "EXPECTED_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Verify npx execution
+        run: |
+          set -euo pipefail
+          NPX_VERSION=$(npx --yes "./$TARBALL" --version)
+          echo "npx --version output: $NPX_VERSION"
+          [ "$NPX_VERSION" = "$EXPECTED_VERSION" ]
+          npx --yes "./$TARBALL" --help
+
+      - name: Install globally and verify bin resolves
+        run: |
+          set -euo pipefail
+          npm install -g "./$TARBALL"
+          which canvas-cli
+
+      - name: Verify --version
+        run: |
+          set -euo pipefail
+          VERSION=$(canvas-cli --version)
+          echo "canvas-cli version: $VERSION"
+          [ "$VERSION" = "$EXPECTED_VERSION" ]
+
+      - name: Verify --help
+        run: canvas-cli --help
+
+      - name: Verify graceful error without credentials (global install)
+        run: |
+          # Disable errexit so the expected non-zero exit doesn't fail the step
+          set +e
+          OUTPUT=$(canvas-cli courses 2>&1)
+          CODE=$?
+          set -e
+          echo "$OUTPUT"
+          echo "Exit code: $CODE"
+          # Must be a known application exit (1=auth, 2=config), not a crash (segfault=139, abort=134)
+          [ "$CODE" -ge 1 ] && [ "$CODE" -le 2 ]
+          # Should contain the recovery hint directing users to login
+          echo "$OUTPUT" | grep -q "canvas-cli login"
+
+      - name: Verify graceful error without credentials (npx)
+        run: |
+          # Exercises the npx resolution path users hit with `npx @reyabsaluja/canvas-cli`
+          set +e
+          OUTPUT=$(npx --yes "./$TARBALL" courses 2>&1)
+          CODE=$?
+          set -e
+          echo "$OUTPUT"
+          echo "Exit code: $CODE"
+          [ "$CODE" -ge 1 ] && [ "$CODE" -le 2 ]
+          echo "$OUTPUT" | grep -q "canvas-cli login"
