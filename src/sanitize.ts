@@ -58,12 +58,18 @@ export function sanitizeFilename(name: string): string {
 }
 
 /**
- * Sanitize a subfolder name. Same as filename but also blocks nested paths.
+ * Sanitize a subfolder name. Throws on path traversal attempts (.. segments).
+ * Each segment is sanitized via sanitizeFilename.
  */
 export function sanitizeSubfolder(name: string): string {
-  // Split on separators, sanitize each segment, rejoin
   const segments = name.split(/[/\\]+/).filter(Boolean);
   if (segments.length === 0) return "unnamed";
+
+  for (const seg of segments) {
+    if (seg === ".." || seg === ".") {
+      throw new Error(`Path traversal blocked in subfolder: "${name}"`);
+    }
+  }
 
   return segments
     .map((seg) => sanitizeFilename(seg))
