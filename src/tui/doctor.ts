@@ -1,5 +1,6 @@
 import { resolveRawConfig, resolveApiUrl } from "../config/env.js";
 import { getAIConfig, type AIProviderName } from "../ai/provider.js";
+import { debug } from "../debug.js";
 import type { Config } from "../config/env.js";
 
 export interface CheckResult {
@@ -215,7 +216,8 @@ async function checkAIProvider(provider: AIProviderName): Promise<CheckResult> {
       {
         method: provider === "anthropic" ? "POST" : "GET",
         headers,
-        // Anthropic validates auth before request body — an invalid body that gets a 400 confirms the key works
+        // Anthropic validates auth before body — a 400 with invalid body confirms the key works.
+        // If Anthropic ever rejects at the network layer before auth, this will produce false negatives.
         ...(provider === "anthropic" ? { body: JSON.stringify({ model: "_", max_tokens: 1, messages: [] }) } : {}),
         signal: AbortSignal.timeout(10_000),
       }
@@ -331,6 +333,7 @@ export async function runDoctor(): Promise<string> {
     aiConfig = getAIConfig();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    debug("config", `getAIConfig threw: ${err instanceof Error ? err.stack ?? message : message}`);
     results.push({
       label: "AI provider",
       status: "fail",
