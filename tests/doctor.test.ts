@@ -9,6 +9,13 @@ describe("validateTokenFormat", () => {
     assert.equal(result.label, "Token format");
   });
 
+  test("fails when token has both whitespace and quotes", () => {
+    const result = validateTokenFormat("  '12345~abc' ");
+    assert.equal(result.status, "fail");
+    assert.match(result.detail, /whitespace/);
+    assert.match(result.detail, /quotes/);
+  });
+
   test("fails when token has leading whitespace", () => {
     const result = validateTokenFormat("  12345~abc");
     assert.equal(result.status, "fail");
