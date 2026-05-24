@@ -25,7 +25,7 @@ export function resolveRawConfig(): ResolvedRawConfig {
   const envToken = process.env.CANVAS_ACCESS_TOKEN;
   const baseUrl = envBaseUrl || stored?.canvasBaseUrl || undefined;
   const accessToken = envToken || loadCredential(profile, "canvas-token") || undefined;
-  const urlSource: ResolvedRawConfig["urlSource"] = envBaseUrl ? "env" : stored ? "stored" : null;
+  const urlSource: ResolvedRawConfig["urlSource"] = envBaseUrl ? "env" : stored?.canvasBaseUrl ? "stored" : null;
   return { baseUrl, accessToken, urlSource, profile };
 }
 
