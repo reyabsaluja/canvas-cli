@@ -4,7 +4,6 @@ import {
   CanvasCliError,
   CanvasNetworkError,
   CanvasRateLimitError,
-  CanvasServerError,
   classifyError,
   isAbortError,
   isNetworkError,
@@ -337,13 +336,6 @@ export class CanvasClient {
     } catch (err) {
       if (err instanceof CanvasCliError && err.kind !== "network" && err.kind !== "unknown") {
         this._skippedEndpoints.push(url);
-        if (err instanceof CanvasRateLimitError) {
-          console.error(`Warning: rate-limited by Canvas API, skipping: ${url}`);
-        } else if (err instanceof CanvasServerError) {
-          console.error(`Warning: Canvas API returned ${err.statusCode} after retries, skipping: ${url}`);
-        } else {
-          console.error(`Warning: Canvas API error (${err.kind}), skipping: ${url}`);
-        }
         return [];
       }
       throw err;
