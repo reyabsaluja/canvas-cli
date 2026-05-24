@@ -195,7 +195,7 @@ async function checkAIProvider(provider: AIProviderName): Promise<CheckResult> {
       {
         method: provider === "anthropic" ? "POST" : "GET",
         headers,
-        ...(provider === "anthropic" ? { body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1, messages: [{ role: "user", content: "hi" }] }) } : {}),
+        ...(provider === "anthropic" ? { body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1, messages: [] }) } : {}),
         signal: AbortSignal.timeout(10_000),
       }
     );
