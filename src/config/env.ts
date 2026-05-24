@@ -11,41 +11,55 @@ export interface Config {
   accessToken: string;
 }
 
+export interface ResolvedRawConfig {
+  baseUrl: string | undefined;
+  accessToken: string | undefined;
+  urlSource: "env" | "stored" | "none";
+  profile: string;
+  credentialError?: Error;
+}
+
+export function resolveRawConfig(): ResolvedRawConfig {
+  const profile = getActiveProfile();
+  const stored = readStoredConfig(profile);
+  const envBaseUrl = process.env.CANVAS_BASE_URL;
+  const envToken = process.env.CANVAS_ACCESS_TOKEN;
+  // Treat empty-string canvasBaseUrl as missing (user hasn't completed setup)
+  const baseUrl = envBaseUrl || stored?.canvasBaseUrl || undefined;
+  let storedToken: string | null = null;
+  let credentialError: Error | undefined;
+  try {
+    storedToken = loadCredential(profile, "canvas-token");
+  } catch (err) {
+    credentialError = err instanceof Error ? err : new Error(String(err));
+  }
+  const accessToken = envToken || storedToken || undefined;
+  const urlSource: ResolvedRawConfig["urlSource"] = envBaseUrl ? "env" : stored?.canvasBaseUrl ? "stored" : "none";
+  return { baseUrl, accessToken, urlSource, profile, credentialError };
+}
+
 export function getActiveProfile(): string {
   return process.env.CANVAS_CLI_PROFILE || "default";
 }
 
+export function resolveApiUrl(raw: ResolvedRawConfig): string | undefined {
+  if (!raw.baseUrl) return undefined;
+  if (raw.urlSource === "stored") {
+    const normalized = raw.baseUrl.replace(/\/+$/, "");
+    return normalized.endsWith("/api/v1") ? normalized : `${normalized}/api/v1`;
+  }
+  return raw.baseUrl.replace(/\/+$/, "");
+}
+
 export function isConfigured(): boolean {
-  const profile = getActiveProfile();
-  const stored = readStoredConfig(profile);
-  const baseUrl = process.env.CANVAS_BASE_URL || stored?.canvasBaseUrl;
-  const token = process.env.CANVAS_ACCESS_TOKEN || loadCredential(profile, "canvas-token");
-  return Boolean(baseUrl && token);
+  const raw = resolveRawConfig();
+  return Boolean(raw.baseUrl && raw.accessToken);
 }
 
 export function loadConfig(): Config {
-  const profile = getActiveProfile();
-
-  // Env vars always take precedence
-  let baseUrl = process.env.CANVAS_BASE_URL;
-  let accessToken = process.env.CANVAS_ACCESS_TOKEN;
-
-  // Fall back to stored config + credentials.
-  // StoredConfig.canvasBaseUrl is saved WITHOUT /api/v1 (normalizeUrl strips it
-  // during login). We append /api/v1 here so the rest of the app gets a ready-to-use
-  // API base URL. If someone manually edits config.json WITH /api/v1, the endsWith
-  // guard prevents double-appending.
-  if (!baseUrl || !accessToken) {
-    const stored = readStoredConfig(profile);
-    if (stored && !baseUrl) {
-      const storedUrl = stored.canvasBaseUrl.replace(/\/+$/, "");
-      baseUrl = storedUrl.endsWith("/api/v1") ? storedUrl : `${storedUrl}/api/v1`;
-    }
-    if (!accessToken) {
-      const token = loadCredential(profile, "canvas-token");
-      if (token) accessToken = token;
-    }
-  }
+  const raw = resolveRawConfig();
+  const baseUrl = resolveApiUrl(raw);
+  const accessToken = raw.accessToken;
 
   if (!baseUrl) {
     throw new ConfigError(
@@ -55,15 +69,23 @@ export function loadConfig(): Config {
   }
 
   if (!accessToken) {
+    if (raw.credentialError) {
+      throw new ConfigError(
+        `Failed to load credentials: ${raw.credentialError.message}`,
+        "Your system credential store may be corrupted or inaccessible. Try running `canvas-cli login` to re-save your token."
+      );
+    }
     throw new ConfigError(
       "Canvas access token is not configured.",
       "Run `canvas-cli login` to set up, or set CANVAS_ACCESS_TOKEN in your environment."
     );
+  } else if (raw.credentialError) {
+    debug("config", `Credential store error (using env fallback): ${raw.credentialError.message}`);
   }
 
   debug("config", `CANVAS_BASE_URL: ${baseUrl.replace(/\/+$/, "")}`);
   debug("config", "CANVAS_ACCESS_TOKEN: ***");
-  debug("config", `Profile: ${profile}`);
+  debug("config", `Profile: ${raw.profile}`);
   debug("config", "Sensitive env vars present", maskEnvForDebug());
 
   return {
