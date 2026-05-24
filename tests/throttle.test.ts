@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { RateLimitThrottle, THROTTLE_THRESHOLD, THROTTLE_DELAY_MS } from "../src/canvas/throttle.js";
 
+const noop = () => {};
+
 test("throttle does not delay when no header has been seen", async () => {
   const delays: number[] = [];
   const throttle = new RateLimitThrottle({ sleepFn: async (ms) => { delays.push(ms); } });
@@ -20,7 +22,7 @@ test("throttle does not delay when remaining is above threshold", async () => {
 
 test("throttle delays when remaining is below threshold", async () => {
   const delays: number[] = [];
-  const throttle = new RateLimitThrottle({ sleepFn: async (ms) => { delays.push(ms); } });
+  const throttle = new RateLimitThrottle({ sleepFn: async (ms) => { delays.push(ms); }, log: noop });
   const response = new Response(null, { headers: { "x-rate-limit-remaining": "50" } });
   throttle.update(response);
   await throttle.throttleIfNeeded();
@@ -31,7 +33,7 @@ test("throttle delays when remaining is below threshold", async () => {
 
 test("throttle delays at exactly threshold - 1", async () => {
   const delays: number[] = [];
-  const throttle = new RateLimitThrottle({ sleepFn: async (ms) => { delays.push(ms); } });
+  const throttle = new RateLimitThrottle({ sleepFn: async (ms) => { delays.push(ms); }, log: noop });
   const response = new Response(null, { headers: { "x-rate-limit-remaining": String(THROTTLE_THRESHOLD - 1) } });
   throttle.update(response);
   await throttle.throttleIfNeeded();
@@ -49,7 +51,7 @@ test("throttle does not delay at exactly the threshold", async () => {
 
 test("throttle uses custom threshold and delay", async () => {
   const delays: number[] = [];
-  const throttle = new RateLimitThrottle({ threshold: 50, delayMs: 1000, sleepFn: async (ms) => { delays.push(ms); } });
+  const throttle = new RateLimitThrottle({ threshold: 50, delayMs: 1000, sleepFn: async (ms) => { delays.push(ms); }, log: noop });
   const response = new Response(null, { headers: { "x-rate-limit-remaining": "30" } });
   throttle.update(response);
   await throttle.throttleIfNeeded();
@@ -60,7 +62,7 @@ test("throttle uses custom threshold and delay", async () => {
 test("throttle delay increases as remaining approaches zero", async () => {
   const delays: number[] = [];
   const sleepFn = async (ms: number) => { delays.push(ms); };
-  const throttle = new RateLimitThrottle({ sleepFn });
+  const throttle = new RateLimitThrottle({ sleepFn, log: noop });
 
   // remaining=99 (just below threshold) → ratio≈0.01 → minimal extra delay
   throttle.update(new Response(null, { headers: { "x-rate-limit-remaining": "99" } }));
@@ -101,7 +103,7 @@ test("throttle tracks latest remaining value", async () => {
 
 test("throttle handles fractional remaining values", async () => {
   const delays: number[] = [];
-  const throttle = new RateLimitThrottle({ sleepFn: async (ms) => { delays.push(ms); } });
+  const throttle = new RateLimitThrottle({ sleepFn: async (ms) => { delays.push(ms); }, log: noop });
   throttle.update(new Response(null, { headers: { "x-rate-limit-remaining": "45.5" } }));
   assert.equal(throttle.currentRemaining, 45.5);
   await throttle.throttleIfNeeded();
@@ -118,11 +120,11 @@ test("throttle increases delay for high-cost requests", async () => {
   const delays: number[] = [];
   const sleepFn = async (ms: number) => { delays.push(ms); };
 
-  const throttleLow = new RateLimitThrottle({ sleepFn });
+  const throttleLow = new RateLimitThrottle({ sleepFn, log: noop });
   throttleLow.update(new Response(null, { headers: { "x-rate-limit-remaining": "50", "x-request-cost": "1" } }));
   await throttleLow.throttleIfNeeded();
 
-  const throttleHigh = new RateLimitThrottle({ sleepFn });
+  const throttleHigh = new RateLimitThrottle({ sleepFn, log: noop });
   throttleHigh.update(new Response(null, { headers: { "x-rate-limit-remaining": "50", "x-request-cost": "5" } }));
   await throttleHigh.throttleIfNeeded();
 
