@@ -3,7 +3,9 @@ import { verticalPicker, horizontalPicker, BACK, C, type PickerOption } from "./
 import { promptLine, promptSecret, ESCAPED } from "./login-prompts.js";
 
 const require = createRequire(import.meta.url);
-const MODEL_CATALOG: Record<string, PickerOption[]> = require("../ai/models.json");
+const MODEL_CATALOG: Record<string, PickerOption[]> = Object.fromEntries(
+  Object.entries(require("../ai/models.json")).filter(([k]) => !k.startsWith("$") && !k.startsWith("_"))
+);
 
 const ESC_HINT = C.dim("(esc to go back)");
 
