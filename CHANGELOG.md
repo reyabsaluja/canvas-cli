@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Breaking:** Removed non-interactive CLI commands (`courses`, `assignments`, `show assignment`, `do`, `work`, `ask`). The TUI is now the sole interactive interface. Setup commands (`login`, `logout`, `status`, `ingest`) remain.
 - Scoped npm package name to `@reyabsaluja/canvas-cli`
 - Excluded source maps and declarations from published package
 
