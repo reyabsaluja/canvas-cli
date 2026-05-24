@@ -12,9 +12,7 @@ const WINDOWS_RESERVED_NAMES = new Set([
 /**
  * Sanitize a filename for safe use on all platforms.
  * Handles: path traversal, Windows reserved names, length limits, control chars,
- * and invalid filesystem characters.
- *
- * Note: strips leading dots — not suitable for preserving dotfile names.
+ * and invalid filesystem characters. Preserves leading dots for dotfiles.
  */
 export function sanitizeFilename(name: string): string {
   if (!name || !name.trim()) return "unnamed";
@@ -28,12 +26,18 @@ export function sanitizeFilename(name: string): string {
   // Remove characters illegal on Windows: < > : " / \ | ? *
   sanitized = sanitized.replace(/[<>:"/\\|?*]/g, "_");
 
+  // Detect dotfile pattern: single leading dot followed by a non-dot, non-separator char
+  const isDotfile = /^\.[^.\s_]/.test(sanitized);
+
   // Collapse multiple underscores/dots
   sanitized = sanitized.replace(/_{2,}/g, "_");
   sanitized = sanitized.replace(/\.{2,}/g, ".");
 
   // Trim leading/trailing dots, spaces, underscores
   sanitized = sanitized.replace(/^[.\s_]+|[.\s_]+$/g, "");
+  if (isDotfile && sanitized) {
+    sanitized = `.${sanitized}`;
+  }
 
   if (!sanitized) return "unnamed";
 
