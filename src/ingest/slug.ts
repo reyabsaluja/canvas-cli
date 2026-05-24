@@ -1,4 +1,5 @@
 import path from "node:path";
+import { slugify } from "../sanitize.js";
 
 const COURSES_DIR = ".canvas-cli/courses";
 
@@ -24,12 +25,4 @@ export function getCoursePath(slug: string): string {
  */
 export function getCoursesRoot(): string {
   return path.resolve(process.cwd(), COURSES_DIR);
-}
-
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/-{2,}/g, "-");
 }

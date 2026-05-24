@@ -4,6 +4,7 @@ import path from "node:path";
 import type { AssignmentDetail, Course } from "../domain/models.js";
 import type { Config } from "../config/env.js";
 import { debugFs } from "../debug.js";
+import { sanitizeDocumentSegment } from "../sanitize.js";
 import {
   loadWorkspaceSessionMeta,
   saveWorkspaceSessionMeta,
@@ -152,9 +153,7 @@ async function writeWorkspaceArtifacts(
   const documentsExtracted: string[] = [];
   if (options.state) {
     for (const [source, text] of options.state.extractedTexts) {
-      const safeName = source
-        .replace(/[^a-zA-Z0-9._-]/g, "_")
-        .replace(/__+/g, "_");
+      const safeName = sanitizeDocumentSegment(source);
       const extractedPath = path.join(wsPath, "extracted", `${safeName}.txt`);
       await writeAtomic(extractedPath, text);
       documentsExtracted.push(`${safeName}.txt`);

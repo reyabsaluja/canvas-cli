@@ -1,4 +1,5 @@
 import path from "node:path";
+import { sanitizeDocumentSegment } from "../sanitize.js";
 
 export function getExtractedSyllabusPath(coursePath: string): string {
   return path.join(coursePath, "extracted", "syllabus-body.txt");
@@ -89,6 +90,3 @@ export function getUnpackedZipDir(
   return path.join(coursePath, `${zipLocalPath}.unpacked`);
 }
 
-function sanitizeDocumentSegment(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]/g, "_");
-}

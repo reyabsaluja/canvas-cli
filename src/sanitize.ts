@@ -1,0 +1,161 @@
+import path from "node:path";
+
+const MAX_FILENAME_LENGTH = 200;
+const MAX_SLUG_COMPONENT_LENGTH = 40;
+
+const WINDOWS_RESERVED_NAMES = new Set([
+  "CON", "PRN", "AUX", "NUL",
+  "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+  "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+]);
+
+/**
+ * Sanitize a filename for safe use on all platforms.
+ * Handles: path traversal, Windows reserved names, length limits, control chars,
+ * and invalid filesystem characters. Preserves leading dots for dotfiles.
+ */
+export function sanitizeFilename(name: string): string {
+  if (!name || !name.trim()) return "unnamed";
+
+  // Strip path separators and traversal components
+  let sanitized = path.basename(name);
+
+  // Remove control characters (U+0000-U+001F, U+007F, U+0080-U+009F)
+  sanitized = sanitized.replace(/[\x00-\x1f\x7f-\x9f]/g, "");
+
+  // Remove characters illegal on Windows: < > : " / \ | ? *
+  sanitized = sanitized.replace(/[<>:"/\\|?*]/g, "_");
+
+  // Detect dotfile pattern: single leading dot followed by a non-dot, non-separator char
+  const isDotfile = /^\.[^.\s_]/.test(sanitized);
+
+  // Collapse multiple underscores/dots
+  sanitized = sanitized.replace(/_{2,}/g, "_");
+  sanitized = sanitized.replace(/\.{2,}/g, ".");
+
+  // Trim leading/trailing dots, spaces, underscores
+  sanitized = sanitized.replace(/^[.\s_]+|[.\s_]+$/g, "");
+  if (isDotfile && sanitized) {
+    sanitized = `.${sanitized}`;
+  }
+
+  if (!sanitized) return "unnamed";
+
+  // Check for Windows reserved names (with or without extension)
+  const baseName = sanitized.replace(/\.[^.]*$/, "");
+  if (WINDOWS_RESERVED_NAMES.has(baseName.toUpperCase())) {
+    sanitized = `_${sanitized}`;
+  }
+
+  // Truncate to max length, preserving extension
+  if (sanitized.length > MAX_FILENAME_LENGTH) {
+    const ext = path.extname(sanitized);
+    const stem = sanitized.slice(0, MAX_FILENAME_LENGTH - ext.length);
+    sanitized = stem + ext;
+  }
+
+  return sanitized;
+}
+
+/**
+ * Sanitize a subfolder name. Throws on path traversal attempts (.. segments).
+ * Each segment is sanitized via sanitizeFilename.
+ */
+export function sanitizeSubfolder(name: string): string {
+  const segments = name.split(/[/\\]+/).filter(Boolean);
+  if (segments.length === 0) return "unnamed";
+
+  for (const seg of segments) {
+    if (seg === ".." || seg === ".") {
+      throw new Error(`Path traversal blocked in subfolder: "${name}"`);
+    }
+  }
+
+  return segments
+    .map((seg) => sanitizeFilename(seg))
+    .join(path.sep);
+}
+
+/**
+ * Ensure a resolved file path stays strictly within the expected base directory.
+ * Returns the safe absolute path, or throws if traversal is detected.
+ * Rejects paths that resolve to the base directory itself (callers must provide a child path).
+ *
+ * Note: validation is point-in-time — a symlink race (TOCTOU) between this check and
+ * the subsequent I/O is possible but acceptable for our threat model (Canvas-provided names,
+ * not adversarial local filesystem). Callers needing stronger guarantees should use O_NOFOLLOW.
+ */
+export function confineToDirectory(baseDir: string, untrustedPath: string): string {
+  const resolved = path.resolve(baseDir, untrustedPath);
+  const normalizedBase = path.resolve(baseDir) + path.sep;
+
+  if (!resolved.startsWith(normalizedBase)) {
+    throw new Error(
+      `Path traversal blocked: "${untrustedPath}" escapes the allowed directory`
+    );
+  }
+  return resolved;
+}
+
+/**
+ * Generate a filesystem-safe slug from arbitrary text.
+ * Handles empty strings, all-special-char inputs, and Unicode.
+ */
+export function slugify(text: string): string {
+  if (!text || !text.trim()) return "unnamed";
+
+  const slug = text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+
+  return slug || "unnamed";
+}
+
+/**
+ * Truncate a slug component to the given max length without cutting mid-word
+ * when possible.
+ */
+export function truncateSlug(
+  slug: string,
+  maxLength: number = MAX_SLUG_COMPONENT_LENGTH
+): string {
+  if (slug.length <= maxLength) return slug;
+
+  const truncated = slug.slice(0, maxLength);
+  // Avoid trailing dash from a cut
+  return truncated.replace(/-+$/, "");
+}
+
+/**
+ * Sanitize a document segment (used in extracted file paths).
+ * Replaces any non-alphanumeric, dot, underscore, or dash with underscore.
+ *
+ * Superset of the prior inline `value.replace(/[^a-zA-Z0-9._-]/g, "_")` — additionally
+ * collapses runs of underscores, trims leading/trailing underscores, returns "unnamed"
+ * for empty/all-special inputs, and prefixes Windows reserved names.
+ */
+export function sanitizeDocumentSegment(value: string): string {
+  if (!value || !value.trim()) return "unnamed";
+
+  let sanitized = value.replace(/[^a-zA-Z0-9._-]/g, "_");
+  sanitized = sanitized.replace(/_{2,}/g, "_");
+  sanitized = sanitized.replace(/^_+|_+$/g, "");
+
+  if (!sanitized) return "unnamed";
+
+  if (sanitized.length > MAX_FILENAME_LENGTH) {
+    sanitized = sanitized.slice(0, MAX_FILENAME_LENGTH);
+    sanitized = sanitized.replace(/_+$/, "");
+  }
+
+  // Check Windows reserved names
+  const baseName = sanitized.replace(/\.[^.]*$/, "");
+  if (WINDOWS_RESERVED_NAMES.has(baseName.toUpperCase())) {
+    sanitized = `_${sanitized}`;
+  }
+
+  return sanitized;
+}
+
