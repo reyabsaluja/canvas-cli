@@ -39,7 +39,7 @@ Run canvas-cli <command> --help for detailed usage of each command.
 Run canvas-cli examples for common workflows.`
   );
 
-const SKIP_CREDENTIAL_LOADING = new Set(["login", "logout", "status"]);
+const SKIP_CREDENTIAL_LOADING = new Set(["login", "logout", "status", "examples"]);
 
 program.hook("preAction", (_thisCommand, actionCommand) => {
   const opts = program.opts();
