@@ -79,6 +79,20 @@ describe("runDoctor integration", () => {
     assert.match(output, /timed out/);
   });
 
+  test("reports redirect as SSO failure", async () => {
+    mock.method(globalThis, "fetch", async () => {
+      return new Response(null, {
+        status: 302,
+        headers: { Location: "https://sso.example.edu/login" },
+      });
+    });
+
+    const output = await runDoctor();
+    assert.match(output, /✗ \*\*Canvas API\*\*/);
+    assert.match(output, /Redirected/);
+    assert.match(output, /SSO/);
+  });
+
   test("skips AI provider when not configured", async () => {
     mock.method(globalThis, "fetch", async () => {
       return new Response(JSON.stringify({ name: "User", id: 1 }), {
