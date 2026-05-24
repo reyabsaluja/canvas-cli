@@ -261,7 +261,7 @@ async function checkAIProvider(creds: AIProviderCredentials): Promise<CheckResul
     const needsPost = provider === "anthropic" || provider === "google";
     let body: string | undefined;
     if (provider === "anthropic") {
-      body = JSON.stringify({ model: "_", max_tokens: 1, messages: [] });
+      body = JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1, messages: [{ role: "user", content: "hi" }] });
     } else if (provider === "google") {
       headers["Content-Type"] = "application/json";
       body = JSON.stringify({ contents: [{ parts: [{ text: "hi" }] }] });
@@ -296,8 +296,8 @@ async function checkAIProvider(creds: AIProviderCredentials): Promise<CheckResul
       };
     }
 
-    // Anthropic/Google validate auth before body — a 400 (invalid body) confirms the key works
-    if ((provider === "anthropic" || provider === "google") && response.status === 400) {
+    // Anthropic/Google validate auth before request body — any non-401/403 confirms the key works
+    if ((provider === "anthropic" || provider === "google") && response.status >= 400 && response.status !== 401 && response.status !== 403) {
       return {
         label: "AI provider",
         status: "pass",
