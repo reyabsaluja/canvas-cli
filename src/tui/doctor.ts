@@ -1,7 +1,6 @@
 import { resolveRawConfig, resolveApiUrl } from "../config/env.js";
 import { getAIConfig, type AIProviderName } from "../ai/provider.js";
 import { debug } from "../debug.js";
-import type { Config } from "../config/env.js";
 
 export interface CheckResult {
   label: string;
@@ -53,7 +52,7 @@ export function validateTokenFormat(token: string): CheckResult {
   };
 }
 
-async function checkCanvasConnectivity(config: Config): Promise<CheckResult> {
+async function checkCanvasConnectivity(config: { baseUrl: string; accessToken: string }): Promise<CheckResult> {
   const url = `${config.baseUrl}/users/self`;
   const start = Date.now();
   try {
