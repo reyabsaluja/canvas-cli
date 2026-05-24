@@ -13,6 +13,8 @@ const WINDOWS_RESERVED_NAMES = new Set([
  * Sanitize a filename for safe use on all platforms.
  * Handles: path traversal, Windows reserved names, length limits, control chars,
  * and invalid filesystem characters.
+ *
+ * Note: strips leading dots — not suitable for preserving dotfile names.
  */
 export function sanitizeFilename(name: string): string {
   if (!name || !name.trim()) return "unnamed";
