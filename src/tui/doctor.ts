@@ -1,4 +1,4 @@
-import { resolveRawConfig } from "../config/env.js";
+import { resolveRawConfig, resolveApiUrl } from "../config/env.js";
 import { getAIConfig, type AIProviderName } from "../ai/provider.js";
 import type { Config } from "../config/env.js";
 
@@ -298,11 +298,8 @@ export async function runDoctor(): Promise<string> {
   }
 
   // Check 3: Canvas API connectivity
-  if (token && baseUrl) {
-    const normalized = baseUrl.replace(/\/+$/, "");
-    const apiUrl = normalized.endsWith("/api/v1")
-      ? normalized
-      : `${normalized}/api/v1`;
+  const apiUrl = resolveApiUrl(raw);
+  if (token && apiUrl) {
     results.push(
       await checkCanvasConnectivity({ baseUrl: apiUrl, accessToken: token })
     );

@@ -33,6 +33,15 @@ export function getActiveProfile(): string {
   return process.env.CANVAS_CLI_PROFILE || "default";
 }
 
+export function resolveApiUrl(raw: ResolvedRawConfig): string | undefined {
+  if (!raw.baseUrl) return undefined;
+  if (raw.source === "stored") {
+    const normalized = raw.baseUrl.replace(/\/+$/, "");
+    return normalized.endsWith("/api/v1") ? normalized : `${normalized}/api/v1`;
+  }
+  return raw.baseUrl;
+}
+
 export function isConfigured(): boolean {
   const raw = resolveRawConfig();
   return Boolean(raw.baseUrl && raw.accessToken);
@@ -40,19 +49,7 @@ export function isConfigured(): boolean {
 
 export function loadConfig(): Config {
   const raw = resolveRawConfig();
-
-  // StoredConfig.canvasBaseUrl is saved WITHOUT /api/v1 (normalizeUrl strips it
-  // during login). We append /api/v1 here so the rest of the app gets a ready-to-use
-  // API base URL. If someone manually edits config.json WITH /api/v1, the endsWith
-  // guard prevents double-appending. Env vars are passed through as-is.
-  let baseUrl: string | undefined;
-  if (raw.baseUrl && raw.source === "stored") {
-    const normalized = raw.baseUrl.replace(/\/+$/, "");
-    baseUrl = normalized.endsWith("/api/v1") ? normalized : `${normalized}/api/v1`;
-  } else {
-    baseUrl = raw.baseUrl;
-  }
-
+  const baseUrl = resolveApiUrl(raw);
   const accessToken = raw.accessToken;
 
   if (!baseUrl) {
