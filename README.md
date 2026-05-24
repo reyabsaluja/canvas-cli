@@ -64,7 +64,7 @@ Generated local state is stored under `.canvas-cli/` and ignored by git:
 
 ## Privacy
 
-canvas-cli collects **no telemetry, analytics, or usage data**. There are no external service calls for tracking, no crash reporters, and no "phone home" behaviour of any kind.
+canvas-cli collects **no telemetry, analytics, or usage data**. There are no external service calls for tracking, no crash reporters, and no "phone home" behavior of any kind.
 
 ### What stays on your machine
 
