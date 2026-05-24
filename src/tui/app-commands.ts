@@ -18,6 +18,7 @@ import {
 import { handleLectureQuery } from "./lecture-resources.js";
 import { formatCourseFilesList } from "./format-course-files.js";
 import { formatCourseModulesList } from "./format-course-modules.js";
+import { runDoctor } from "./doctor.js";
 
 export async function handleCommand(
   command: string,
@@ -41,6 +42,12 @@ export async function handleCommand(
 
   if (command === "/login") {
     return { type: "login" };
+  }
+
+  if (command === "/doctor") {
+    const output = await runDoctor();
+    await api.addMessage({ role: "assistant", content: output });
+    return;
   }
 
   if (command === "/model") {
