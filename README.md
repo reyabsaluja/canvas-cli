@@ -72,7 +72,7 @@ All data canvas-cli creates lives in two locations:
 
 | Location | Contents |
 |---|---|
-| `~/.config/canvas-cli/` (or macOS Keychain) | Your Canvas token, AI provider API keys, and profile configuration |
+| `~/.config/canvas-cli/` (respects `$XDG_CONFIG_HOME`; macOS uses Keychain) | Your Canvas token, AI provider API keys, and profile configuration |
 | `.canvas-cli/` (in your project directory) | Ingested course data, assignment workspaces, chat sessions, and extracted documents |
 
 Nothing is sent anywhere except the API providers you explicitly configure.
