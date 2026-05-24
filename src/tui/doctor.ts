@@ -218,7 +218,7 @@ async function checkAIProvider(provider: AIProviderName): Promise<CheckResult> {
       };
     }
 
-    if (response.ok || response.status === 200) {
+    if (response.ok) {
       return {
         label: "AI provider",
         status: "pass",
