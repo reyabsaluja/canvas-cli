@@ -137,7 +137,7 @@ Select "Configure AI provider" when prompted, choose your provider, and paste yo
 | Google / Gemini | Gemini 3.5 Flash | Low | Budget-friendly, fast |
 | AWS Bedrock | Claude Sonnet 4.6 | Mid | Teams already on AWS, no separate API key |
 
-**Typical usage costs ~$0.50–2/month** for a student using AI features a few times per week (as of mid-2025 — check your provider's pricing page for current rates). Costs depend on the model you choose and how often you use `work`, `ask`, and TUI chat. Budget models (Gemini Flash, GPT-5.4 Mini) are significantly cheaper; premium models (Claude Opus, GPT-5.5) cost more but produce higher-quality analysis.
+**Typical usage costs ~$0.50–2/month** for a student using AI features a few times per week (check your provider's pricing page for current rates). Costs depend on the model you choose and how often you use `work`, `ask`, and TUI chat. Budget models (Gemini Flash, GPT-5.4 Mini) are significantly cheaper; premium models (Claude Opus, GPT-5.5) cost more but produce higher-quality analysis.
 
 ### Setting up Anthropic
 
