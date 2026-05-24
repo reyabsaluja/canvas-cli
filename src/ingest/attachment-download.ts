@@ -20,6 +20,7 @@ export async function downloadSelectedAttachments(
   for (const attachment of attachments) {
     const safeSubfolder = sanitizeSubfolder(attachment.subfolder);
     const safeFilename = sanitizeFilename(attachment.filename);
+    // Forward slashes in localPath are intentional — manifest uses POSIX paths regardless of platform
     const subDir = confineToDirectory(attachmentsDir, safeSubfolder);
     await fs.mkdir(subDir, { recursive: true });
 
