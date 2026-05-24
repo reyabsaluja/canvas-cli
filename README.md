@@ -90,6 +90,8 @@ Canvas uses personal access tokens for API authentication. Here's how to generat
 6. Click **Generate Token**
 7. **Copy the token immediately** — it won't be shown again
 
+> **Security:** Treat your token like a password. Do not share it in chat, commit it to git, or post it in issues. If compromised, revoke it immediately in Canvas → Settings → Approved Integrations.
+
 Your Canvas base URL is the root of your institution's Canvas site. Common formats:
 - `https://canvas.university.edu`
 - `https://your-school.instructure.com`
