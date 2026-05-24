@@ -100,13 +100,21 @@ async function checkCanvasConnectivity(config: Config): Promise<CheckResult> {
     }
 
     const elapsed = Date.now() - start;
-    const user = (await response.json()) as { name?: string; id?: number };
     const remaining = response.headers.get("X-Rate-Limit-Remaining");
     const rateInfo = remaining ? ` · rate limit remaining: ${remaining}` : "";
+    let userName = "Unknown";
+    let userId: string | number = "?";
+    try {
+      const user = (await response.json()) as { name?: string; id?: number };
+      if (user.name) userName = user.name;
+      if (user.id != null) userId = user.id;
+    } catch {
+      // Non-JSON response — connection is still valid
+    }
     return {
       label: "Canvas API",
       status: "pass",
-      detail: `Connected as ${user.name ?? "Unknown"} (id: ${user.id ?? "?"}) · ${elapsed}ms${rateInfo}`,
+      detail: `Connected as ${userName} (id: ${userId}) · ${elapsed}ms${rateInfo}`,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
