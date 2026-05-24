@@ -50,10 +50,18 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
 
   const profile = options.profile || "default";
 
-  const titleLine = `${C.whiteBold("canvas-cli")} ${C.dim("·")} ${C.muted("login")}`;
+  const banner = [
+    "░█▀▀░█▀█░█▀█░█░█░█▀█░█▀▀",
+    "░█░░░█▀█░█░█░▀▄▀░█▀█░▀▀█",
+    "░▀▀▀░▀░▀░▀░▀░░▀░░▀░▀░▀▀▀",
+  ];
   const profileLine = profile !== "default" ? `${C.dim("profile:")} ${C.warm(profile)}` : "";
-  const rightLines = [titleLine, profileLine].filter(Boolean);
-  const textStart = 2;
+  const rightLines = [
+    ...banner.map((l) => C.primary(l)),
+    "",
+    C.whiteBold("Login") + (profileLine ? "  " + profileLine : ""),
+  ];
+  const textStart = 1;
 
   const printHeader = () => {
     console.log();
