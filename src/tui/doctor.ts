@@ -348,27 +348,35 @@ export async function runDoctor(): Promise<string> {
       });
       results.push(validateTokenFormat(token));
     }
-
-    // Check 3: Canvas API connectivity
-    const apiUrl = resolveApiUrl(raw);
-    if (token && apiUrl) {
-      results.push(
-        await checkCanvasConnectivity({ baseUrl: apiUrl, accessToken: token })
-      );
-    }
   }
 
-  // Check 4: AI provider
-  let aiConfig: AIProviderConfig | null;
+  // Check 3 & 4: Canvas API + AI provider (run network calls in parallel)
+  const apiUrl = resolveApiUrl(raw);
+  const canvasPromise = baseUrl && token && apiUrl
+    ? checkCanvasConnectivity({ baseUrl: apiUrl, accessToken: token })
+    : null;
+
+  let aiConfig: AIProviderConfig | null = null;
+  let aiConfigError: string | null = null;
   try {
     aiConfig = getAIConfig();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     debug("config", `getAIConfig threw: ${err instanceof Error ? err.stack ?? message : message}`);
+    aiConfigError = message;
+  }
+
+  const aiPromise = aiConfig ? checkAIProvider(aiConfig.provider) : null;
+
+  const [canvasResult, aiResult] = await Promise.all([canvasPromise, aiPromise]);
+
+  if (canvasResult) results.push(canvasResult);
+
+  if (aiConfigError) {
     results.push({
       label: "AI provider",
       status: "fail",
-      detail: `Failed to load AI config: ${message}`,
+      detail: `Failed to load AI config: ${aiConfigError}`,
       fix: "Check your AI provider environment variables and run `canvas-cli login` to reconfigure.",
     });
     return formatResults(profile, results);
@@ -387,7 +395,7 @@ export async function runDoctor(): Promise<string> {
       status: "pass",
       detail: `${aiConfig.provider} · ${aiConfig.model}${aiConfig.effort ? ` · effort: ${aiConfig.effort}` : ""}`,
     });
-    results.push(await checkAIProvider(aiConfig.provider));
+    results.push(aiResult!);
   }
 
   return formatResults(profile, results);
