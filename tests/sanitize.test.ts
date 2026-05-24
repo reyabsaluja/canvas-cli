@@ -115,9 +115,19 @@ test("sanitizeSubfolder sanitizes each path segment independently", () => {
   assert.equal(result, expected);
 });
 
-test("sanitizeSubfolder sanitizes traversal segments to unnamed", () => {
-  assert.equal(sanitizeSubfolder("../secret"), "unnamed/secret");
-  assert.equal(sanitizeSubfolder("../../etc"), "unnamed/unnamed/etc");
+test("sanitizeSubfolder throws on traversal segments", () => {
+  assert.throws(
+    () => sanitizeSubfolder("../secret"),
+    /Path traversal blocked/
+  );
+  assert.throws(
+    () => sanitizeSubfolder("../../etc"),
+    /Path traversal blocked/
+  );
+  assert.throws(
+    () => sanitizeSubfolder("foo/../bar"),
+    /Path traversal blocked/
+  );
 });
 
 test("sanitizeSubfolder handles empty input", () => {
