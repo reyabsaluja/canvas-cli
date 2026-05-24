@@ -52,7 +52,7 @@ The login wizard walks you through:
 2. Pasting your Canvas API access token
 3. Optionally configuring an AI provider for smart features
 
-Credentials are stored securely in `~/.canvas-cli/` and never written to your project directory.
+Credentials are stored securely — on macOS in your system Keychain, otherwise under `~/.config/canvas-cli/`. They are never written to your project directory.
 
 ### 2. Verify your connection
 
