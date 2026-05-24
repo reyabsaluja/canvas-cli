@@ -317,7 +317,20 @@ export async function runDoctor(): Promise<string> {
   }
 
   // Check 4: AI provider
-  const aiConfig = getAIConfig();
+  let aiConfig: ReturnType<typeof getAIConfig>;
+  try {
+    aiConfig = getAIConfig();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    results.push({
+      label: "AI provider",
+      status: "fail",
+      detail: `Failed to load AI config: ${message}`,
+      fix: "Check your AI provider environment variables and run `canvas-cli login` to reconfigure.",
+    });
+    return formatResults(profile, results);
+  }
+
   if (!aiConfig) {
     results.push({
       label: "AI provider",
