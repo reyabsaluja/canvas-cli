@@ -62,6 +62,38 @@ Generated local state is stored under `.canvas-cli/` and ignored by git:
 - `.canvas-cli/courses/`: ingested course data and attachments
 - `.canvas-cli/sessions/`: assignment workspaces, extracted text, notes, and plans
 
+## Privacy
+
+canvas-cli collects **no telemetry, analytics, or usage data**. There are no external service calls for tracking, no crash reporters, and no "phone home" behaviour of any kind.
+
+### What stays on your machine
+
+All data canvas-cli creates lives in two locations:
+
+| Location | Contents |
+|---|---|
+| `~/.config/canvas-cli/` (or macOS Keychain) | Your Canvas token, AI provider API keys, and profile configuration |
+| `.canvas-cli/` (in your project directory) | Ingested course data, assignment workspaces, chat sessions, and extracted documents |
+
+Nothing is sent anywhere except the API providers you explicitly configure.
+
+### What leaves your machine
+
+| Destination | Data sent | When |
+|---|---|---|
+| Your Canvas instance | Canvas API token (in `Authorization` header) | Any command that fetches courses, assignments, or files |
+| AI provider (Anthropic, OpenAI, Google, or AWS Bedrock) | AI API key + prompt content (assignment text, course materials) | Only when using AI features (`work`, `ask`, `show --smart`, TUI chat) |
+
+API keys are sent **only** to their respective providers — your Canvas token is never sent to an AI provider, and AI keys are never sent to Canvas.
+
+### Debug output
+
+The `--debug` flag writes diagnostic info to stderr. All secrets are automatically masked in debug output — tokens, API keys, and credentials are replaced with `***` before being written.
+
+### Future policy
+
+If analytics are ever added, they will be strictly opt-in with clear disclosure before any data is collected.
+
 ## Development
 
 ```bash
