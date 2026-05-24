@@ -268,7 +268,7 @@ async function selectModuleFiles(
         };
       }
 
-      const fetched = await client.getFileSafe(candidate.contentId);
+      const fetched = await client.getFileSafe(candidate.contentId, signal);
       if (!fetched) {
         return null;
       }

@@ -6,6 +6,7 @@ import {
   CanvasRateLimitError,
   CanvasServerError,
   classifyError,
+  isAbortError,
   isNetworkError,
 } from "../errors.js";
 import { debugApiRequest, debugApiResponse, maskUrl } from "../debug.js";
@@ -51,7 +52,7 @@ export class CanvasClient {
     this._skippedEndpoints = [];
   }
 
-  private async fetchPaginated<T>(url: string): Promise<T[]> {
+  private async fetchPaginated<T>(url: string, signal?: AbortSignal | null): Promise<T[]> {
     const results: T[] = [];
     let nextUrl: string | null = url;
 
@@ -60,7 +61,11 @@ export class CanvasClient {
       const start = Date.now();
       let response: Response;
       try {
-        response = await fetchWithRetry(nextUrl, { headers: this.headers }, this.retryOptions);
+        response = await fetchWithRetry(
+          nextUrl,
+          { headers: this.headers, signal: signal ?? undefined },
+          this.retryOptions
+        );
       } catch (err) {
         throw this.toNetworkError(err);
       }
@@ -79,12 +84,16 @@ export class CanvasClient {
     return results;
   }
 
-  private async fetchOne<T>(url: string): Promise<T> {
+  private async fetchOne<T>(url: string, signal?: AbortSignal | null): Promise<T> {
     debugApiRequest("GET", url);
     const start = Date.now();
     let response: Response;
     try {
-      response = await fetchWithRetry(url, { headers: this.headers }, this.retryOptions);
+      response = await fetchWithRetry(
+        url,
+        { headers: this.headers, signal: signal ?? undefined },
+        this.retryOptions
+      );
     } catch (err) {
       throw this.toNetworkError(err);
     }
@@ -129,41 +138,43 @@ export class CanvasClient {
   }
 
   /** Get courses with term and enrollment info for relevance filtering. */
-  async getCourses(): Promise<CanvasCourse[]> {
+  async getCourses(signal?: AbortSignal | null): Promise<CanvasCourse[]> {
     const url = `${this.baseUrl}/courses?per_page=50&include[]=term&include[]=total_students&include[]=enrollments`;
-    return this.fetchPaginated<CanvasCourse>(url);
+    return this.fetchPaginated<CanvasCourse>(url, signal);
   }
 
   /** Get assignments for a course, including submission status. */
-  async getAssignments(courseId: number): Promise<CanvasAssignment[]> {
+  async getAssignments(courseId: number, signal?: AbortSignal | null): Promise<CanvasAssignment[]> {
     const url = `${this.baseUrl}/courses/${courseId}/assignments?per_page=50&include[]=submission`;
-    return this.fetchPaginated<CanvasAssignment>(url);
+    return this.fetchPaginated<CanvasAssignment>(url, signal);
   }
 
   /** Get full detail for a single assignment. */
   async getAssignmentDetail(
     courseId: number,
-    assignmentId: number
+    assignmentId: number,
+    signal?: AbortSignal | null
   ): Promise<CanvasAssignmentDetail> {
     const url = `${this.baseUrl}/courses/${courseId}/assignments/${assignmentId}?include[]=submission&include[]=rubric`;
-    return this.fetchOne<CanvasAssignmentDetail>(url);
+    return this.fetchOne<CanvasAssignmentDetail>(url, signal);
   }
 
   /** Get course detail with syllabus body. */
-  async getCourseDetail(courseId: number): Promise<CanvasCourseDetail> {
+  async getCourseDetail(courseId: number, signal?: AbortSignal | null): Promise<CanvasCourseDetail> {
     const url = `${this.baseUrl}/courses/${courseId}?include[]=syllabus_body&include[]=term`;
-    return this.fetchOne<CanvasCourseDetail>(url);
+    return this.fetchOne<CanvasCourseDetail>(url, signal);
   }
 
   /**
    * Get the course front page (home page) content. Returns null if not available.
    */
-  async getFrontPageSafe(courseId: number): Promise<{ title: string; body: string } | null> {
+  async getFrontPageSafe(courseId: number, signal?: AbortSignal | null): Promise<{ title: string; body: string } | null> {
     try {
       const url = `${this.baseUrl}/courses/${courseId}/front_page`;
-      const page = await this.fetchOne<{ title: string; body: string }>(url);
+      const page = await this.fetchOne<{ title: string; body: string }>(url, signal);
       return page?.body ? page : null;
-    } catch {
+    } catch (err) {
+      if (isAbortError(err)) throw err;
       return null;
     }
   }
@@ -171,12 +182,13 @@ export class CanvasClient {
   /**
    * Get a specific page by slug. Returns null if not accessible.
    */
-  async getPageBySlugSafe(courseId: number, slug: string): Promise<{ title: string; body: string; url: string } | null> {
+  async getPageBySlugSafe(courseId: number, slug: string, signal?: AbortSignal | null): Promise<{ title: string; body: string; url: string } | null> {
     try {
       const url = `${this.baseUrl}/courses/${courseId}/pages/${slug}`;
-      const page = await this.fetchOne<{ title: string; body: string; url: string }>(url);
+      const page = await this.fetchOne<{ title: string; body: string; url: string }>(url, signal);
       return page?.body ? page : null;
-    } catch {
+    } catch (err) {
+      if (isAbortError(err)) throw err;
       return null;
     }
   }
@@ -184,9 +196,9 @@ export class CanvasClient {
   /**
    * Get modules for a course. Returns empty array if modules are disabled/inaccessible.
    */
-  async getModulesSafe(courseId: number): Promise<CanvasModule[]> {
+  async getModulesSafe(courseId: number, signal?: AbortSignal | null): Promise<CanvasModule[]> {
     const url = `${this.baseUrl}/courses/${courseId}/modules?per_page=50`;
-    return this.fetchPaginatedSafe<CanvasModule>(url);
+    return this.fetchPaginatedSafe<CanvasModule>(url, signal);
   }
 
   /**
@@ -194,39 +206,41 @@ export class CanvasClient {
    */
   async getModuleItemsSafe(
     courseId: number,
-    moduleId: number
+    moduleId: number,
+    signal?: AbortSignal | null
   ): Promise<CanvasModuleItem[]> {
     const url = `${this.baseUrl}/courses/${courseId}/modules/${moduleId}/items?per_page=50`;
-    return this.fetchPaginatedSafe<CanvasModuleItem>(url);
+    return this.fetchPaginatedSafe<CanvasModuleItem>(url, signal);
   }
 
   /**
    * Get files for a course. Returns empty array if the Files API is blocked.
    * Some institutions restrict student access to the files endpoint.
    */
-  async getFilesSafe(courseId: number): Promise<CanvasFile[]> {
+  async getFilesSafe(courseId: number, signal?: AbortSignal | null): Promise<CanvasFile[]> {
     const url = `${this.baseUrl}/courses/${courseId}/files?per_page=50`;
-    return this.fetchPaginatedSafe<CanvasFile>(url);
+    return this.fetchPaginatedSafe<CanvasFile>(url, signal);
   }
 
   /**
    * Get pages for a course. Returns empty array if the Pages API is blocked.
    * Some institutions restrict student access to pages.
    */
-  async getPagesSafe(courseId: number): Promise<CanvasPage[]> {
+  async getPagesSafe(courseId: number, signal?: AbortSignal | null): Promise<CanvasPage[]> {
     const url = `${this.baseUrl}/courses/${courseId}/pages?per_page=50`;
-    return this.fetchPaginatedSafe<CanvasPage>(url);
+    return this.fetchPaginatedSafe<CanvasPage>(url, signal);
   }
 
   /**
    * Get a single file's metadata by Canvas file ID.
    * Returns null if the Files API is blocked or file not found.
    */
-  async getFileSafe(fileId: number): Promise<CanvasFile | null> {
+  async getFileSafe(fileId: number, signal?: AbortSignal | null): Promise<CanvasFile | null> {
     try {
       const url = `${this.baseUrl}/files/${fileId}`;
-      return await this.fetchOne<CanvasFile>(url);
-    } catch {
+      return await this.fetchOne<CanvasFile>(url, signal);
+    } catch (err) {
+      if (isAbortError(err)) throw err;
       return null;
     }
   }
@@ -269,20 +283,21 @@ export class CanvasClient {
   /** Get announcements for a course. Returns empty array on access errors. */
   async getAnnouncementsSafe(
     courseId: number,
-    _options?: { startDate?: string; endDate?: string }
+    _options?: { startDate?: string; endDate?: string },
+    signal?: AbortSignal | null
   ): Promise<CanvasDiscussionTopic[]> {
     const params = new URLSearchParams();
     params.set("only_announcements", "true");
     params.set("per_page", "50");
     params.set("order_by", "recent_activity");
     const url = `${this.baseUrl}/courses/${courseId}/discussion_topics?${params.toString()}`;
-    return this.fetchPaginatedSafe<CanvasDiscussionTopic>(url);
+    return this.fetchPaginatedSafe<CanvasDiscussionTopic>(url, signal);
   }
 
   /** Get discussion topics for a course (excludes announcements). Returns empty array on access errors. */
-  async getDiscussionTopicsSafe(courseId: number): Promise<CanvasDiscussionTopic[]> {
+  async getDiscussionTopicsSafe(courseId: number, signal?: AbortSignal | null): Promise<CanvasDiscussionTopic[]> {
     const url = `${this.baseUrl}/courses/${courseId}/discussion_topics?per_page=30&order_by=recent_activity`;
-    const topics = await this.fetchPaginatedSafe<CanvasDiscussionTopic>(url);
+    const topics = await this.fetchPaginatedSafe<CanvasDiscussionTopic>(url, signal);
     return topics.filter((t) => !t.is_announcement);
   }
 
@@ -299,12 +314,14 @@ export class CanvasClient {
   /** Get the full thread view for a discussion topic. Returns null on error. */
   async getDiscussionTopicViewSafe(
     courseId: number,
-    topicId: number
+    topicId: number,
+    signal?: AbortSignal | null
   ): Promise<CanvasDiscussionTopicView | null> {
     try {
       const url = `${this.baseUrl}/courses/${courseId}/discussion_topics/${topicId}/view?include_new_entries=1`;
-      return await this.fetchOne<CanvasDiscussionTopicView>(url);
-    } catch {
+      return await this.fetchOne<CanvasDiscussionTopicView>(url, signal);
+    } catch (err) {
+      if (isAbortError(err)) throw err;
       return null;
     }
   }
@@ -314,9 +331,9 @@ export class CanvasClient {
    * Used for endpoints that may be blocked or temporarily unavailable — after retries
    * are exhausted, we prefer partial data over crashing the entire ingest.
    */
-  private async fetchPaginatedSafe<T>(url: string): Promise<T[]> {
+  private async fetchPaginatedSafe<T>(url: string, signal?: AbortSignal | null): Promise<T[]> {
     try {
-      return await this.fetchPaginated<T>(url);
+      return await this.fetchPaginated<T>(url, signal);
     } catch (err) {
       if (err instanceof CanvasCliError && err.kind !== "network" && err.kind !== "unknown") {
         this._skippedEndpoints.push(url);
