@@ -163,6 +163,7 @@ interface AIProviderCredentials {
   region?: string;
 }
 
+// Keep envKey values in sync with src/config/load-credentials-to-env.ts
 const AI_ENDPOINTS: Record<AIProviderName, { url: string; headerKey: string; envKey: string }> = {
   openai: {
     url: "https://api.openai.com/v1/models",
