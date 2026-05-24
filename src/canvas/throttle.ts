@@ -39,8 +39,10 @@ export class RateLimitThrottle {
 
   async throttleIfNeeded(signal?: AbortSignal | null): Promise<void> {
     if (this.remaining !== null && this.remaining < this.threshold) {
-      this.log(`Rate limit low (${this.remaining} remaining), throttling ${this.delayMs}ms...`);
-      await this.sleepFn(this.delayMs, signal);
+      const ratio = Math.max(0, 1 - this.remaining / this.threshold);
+      const delay = Math.ceil(this.delayMs * (1 + ratio * 3));
+      this.log(`Rate limit low (${this.remaining} remaining), throttling ${delay}ms...`);
+      await this.sleepFn(delay, signal);
     }
   }
 
