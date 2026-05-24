@@ -1,6 +1,7 @@
 export { CanvasApiError } from "./errors.js";
-export { RateLimitThrottle, THROTTLE_THRESHOLD, THROTTLE_DELAY_MS } from "./throttle.js";
-import type { RateLimitThrottle } from "./throttle.js";
+export { THROTTLE_THRESHOLD, THROTTLE_DELAY_MS } from "./throttle.js";
+import { RateLimitThrottle } from "./throttle.js";
+export { RateLimitThrottle };
 
 export const DEFAULT_MAX_RETRIES = 3;
 export const DEFAULT_BASE_DELAY_MS = 1000;
