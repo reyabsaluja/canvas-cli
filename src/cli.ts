@@ -119,6 +119,12 @@ Examples:
 program
   .command("examples")
   .description("Show common workflows and usage patterns")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ canvas-cli examples              Print categorized usage patterns and workflows`
+  )
   .action(examplesCommand);
 
 program
