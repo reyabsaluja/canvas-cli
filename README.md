@@ -238,7 +238,7 @@ Set interactively with `/model effort` in the TUI. Google/Gemini does not suppor
 
 ### Auto-detection fallback
 
-If you set an API key without specifying `AI_PROVIDER`, canvas-cli auto-detects the provider from whichever key is present (checking Anthropic, then OpenAI, then Google in that order). Explicit `AI_PROVIDER` is recommended to avoid ambiguity if you have multiple keys set.
+If you set an API key without specifying `AI_PROVIDER`, canvas-cli auto-detects the provider from whichever key is present (checking Anthropic, then OpenAI, then Google in that order). Bedrock is never auto-detected — you must set `AI_PROVIDER=bedrock` explicitly. Explicit `AI_PROVIDER` is recommended to avoid ambiguity if you have multiple keys set.
 
 ## Troubleshooting
 
