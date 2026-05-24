@@ -209,7 +209,7 @@ Each provider has a sensible default, but you can override it with `AI_MODEL`:
 ```bash
 AI_MODEL=claude-opus-4-7        # use Anthropic's most capable model
 AI_MODEL=gpt-5.5                # use OpenAI's most capable model
-AI_MODEL=gemini-2.5-pro         # use Google's legacy reasoning model
+AI_MODEL=gemini-3.1-pro-preview # use Google's reasoning model
 ```
 
 Available models per provider:
