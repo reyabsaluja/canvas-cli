@@ -11,3 +11,4 @@ canvas.webp
 canvas.txt
 .video/
 .env.bak
+package-lock.json
