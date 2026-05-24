@@ -239,7 +239,7 @@ export class CanvasClient {
       const response = await fetchWithRetry(downloadUrl, {
         headers: this.headers,
         redirect: "follow",
-      }, { ...this.retryOptions, requestTimeoutMs: 60_000, throttle: this.throttle });
+      }, { ...this.retryOptions, requestTimeoutMs: 60_000 });
       if (!response.ok) return null;
       return Buffer.from(await response.arrayBuffer());
     } catch {
