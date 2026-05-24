@@ -23,7 +23,7 @@ test("integration: CLI exits with structured error output", async (t) => {
 
   await t.test("invalid token exits with code 1 and shows auth error", async () => {
     try {
-      await execFileAsync("node", [CLI_PATH, "courses"], {
+      await execFileAsync("node", [CLI_PATH, "ingest", "CS101"], {
         env: {
           ...baseEnv,
           CANVAS_BASE_URL: `http://127.0.0.1:${port}/api/v1`,
@@ -41,7 +41,7 @@ test("integration: CLI exits with structured error output", async (t) => {
 
   await t.test("missing config exits with code 2 and shows config error", async () => {
     try {
-      await execFileAsync("node", [CLI_PATH, "courses"], {
+      await execFileAsync("node", [CLI_PATH, "ingest", "CS101"], {
         env: {
           ...baseEnv,
           CANVAS_BASE_URL: "",
