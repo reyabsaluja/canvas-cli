@@ -10,10 +10,10 @@
 
 ## Major Runtime Flows
 
-### 1. Course and assignment browsing
+### 1. Entry and setup
 
-- `src/cli.ts` registers the command surface and launches the TUI by default.
-- `src/commands/` contains thin command handlers.
+- `src/cli.ts` registers the setup commands (`login`, `logout`, `status`, `ingest`) and launches the TUI by default.
+- `src/commands/` contains thin command handlers for setup operations.
 - `src/canvas/` handles Canvas API communication.
 - `src/domain/` normalizes and resolves courses and assignments for user-facing workflows.
 
@@ -37,7 +37,7 @@
 ### 5. Interactive terminal UI
 
 - `src/tui/` owns the interactive application, picker screens, workspace UI, and terminal input parsing.
-- The TUI is a presentation layer over the same service and workspace flows exposed by commands.
+- The TUI is the primary interface — all course browsing, assignment interaction, and AI features are accessed through it.
 
 ## Source Responsibility Map
 
@@ -46,7 +46,7 @@
 | `src/ai/` | AI provider setup, prompting, parsing, and shared AI types |
 | `src/ask/` | Retrieval and answer generation for prepared workspaces |
 | `src/canvas/` | Canvas API client and remote types |
-| `src/commands/` | CLI command entrypoints |
+| `src/commands/` | Setup CLI entrypoints (`login`, `logout`, `status`, `ingest`) and TUI-invoked flows (`model`) |
 | `src/config/` | Environment loading and runtime configuration |
 | `src/domain/` | Core models, matching, normalization, ranking, and resolution |
 | `src/enrich/` | Deterministic enrichment from cached course artifacts |
@@ -59,7 +59,7 @@
 
 ## Design Principles
 
-- Keep command handlers thin and push reusable logic into domain modules.
+- Keep setup command handlers thin and push reusable logic into domain modules.
 - Prefer deterministic data preparation before AI synthesis.
 - Treat `.canvas-cli/` as generated local state, not source-controlled content.
 - Keep the TUI isolated from Canvas-specific logic where possible so workflows stay testable.
