@@ -222,13 +222,12 @@ async function checkAIProvider(provider: AIProviderName): Promise<CheckResult> {
         headers[ep.headerKey] = `Bearer ${key}`;
         break;
       case "google":
+        headers[ep.headerKey] = key;
         break;
     }
 
-    // Google's discovery endpoint only supports key-as-query-param auth.
-    // The key may appear in local proxy logs — acceptable since the user is explicitly validating their own key.
     const response = await fetch(
-      provider === "google" ? `${ep.url}?key=${key}` : ep.url,
+      ep.url,
       {
         method: provider === "anthropic" ? "POST" : "GET",
         headers,
