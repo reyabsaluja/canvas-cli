@@ -79,6 +79,8 @@ export function loadConfig(): Config {
       "Canvas access token is not configured.",
       "Run `canvas-cli login` to set up, or set CANVAS_ACCESS_TOKEN in your environment."
     );
+  } else if (raw.credentialError) {
+    debug("config", `Credential store error (using env fallback): ${raw.credentialError.message}`);
   }
 
   debug("config", `CANVAS_BASE_URL: ${baseUrl.replace(/\/+$/, "")}`);
