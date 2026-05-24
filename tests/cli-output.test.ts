@@ -43,7 +43,7 @@ test("examples command exits cleanly and shows workflows", () => {
 test("login --help includes examples section", () => {
   const output = run(["login", "--help"]);
   assert.ok(output.includes("Examples:"));
-  assert.ok(output.includes("Guided setup"));
+  assert.ok(output.includes("Guided setup for Canvas URL"));
 });
 
 test("logout --help includes examples section", () => {
