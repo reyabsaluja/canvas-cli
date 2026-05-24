@@ -48,7 +48,6 @@ import {
 } from "../src/ask/load-workspace.js";
 import { listWorkspaces } from "../src/ask/resolve-workspace.js";
 import {
-  createWorkspace,
   createWorkWorkspace,
 } from "../src/workspace/create.js";
 import {
@@ -717,8 +716,9 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     assert.deepEqual(nextScope, { type: "course", courseId: 17 });
   });
 
-  await t.test("workspace base and work flows share one writer and metadata contract", async () => {
-    await withTempCwd(async (tempDir) => {
+  await t.test("workspace work flow writes metadata and extracted content", async () => {
+    await withTempCwd(async (rawTempDir) => {
+      const tempDir = await fs.realpath(rawTempDir);
       const course: Course = {
         id: 17,
         name: "ECE243",
@@ -749,10 +749,6 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
         description: null,
         attachments: [],
       };
-
-      const baseResult = await createWorkspace(detail as any, course, {
-        accessToken: "token",
-      } as any);
 
       const workup = {
         overview: "Complete lab 4.",
@@ -792,13 +788,13 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
         } as any
       );
 
-      assert.equal(workResult.workspacePath, baseResult.workspacePath);
       const workspacePath = path.join(
         tempDir,
         ".canvas-cli",
         "sessions",
         "ece243h1-lab-4-42"
       );
+      assert.equal(workResult.workspacePath, workspacePath);
       const meta = await loadWorkspaceSessionMeta(workspacePath);
       assert.ok(meta);
       assert.equal(meta?.assignmentId, 42);

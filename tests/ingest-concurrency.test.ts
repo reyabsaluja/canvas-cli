@@ -93,6 +93,8 @@ test("fetchCourseContent uses bounded concurrency for module items and page bodi
         url: slug,
       };
     },
+    skippedEndpoints: [] as string[],
+    resetSkippedEndpoints() {},
   } as any;
 
   const result = await fetchCourseContent(client, 17);
@@ -168,6 +170,8 @@ test("ingestCourse captures page bodies from the Pages index even when no other 
           url: slug,
         };
       },
+      skippedEndpoints: [] as string[],
+    resetSkippedEndpoints() {},
     } as any;
 
     const result = await ingestCourse(
@@ -305,6 +309,8 @@ test("ingestCourse crawls announcement and linked-page content into the cache", 
         async getPageBySlugSafe(_courseId: number, slug: string) {
           return pageBodies.get(slug) ?? null;
         },
+        skippedEndpoints: [] as string[],
+    resetSkippedEndpoints() {},
       } as any;
 
       const result = await ingestCourse(
@@ -436,6 +442,8 @@ test("ingestCourse stores assignment descriptions as rich extracted documents", 
       async getPageBySlugSafe() {
         return null;
       },
+      skippedEndpoints: [] as string[],
+    resetSkippedEndpoints() {},
     } as any;
 
     const result = await ingestCourse(
@@ -563,6 +571,8 @@ test("ingestCourse enriches assignment extracts with rubric criteria from assign
       async getPageBySlugSafe() {
         return null;
       },
+      skippedEndpoints: [] as string[],
+    resetSkippedEndpoints() {},
     } as any;
 
     const result = await ingestCourse(
@@ -720,6 +730,8 @@ test("ingestCourse captures discussion thread clarifications and linked resource
         async getPageBySlugSafe(_courseId: number, slug: string) {
           return pageBodies.get(slug) ?? null;
         },
+        skippedEndpoints: [] as string[],
+    resetSkippedEndpoints() {},
       } as any;
 
       const result = await ingestCourse(
@@ -895,6 +907,8 @@ test("ingestCourse captures external resources linked from course content and mo
         async getPageBySlugSafe() {
           return null;
         },
+        skippedEndpoints: [] as string[],
+    resetSkippedEndpoints() {},
       } as any;
 
       const result = await ingestCourse(
@@ -1061,6 +1075,8 @@ test("ingestCourse exports shared Google Docs links to readable text", async () 
         async getPageBySlugSafe() {
           return null;
         },
+        skippedEndpoints: [] as string[],
+    resetSkippedEndpoints() {},
       } as any;
 
       const result = await ingestCourse(
@@ -1188,6 +1204,8 @@ test("ingestCourse uses bounded concurrency for fallback module file metadata fe
             folder_id: null,
           };
         },
+        skippedEndpoints: [] as string[],
+    resetSkippedEndpoints() {},
       } as any;
 
       const result = await ingestCourse(
