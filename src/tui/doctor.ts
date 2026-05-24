@@ -175,7 +175,7 @@ const AI_ENDPOINTS: Record<AIProviderName, { url: string; headerKey: string; env
     envKey: "ANTHROPIC_API_KEY",
   },
   google: {
-    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:countTokens",
+    url: "https://generativelanguage.googleapis.com/v1beta/models",
     headerKey: "x-goog-api-key",
     envKey: "GOOGLE_API_KEY",
   },
@@ -258,13 +258,10 @@ async function checkAIProvider(creds: AIProviderCredentials): Promise<CheckResul
         break;
     }
 
-    const needsPost = provider === "anthropic" || provider === "google";
+    const needsPost = provider === "anthropic";
     let body: string | undefined;
     if (provider === "anthropic") {
       body = JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1, messages: [{ role: "user", content: "hi" }] });
-    } else if (provider === "google") {
-      headers["Content-Type"] = "application/json";
-      body = JSON.stringify({ contents: [{ parts: [{ text: "hi" }] }] });
     }
 
     const response = await fetch(
@@ -296,8 +293,8 @@ async function checkAIProvider(creds: AIProviderCredentials): Promise<CheckResul
       };
     }
 
-    // Anthropic/Google validate auth before request body — any non-401/403 confirms the key works
-    if ((provider === "anthropic" || provider === "google") && response.status >= 400 && response.status !== 401 && response.status !== 403) {
+    // Anthropic validates auth before request body — any non-401/403 confirms the key works
+    if (provider === "anthropic" && response.status >= 400 && response.status !== 401 && response.status !== 403) {
       return {
         label: "AI provider",
         status: "pass",
