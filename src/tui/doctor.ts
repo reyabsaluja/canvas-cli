@@ -301,7 +301,7 @@ export async function runDoctor(): Promise<string> {
     });
   } else {
     results.push({
-      label: "AI model",
+      label: "AI config",
       status: "pass",
       detail: `${aiConfig.provider} · ${aiConfig.model}${aiConfig.effort ? ` · effort: ${aiConfig.effort}` : ""}`,
     });
