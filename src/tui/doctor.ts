@@ -251,11 +251,11 @@ async function checkAIProvider(provider: AIProviderName): Promise<CheckResult> {
 
 export async function runDoctor(): Promise<string> {
   const raw = resolveRawConfig();
-  const { profile, baseUrl, accessToken: token, source: configSource } = raw;
+  const { profile, baseUrl, accessToken: token, urlSource } = raw;
   const results: CheckResult[] = [];
 
   // Check 1: Configuration source
-  if (!baseUrl && !configSource) {
+  if (!baseUrl && !urlSource) {
     results.push({
       label: "Configuration",
       status: "fail",
@@ -265,7 +265,7 @@ export async function runDoctor(): Promise<string> {
     return formatResults(profile, results);
   }
 
-  if (configSource === "env") {
+  if (urlSource === "env") {
     results.push({
       label: "Configuration",
       status: "pass",
