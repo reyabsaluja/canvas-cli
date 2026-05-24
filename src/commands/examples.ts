@@ -2,8 +2,8 @@ export function examplesCommand(): void {
   console.log(`canvas-cli — Common Workflows
 
 Getting Started:
-  $ canvas-cli login                   Interactive setup wizard
-  $ canvas-cli status                  Verify everything is configured correctly
+  $ canvas-cli login   Interactive setup wizard
+  $ canvas-cli status  Verify everything is configured correctly
 
 Working with Courses:
   $ canvas-cli ingest CS101            Cache course content locally
@@ -11,8 +11,8 @@ Working with Courses:
   $ canvas-cli ingest CS101 --json     Get structured output for scripting
 
 Using the Interactive TUI:
-  $ canvas-cli                         Launch the full interactive interface
-                                       (Browse courses, read content, ask AI questions)
+  $ canvas-cli  Launch the full interactive interface
+                (Browse courses, read content, ask AI questions)
 
 Managing Multiple Accounts:
   $ canvas-cli login --profile school  Set up school account
@@ -21,6 +21,6 @@ Managing Multiple Accounts:
   $ export CANVAS_CLI_PROFILE=work     Switch active profile
 
 Debugging:
-  $ canvas-cli --debug ingest CS101    Show verbose debug output
-  $ canvas-cli status                  Check if credentials are valid`);
+  $ canvas-cli --debug ingest CS101  Show verbose debug output
+  $ canvas-cli status                Check if credentials are valid`);
 }

@@ -64,8 +64,8 @@ program
     "after",
     `
 Examples:
-  $ canvas-cli login                Guided setup for Canvas URL, token, and AI provider
-  $ canvas-cli login --profile work Configure a separate profile for a work account`
+  $ canvas-cli login                 Guided setup for Canvas URL, token, and AI provider
+  $ canvas-cli login --profile work  Configure a separate profile for a work account`
   )
   .action(loginCommand);
 
@@ -77,8 +77,8 @@ program
     "after",
     `
 Examples:
-  $ canvas-cli logout                Remove the default profile's credentials
-  $ canvas-cli logout --profile work Remove only the "work" profile`
+  $ canvas-cli logout                 Remove the default profile's credentials
+  $ canvas-cli logout --profile work  Remove only the "work" profile`
   )
   .action(logoutCommand);
 
@@ -90,8 +90,8 @@ program
     "after",
     `
 Examples:
-  $ canvas-cli status                Show active profile, Canvas URL, and token status
-  $ canvas-cli status --profile work Inspect the "work" profile configuration`
+  $ canvas-cli status                 Show active profile, Canvas URL, and token status
+  $ canvas-cli status --profile work  Inspect the "work" profile configuration`
   )
   .action(statusCommand);
 
@@ -110,10 +110,10 @@ program
     "after",
     `
 Examples:
-  $ canvas-cli ingest CS101           Download modules, pages, and files for CS101
-  $ canvas-cli ingest "Intro to"      Match by partial course name
-  $ canvas-cli ingest CS101 --refresh Re-download even if already cached
-  $ canvas-cli ingest CS101 --json    Output JSON for scripting or piping`
+  $ canvas-cli ingest CS101            Download modules, pages, and files for CS101
+  $ canvas-cli ingest "Intro to"       Match by partial course name
+  $ canvas-cli ingest CS101 --refresh  Re-download even if already cached
+  $ canvas-cli ingest CS101 --json     Output JSON for scripting or piping`
   )
   .action(ingestCourseCommand);
 
