@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
@@ -10,10 +10,12 @@ const cliPath = resolve(__dirname, "../src/cli.ts");
 const pkgPath = resolve(__dirname, "../package.json");
 const expectedVersion = JSON.parse(readFileSync(pkgPath, "utf-8")).version;
 
-function run(args: string[]): string {
-  return execFileSync("node", ["--import", "tsx", cliPath, ...args], {
+function run(args: string[]) {
+  const result = spawnSync("node", ["--import", "tsx", cliPath, ...args], {
     encoding: "utf-8",
-  }).trim();
+  });
+  assert.equal(result.status, 0, `"canvas-cli ${args.join(" ")}" exited with code ${result.status}`);
+  return result.stdout.trim();
 }
 
 test("--version prints the package.json version", () => {
@@ -27,11 +29,7 @@ test("-V prints the package.json version", () => {
 });
 
 test("examples command exits cleanly and shows workflows", () => {
-  const result = spawnSync("node", ["--import", "tsx", cliPath, "examples"], {
-    encoding: "utf-8",
-  });
-  assert.equal(result.status, 0, "examples command should exit with code 0");
-  const output = result.stdout.trim();
+  const output = run(["examples"]);
   assert.ok(output.includes("Common Workflows"));
   assert.ok(output.includes("canvas-cli login"));
   assert.ok(output.includes("canvas-cli ingest"));
