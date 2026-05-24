@@ -67,14 +67,15 @@ export function sanitizeSubfolder(name: string): string {
 }
 
 /**
- * Ensure a resolved file path stays within the expected base directory.
+ * Ensure a resolved file path stays strictly within the expected base directory.
  * Returns the safe absolute path, or throws if traversal is detected.
+ * Rejects paths that resolve to the base directory itself (callers must provide a child path).
  */
 export function confineToDirectory(baseDir: string, untrustedPath: string): string {
   const resolved = path.resolve(baseDir, untrustedPath);
   const normalizedBase = path.resolve(baseDir) + path.sep;
 
-  if (!resolved.startsWith(normalizedBase) && resolved !== path.resolve(baseDir)) {
+  if (!resolved.startsWith(normalizedBase)) {
     throw new Error(
       `Path traversal blocked: "${untrustedPath}" resolves outside "${baseDir}"`
     );
