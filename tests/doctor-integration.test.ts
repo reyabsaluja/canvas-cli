@@ -19,6 +19,7 @@ describe("runDoctor integration", () => {
   beforeEach(() => {
     process.env.CANVAS_BASE_URL = "https://canvas.example.edu/api/v1";
     process.env.CANVAS_ACCESS_TOKEN = "12345~AbcDef";
+    process.env.CANVAS_CLI_PROFILE = "doctor-integration-test";
     delete process.env.OPENAI_API_KEY;
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.GOOGLE_API_KEY;
