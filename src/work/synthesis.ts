@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { AssignmentDetail, Course } from "../domain/models.js";
 import type { EnrichmentSummary } from "../enrich/types.js";
+import { sanitizeDocumentSegment } from "../sanitize.js";
 import type {
   AssignmentWorkup,
   InvestigationState,
@@ -136,7 +137,7 @@ async function persistFailedSynthesisResponses(
     const dir = path.join(coursePath, "debug", "synthesis-failures");
     await fs.mkdir(dir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const safeName = String(detail.id ?? "assignment").replace(/[^a-zA-Z0-9._-]/g, "_");
+    const safeName = sanitizeDocumentSegment(String(detail.id ?? "assignment"));
     const filePath = path.join(dir, `${stamp}-${safeName}.txt`);
     const body = [
       `Assignment: ${detail.name} (${detail.id})`,

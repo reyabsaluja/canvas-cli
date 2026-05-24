@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Config } from "../config/env.js";
+import { sanitizeFilename, confineToDirectory } from "../sanitize.js";
 
 export interface LinkedFile {
   title: string;
@@ -109,7 +110,8 @@ export async function downloadAttachments(
   const failed: string[] = [];
 
   for (const file of files) {
-    const filePath = path.join(attachmentsDir, file.title);
+    const safeName = sanitizeFilename(file.title);
+    const filePath = confineToDirectory(attachmentsDir, safeName);
 
     // Skip if already downloaded
     try {
