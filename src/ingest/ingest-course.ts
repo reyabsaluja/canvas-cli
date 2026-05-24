@@ -44,13 +44,14 @@ export async function ingestCourse(
   course: Course,
   client: CanvasClient,
   config: Config,
-  options: { refresh: boolean }
+  options: { refresh: boolean; signal?: AbortSignal | null }
 ): Promise<IngestionResult> {
+  const signal = options.signal ?? null;
   const slug = makeCourseSlug(course.courseCode, course.id);
   const coursePath = getCoursePath(slug);
 
   // Step 1: Fetch raw content from Canvas
-  const raw = await fetchCourseContent(client, course.id);
+  const raw = await fetchCourseContent(client, course.id, signal);
 
   // Step 2: Normalize
   const {
@@ -84,7 +85,8 @@ export async function ingestCourse(
     modules,
     files,
     heuristicAttachments,
-    client
+    client,
+    signal
   );
 
   // Step 5b: Also download files linked in assignment descriptions
@@ -131,7 +133,8 @@ export async function ingestCourse(
   const attachmentResults = await downloadSelectedAttachments(
     allSelected,
     attachmentsDir,
-    config
+    config,
+    signal
   );
 
   // Step 7: Discover lectures from module items, front page, and fetched pages
@@ -218,7 +221,8 @@ async function selectModuleFiles(
   modules: ModuleIndexEntry[],
   files: FileIndexEntry[],
   alreadySelected: SelectedAttachment[],
-  client: CanvasClient
+  client: CanvasClient,
+  signal?: AbortSignal | null
 ): Promise<SelectedAttachment[]> {
   const selected: SelectedAttachment[] = [];
   const alreadySelectedIds = new Set(
@@ -264,7 +268,7 @@ async function selectModuleFiles(
         };
       }
 
-      const fetched = await client.getFileSafe(candidate.contentId);
+      const fetched = await client.getFileSafe(candidate.contentId, signal);
       if (!fetched) {
         return null;
       }
@@ -283,7 +287,8 @@ async function selectModuleFiles(
         modName: candidate.modName,
         itemTitle: candidate.itemTitle,
       };
-    }
+    },
+    signal
   );
 
   for (const entry of resolved) {

@@ -49,7 +49,8 @@ const ASSIGNMENT_DETAIL_CONCURRENCY = 4;
  */
 export async function fetchCourseContent(
   client: CanvasClient,
-  courseId: number
+  courseId: number,
+  signal?: AbortSignal | null
 ): Promise<RawCourseContent> {
   const warnings: string[] = [];
   client.resetSkippedEndpoints();
@@ -58,8 +59,8 @@ export async function fetchCourseContent(
   let courseDetail, assignmentSummaries;
   try {
     [courseDetail, assignmentSummaries] = await Promise.all([
-      client.getCourseDetail(courseId),
-      client.getAssignments(courseId),
+      client.getCourseDetail(courseId, signal),
+      client.getAssignments(courseId, signal),
     ]);
   } catch (err) {
     throw new Error(
@@ -68,20 +69,22 @@ export async function fetchCourseContent(
   }
 
   const announcementFetcher = (client as CanvasClient & {
-    getAnnouncementsSafe?: (courseId: number) => Promise<CanvasDiscussionTopic[]>;
+    getAnnouncementsSafe?: (courseId: number, _options?: unknown, signal?: AbortSignal | null) => Promise<CanvasDiscussionTopic[]>;
   }).getAnnouncementsSafe;
   const assignmentDetailsPromise = enrichAssignmentsWithDetails(
     client,
     courseId,
-    assignmentSummaries
+    assignmentSummaries,
+    signal
   );
   const discussionFetcher = (client as CanvasClient & {
-    getDiscussionTopicsSafe?: (courseId: number) => Promise<CanvasDiscussionTopic[]>;
+    getDiscussionTopicsSafe?: (courseId: number, signal?: AbortSignal | null) => Promise<CanvasDiscussionTopic[]>;
   }).getDiscussionTopicsSafe;
   const discussionViewFetcher = (client as CanvasClient & {
     getDiscussionTopicViewSafe?: (
       courseId: number,
-      topicId: number
+      topicId: number,
+      signal?: AbortSignal | null
     ) => Promise<CanvasDiscussionTopicView | null>;
   }).getDiscussionTopicViewSafe;
   const [
@@ -94,16 +97,16 @@ export async function fetchCourseContent(
     assignmentDetailResult,
   ] =
     await Promise.all([
-      client.getModulesSafe(courseId),
-      client.getFilesSafe(courseId),
-      client.getPagesSafe(courseId),
+      client.getModulesSafe(courseId, signal),
+      client.getFilesSafe(courseId, signal),
+      client.getPagesSafe(courseId, signal),
       announcementFetcher
-        ? announcementFetcher.call(client, courseId)
+        ? announcementFetcher.call(client, courseId, undefined, signal)
         : Promise.resolve([]),
       discussionFetcher
-        ? discussionFetcher.call(client, courseId)
+        ? discussionFetcher.call(client, courseId, signal)
         : Promise.resolve([]),
-      client.getFrontPageSafe(courseId),
+      client.getFrontPageSafe(courseId, signal),
       assignmentDetailsPromise,
     ]);
   const assignments = assignmentDetailResult.assignments;
@@ -115,9 +118,10 @@ export async function fetchCourseContent(
     rawModules,
     MODULE_ITEMS_CONCURRENCY,
     async (mod) => {
-      const items = await client.getModuleItemsSafe(courseId, mod.id);
+      const items = await client.getModuleItemsSafe(courseId, mod.id, signal);
       return { ...mod, items };
-    }
+    },
+    signal
   );
 
   if (files.length === 0 && rawModules.length > 0) {
@@ -150,13 +154,14 @@ export async function fetchCourseContent(
         discussions,
         DISCUSSION_VIEW_CONCURRENCY,
         async (topic) => {
-          const view = await discussionViewFetcher.call(client, courseId, topic.id);
+          const view = await discussionViewFetcher.call(client, courseId, topic.id, signal);
           return {
             topic,
             entries: flattenDiscussionEntries(view),
             participantCount: view?.participants.length ?? 0,
           };
-        }
+        },
+        signal
       )
     : discussions.map((topic) => ({
         topic,
@@ -234,17 +239,21 @@ export async function fetchCourseContent(
   }
 
   while (pendingSlugs.length > 0) {
+    if (signal?.aborted) {
+      throw signal.reason ?? new DOMException("Aborted", "AbortError");
+    }
     const batch = pendingSlugs.splice(0, pendingSlugs.length);
     const batchResults = await mapWithConcurrency(
       batch,
       PAGE_BODY_CONCURRENCY,
       async (slug) => {
-        const page = await client.getPageBySlugSafe(courseId, slug);
+        const page = await client.getPageBySlugSafe(courseId, slug, signal);
         if (!page?.body) {
           return null;
         }
         return { slug, title: page.title, body: page.body };
-      }
+      },
+      signal
     );
 
     for (const page of batchResults) {
@@ -271,12 +280,14 @@ export async function fetchCourseContent(
 async function enrichAssignmentsWithDetails(
   client: CanvasClient,
   courseId: number,
-  assignments: CanvasAssignment[]
+  assignments: CanvasAssignment[],
+  signal?: AbortSignal | null
 ): Promise<{ assignments: RawAssignmentRecord[]; warning: string | null }> {
   const detailFetcher = (client as CanvasClient & {
     getAssignmentDetail?: (
       courseId: number,
-      assignmentId: number
+      assignmentId: number,
+      signal?: AbortSignal | null
     ) => Promise<CanvasAssignmentDetail>;
   }).getAssignmentDetail;
 
@@ -290,13 +301,14 @@ async function enrichAssignmentsWithDetails(
     ASSIGNMENT_DETAIL_CONCURRENCY,
     async (assignment) => {
       try {
-        const detail = await detailFetcher.call(client, courseId, assignment.id);
+        const detail = await detailFetcher.call(client, courseId, assignment.id, signal);
         return { ...assignment, ...detail };
       } catch {
         failedDetails += 1;
         return assignment;
       }
-    }
+    },
+    signal
   );
 
   return {
