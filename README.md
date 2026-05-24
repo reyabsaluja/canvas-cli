@@ -122,7 +122,7 @@ Select "Configure AI provider" when prompted, choose your provider, and paste yo
 | `canvas-cli show assignment` | No | Direct Canvas API |
 | `canvas-cli show assignment --smart` | **Yes** | AI-powered assignment overview |
 | `canvas-cli ingest` | No | Downloads and caches locally |
-| `canvas-cli do` | No | Creates workspace structure without AI |
+| `canvas-cli do` | No | Scaffolds assignment workspace (no AI needed) |
 | `canvas-cli work` | **Yes** | AI investigation agent |
 | `canvas-cli ask` | **Yes** | AI-grounded Q&A |
 | TUI conversational mode | **Yes** | AI chat in all scopes |
