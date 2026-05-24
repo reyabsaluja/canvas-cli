@@ -1,3 +1,4 @@
+// Tests that patch globalThis.fetch must run sequentially — do not add { concurrency: true }.
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
