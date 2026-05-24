@@ -49,7 +49,8 @@ const ASSIGNMENT_DETAIL_CONCURRENCY = 4;
  */
 export async function fetchCourseContent(
   client: CanvasClient,
-  courseId: number
+  courseId: number,
+  signal?: AbortSignal | null
 ): Promise<RawCourseContent> {
   const warnings: string[] = [];
   client.resetSkippedEndpoints();
@@ -73,7 +74,8 @@ export async function fetchCourseContent(
   const assignmentDetailsPromise = enrichAssignmentsWithDetails(
     client,
     courseId,
-    assignmentSummaries
+    assignmentSummaries,
+    signal
   );
   const discussionFetcher = (client as CanvasClient & {
     getDiscussionTopicsSafe?: (courseId: number) => Promise<CanvasDiscussionTopic[]>;
@@ -117,7 +119,8 @@ export async function fetchCourseContent(
     async (mod) => {
       const items = await client.getModuleItemsSafe(courseId, mod.id);
       return { ...mod, items };
-    }
+    },
+    signal
   );
 
   if (files.length === 0 && rawModules.length > 0) {
@@ -156,7 +159,8 @@ export async function fetchCourseContent(
             entries: flattenDiscussionEntries(view),
             participantCount: view?.participants.length ?? 0,
           };
-        }
+        },
+        signal
       )
     : discussions.map((topic) => ({
         topic,
@@ -234,6 +238,9 @@ export async function fetchCourseContent(
   }
 
   while (pendingSlugs.length > 0) {
+    if (signal?.aborted) {
+      throw signal.reason ?? new DOMException("Aborted", "AbortError");
+    }
     const batch = pendingSlugs.splice(0, pendingSlugs.length);
     const batchResults = await mapWithConcurrency(
       batch,
@@ -244,7 +251,8 @@ export async function fetchCourseContent(
           return null;
         }
         return { slug, title: page.title, body: page.body };
-      }
+      },
+      signal
     );
 
     for (const page of batchResults) {
@@ -271,7 +279,8 @@ export async function fetchCourseContent(
 async function enrichAssignmentsWithDetails(
   client: CanvasClient,
   courseId: number,
-  assignments: CanvasAssignment[]
+  assignments: CanvasAssignment[],
+  signal?: AbortSignal | null
 ): Promise<{ assignments: RawAssignmentRecord[]; warning: string | null }> {
   const detailFetcher = (client as CanvasClient & {
     getAssignmentDetail?: (
@@ -296,7 +305,8 @@ async function enrichAssignmentsWithDetails(
         failedDetails += 1;
         return assignment;
       }
-    }
+    },
+    signal
   );
 
   return {
