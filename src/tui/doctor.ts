@@ -12,7 +12,21 @@ export interface CheckResult {
 const TOKEN_PATTERN = /^\d+~[A-Za-z0-9]+$/;
 
 export function validateTokenFormat(token: string): CheckResult {
-  if (token !== token.trim()) {
+  const hasWhitespace = token !== token.trim();
+  const trimmed = token.trim();
+  const hasQuotes =
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"));
+
+  if (hasWhitespace && hasQuotes) {
+    return {
+      label: "Token format",
+      status: "fail",
+      detail: "Token has whitespace and is wrapped in quotes",
+      fix: "Re-run `canvas-cli login` and paste the raw token without spaces, newlines, or surrounding quotes.",
+    };
+  }
+  if (hasWhitespace) {
     return {
       label: "Token format",
       status: "fail",
@@ -20,8 +34,7 @@ export function validateTokenFormat(token: string): CheckResult {
       fix: "Re-run `canvas-cli login` and paste the token without extra spaces or newlines.",
     };
   }
-  if ((token.startsWith('"') && token.endsWith('"')) ||
-      (token.startsWith("'") && token.endsWith("'"))) {
+  if (hasQuotes) {
     return {
       label: "Token format",
       status: "fail",
