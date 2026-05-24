@@ -1,4 +1,6 @@
 export { CanvasApiError } from "./errors.js";
+export { RateLimitThrottle, THROTTLE_THRESHOLD, THROTTLE_DELAY_MS } from "./throttle.js";
+import type { RateLimitThrottle } from "./throttle.js";
 
 export const DEFAULT_MAX_RETRIES = 3;
 export const DEFAULT_BASE_DELAY_MS = 1000;
@@ -90,6 +92,7 @@ export interface RetryOptions {
   requestTimeoutMs?: number;
   log?: LogFn;
   sleepFn?: SleepFn;
+  throttle?: RateLimitThrottle;
 }
 
 export async function fetchWithRetry(
@@ -103,10 +106,13 @@ export async function fetchWithRetry(
   const requestTimeout = options?.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const log = options?.log ?? stderrLog;
   const sleepImpl = options?.sleepFn ?? sleep;
+  const throttle = options?.throttle ?? null;
   const signal = init?.signal ?? null;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
+      if (throttle) await throttle.throttleIfNeeded(signal);
+
       let fetchInit = init;
       if (requestTimeout > 0) {
         const timeoutSignal = AbortSignal.timeout(requestTimeout);
@@ -116,6 +122,8 @@ export async function fetchWithRetry(
         fetchInit = { ...init, signal: combinedSignal };
       }
       const response = await fetch(url, fetchInit);
+
+      if (throttle) throttle.update(response);
 
       if (response.ok || isPermanentStatus(response.status)) {
         return response;
