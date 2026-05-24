@@ -107,3 +107,34 @@ test("throttle handles fractional remaining values", async () => {
   await throttle.throttleIfNeeded();
   assert.equal(delays.length, 1);
 });
+
+test("throttle reads x-request-cost header", async () => {
+  const throttle = new RateLimitThrottle({ sleepFn: async () => {} });
+  throttle.update(new Response(null, { headers: { "x-rate-limit-remaining": "80", "x-request-cost": "5" } }));
+  assert.equal(throttle.currentCost, 5);
+});
+
+test("throttle increases delay for high-cost requests", async () => {
+  const delays: number[] = [];
+  const sleepFn = async (ms: number) => { delays.push(ms); };
+
+  const throttleLow = new RateLimitThrottle({ sleepFn });
+  throttleLow.update(new Response(null, { headers: { "x-rate-limit-remaining": "50", "x-request-cost": "1" } }));
+  await throttleLow.throttleIfNeeded();
+
+  const throttleHigh = new RateLimitThrottle({ sleepFn });
+  throttleHigh.update(new Response(null, { headers: { "x-rate-limit-remaining": "50", "x-request-cost": "5" } }));
+  await throttleHigh.throttleIfNeeded();
+
+  assert.ok(delays[1] > delays[0], `High-cost delay (${delays[1]}) should exceed low-cost delay (${delays[0]})`);
+});
+
+test("throttle ignores invalid x-request-cost values", async () => {
+  const throttle = new RateLimitThrottle({ sleepFn: async () => {} });
+  throttle.update(new Response(null, { headers: { "x-request-cost": "0" } }));
+  assert.equal(throttle.currentCost, 1);
+  throttle.update(new Response(null, { headers: { "x-request-cost": "-2" } }));
+  assert.equal(throttle.currentCost, 1);
+  throttle.update(new Response(null, { headers: { "x-request-cost": "abc" } }));
+  assert.equal(throttle.currentCost, 1);
+});

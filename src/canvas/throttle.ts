@@ -30,6 +30,7 @@ export interface ThrottleOptions {
 
 export class RateLimitThrottle {
   private remaining: number | null = null;
+  private lastCost: number = 1;
   private readonly threshold: number;
   private readonly delayMs: number;
   private readonly sleepFn: SleepFn;
@@ -50,18 +51,31 @@ export class RateLimitThrottle {
         this.remaining = value;
       }
     }
+    const costHeader = response.headers.get("x-request-cost");
+    if (costHeader !== null) {
+      const cost = parseFloat(costHeader);
+      if (Number.isFinite(cost) && cost > 0) {
+        this.lastCost = cost;
+      }
+    }
   }
 
   async throttleIfNeeded(signal?: AbortSignal | null): Promise<void> {
-    if (this.remaining !== null && this.remaining < this.threshold) {
-      const ratio = Math.max(0, 1 - this.remaining / this.threshold);
+    if (this.remaining === null) return;
+    const effectiveRemaining = this.remaining / this.lastCost;
+    if (effectiveRemaining < this.threshold) {
+      const ratio = Math.max(0, 1 - effectiveRemaining / this.threshold);
       const delay = Math.ceil(this.delayMs * (1 + ratio * 3));
-      this.log(`Rate limit low (${this.remaining} remaining), throttling ${delay}ms...`);
+      this.log(`Rate limit low (${this.remaining} remaining, cost ${this.lastCost}), throttling ${delay}ms...`);
       await this.sleepFn(delay, signal);
     }
   }
 
   get currentRemaining(): number | null {
     return this.remaining;
+  }
+
+  get currentCost(): number {
+    return this.lastCost;
   }
 }
