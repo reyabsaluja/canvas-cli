@@ -140,18 +140,3 @@ export function sanitizeDocumentSegment(value: string): string {
   return sanitized;
 }
 
-// Regex for stripping control characters and zero-width Unicode from terminal output.
-// Covers: C0 controls except \t \n \r, DEL, C1 controls, zero-width chars, BOM.
-const CONTROL_CHARS_RE = new RegExp(
-  "[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f-\\x9f" +
-  "\\u200B-\\u200F\\u2028-\\u202F\\uFEFF]",
-  "g"
-);
-
-/**
- * Strip Unicode control characters and zero-width characters from text
- * before displaying in a terminal. Preserves printable Unicode (emoji, CJK, etc).
- */
-export function stripControlChars(text: string): string {
-  return text.replace(CONTROL_CHARS_RE, "");
-}

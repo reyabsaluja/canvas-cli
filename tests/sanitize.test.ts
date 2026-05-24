@@ -7,7 +7,6 @@ import {
   slugify,
   truncateSlug,
   sanitizeDocumentSegment,
-  stripControlChars,
 } from "../src/sanitize.js";
 
 test("sanitizeFilename passes through normal filenames unchanged", () => {
@@ -247,42 +246,6 @@ test("sanitizeDocumentSegment prefixes Windows reserved names", () => {
 test("sanitizeDocumentSegment does not flag names containing reserved substrings", () => {
   assert.equal(sanitizeDocumentSegment("CONCRETE"), "CONCRETE");
   assert.equal(sanitizeDocumentSegment("conquer"), "conquer");
-});
-
-test("stripControlChars preserves normal text", () => {
-  assert.equal(stripControlChars("Hello, World!"), "Hello, World!");
-});
-
-test("stripControlChars preserves newlines, carriage returns, and tabs", () => {
-  assert.equal(stripControlChars("line1\nline2\r\n\ttab"), "line1\nline2\r\n\ttab");
-});
-
-test("stripControlChars removes null bytes and C0 controls", () => {
-  assert.equal(stripControlChars("hel\x00lo"), "hello");
-  assert.equal(stripControlChars("hel\x01lo"), "hello");
-  assert.equal(stripControlChars("hel\x08lo"), "hello");
-  assert.equal(stripControlChars("hel\x0elo"), "hello");
-});
-
-test("stripControlChars removes DEL character", () => {
-  assert.equal(stripControlChars("hel\x7flo"), "hello");
-});
-
-test("stripControlChars removes C1 control characters", () => {
-  assert.equal(stripControlChars("hel\x80lo"), "hello");
-  assert.equal(stripControlChars("hel\x9flo"), "hello");
-});
-
-test("stripControlChars removes zero-width characters", () => {
-  assert.equal(stripControlChars("hel​lo"), "hello"); // zero-width space
-  assert.equal(stripControlChars("hel‏lo"), "hello"); // right-to-left mark
-  assert.equal(stripControlChars("hel﻿lo"), "hello"); // BOM
-});
-
-test("stripControlChars preserves emoji and CJK characters", () => {
-  assert.equal(stripControlChars("Hello \u{1F389} World"), "Hello \u{1F389} World");
-  assert.equal(stripControlChars("课程大纲"), "课程大纲");
-  assert.equal(stripControlChars("café"), "café");
 });
 
 test("slugify integration: pathological course codes", () => {
