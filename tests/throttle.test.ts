@@ -25,7 +25,8 @@ test("throttle delays when remaining is below threshold", async () => {
   throttle.update(response);
   await throttle.throttleIfNeeded();
   assert.equal(delays.length, 1);
-  assert.equal(delays[0], THROTTLE_DELAY_MS);
+  // 50/100 remaining → ratio=0.5 → delay = 500*(1+0.5*3) = 1250
+  assert.equal(delays[0], 1250);
 });
 
 test("throttle delays at exactly threshold - 1", async () => {
@@ -52,7 +53,25 @@ test("throttle uses custom threshold and delay", async () => {
   const response = new Response(null, { headers: { "x-rate-limit-remaining": "30" } });
   throttle.update(response);
   await throttle.throttleIfNeeded();
-  assert.equal(delays[0], 1000);
+  // 30/50 remaining → ratio=0.4 → delay = 1000*(1+0.4*3) = 2200
+  assert.equal(delays[0], 2200);
+});
+
+test("throttle delay increases as remaining approaches zero", async () => {
+  const delays: number[] = [];
+  const sleepFn = async (ms: number) => { delays.push(ms); };
+  const throttle = new RateLimitThrottle({ sleepFn });
+
+  // remaining=99 (just below threshold) → ratio≈0.01 → minimal extra delay
+  throttle.update(new Response(null, { headers: { "x-rate-limit-remaining": "99" } }));
+  await throttle.throttleIfNeeded();
+
+  // remaining=0 → ratio=1 → max delay = 500*(1+1*3) = 2000
+  throttle.update(new Response(null, { headers: { "x-rate-limit-remaining": "0" } }));
+  await throttle.throttleIfNeeded();
+
+  assert.ok(delays[1] > delays[0], `Delay at 0 (${delays[1]}) should exceed delay at 99 (${delays[0]})`);
+  assert.equal(delays[1], 2000);
 });
 
 test("throttle logs when throttling", async () => {
