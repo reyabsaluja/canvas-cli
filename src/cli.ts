@@ -3,11 +3,11 @@
 import { createRequire } from "node:module";
 import { Command } from "commander";
 import { initDebug, debug } from "./debug.js";
+import { examplesCommand } from "./commands/examples.js";
 import { ingestCourseCommand } from "./commands/ingest-course.js";
 import { loginCommand } from "./commands/login.js";
 import { logoutCommand } from "./commands/logout.js";
 import { statusCommand } from "./commands/status.js";
-import { examplesCommand } from "./commands/examples.js";
 import { loadStoredCredentialsToEnv } from "./config/load-credentials-to-env.js";
 import { CanvasCliError, classifyError } from "./errors.js";
 
