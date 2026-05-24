@@ -7,8 +7,10 @@ import {
   renderIngestionSummary,
   renderIngestionJson,
 } from "../format/render-ingestion-summary.js";
-import { handleError } from "../errors.js";
+import { handleError, isAbortError } from "../errors.js";
 import chalk from "chalk";
+
+const USER_ABORT_EXIT_CODE = 130;
 
 interface IngestOptions {
   refresh?: boolean;
@@ -21,6 +23,11 @@ export async function ingestCourseCommand(
 ): Promise<void> {
   const config = loadConfig();
   const client = new CanvasClient(config);
+
+  const ac = new AbortController();
+  const onSignal = () => ac.abort();
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
 
   // Fetch and normalize courses
   let rawCourses;
@@ -62,14 +69,22 @@ export async function ingestCourseCommand(
   try {
     result = await ingestCourse(course, client, config, {
       refresh: options.refresh ?? false,
+      signal: ac.signal,
     });
   } catch (err) {
+    if (isAbortError(err)) {
+      console.error("\nOperation cancelled.");
+      process.exit(USER_ABORT_EXIT_CODE);
+    }
     if (err instanceof Error) {
       console.error(`Ingestion failed: ${err.message}`);
     } else {
       console.error("Ingestion failed.");
     }
     process.exit(1);
+  } finally {
+    process.removeListener("SIGINT", onSignal);
+    process.removeListener("SIGTERM", onSignal);
   }
 
   // Output
