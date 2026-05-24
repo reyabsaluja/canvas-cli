@@ -229,7 +229,7 @@ For providers that support extended thinking (Anthropic, OpenAI, Bedrock), you c
 
 ```bash
 AI_EFFORT=low       # fastest, cheapest — good for simple questions
-AI_EFFORT=medium    # balanced (default behavior when unset)
+AI_EFFORT=medium    # balanced
 AI_EFFORT=high      # more thorough analysis
 AI_EFFORT=max       # maximum reasoning — best for complex assignments
 ```
