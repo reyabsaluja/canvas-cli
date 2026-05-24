@@ -14,7 +14,7 @@ export interface Config {
 export interface ResolvedRawConfig {
   baseUrl: string | undefined;
   accessToken: string | undefined;
-  source: "env" | "stored" | null;
+  urlSource: "env" | "stored" | null;
   profile: string;
 }
 
@@ -25,8 +25,8 @@ export function resolveRawConfig(): ResolvedRawConfig {
   const envToken = process.env.CANVAS_ACCESS_TOKEN;
   const baseUrl = envBaseUrl || stored?.canvasBaseUrl || undefined;
   const accessToken = envToken || loadCredential(profile, "canvas-token") || undefined;
-  const source: ResolvedRawConfig["source"] = envBaseUrl ? "env" : stored ? "stored" : null;
-  return { baseUrl, accessToken, source, profile };
+  const urlSource: ResolvedRawConfig["urlSource"] = envBaseUrl ? "env" : stored ? "stored" : null;
+  return { baseUrl, accessToken, urlSource, profile };
 }
 
 export function getActiveProfile(): string {
@@ -35,7 +35,7 @@ export function getActiveProfile(): string {
 
 export function resolveApiUrl(raw: ResolvedRawConfig): string | undefined {
   if (!raw.baseUrl) return undefined;
-  if (raw.source === "stored") {
+  if (raw.urlSource === "stored") {
     const normalized = raw.baseUrl.replace(/\/+$/, "");
     return normalized.endsWith("/api/v1") ? normalized : `${normalized}/api/v1`;
   }
