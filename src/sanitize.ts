@@ -91,7 +91,7 @@ export function confineToDirectory(baseDir: string, untrustedPath: string): stri
 
   if (!resolved.startsWith(normalizedBase)) {
     throw new Error(
-      `Path traversal blocked: "${untrustedPath}" resolves outside "${baseDir}"`
+      `Path traversal blocked: "${untrustedPath}" escapes the allowed directory`
     );
   }
   return resolved;
