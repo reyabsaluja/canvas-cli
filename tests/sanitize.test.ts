@@ -150,6 +150,17 @@ test("confineToDirectory throws on absolute path escape", () => {
   );
 });
 
+test("confineToDirectory rejects paths resolving to the base directory itself", () => {
+  assert.throws(
+    () => confineToDirectory("/base/dir", "."),
+    /Path traversal blocked/
+  );
+  assert.throws(
+    () => confineToDirectory("/base/dir", "sub/.."),
+    /Path traversal blocked/
+  );
+});
+
 test("slugify lowercases and replaces non-alphanumeric with dashes", () => {
   assert.equal(slugify("Hello World"), "hello-world");
   assert.equal(slugify("ECE 297"), "ece-297");
