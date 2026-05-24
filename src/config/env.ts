@@ -14,7 +14,7 @@ export interface Config {
 export interface ResolvedRawConfig {
   baseUrl: string | undefined;
   accessToken: string | undefined;
-  urlSource: "env" | "stored" | null;
+  urlSource: "env" | "stored" | "none";
   profile: string;
   credentialError?: Error;
 }
@@ -34,7 +34,7 @@ export function resolveRawConfig(): ResolvedRawConfig {
     credentialError = err instanceof Error ? err : new Error(String(err));
   }
   const accessToken = envToken || storedToken || undefined;
-  const urlSource: ResolvedRawConfig["urlSource"] = envBaseUrl ? "env" : stored?.canvasBaseUrl ? "stored" : null;
+  const urlSource: ResolvedRawConfig["urlSource"] = envBaseUrl ? "env" : stored?.canvasBaseUrl ? "stored" : "none";
   return { baseUrl, accessToken, urlSource, profile, credentialError };
 }
 
