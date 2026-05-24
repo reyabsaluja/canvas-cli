@@ -12,6 +12,14 @@ export interface CheckResult {
 const TOKEN_PATTERN = /^\d+~[A-Za-z0-9]+$/;
 
 export function validateTokenFormat(token: string): CheckResult {
+  if (token !== token.trim()) {
+    return {
+      label: "Token format",
+      status: "fail",
+      detail: "Token has leading or trailing whitespace",
+      fix: "Re-run `canvas-cli login` and paste the token without extra spaces or newlines.",
+    };
+  }
   if ((token.startsWith('"') && token.endsWith('"')) ||
       (token.startsWith("'") && token.endsWith("'"))) {
     return {
