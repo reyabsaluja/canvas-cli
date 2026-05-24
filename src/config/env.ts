@@ -25,7 +25,13 @@ export function resolveRawConfig(): ResolvedRawConfig {
   const envToken = process.env.CANVAS_ACCESS_TOKEN;
   // Treat empty-string canvasBaseUrl as missing (user hasn't completed setup)
   const baseUrl = envBaseUrl || stored?.canvasBaseUrl || undefined;
-  const accessToken = envToken || loadCredential(profile, "canvas-token") || undefined;
+  let storedToken: string | null = null;
+  try {
+    storedToken = loadCredential(profile, "canvas-token");
+  } catch {
+    // Credential store unavailable (e.g. corrupted keychain, permission error) — treat as missing
+  }
+  const accessToken = envToken || storedToken || undefined;
   const urlSource: ResolvedRawConfig["urlSource"] = envBaseUrl ? "env" : stored?.canvasBaseUrl ? "stored" : null;
   return { baseUrl, accessToken, urlSource, profile };
 }
