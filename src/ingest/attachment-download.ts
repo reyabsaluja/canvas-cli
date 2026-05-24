@@ -3,6 +3,7 @@ import path from "node:path";
 import type { Config } from "../config/env.js";
 import type { DownloadedAttachmentEntry } from "./types.js";
 import type { SelectedAttachment } from "./attachment-selection.js";
+import { sanitizeFilename, sanitizeSubfolder, confineToDirectory } from "../sanitize.js";
 
 /**
  * Download selected attachments into the course attachments directory.
@@ -17,10 +18,12 @@ export async function downloadSelectedAttachments(
   const results: DownloadedAttachmentEntry[] = [];
 
   for (const attachment of attachments) {
-    const subDir = path.join(attachmentsDir, attachment.subfolder);
+    const safeSubfolder = sanitizeSubfolder(attachment.subfolder);
+    const safeFilename = sanitizeFilename(attachment.filename);
+    const subDir = confineToDirectory(attachmentsDir, safeSubfolder);
     await fs.mkdir(subDir, { recursive: true });
 
-    const filePath = path.join(subDir, attachment.filename);
+    const filePath = confineToDirectory(subDir, safeFilename);
     const localPath = path.relative(
       path.dirname(attachmentsDir),
       filePath
@@ -32,7 +35,7 @@ export async function downloadSelectedAttachments(
         sourceType: attachment.sourceType,
         canvasFileId: attachment.fileId,
         originalFilename: attachment.filename,
-        localPath: `attachments/${attachment.subfolder}/${attachment.filename}`,
+        localPath: `attachments/${safeSubfolder}/${safeFilename}`,
         contentType: attachment.contentType,
         size: attachment.size,
         downloadUrl: attachment.downloadUrl,
@@ -53,7 +56,7 @@ export async function downloadSelectedAttachments(
           sourceType: attachment.sourceType,
           canvasFileId: attachment.fileId,
           originalFilename: attachment.filename,
-          localPath: `attachments/${attachment.subfolder}/${attachment.filename}`,
+          localPath: `attachments/${safeSubfolder}/${safeFilename}`,
           contentType: attachment.contentType,
           size: attachment.size,
           downloadUrl: attachment.downloadUrl,
@@ -70,7 +73,7 @@ export async function downloadSelectedAttachments(
         sourceType: attachment.sourceType,
         canvasFileId: attachment.fileId,
         originalFilename: attachment.filename,
-        localPath: `attachments/${attachment.subfolder}/${attachment.filename}`,
+        localPath: `attachments/${safeSubfolder}/${safeFilename}`,
         contentType: attachment.contentType,
         size: buffer.length,
         downloadUrl: attachment.downloadUrl,
@@ -82,7 +85,7 @@ export async function downloadSelectedAttachments(
         sourceType: attachment.sourceType,
         canvasFileId: attachment.fileId,
         originalFilename: attachment.filename,
-        localPath: `attachments/${attachment.subfolder}/${attachment.filename}`,
+        localPath: `attachments/${safeSubfolder}/${safeFilename}`,
         contentType: attachment.contentType,
         size: attachment.size,
         downloadUrl: attachment.downloadUrl,
