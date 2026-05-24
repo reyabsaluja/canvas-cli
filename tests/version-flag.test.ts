@@ -25,3 +25,10 @@ test("-V prints the package.json version", () => {
   const output = run(["-V"]);
   assert.equal(output, expectedVersion);
 });
+
+test("examples command exits cleanly and shows workflows", () => {
+  const output = run(["examples"]);
+  assert.ok(output.includes("Common Workflows"));
+  assert.ok(output.includes("canvas-cli login"));
+  assert.ok(output.includes("canvas-cli ingest"));
+});
