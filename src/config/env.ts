@@ -11,41 +11,49 @@ export interface Config {
   accessToken: string;
 }
 
+export interface ResolvedRawConfig {
+  baseUrl: string | undefined;
+  accessToken: string | undefined;
+  source: "env" | "stored" | null;
+  profile: string;
+}
+
+export function resolveRawConfig(): ResolvedRawConfig {
+  const profile = getActiveProfile();
+  const stored = readStoredConfig(profile);
+  const envBaseUrl = process.env.CANVAS_BASE_URL;
+  const envToken = process.env.CANVAS_ACCESS_TOKEN;
+  const baseUrl = envBaseUrl || stored?.canvasBaseUrl || undefined;
+  const accessToken = envToken || loadCredential(profile, "canvas-token") || undefined;
+  const source: ResolvedRawConfig["source"] = envBaseUrl ? "env" : stored ? "stored" : null;
+  return { baseUrl, accessToken, source, profile };
+}
+
 export function getActiveProfile(): string {
   return process.env.CANVAS_CLI_PROFILE || "default";
 }
 
 export function isConfigured(): boolean {
-  const profile = getActiveProfile();
-  const stored = readStoredConfig(profile);
-  const baseUrl = process.env.CANVAS_BASE_URL || stored?.canvasBaseUrl;
-  const token = process.env.CANVAS_ACCESS_TOKEN || loadCredential(profile, "canvas-token");
-  return Boolean(baseUrl && token);
+  const raw = resolveRawConfig();
+  return Boolean(raw.baseUrl && raw.accessToken);
 }
 
 export function loadConfig(): Config {
-  const profile = getActiveProfile();
+  const raw = resolveRawConfig();
 
-  // Env vars always take precedence
-  let baseUrl = process.env.CANVAS_BASE_URL;
-  let accessToken = process.env.CANVAS_ACCESS_TOKEN;
-
-  // Fall back to stored config + credentials.
   // StoredConfig.canvasBaseUrl is saved WITHOUT /api/v1 (normalizeUrl strips it
   // during login). We append /api/v1 here so the rest of the app gets a ready-to-use
   // API base URL. If someone manually edits config.json WITH /api/v1, the endsWith
-  // guard prevents double-appending.
-  if (!baseUrl || !accessToken) {
-    const stored = readStoredConfig(profile);
-    if (stored && !baseUrl) {
-      const storedUrl = stored.canvasBaseUrl.replace(/\/+$/, "");
-      baseUrl = storedUrl.endsWith("/api/v1") ? storedUrl : `${storedUrl}/api/v1`;
-    }
-    if (!accessToken) {
-      const token = loadCredential(profile, "canvas-token");
-      if (token) accessToken = token;
-    }
+  // guard prevents double-appending. Env vars are passed through as-is.
+  let baseUrl: string | undefined;
+  if (raw.baseUrl && raw.source === "stored") {
+    const normalized = raw.baseUrl.replace(/\/+$/, "");
+    baseUrl = normalized.endsWith("/api/v1") ? normalized : `${normalized}/api/v1`;
+  } else {
+    baseUrl = raw.baseUrl;
   }
+
+  const accessToken = raw.accessToken;
 
   if (!baseUrl) {
     throw new ConfigError(
@@ -63,7 +71,7 @@ export function loadConfig(): Config {
 
   debug("config", `CANVAS_BASE_URL: ${baseUrl.replace(/\/+$/, "")}`);
   debug("config", "CANVAS_ACCESS_TOKEN: ***");
-  debug("config", `Profile: ${profile}`);
+  debug("config", `Profile: ${raw.profile}`);
   debug("config", "Sensitive env vars present", maskEnvForDebug());
 
   return {
