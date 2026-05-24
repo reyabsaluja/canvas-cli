@@ -14,17 +14,8 @@ interface CheckResult {
 const TOKEN_PATTERN = /^\d+~[A-Za-z0-9]+$/;
 
 function validateTokenFormat(token: string): CheckResult {
-  const trimmed = token.trim();
-  if (trimmed !== token) {
-    return {
-      label: "Token format",
-      status: "fail",
-      detail: "Token has leading or trailing whitespace",
-      fix: "Re-run `canvas-cli login` and paste the token without extra spaces.",
-    };
-  }
-  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-      (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+  if ((token.startsWith('"') && token.endsWith('"')) ||
+      (token.startsWith("'") && token.endsWith("'"))) {
     return {
       label: "Token format",
       status: "fail",
@@ -32,7 +23,7 @@ function validateTokenFormat(token: string): CheckResult {
       fix: "Re-run `canvas-cli login` and paste the raw token without surrounding quotes.",
     };
   }
-  if (trimmed.toLowerCase().includes("paste") || trimmed.toLowerCase().includes("your_token")) {
+  if (token.toLowerCase().includes("paste") || token.toLowerCase().includes("your_token")) {
     return {
       label: "Token format",
       status: "fail",
@@ -40,7 +31,7 @@ function validateTokenFormat(token: string): CheckResult {
       fix: "Generate a real token at your Canvas profile settings page, then run `canvas-cli login`.",
     };
   }
-  if (!TOKEN_PATTERN.test(trimmed)) {
+  if (!TOKEN_PATTERN.test(token)) {
     return {
       label: "Token format",
       status: "warn",
