@@ -131,6 +131,10 @@ export function truncateSlug(
 /**
  * Sanitize a document segment (used in extracted file paths).
  * Replaces any non-alphanumeric, dot, underscore, or dash with underscore.
+ *
+ * Superset of the prior inline `value.replace(/[^a-zA-Z0-9._-]/g, "_")` — additionally
+ * collapses runs of underscores, trims leading/trailing underscores, returns "unnamed"
+ * for empty/all-special inputs, and prefixes Windows reserved names.
  */
 export function sanitizeDocumentSegment(value: string): string {
   if (!value || !value.trim()) return "unnamed";
