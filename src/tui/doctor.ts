@@ -198,6 +198,30 @@ export function resolveAICredentials(provider: AIProviderName): AIProviderCreden
   };
 }
 
+export function validateAIKeyFormat(provider: AIProviderName, key: string): CheckResult | null {
+  if (key !== key.trim()) {
+    return {
+      label: "AI key format",
+      status: "fail",
+      detail: `${provider} key has leading or trailing whitespace`,
+      fix: `Remove whitespace from your ${AI_ENDPOINTS[provider].envKey} value in .env or re-run \`canvas-cli login\`.`,
+    };
+  }
+  const trimmed = key.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return {
+      label: "AI key format",
+      status: "fail",
+      detail: `${provider} key is wrapped in quotes`,
+      fix: `Remove surrounding quotes from your ${AI_ENDPOINTS[provider].envKey} value in .env.`,
+    };
+  }
+  return null;
+}
+
 async function checkAIProvider(creds: AIProviderCredentials): Promise<CheckResult> {
   const { provider, key } = creds;
   const ep = AI_ENDPOINTS[provider];
@@ -414,6 +438,8 @@ export async function runDoctor(): Promise<string> {
         fix: `Run \`canvas-cli login\` and configure your ${aiConfig.provider} API key.`,
       });
     } else {
+      const keyFmtResult = validateAIKeyFormat(aiCreds.provider, aiCreds.key);
+      if (keyFmtResult) results.push(keyFmtResult);
       results.push(aiResult!);
     }
   }

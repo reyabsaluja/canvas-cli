@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { validateTokenFormat, formatResults, type CheckResult } from "../src/tui/doctor.js";
+import { validateTokenFormat, validateAIKeyFormat, formatResults, type CheckResult } from "../src/tui/doctor.js";
 
 describe("validateTokenFormat", () => {
   test("passes for valid Canvas token pattern", () => {
@@ -62,6 +62,41 @@ describe("validateTokenFormat", () => {
   test("warns for token with special characters after tilde", () => {
     const result = validateTokenFormat("12345~abc!@#");
     assert.equal(result.status, "warn");
+  });
+});
+
+describe("validateAIKeyFormat", () => {
+  test("returns null for clean key", () => {
+    const result = validateAIKeyFormat("openai", "sk-abc123xyz");
+    assert.equal(result, null);
+  });
+
+  test("fails when key has leading whitespace", () => {
+    const result = validateAIKeyFormat("openai", "  sk-abc123");
+    assert.ok(result);
+    assert.equal(result.status, "fail");
+    assert.match(result.detail, /whitespace/);
+  });
+
+  test("fails when key has trailing newline", () => {
+    const result = validateAIKeyFormat("anthropic", "sk-ant-abc\n");
+    assert.ok(result);
+    assert.equal(result.status, "fail");
+    assert.match(result.detail, /whitespace/);
+  });
+
+  test("fails when key is wrapped in double quotes", () => {
+    const result = validateAIKeyFormat("google", '"AIza-key"');
+    assert.ok(result);
+    assert.equal(result.status, "fail");
+    assert.match(result.detail, /quotes/);
+  });
+
+  test("fails when key is wrapped in single quotes", () => {
+    const result = validateAIKeyFormat("openai", "'sk-abc'");
+    assert.ok(result);
+    assert.equal(result.status, "fail");
+    assert.match(result.detail, /quotes/);
   });
 });
 
