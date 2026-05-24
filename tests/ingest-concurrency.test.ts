@@ -171,7 +171,7 @@ test("ingestCourse captures page bodies from the Pages index even when no other 
         };
       },
       skippedEndpoints: [] as string[],
-    resetSkippedEndpoints() {},
+      resetSkippedEndpoints() {},
     } as any;
 
     const result = await ingestCourse(
@@ -310,7 +310,7 @@ test("ingestCourse crawls announcement and linked-page content into the cache", 
           return pageBodies.get(slug) ?? null;
         },
         skippedEndpoints: [] as string[],
-    resetSkippedEndpoints() {},
+        resetSkippedEndpoints() {},
       } as any;
 
       const result = await ingestCourse(
@@ -443,7 +443,7 @@ test("ingestCourse stores assignment descriptions as rich extracted documents", 
         return null;
       },
       skippedEndpoints: [] as string[],
-    resetSkippedEndpoints() {},
+      resetSkippedEndpoints() {},
     } as any;
 
     const result = await ingestCourse(
@@ -572,7 +572,7 @@ test("ingestCourse enriches assignment extracts with rubric criteria from assign
         return null;
       },
       skippedEndpoints: [] as string[],
-    resetSkippedEndpoints() {},
+      resetSkippedEndpoints() {},
     } as any;
 
     const result = await ingestCourse(
@@ -731,7 +731,7 @@ test("ingestCourse captures discussion thread clarifications and linked resource
           return pageBodies.get(slug) ?? null;
         },
         skippedEndpoints: [] as string[],
-    resetSkippedEndpoints() {},
+        resetSkippedEndpoints() {},
       } as any;
 
       const result = await ingestCourse(
@@ -908,7 +908,7 @@ test("ingestCourse captures external resources linked from course content and mo
           return null;
         },
         skippedEndpoints: [] as string[],
-    resetSkippedEndpoints() {},
+        resetSkippedEndpoints() {},
       } as any;
 
       const result = await ingestCourse(
@@ -1076,7 +1076,7 @@ test("ingestCourse exports shared Google Docs links to readable text", async () 
           return null;
         },
         skippedEndpoints: [] as string[],
-    resetSkippedEndpoints() {},
+        resetSkippedEndpoints() {},
       } as any;
 
       const result = await ingestCourse(
@@ -1205,7 +1205,7 @@ test("ingestCourse uses bounded concurrency for fallback module file metadata fe
           };
         },
         skippedEndpoints: [] as string[],
-    resetSkippedEndpoints() {},
+        resetSkippedEndpoints() {},
       } as any;
 
       const result = await ingestCourse(
