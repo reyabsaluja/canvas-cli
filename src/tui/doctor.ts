@@ -184,6 +184,7 @@ async function checkAIProvider(provider: AIProviderName): Promise<CheckResult> {
     if (provider === "anthropic") {
       headers[ep.headerKey] = key;
       headers["anthropic-version"] = "2023-06-01";
+      headers["Content-Type"] = "application/json";
     } else if (provider === "openai") {
       headers[ep.headerKey] = `Bearer ${key}`;
     } else {
