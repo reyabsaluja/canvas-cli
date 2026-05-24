@@ -2,12 +2,13 @@ export { CanvasApiError } from "./errors.js";
 export { THROTTLE_THRESHOLD, THROTTLE_DELAY_MS } from "./throttle.js";
 import { RateLimitThrottle } from "./throttle.js";
 export { RateLimitThrottle };
+import type { LogFn, SleepFn } from "./throttle.js";
+export type { LogFn, SleepFn };
 
 export const DEFAULT_MAX_RETRIES = 3;
 export const DEFAULT_BASE_DELAY_MS = 1000;
 export const DEFAULT_MAX_DELAY_MS = 30_000;
 
-export type LogFn = (message: string) => void;
 const stderrLog: LogFn = (msg) => console.error(msg);
 
 const RETRIABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
@@ -81,8 +82,6 @@ function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
-
-export type SleepFn = (ms: number, signal?: AbortSignal | null) => Promise<void>;
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
