@@ -48,6 +48,7 @@ function validateTokenFormat(token: string): CheckResult {
 
 async function checkCanvasConnectivity(config: Config): Promise<CheckResult> {
   const url = `${config.baseUrl}/users/self`;
+  const start = Date.now();
   try {
     const response = await fetch(url, {
       headers: {
@@ -82,13 +83,14 @@ async function checkCanvasConnectivity(config: Config): Promise<CheckResult> {
       };
     }
 
+    const elapsed = Date.now() - start;
     const user = (await response.json()) as { name?: string; id?: number };
     const remaining = response.headers.get("X-Rate-Limit-Remaining");
     const rateInfo = remaining ? ` · rate limit remaining: ${remaining}` : "";
     return {
       label: "Canvas API",
       status: "pass",
-      detail: `Connected as ${user.name ?? "Unknown"} (id: ${user.id ?? "?"})${rateInfo}`,
+      detail: `Connected as ${user.name ?? "Unknown"} (id: ${user.id ?? "?"}) · ${elapsed}ms${rateInfo}`,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
