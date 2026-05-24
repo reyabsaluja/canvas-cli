@@ -217,8 +217,9 @@ async function checkAIProvider(provider: AIProviderName): Promise<CheckResult> {
       {
         method: provider === "anthropic" ? "POST" : "GET",
         headers,
-        // Anthropic validates auth before body — a 400 with invalid body confirms the key works.
-        // If Anthropic ever rejects at the network layer before auth, this will produce false negatives.
+        // Anthropic validates auth before body — a 400 (invalid body) confirms the key works.
+        // False negative: if Anthropic adds a WAF/rate-limit layer that rejects before auth,
+        // we'd get a non-400 error and report "warn" instead of "pass". Revisit if users report this.
         ...(provider === "anthropic" ? { body: JSON.stringify({ model: "_", max_tokens: 1, messages: [] }) } : {}),
         signal: AbortSignal.timeout(10_000),
       }
