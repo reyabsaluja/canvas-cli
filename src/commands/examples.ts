@@ -1,5 +1,5 @@
 export function examplesCommand(): void {
-  process.stdout.write(`canvas-cli — Common Workflows
+  console.log(`canvas-cli — Common Workflows
 
 Getting Started:
   $ canvas-cli login                   Interactive setup wizard
@@ -22,6 +22,5 @@ Managing Multiple Accounts:
 
 Debugging:
   $ canvas-cli --debug ingest CS101    Show verbose debug output
-  $ canvas-cli status                  Check if credentials are valid
-`);
+  $ canvas-cli status                  Check if credentials are valid`);
 }
