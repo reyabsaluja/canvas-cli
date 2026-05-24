@@ -9,7 +9,7 @@ import {
   isNetworkError,
 } from "../errors.js";
 import { debugApiRequest, debugApiResponse, maskUrl } from "../debug.js";
-import { fetchWithRetry, type RetryOptions } from "./retry.js";
+import { fetchWithRetry, type RetryOptions, RateLimitThrottle } from "./retry.js";
 import type {
   CanvasAssignment,
   CanvasAssignmentDetail,
@@ -28,6 +28,7 @@ export class CanvasClient {
   private headers: Record<string, string>;
   private retryOptions?: RetryOptions;
   private _skippedEndpoints: string[] = [];
+  private throttle: RateLimitThrottle;
 
   constructor(config: Config, retryOptions?: RetryOptions) {
     this.baseUrl = config.baseUrl;
@@ -35,7 +36,11 @@ export class CanvasClient {
       Authorization: `Bearer ${config.accessToken}`,
       Accept: "application/json",
     };
-    this.retryOptions = retryOptions;
+    this.throttle = new RateLimitThrottle({
+      log: retryOptions?.log,
+      sleepFn: retryOptions?.sleepFn,
+    });
+    this.retryOptions = { ...retryOptions, throttle: this.throttle };
   }
 
   get skippedEndpoints(): readonly string[] {
@@ -234,7 +239,7 @@ export class CanvasClient {
       const response = await fetchWithRetry(downloadUrl, {
         headers: this.headers,
         redirect: "follow",
-      }, { ...this.retryOptions, requestTimeoutMs: 60_000 });
+      }, { ...this.retryOptions, requestTimeoutMs: 60_000, throttle: this.throttle });
       if (!response.ok) return null;
       return Buffer.from(await response.arrayBuffer());
     } catch {
