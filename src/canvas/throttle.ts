@@ -1,6 +1,7 @@
 export type SleepFn = (ms: number, signal?: AbortSignal | null) => Promise<void>;
 export type LogFn = (message: string) => void;
 
+export const noopLog: LogFn = () => {};
 export const stderrLog: LogFn = (msg) => console.error(msg);
 
 export const abortableSleep: SleepFn = (ms, signal) =>
@@ -42,7 +43,7 @@ export class RateLimitThrottle {
     this.threshold = options?.threshold ?? THROTTLE_THRESHOLD;
     this.delayMs = options?.delayMs ?? THROTTLE_DELAY_MS;
     this.sleepFn = options?.sleepFn ?? abortableSleep;
-    this.log = options?.log ?? stderrLog;
+    this.log = options?.log ?? noopLog;
   }
 
   update(response: Response): void {

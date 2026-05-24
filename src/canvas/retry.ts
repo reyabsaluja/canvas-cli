@@ -1,6 +1,6 @@
 export { CanvasApiError } from "./errors.js";
 export { THROTTLE_THRESHOLD, THROTTLE_DELAY_MS } from "./throttle.js";
-import { RateLimitThrottle, abortableSleep, stderrLog } from "./throttle.js";
+import { RateLimitThrottle, abortableSleep, noopLog } from "./throttle.js";
 export { RateLimitThrottle };
 import type { LogFn, SleepFn } from "./throttle.js";
 export type { LogFn, SleepFn };
@@ -85,7 +85,7 @@ export async function fetchWithRetry(
   const baseDelay = options?.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
   const maxDelay = options?.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
   const requestTimeout = options?.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-  const log = options?.log ?? stderrLog;
+  const log = options?.log ?? noopLog;
   const sleepImpl = options?.sleepFn ?? abortableSleep;
   const throttle = options?.throttle ?? null;
   const signal = init?.signal ?? null;
