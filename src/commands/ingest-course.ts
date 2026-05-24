@@ -7,7 +7,7 @@ import {
   renderIngestionSummary,
   renderIngestionJson,
 } from "../format/render-ingestion-summary.js";
-import { handleError } from "../errors.js";
+import { handleError, isAbortError } from "../errors.js";
 import chalk from "chalk";
 
 const USER_ABORT_EXIT_CODE = 130;
@@ -15,10 +15,6 @@ const USER_ABORT_EXIT_CODE = 130;
 interface IngestOptions {
   refresh?: boolean;
   json?: boolean;
-}
-
-function isAbortError(err: unknown): boolean {
-  return err instanceof Error && err.name === "AbortError";
 }
 
 export async function ingestCourseCommand(

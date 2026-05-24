@@ -230,6 +230,10 @@ export function classifyError(err: unknown): CanvasCliError {
   return new CanvasCliError("An unexpected error occurred.", "unknown", { cause: err });
 }
 
+export function isAbortError(err: unknown): boolean {
+  return err instanceof Error && err.name === "AbortError";
+}
+
 export function handleError(err: unknown): never {
   const classified = classifyError(err);
   console.error(classified.userMessage);
