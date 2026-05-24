@@ -5,6 +5,17 @@ import { runDoctor } from "../src/tui/doctor.js";
 describe("runDoctor integration", () => {
   const originalEnv = { ...process.env };
 
+  function restoreEnv() {
+    for (const key of Object.keys(process.env)) {
+      if (!(key in originalEnv)) {
+        delete process.env[key];
+      }
+    }
+    for (const [key, value] of Object.entries(originalEnv)) {
+      process.env[key] = value;
+    }
+  }
+
   beforeEach(() => {
     process.env.CANVAS_BASE_URL = "https://canvas.example.edu/api/v1";
     process.env.CANVAS_ACCESS_TOKEN = "12345~AbcDef";
@@ -16,7 +27,7 @@ describe("runDoctor integration", () => {
   });
 
   afterEach(() => {
-    process.env = { ...originalEnv };
+    restoreEnv();
     mock.restoreAll();
   });
 
