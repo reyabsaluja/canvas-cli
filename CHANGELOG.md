@@ -35,7 +35,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `--version` flag
 - CI pipeline with typecheck, test, and build
 - Automated npm publish workflow with provenance
-- End-to-end smoke tests for npx installation
 
 [Unreleased]: https://github.com/reyabsaluja/canvas-cli/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/reyabsaluja/canvas-cli/releases/tag/v0.1.0
