@@ -29,8 +29,20 @@ export async function mapWithConcurrency<T, TResult>(
   }
 
   const workerCount = Math.min(limit, items.length);
-  await Promise.all(
+  const outcomes = await Promise.allSettled(
     Array.from({ length: workerCount }, () => runWorker())
   );
+
+  const errors = outcomes
+    .filter((o): o is PromiseRejectedResult => o.status === "rejected")
+    .map((o) => o.reason);
+
+  if (errors.length > 0) {
+    const nonAbort = errors.find(
+      (e) => !(e instanceof Error && e.name === "AbortError")
+    );
+    throw nonAbort ?? errors[0];
+  }
+
   return results;
 }
