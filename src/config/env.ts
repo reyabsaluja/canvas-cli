@@ -16,6 +16,7 @@ export interface ResolvedRawConfig {
   accessToken: string | undefined;
   urlSource: "env" | "stored" | null;
   profile: string;
+  credentialError?: Error;
 }
 
 export function resolveRawConfig(): ResolvedRawConfig {
@@ -26,14 +27,15 @@ export function resolveRawConfig(): ResolvedRawConfig {
   // Treat empty-string canvasBaseUrl as missing (user hasn't completed setup)
   const baseUrl = envBaseUrl || stored?.canvasBaseUrl || undefined;
   let storedToken: string | null = null;
+  let credentialError: Error | undefined;
   try {
     storedToken = loadCredential(profile, "canvas-token");
-  } catch {
-    // Credential store unavailable (e.g. corrupted keychain, permission error) — treat as missing
+  } catch (err) {
+    credentialError = err instanceof Error ? err : new Error(String(err));
   }
   const accessToken = envToken || storedToken || undefined;
   const urlSource: ResolvedRawConfig["urlSource"] = envBaseUrl ? "env" : stored?.canvasBaseUrl ? "stored" : null;
-  return { baseUrl, accessToken, urlSource, profile };
+  return { baseUrl, accessToken, urlSource, profile, credentialError };
 }
 
 export function getActiveProfile(): string {
@@ -67,6 +69,12 @@ export function loadConfig(): Config {
   }
 
   if (!accessToken) {
+    if (raw.credentialError) {
+      throw new ConfigError(
+        `Failed to load credentials: ${raw.credentialError.message}`,
+        "Your system credential store may be corrupted or inaccessible. Try running `canvas-cli login` to re-save your token."
+      );
+    }
     throw new ConfigError(
       "Canvas access token is not configured.",
       "Run `canvas-cli login` to set up, or set CANVAS_ACCESS_TOKEN in your environment."
