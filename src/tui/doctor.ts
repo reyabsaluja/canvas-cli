@@ -229,6 +229,7 @@ async function checkAIProvider(provider: AIProviderName): Promise<CheckResult> {
       {
         method: provider === "anthropic" ? "POST" : "GET",
         headers,
+        redirect: "manual",
         // Anthropic validates auth before body — a 400 (invalid body) confirms the key works.
         // False negative: if Anthropic adds a WAF/rate-limit layer that rejects before auth,
         // we'd get a non-400 error and report "warn" instead of "pass". Revisit if users report this.
@@ -243,6 +244,14 @@ async function checkAIProvider(provider: AIProviderName): Promise<CheckResult> {
         status: "fail",
         detail: `${provider} key is invalid or revoked (HTTP ${response.status})`,
         fix: `Check your ${provider} API key and regenerate if needed, then run \`canvas-cli login\`.`,
+      };
+    }
+
+    if (response.status >= 300 && response.status < 400) {
+      return {
+        label: "AI provider",
+        status: "warn",
+        detail: `${provider} API redirected (HTTP ${response.status}) — possible proxy interception`,
       };
     }
 
