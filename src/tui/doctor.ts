@@ -309,10 +309,7 @@ export async function runDoctor(): Promise<string> {
       detail: "No stored config or CANVAS_BASE_URL env var found",
       fix: "Run `canvas-cli login` to set up, or set CANVAS_BASE_URL and CANVAS_ACCESS_TOKEN in your environment.",
     });
-    return formatResults(profile, results);
-  }
-
-  if (urlSource === "env") {
+  } else if (urlSource === "env") {
     results.push({
       label: "Configuration",
       status: "pass",
@@ -326,30 +323,32 @@ export async function runDoctor(): Promise<string> {
     });
   }
 
-  // Check 2: Canvas token presence & format
-  if (!token) {
-    results.push({
-      label: "Canvas token",
-      status: "fail",
-      detail: "No token found in credential store or CANVAS_ACCESS_TOKEN env var",
-      fix: "Run `canvas-cli login` to set up your access token, or set CANVAS_ACCESS_TOKEN in your environment.",
-    });
-  } else {
-    const tokenSource = process.env.CANVAS_ACCESS_TOKEN ? " (from env)" : "";
-    results.push({
-      label: "Canvas token",
-      status: "pass",
-      detail: `Token found${tokenSource}`,
-    });
-    results.push(validateTokenFormat(token));
-  }
+  // Check 2: Canvas token presence & format (only when Canvas URL is configured)
+  if (baseUrl) {
+    if (!token) {
+      results.push({
+        label: "Canvas token",
+        status: "fail",
+        detail: "No token found in credential store or CANVAS_ACCESS_TOKEN env var",
+        fix: "Run `canvas-cli login` to set up your access token, or set CANVAS_ACCESS_TOKEN in your environment.",
+      });
+    } else {
+      const tokenSource = process.env.CANVAS_ACCESS_TOKEN ? " (from env)" : "";
+      results.push({
+        label: "Canvas token",
+        status: "pass",
+        detail: `Token found${tokenSource}`,
+      });
+      results.push(validateTokenFormat(token));
+    }
 
-  // Check 3: Canvas API connectivity
-  const apiUrl = resolveApiUrl(raw);
-  if (token && apiUrl) {
-    results.push(
-      await checkCanvasConnectivity({ baseUrl: apiUrl, accessToken: token })
-    );
+    // Check 3: Canvas API connectivity
+    const apiUrl = resolveApiUrl(raw);
+    if (token && apiUrl) {
+      results.push(
+        await checkCanvasConnectivity({ baseUrl: apiUrl, accessToken: token })
+      );
+    }
   }
 
   // Check 4: AI provider
