@@ -115,4 +115,47 @@ describe("runDoctor integration", () => {
     assert.match(output, /– \*\*AI provider\*\*/);
     assert.match(output, /Not configured/);
   });
+
+  test("reports AI provider failure when key is invalid (401)", async () => {
+    process.env.AI_PROVIDER = "openai";
+    process.env.OPENAI_API_KEY = "sk-invalid-key";
+
+    let callCount = 0;
+    mock.method(globalThis, "fetch", async () => {
+      callCount++;
+      // First call is Canvas API, second is AI provider check
+      if (callCount === 1) {
+        return new Response(JSON.stringify({ name: "User", id: 1 }), {
+          status: 200,
+        });
+      }
+      return new Response("Unauthorized", { status: 401 });
+    });
+
+    const output = await runDoctor();
+    assert.match(output, /✓ \*\*AI config\*\*/);
+    assert.match(output, /✗ \*\*AI provider\*\*/);
+    assert.match(output, /invalid or revoked/);
+  });
+
+  test("reports AI provider pass when key is valid", async () => {
+    process.env.AI_PROVIDER = "openai";
+    process.env.OPENAI_API_KEY = "sk-valid-key";
+
+    let callCount = 0;
+    mock.method(globalThis, "fetch", async () => {
+      callCount++;
+      if (callCount === 1) {
+        return new Response(JSON.stringify({ name: "User", id: 1 }), {
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    });
+
+    const output = await runDoctor();
+    assert.match(output, /✓ \*\*AI config\*\*/);
+    assert.match(output, /✓ \*\*AI provider\*\*/);
+    assert.match(output, /openai key is valid/);
+  });
 });
