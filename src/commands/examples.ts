@@ -1,3 +1,4 @@
+// Descriptions aligned to column 40
 export function examplesCommand(): void {
   process.stdout.write(`canvas-cli — Common Workflows
 
