@@ -886,14 +886,25 @@ export async function runChatShell<TExit>(
       } catch (error) {
         flushPendingStreamDelta();
         stopSpinner();
-        streamingStarted = false;
-        streamedText = "";
 
         if (error instanceof DOMException && error.name === "AbortError") {
-          messages.splice(messageCountBeforeAsk);
-          markTranscriptDirty(messageCountBeforeAsk);
-          persistence.schedule(0);
-          inputBuffer = preProcessingInput;
+          const lastMsg = messages[messages.length - 1];
+          if (lastMsg?.role === "assistant" && !lastMsg.content.trim()) {
+            messages.pop();
+            markTranscriptDirty(messages.length);
+          }
+
+          const producedOutput = messages.length > messageCountBeforeAsk + 1;
+          if (producedOutput) {
+            messages.push({ role: "system", content: "Interrupted... What should I do differently?" });
+            markTranscriptDirty(messages.length - 1);
+            persistence.schedule(0);
+          } else {
+            messages.splice(messageCountBeforeAsk);
+            markTranscriptDirty(messageCountBeforeAsk);
+            persistence.schedule(0);
+            inputBuffer = preProcessingInput;
+          }
         } else {
           if (messages.length > messageCountBeforeAsk + 1) {
             const lastMsg = messages[messages.length - 1];
