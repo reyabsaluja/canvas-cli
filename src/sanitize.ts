@@ -74,6 +74,10 @@ export function sanitizeSubfolder(name: string): string {
  * Ensure a resolved file path stays strictly within the expected base directory.
  * Returns the safe absolute path, or throws if traversal is detected.
  * Rejects paths that resolve to the base directory itself (callers must provide a child path).
+ *
+ * Note: validation is point-in-time — a symlink race (TOCTOU) between this check and
+ * the subsequent I/O is possible but acceptable for our threat model (Canvas-provided names,
+ * not adversarial local filesystem). Callers needing stronger guarantees should use O_NOFOLLOW.
  */
 export function confineToDirectory(baseDir: string, untrustedPath: string): string {
   const resolved = path.resolve(baseDir, untrustedPath);
