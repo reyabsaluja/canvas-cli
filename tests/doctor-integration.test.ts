@@ -120,11 +120,8 @@ describe("runDoctor integration", () => {
     process.env.AI_PROVIDER = "openai";
     process.env.OPENAI_API_KEY = "sk-invalid-key";
 
-    let callCount = 0;
-    mock.method(globalThis, "fetch", async () => {
-      callCount++;
-      // First call is Canvas API, second is AI provider check
-      if (callCount === 1) {
+    mock.method(globalThis, "fetch", async (url: string | URL) => {
+      if (String(url).includes("canvas.example.edu")) {
         return new Response(JSON.stringify({ name: "User", id: 1 }), {
           status: 200,
         });
@@ -142,10 +139,8 @@ describe("runDoctor integration", () => {
     process.env.AI_PROVIDER = "openai";
     process.env.OPENAI_API_KEY = "sk-valid-key";
 
-    let callCount = 0;
-    mock.method(globalThis, "fetch", async () => {
-      callCount++;
-      if (callCount === 1) {
+    mock.method(globalThis, "fetch", async (url: string | URL) => {
+      if (String(url).includes("canvas.example.edu")) {
         return new Response(JSON.stringify({ name: "User", id: 1 }), {
           status: 200,
         });
