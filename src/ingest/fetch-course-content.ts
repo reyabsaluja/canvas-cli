@@ -59,8 +59,8 @@ export async function fetchCourseContent(
   let courseDetail, assignmentSummaries;
   try {
     [courseDetail, assignmentSummaries] = await Promise.all([
-      client.getCourseDetail(courseId),
-      client.getAssignments(courseId),
+      client.getCourseDetail(courseId, signal),
+      client.getAssignments(courseId, signal),
     ]);
   } catch (err) {
     throw new Error(
@@ -69,7 +69,7 @@ export async function fetchCourseContent(
   }
 
   const announcementFetcher = (client as CanvasClient & {
-    getAnnouncementsSafe?: (courseId: number) => Promise<CanvasDiscussionTopic[]>;
+    getAnnouncementsSafe?: (courseId: number, _options?: unknown, signal?: AbortSignal | null) => Promise<CanvasDiscussionTopic[]>;
   }).getAnnouncementsSafe;
   const assignmentDetailsPromise = enrichAssignmentsWithDetails(
     client,
@@ -78,12 +78,13 @@ export async function fetchCourseContent(
     signal
   );
   const discussionFetcher = (client as CanvasClient & {
-    getDiscussionTopicsSafe?: (courseId: number) => Promise<CanvasDiscussionTopic[]>;
+    getDiscussionTopicsSafe?: (courseId: number, signal?: AbortSignal | null) => Promise<CanvasDiscussionTopic[]>;
   }).getDiscussionTopicsSafe;
   const discussionViewFetcher = (client as CanvasClient & {
     getDiscussionTopicViewSafe?: (
       courseId: number,
-      topicId: number
+      topicId: number,
+      signal?: AbortSignal | null
     ) => Promise<CanvasDiscussionTopicView | null>;
   }).getDiscussionTopicViewSafe;
   const [
@@ -96,16 +97,16 @@ export async function fetchCourseContent(
     assignmentDetailResult,
   ] =
     await Promise.all([
-      client.getModulesSafe(courseId),
-      client.getFilesSafe(courseId),
-      client.getPagesSafe(courseId),
+      client.getModulesSafe(courseId, signal),
+      client.getFilesSafe(courseId, signal),
+      client.getPagesSafe(courseId, signal),
       announcementFetcher
-        ? announcementFetcher.call(client, courseId)
+        ? announcementFetcher.call(client, courseId, undefined, signal)
         : Promise.resolve([]),
       discussionFetcher
-        ? discussionFetcher.call(client, courseId)
+        ? discussionFetcher.call(client, courseId, signal)
         : Promise.resolve([]),
-      client.getFrontPageSafe(courseId),
+      client.getFrontPageSafe(courseId, signal),
       assignmentDetailsPromise,
     ]);
   const assignments = assignmentDetailResult.assignments;
@@ -117,7 +118,7 @@ export async function fetchCourseContent(
     rawModules,
     MODULE_ITEMS_CONCURRENCY,
     async (mod) => {
-      const items = await client.getModuleItemsSafe(courseId, mod.id);
+      const items = await client.getModuleItemsSafe(courseId, mod.id, signal);
       return { ...mod, items };
     },
     signal
@@ -153,7 +154,7 @@ export async function fetchCourseContent(
         discussions,
         DISCUSSION_VIEW_CONCURRENCY,
         async (topic) => {
-          const view = await discussionViewFetcher.call(client, courseId, topic.id);
+          const view = await discussionViewFetcher.call(client, courseId, topic.id, signal);
           return {
             topic,
             entries: flattenDiscussionEntries(view),
@@ -246,7 +247,7 @@ export async function fetchCourseContent(
       batch,
       PAGE_BODY_CONCURRENCY,
       async (slug) => {
-        const page = await client.getPageBySlugSafe(courseId, slug);
+        const page = await client.getPageBySlugSafe(courseId, slug, signal);
         if (!page?.body) {
           return null;
         }
@@ -285,7 +286,8 @@ async function enrichAssignmentsWithDetails(
   const detailFetcher = (client as CanvasClient & {
     getAssignmentDetail?: (
       courseId: number,
-      assignmentId: number
+      assignmentId: number,
+      signal?: AbortSignal | null
     ) => Promise<CanvasAssignmentDetail>;
   }).getAssignmentDetail;
 
@@ -299,7 +301,7 @@ async function enrichAssignmentsWithDetails(
     ASSIGNMENT_DETAIL_CONCURRENCY,
     async (assignment) => {
       try {
-        const detail = await detailFetcher.call(client, courseId, assignment.id);
+        const detail = await detailFetcher.call(client, courseId, assignment.id, signal);
         return { ...assignment, ...detail };
       } catch {
         failedDetails += 1;
