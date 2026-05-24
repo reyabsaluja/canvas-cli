@@ -48,7 +48,12 @@ test("sanitizeFilename trims leading/trailing dots, spaces, and underscores", ()
   assert.equal(sanitizeFilename("...hidden"), "hidden");
   assert.equal(sanitizeFilename("  spaced  "), "spaced");
   assert.equal(sanitizeFilename("___underscored___"), "underscored");
-  assert.equal(sanitizeFilename(".gitignore"), "gitignore");
+});
+
+test("sanitizeFilename preserves leading dot for dotfiles", () => {
+  assert.equal(sanitizeFilename(".gitignore"), ".gitignore");
+  assert.equal(sanitizeFilename(".env.example"), ".env.example");
+  assert.equal(sanitizeFilename(".hidden"), ".hidden");
 });
 
 test("sanitizeFilename prefixes Windows reserved names", () => {
