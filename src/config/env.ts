@@ -46,7 +46,7 @@ export function resolveApiUrl(raw: ResolvedRawConfig): string | undefined {
     const normalized = raw.baseUrl.replace(/\/+$/, "");
     return normalized.endsWith("/api/v1") ? normalized : `${normalized}/api/v1`;
   }
-  return raw.baseUrl;
+  return raw.baseUrl.replace(/\/+$/, "");
 }
 
 export function isConfigured(): boolean {
