@@ -15,6 +15,11 @@ function run(args: string[]) {
     encoding: "utf-8",
   });
   assert.equal(result.status, 0, `"canvas-cli ${args.join(" ")}" exited with code ${result.status}`);
+  const unexpectedStderr = result.stderr
+    .split("\n")
+    .filter((line) => line && !line.includes("DeprecationWarning") && !line.includes("--trace-deprecation"))
+    .join("\n");
+  assert.equal(unexpectedStderr, "", `"canvas-cli ${args.join(" ")}" produced unexpected stderr`);
   return result.stdout.trim();
 }
 
