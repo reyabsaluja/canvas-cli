@@ -207,10 +207,9 @@ export function validateAIKeyFormat(provider: AIProviderName, key: string): Chec
       fix: `Remove whitespace from your ${AI_ENDPOINTS[provider].envKey} value in .env or re-run \`canvas-cli login\`.`,
     };
   }
-  const trimmed = key.trim();
   if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
   ) {
     return {
       label: "AI key format",
