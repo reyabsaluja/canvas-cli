@@ -122,9 +122,8 @@ export function sanitizeDocumentSegment(value: string): string {
 
   let sanitized = value.replace(/[^a-zA-Z0-9._-]/g, "_");
   sanitized = sanitized.replace(/_{2,}/g, "_");
-  sanitized = sanitized.replace(/^_+|_+$/g, "");
 
-  if (!sanitized) return "unnamed";
+  if (!sanitized || sanitized === "_") return "unnamed";
 
   if (sanitized.length > MAX_FILENAME_LENGTH) {
     sanitized = sanitized.slice(0, MAX_FILENAME_LENGTH);

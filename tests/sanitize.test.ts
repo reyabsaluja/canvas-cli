@@ -211,15 +211,15 @@ test("sanitizeDocumentSegment passes through safe characters", () => {
 });
 
 test("sanitizeDocumentSegment replaces special characters with underscores", () => {
-  assert.equal(sanitizeDocumentSegment("hello world!"), "hello_world");
+  assert.equal(sanitizeDocumentSegment("hello world!"), "hello_world_");
 });
 
 test("sanitizeDocumentSegment collapses multiple underscores", () => {
   assert.equal(sanitizeDocumentSegment("foo   bar"), "foo_bar");
 });
 
-test("sanitizeDocumentSegment trims leading/trailing underscores", () => {
-  assert.equal(sanitizeDocumentSegment("  hello  "), "hello");
+test("sanitizeDocumentSegment preserves leading/trailing underscores for backward compat", () => {
+  assert.equal(sanitizeDocumentSegment("  hello  "), "_hello_");
 });
 
 test("sanitizeDocumentSegment handles empty and whitespace-only input", () => {
