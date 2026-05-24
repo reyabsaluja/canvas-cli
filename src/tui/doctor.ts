@@ -4,7 +4,7 @@ import { loadCredential } from "../config/credentials.js";
 import { getAIConfig, type AIProviderName } from "../ai/provider.js";
 import type { Config } from "../config/env.js";
 
-interface CheckResult {
+export interface CheckResult {
   label: string;
   status: "pass" | "fail" | "warn" | "skip";
   detail: string;
@@ -13,7 +13,7 @@ interface CheckResult {
 
 const TOKEN_PATTERN = /^\d+~[A-Za-z0-9]+$/;
 
-function validateTokenFormat(token: string): CheckResult {
+export function validateTokenFormat(token: string): CheckResult {
   if ((token.startsWith('"') && token.endsWith('"')) ||
       (token.startsWith("'") && token.endsWith("'"))) {
     return {
@@ -329,7 +329,7 @@ export async function runDoctor(): Promise<string> {
   return formatResults(profile, results);
 }
 
-function formatResults(profile: string, results: CheckResult[]): string {
+export function formatResults(profile: string, results: CheckResult[]): string {
   const lines: string[] = [];
   lines.push(`**Doctor** — profile: ${profile}\n`);
 
