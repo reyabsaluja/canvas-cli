@@ -4,22 +4,6 @@
 
 `canvas-cli` is a TypeScript command-line interface for working with Canvas LMS from the terminal. It combines direct Canvas API access, local course ingestion, an interactive TUI, and optional AI-assisted assignment investigation.
 
-## Install
-
-```bash
-npm install -g @reyabsaluja/canvas-cli
-# or
-bun add -g @reyabsaluja/canvas-cli
-# or
-pnpm add -g @reyabsaluja/canvas-cli
-```
-
-Or run directly:
-
-```bash
-npx @reyabsaluja/canvas-cli
-```
-
 ## Highlights
 
 - Browse Canvas courses and assignments without leaving the terminal
@@ -28,20 +12,134 @@ npx @reyabsaluja/canvas-cli
 - Ask grounded questions against an existing workspace
 - Launch an interactive terminal UI by running the CLI with no subcommand
 
-## Quick Start
+## Installation
+
+**Prerequisites:** [Node.js](https://nodejs.org/) version 20 or later.
 
 ```bash
-bun install
-cp .env.example .env
-bun run build
-bun start
+npm install -g @reyabsaluja/canvas-cli
 ```
 
-Configure `.env` with:
+Or use another package manager:
 
-- `CANVAS_BASE_URL`
-- `CANVAS_ACCESS_TOKEN`
-- One optional AI provider configuration for smart features: set `AI_PROVIDER` plus matching credentials for Anthropic, OpenAI, Gemini/Google, or AWS Bedrock
+```bash
+bun add -g @reyabsaluja/canvas-cli
+pnpm add -g @reyabsaluja/canvas-cli
+```
+
+Or run without installing:
+
+```bash
+npx @reyabsaluja/canvas-cli
+```
+
+Verify the installation:
+
+```bash
+canvas-cli --version
+```
+
+## Quick Start
+
+### 1. Run the interactive login
+
+```bash
+canvas-cli login
+```
+
+The login wizard walks you through:
+1. Entering your Canvas base URL (e.g., `https://your-school.instructure.com`)
+2. Pasting your Canvas API access token
+3. Optionally configuring an AI provider for smart features
+
+Credentials are stored securely in `~/.canvas-cli/` and never written to your project directory.
+
+### 2. Verify your connection
+
+```bash
+canvas-cli courses
+```
+
+You should see your active courses listed. If not, see [Troubleshooting](#troubleshooting) below.
+
+### 3. Start using canvas-cli
+
+Launch the interactive TUI:
+
+```bash
+canvas-cli
+```
+
+Or use individual commands:
+
+```bash
+canvas-cli assignments                    # see what's due
+canvas-cli ingest ece297                  # cache course materials locally
+canvas-cli work "Milestone 3"            # build an AI-powered assignment workspace
+```
+
+## Getting a Canvas API Token
+
+Canvas uses personal access tokens for API authentication. Here's how to generate one:
+
+1. Log in to your institution's Canvas site (e.g., `https://your-school.instructure.com`)
+2. Click your **profile picture** (top-left) → **Settings**
+3. Scroll down to **Approved Integrations**
+4. Click **+ New Access Token**
+5. Enter a purpose (e.g., "canvas-cli") and optionally set an expiry date
+6. Click **Generate Token**
+7. **Copy the token immediately** — it won't be shown again
+
+Your Canvas base URL is the root of your institution's Canvas site. Common formats:
+- `https://canvas.university.edu`
+- `https://your-school.instructure.com`
+- `https://learn.institution.edu`
+
+> **Note:** Do not include `/api/v1` in the base URL — canvas-cli adds this automatically.
+
+> **Note:** Some institutions disable personal access tokens for students. If you don't see the "New Access Token" button, contact your institution's Canvas administrator.
+
+## AI Provider Setup (Optional)
+
+AI features (`work`, `ask`, `show --smart`, and the TUI's conversational mode) require an API key from one supported provider. During `canvas-cli login`, select "Configure AI provider" and choose one:
+
+| Provider | Required credential |
+|---|---|
+| Anthropic | `ANTHROPIC_API_KEY` |
+| OpenAI | `OPENAI_API_KEY` |
+| Google / Gemini | `GOOGLE_API_KEY` |
+| AWS Bedrock | `AWS_REGION` + `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` |
+
+Only one provider is needed. All AI features are optional — core Canvas browsing, assignment listing, and course ingestion work without any AI configuration.
+
+## Troubleshooting
+
+### "Authentication failed" or 401 errors
+
+- **Token expired:** Canvas tokens can expire if you set an expiry date. Generate a new one in Canvas → Settings → Approved Integrations.
+- **Wrong base URL:** Ensure your base URL matches your institution's Canvas domain exactly. Try opening `https://your-base-url/api/v1/users/self` in a browser while logged in — if it returns JSON, the URL is correct.
+- **Token revoked:** Check that your token still appears in Canvas → Settings → Approved Integrations. If not, generate a new one and run `canvas-cli login` again.
+
+### "Network error" or connection failures
+
+- **VPN required:** Many institutions require VPN access to reach Canvas. Connect to your school's VPN and retry.
+- **Firewall blocking:** Corporate or campus firewalls may block outbound HTTPS. Try from a different network.
+- **Wrong URL format:** The base URL should not include `/api/v1`, trailing slashes, or path segments beyond the domain. Correct: `https://canvas.school.edu`. Incorrect: `https://canvas.school.edu/api/v1/`.
+- **DNS issues:** Verify you can reach the URL with `curl https://your-base-url/api/v1/users/self -H "Authorization: Bearer YOUR_TOKEN"`.
+
+### "No courses found"
+
+- **Enrollment filtering:** By default, only current/active courses are shown. Use `canvas-cli courses --all` to include past terms.
+- **Completed terms:** Courses from finished terms are hidden by default. If your current term just ended, courses may have already been marked inactive.
+- **Student role only:** canvas-cli filters to enrollments where you have an active role. If you were recently added to a course, it may take a few minutes to appear.
+- **Wrong account:** Verify you're using a token from the correct Canvas account if your institution has multiple Canvas instances.
+
+### AI features not working
+
+- **No provider configured:** Run `canvas-cli login` and select "Configure AI provider" to set up an API key.
+- **Invalid API key:** Verify your key is correct and has not been revoked. Test it directly with your provider's API.
+- **Rate limited:** If you see rate limit errors, wait a few minutes and retry. Consider using a provider with higher rate limits.
+- **Missing course ingestion:** Commands like `work` and `ask` produce better results after running `canvas-cli ingest <course>` first. Without ingestion, the AI has less context to work with.
 
 ## Commands
 
@@ -65,11 +163,20 @@ Generated local state is stored under `.canvas-cli/` and ignored by git:
 ## Development
 
 ```bash
-bun run dev
+git clone https://github.com/reyabsaluja/canvas-cli.git
+cd canvas-cli
+bun install
+cp .env.example .env   # fill in your Canvas URL, token, and optional AI key
+bun run dev            # run from source
+```
+
+Other development commands:
+
+```bash
 bun run typecheck
 bun run test
 bun run build
-bun run check
+bun run check          # typecheck + test + build (all gates)
 ```
 
 ## Documentation
