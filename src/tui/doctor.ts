@@ -299,9 +299,10 @@ export async function runDoctor(): Promise<string> {
 
   // Check 3: Canvas API connectivity
   if (token && baseUrl) {
-    const apiUrl = baseUrl.endsWith("/api/v1")
-      ? baseUrl
-      : `${baseUrl}/api/v1`;
+    const normalized = baseUrl.replace(/\/+$/, "");
+    const apiUrl = normalized.endsWith("/api/v1")
+      ? normalized
+      : `${normalized}/api/v1`;
     results.push(
       await checkCanvasConnectivity({ baseUrl: apiUrl, accessToken: token })
     );
