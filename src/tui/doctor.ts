@@ -165,8 +165,9 @@ async function checkAIProvider(provider: AIProviderName): Promise<CheckResult> {
     }
     return {
       label: "AI provider",
-      status: "pass",
-      detail: `bedrock credentials present (region: ${process.env.AWS_REGION ?? "not set"})`,
+      status: "warn",
+      detail: `bedrock credentials present but not verified (region: ${process.env.AWS_REGION ?? "not set"})`,
+      fix: "Bedrock uses SigV4 auth which cannot be validated with a simple request. Verify by running an AI command.",
     };
   }
 
