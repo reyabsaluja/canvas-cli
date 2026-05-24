@@ -7,11 +7,9 @@ import { normalizeCourse, normalizeAssignment } from "../src/domain/normalize.js
 import { filterRelevantAssignments } from "../src/domain/assignment-relevance.js";
 import { matchCourses } from "../src/domain/matching.js";
 import { sortByUrgency } from "../src/domain/sorting.js";
-import { renderCourseList } from "../src/format/render-courses.js";
-import { renderAssignments } from "../src/format/render-assignments.js";
 import type { Config } from "../src/config/env.js";
 
-test("integration: command-level flows against mock API", async (t) => {
+test("integration: domain flows against mock API", async (t) => {
   const data = buildDefaultServerData();
   const server = createMockCanvasServer(data);
   const port = await startServer(server);
@@ -22,7 +20,7 @@ test("integration: command-level flows against mock API", async (t) => {
 
   t.after(async () => { await stopServer(server); });
 
-  await t.test("courses flow: list → normalize → render", async () => {
+  await t.test("courses flow: list → normalize → filter", async () => {
     const client = new CanvasClient(config);
     const rawCourses = await client.getCourses();
     const allCourses = rawCourses.map(normalizeCourse);
@@ -33,20 +31,14 @@ test("integration: command-level flows against mock API", async (t) => {
     assert.equal(currentCourses.length, 2);
     assert.ok(currentCourses.some((c) => c.courseCode === "CS101"));
     assert.ok(currentCourses.some((c) => c.courseCode === "CS202"));
-
-    const output = renderCourseList(currentCourses, false);
-    assert.ok(output.includes("CS101"));
-    assert.ok(output.includes("CS202"));
-    assert.ok(!output.includes("HIST303"));
   });
 
-  await t.test("courses flow: --all shows completed courses", async () => {
+  await t.test("courses flow: all courses includes completed", async () => {
     const client = new CanvasClient(config);
     const rawCourses = await client.getCourses();
     const allCourses = rawCourses.map(normalizeCourse);
 
-    const output = renderCourseList(allCourses, true);
-    assert.ok(output.includes("HIST303"));
+    assert.ok(allCourses.some((c) => c.courseCode === "HIST303"));
   });
 
   await t.test("assignments flow: fetch → normalize → filter → sort", async () => {
@@ -74,7 +66,7 @@ test("integration: command-level flows against mock API", async (t) => {
     }
   });
 
-  await t.test("assignments flow: --course filter narrows to one course", async () => {
+  await t.test("assignments flow: course filter narrows to one course", async () => {
     const client = new CanvasClient(config);
     const rawCourses = await client.getCourses();
     const courses = rawCourses.map(normalizeCourse);
@@ -88,7 +80,7 @@ test("integration: command-level flows against mock API", async (t) => {
     assert.equal(normalized.length, 3);
   });
 
-  await t.test("assignments flow: --course with ambiguous query returns multiple matches", async () => {
+  await t.test("assignments flow: ambiguous course query returns multiple matches", async () => {
     const client = new CanvasClient(config);
     const rawCourses = await client.getCourses();
     const courses = rawCourses.map(normalizeCourse);
@@ -113,7 +105,7 @@ test("integration: command-level flows against mock API", async (t) => {
     assert.ok(defaultFiltered.length <= allFiltered.length);
   });
 
-  await t.test("show assignment flow: pick course → get detail", async () => {
+  await t.test("assignment detail: pick course → get detail", async () => {
     const client = new CanvasClient(config);
     const rawCourses = await client.getCourses();
     const courses = rawCourses.map(normalizeCourse);
@@ -125,21 +117,6 @@ test("integration: command-level flows against mock API", async (t) => {
     assert.equal(detail.name, "Lab 1: Hello World");
     assert.ok(detail.description?.includes("Hello World"));
     assert.equal(detail.points_possible, 10);
-  });
-
-  await t.test("assignment rendering produces readable output", async () => {
-    const client = new CanvasClient(config);
-    const rawCourses = await client.getCourses();
-    const courses = rawCourses.map(normalizeCourse);
-    const csCourse = courses.find((c) => c.courseCode === "CS101")!;
-
-    const raw = await client.getAssignments(csCourse.id);
-    const normalized = raw.map((a) => normalizeAssignment(a, csCourse.name));
-    const sorted = sortByUrgency(normalized);
-
-    const output = renderAssignments(sorted, { groupByCourse: false });
-    assert.ok(output.includes("Lab 1"));
-    assert.ok(output.includes("Lab 2"));
   });
 
 });
