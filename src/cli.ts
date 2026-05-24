@@ -21,9 +21,23 @@ const program = new Command();
 
 program
   .name("canvas-cli")
-  .description("A terminal interface for Canvas LMS")
+  .description(
+    "A terminal interface for Canvas LMS — manage courses, assignments, and content from the command line."
+  )
   .version(version, "-V, --version", "output the current version")
-  .option("--debug", "Enable verbose debug output to stderr");
+  .option("--debug", "Enable verbose debug output to stderr")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ canvas-cli login                  Set up credentials (interactive wizard)
+  $ canvas-cli ingest CS101           Download course content for offline use
+  $ canvas-cli status                 Verify your configuration
+  $ canvas-cli                        Launch the interactive TUI
+
+Run canvas-cli <command> --help for detailed usage of each command.
+Run canvas-cli examples for common workflows.`
+  );
 
 const SKIP_CREDENTIAL_LOADING = new Set(["login", "logout", "status"]);
 
@@ -41,27 +55,97 @@ program.hook("preAction", (_thisCommand, actionCommand) => {
 program
   .command("login")
   .description("Set up Canvas credentials interactively")
-  .option("--profile <name>", "Profile name for multiple Canvas instances")
+  .option(
+    "--profile <name>",
+    "Named profile for managing multiple Canvas instances (e.g., school, work)"
+  )
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ canvas-cli login                  Guided setup for Canvas URL, token, and AI provider
+  $ canvas-cli login --profile work   Configure a separate profile for a work account`
+  )
   .action(loginCommand);
 
 program
   .command("logout")
-  .description("Remove stored credentials")
-  .option("--profile <name>", "Profile to remove")
+  .description("Remove stored credentials and configuration")
+  .option("--profile <name>", "Profile to remove (defaults to \"default\")")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ canvas-cli logout                 Remove the default profile's credentials
+  $ canvas-cli logout --profile work  Remove only the "work" profile`
+  )
   .action(logoutCommand);
 
 program
   .command("status")
   .description("Show current configuration and connection status")
-  .option("--profile <name>", "Profile to inspect")
+  .option("--profile <name>", "Profile to inspect (defaults to active profile)")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ canvas-cli status                 Show active profile, Canvas URL, and token status
+  $ canvas-cli status --profile work  Inspect the "work" profile configuration`
+  )
   .action(statusCommand);
 
 program
   .command("ingest <course>")
-  .description("Ingest course structure and content into a local cache")
-  .option("--refresh", "Force re-ingestion even if cache exists")
-  .option("--json", "Output machine-readable JSON summary")
+  .description(
+    "Ingest course structure and content into a local cache for offline access"
+  )
+  .option("--refresh", "Force re-download even if a cached version exists")
+  .option("--json", "Output a machine-readable JSON summary instead of formatted text")
+  .addHelpText(
+    "after",
+    `
+Arguments:
+  course        Course code, name, or partial match (e.g., "CS101", "Intro to Bio")
+
+Examples:
+  $ canvas-cli ingest CS101           Download modules, pages, and files for CS101
+  $ canvas-cli ingest "Intro to"      Match by partial course name
+  $ canvas-cli ingest CS101 --refresh Re-download even if already cached
+  $ canvas-cli ingest CS101 --json    Output JSON for scripting or piping`
+  )
   .action(ingestCourseCommand);
+
+program
+  .command("examples")
+  .description("Show common workflows and usage patterns")
+  .action(() => {
+    console.log(`
+canvas-cli — Common Workflows
+
+Getting Started:
+  $ canvas-cli login                  Interactive setup wizard
+  $ canvas-cli status                 Verify everything is configured correctly
+
+Working with Courses:
+  $ canvas-cli ingest CS101           Cache course content locally
+  $ canvas-cli ingest CS101 --refresh Force re-download of course content
+  $ canvas-cli ingest CS101 --json    Get structured output for scripting
+
+Using the Interactive TUI:
+  $ canvas-cli                        Launch the full interactive interface
+                                      (Browse courses, read content, ask AI questions)
+
+Managing Multiple Accounts:
+  $ canvas-cli login --profile school Set up school account
+  $ canvas-cli login --profile work   Set up work account
+  $ canvas-cli status --profile work  Check work account status
+  $ export CANVAS_CLI_PROFILE=work    Switch active profile
+
+Debugging:
+  $ canvas-cli --debug ingest CS101   Show verbose debug output
+  $ canvas-cli status                 Check if credentials are valid
+`);
+  });
 
 program
   .command("tui", { isDefault: true, hidden: true })
