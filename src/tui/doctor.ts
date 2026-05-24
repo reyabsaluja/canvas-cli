@@ -1,5 +1,5 @@
 import { resolveRawConfig, resolveApiUrl } from "../config/env.js";
-import { getAIConfig, type AIProviderName } from "../ai/provider.js";
+import { getAIConfig, type AIProviderConfig, type AIProviderName } from "../ai/provider.js";
 import { debug } from "../debug.js";
 
 export interface CheckResult {
@@ -352,7 +352,7 @@ export async function runDoctor(): Promise<string> {
   }
 
   // Check 4: AI provider
-  let aiConfig: ReturnType<typeof getAIConfig>;
+  let aiConfig: AIProviderConfig | null;
   try {
     aiConfig = getAIConfig();
   } catch (err) {
