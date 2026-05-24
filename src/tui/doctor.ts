@@ -209,6 +209,7 @@ async function checkAIProvider(provider: AIProviderName): Promise<CheckResult> {
       headers[ep.headerKey] = key;
     }
 
+    // Google's API requires the key as a query param (no header-based auth for this endpoint)
     const response = await fetch(
       provider === "google" ? `${ep.url}?key=${key}` : ep.url,
       {
