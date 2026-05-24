@@ -31,10 +31,10 @@ program
     "after",
     `
 Examples:
-  $ canvas-cli login                  Set up credentials (interactive wizard)
-  $ canvas-cli ingest CS101           Download course content for offline use
-  $ canvas-cli status                 Verify your configuration
-  $ canvas-cli                        Launch the interactive TUI
+  $ canvas-cli login              Set up credentials (interactive wizard)
+  $ canvas-cli ingest CS101       Download course content for offline use
+  $ canvas-cli status             Verify your configuration
+  $ canvas-cli                    Launch the interactive TUI
 
 Run canvas-cli <command> --help for detailed usage of each command.
 Run canvas-cli examples for common workflows.`
@@ -64,8 +64,8 @@ program
     "after",
     `
 Examples:
-  $ canvas-cli login                  Guided setup for Canvas URL, token, and AI provider
-  $ canvas-cli login --profile work   Configure a separate profile for a work account`
+  $ canvas-cli login                Guided setup for Canvas URL, token, and AI provider
+  $ canvas-cli login --profile work Configure a separate profile for a work account`
   )
   .action(loginCommand);
 
@@ -77,8 +77,8 @@ program
     "after",
     `
 Examples:
-  $ canvas-cli logout                 Remove the default profile's credentials
-  $ canvas-cli logout --profile work  Remove only the "work" profile`
+  $ canvas-cli logout                Remove the default profile's credentials
+  $ canvas-cli logout --profile work Remove only the "work" profile`
   )
   .action(logoutCommand);
 
@@ -90,8 +90,8 @@ program
     "after",
     `
 Examples:
-  $ canvas-cli status                 Show active profile, Canvas URL, and token status
-  $ canvas-cli status --profile work  Inspect the "work" profile configuration`
+  $ canvas-cli status                Show active profile, Canvas URL, and token status
+  $ canvas-cli status --profile work Inspect the "work" profile configuration`
   )
   .action(statusCommand);
 
@@ -124,7 +124,7 @@ program
     "after",
     `
 Examples:
-  $ canvas-cli examples              Print categorized usage patterns and workflows`
+  $ canvas-cli examples  Print categorized usage patterns and workflows`
   )
   .action(examplesCommand);
 
