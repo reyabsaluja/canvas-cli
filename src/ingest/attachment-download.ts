@@ -4,6 +4,7 @@ import type { Config } from "../config/env.js";
 import type { DownloadedAttachmentEntry } from "./types.js";
 import type { SelectedAttachment } from "./attachment-selection.js";
 import { sanitizeFilename, sanitizeSubfolder, confineToDirectory } from "../sanitize.js";
+import { isAbortError } from "../errors.js";
 
 /**
  * Download selected attachments into the course attachments directory.
@@ -94,7 +95,7 @@ export async function downloadSelectedAttachments(
       });
     } catch (err) {
       await fs.rm(tmpPath, { force: true }).catch(() => {});
-      if (err instanceof Error && err.name === "AbortError") {
+      if (isAbortError(err)) {
         throw err;
       }
       results.push({
