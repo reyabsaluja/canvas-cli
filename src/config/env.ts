@@ -23,6 +23,7 @@ export function resolveRawConfig(): ResolvedRawConfig {
   const stored = readStoredConfig(profile);
   const envBaseUrl = process.env.CANVAS_BASE_URL;
   const envToken = process.env.CANVAS_ACCESS_TOKEN;
+  // Treat empty-string canvasBaseUrl as missing (user hasn't completed setup)
   const baseUrl = envBaseUrl || stored?.canvasBaseUrl || undefined;
   const accessToken = envToken || loadCredential(profile, "canvas-token") || undefined;
   const urlSource: ResolvedRawConfig["urlSource"] = envBaseUrl ? "env" : stored?.canvasBaseUrl ? "stored" : null;
