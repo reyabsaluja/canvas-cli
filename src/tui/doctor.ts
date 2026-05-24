@@ -1,6 +1,4 @@
-import { getActiveProfile } from "../config/env.js";
-import { readStoredConfig } from "../config/store.js";
-import { loadCredential } from "../config/credentials.js";
+import { resolveRawConfig } from "../config/env.js";
 import { getAIConfig, type AIProviderName } from "../ai/provider.js";
 import type { Config } from "../config/env.js";
 
@@ -243,19 +241,12 @@ async function checkAIProvider(provider: AIProviderName): Promise<CheckResult> {
 }
 
 export async function runDoctor(): Promise<string> {
-  const profile = getActiveProfile();
-  const stored = readStoredConfig(profile);
+  const raw = resolveRawConfig();
+  const { profile, baseUrl, accessToken: token, source: configSource } = raw;
   const results: CheckResult[] = [];
 
-  // Resolve config from stored profile OR env vars (env takes precedence, same as loadConfig)
-  const envBaseUrl = process.env.CANVAS_BASE_URL;
-  const envToken = process.env.CANVAS_ACCESS_TOKEN;
-  const baseUrl = envBaseUrl || stored?.canvasBaseUrl;
-  const token = envToken || loadCredential(profile, "canvas-token");
-  const configSource = envBaseUrl ? "env" : stored ? "stored" : null;
-
   // Check 1: Configuration source
-  if (!baseUrl && !stored) {
+  if (!baseUrl && !configSource) {
     results.push({
       label: "Configuration",
       status: "fail",
@@ -288,7 +279,7 @@ export async function runDoctor(): Promise<string> {
       fix: "Run `canvas-cli login` to set up your access token, or set CANVAS_ACCESS_TOKEN in your environment.",
     });
   } else {
-    const tokenSource = envToken ? " (from env)" : "";
+    const tokenSource = process.env.CANVAS_ACCESS_TOKEN ? " (from env)" : "";
     results.push({
       label: "Canvas token",
       status: "pass",
