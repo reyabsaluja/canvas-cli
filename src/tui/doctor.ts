@@ -212,14 +212,17 @@ async function checkAIProvider(provider: AIProviderName): Promise<CheckResult> {
 
   try {
     const headers: Record<string, string> = { Accept: "application/json" };
-    if (provider === "anthropic") {
-      headers[ep.headerKey] = key;
-      headers["anthropic-version"] = "2023-06-01";
-      headers["Content-Type"] = "application/json";
-    } else if (provider === "openai") {
-      headers[ep.headerKey] = `Bearer ${key}`;
-    } else if (provider !== "google") {
-      headers[ep.headerKey] = key;
+    switch (provider) {
+      case "anthropic":
+        headers[ep.headerKey] = key;
+        headers["anthropic-version"] = "2023-06-01";
+        headers["Content-Type"] = "application/json";
+        break;
+      case "openai":
+        headers[ep.headerKey] = `Bearer ${key}`;
+        break;
+      case "google":
+        break;
     }
 
     // Google's discovery endpoint only supports key-as-query-param auth.
