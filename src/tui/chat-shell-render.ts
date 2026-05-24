@@ -638,11 +638,23 @@ function writeAutocompleteOverlay(rows: string[] | null): void {
     !lastOverlayRows ||
     lastOverlayRows.length !== rows.length;
 
-  if (positionChanged) {
-    clearOverlayPaintedRows();
+  const writes: string[] = [];
+
+  // Clear old overlay rows inline (instead of a separate write) to avoid flicker
+  if (positionChanged && lastOverlayPaintedStart >= 1 && lastOverlayPaintedEnd >= lastOverlayPaintedStart) {
+    const clampedEnd = Math.min(lastOverlayPaintedEnd, totalRows);
+    if (lastOverlayPaintedStart <= clampedEnd) {
+      writes.push("\x1B[0m");
+      for (let row = lastOverlayPaintedStart; row <= clampedEnd; row++) {
+        writes.push(`\x1B[${row};1H\x1B[2K`);
+      }
+      invalidateScreenRows(lastOverlayPaintedStart, clampedEnd);
+    }
+    lastOverlayPaintedStart = -1;
+    lastOverlayPaintedEnd = -1;
+    lastOverlayRows = null;
   }
 
-  const writes: string[] = [];
   let paintedStart = -1;
   let paintedEnd = -1;
   for (let index = 0; index < rows.length; index++) {

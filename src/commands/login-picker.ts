@@ -43,7 +43,8 @@ export async function verticalPicker(
     }
   };
 
-  // Print placeholder lines so the first render() can cursor-up over them
+  // Hide cursor and print placeholder lines so the first render() can cursor-up over them
+  process.stdout.write("\x1b[?25l");
   process.stdout.write("\n".repeat(options.length + 1));
   render();
 
@@ -57,6 +58,7 @@ export async function verticalPicker(
     process.stdin.resume();
 
     const cleanup = () => {
+      process.stdout.write("\x1b[?25h");
       try { process.stdin.setRawMode(false); } catch {}
       process.stdin.removeListener("data", onData);
       process.stdin.pause();
@@ -125,19 +127,21 @@ export async function horizontalPicker(
     process.stdout.write(line);
   };
 
+  process.stdout.write("\x1b[?25l");
   renderLine();
 
   return new Promise((resolve) => {
     try {
       process.stdin.setRawMode(true);
     } catch {
-      process.stdout.write("\n");
+      process.stdout.write("\x1b[?25h\n");
       resolve(null);
       return;
     }
     process.stdin.resume();
 
     const cleanup = () => {
+      process.stdout.write("\x1b[?25h");
       try { process.stdin.setRawMode(false); } catch {}
       process.stdin.removeListener("data", onData);
       process.stdin.pause();
