@@ -72,6 +72,11 @@ export const COMMANDS: CommandDefinition[] = [
     navigation: true,
   },
   {
+    name: "/doctor",
+    description: "Diagnose configuration and connectivity",
+    scopes: ["global", "course", "workspace"],
+  },
+  {
     name: "/login",
     description: "Re-run login setup",
     scopes: ["global", "course", "workspace"],
