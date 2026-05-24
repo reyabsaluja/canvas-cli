@@ -3,13 +3,7 @@
 import { createRequire } from "node:module";
 import { Command } from "commander";
 import { initDebug, debug } from "./debug.js";
-import { coursesCommand } from "./commands/courses.js";
-import { assignmentsCommand } from "./commands/assignments.js";
-import { showAssignmentCommand } from "./commands/show-assignment.js";
-import { doAssignmentCommand } from "./commands/do-assignment.js";
 import { ingestCourseCommand } from "./commands/ingest-course.js";
-import { workCommand } from "./commands/work.js";
-import { askCommand } from "./commands/ask.js";
 import { loginCommand } from "./commands/login.js";
 import { logoutCommand } from "./commands/logout.js";
 import { statusCommand } from "./commands/status.js";
@@ -45,74 +39,6 @@ program.hook("preAction", (_thisCommand, actionCommand) => {
 });
 
 program
-  .command("courses")
-  .description("List your Canvas courses")
-  .option("--all", "Include past/inactive courses")
-  .option("--json", "Output as JSON")
-  .action(coursesCommand);
-
-program
-  .command("assignments")
-  .description("List upcoming assignments")
-  .option("--course <query>", "Filter to a specific course")
-  .option("--all", "Show all assignments including old/submitted")
-  .option("--include-submitted", "Include submitted assignments")
-  .option("--include-no-due-date", "Include assignments with no due date")
-  .option("--json", "Output as JSON")
-  .action(assignmentsCommand);
-
-const show = program
-  .command("show")
-  .description("Show details for a resource");
-
-show
-  .command("assignment <name>")
-  .description("Show detailed info for an assignment")
-  .option("--course <query>", "Scope to a specific course")
-  .option("--id <assignmentId>", "Look up by Canvas assignment ID")
-  .option("--json", "Output as JSON")
-  .option("--smart", "Include AI-generated real assignment overview")
-  .action(showAssignmentCommand);
-
-program
-  .command("do <assignment>")
-  .description("Create a local workspace for an assignment")
-  .option("--course <query>", "Scope to a specific course")
-  .option("--id <assignmentId>", "Look up by Canvas assignment ID")
-  .action(doAssignmentCommand);
-
-program
-  .command("ingest <course>")
-  .description("Ingest course structure and content into a local cache")
-  .option("--refresh", "Force re-ingestion even if cache exists")
-  .option("--json", "Output machine-readable JSON summary")
-  .action(ingestCourseCommand);
-
-program
-  .command("work <assignment>")
-  .description("Create a rich AI-powered workspace for an assignment")
-  .option("--course <query>", "Scope to a specific course")
-  .option("--id <assignmentId>", "Look up by Canvas assignment ID")
-  .action(workCommand);
-
-program
-  .command("ask <question>")
-  .description("Ask a question about the current assignment workspace")
-  .option("--workspace <path>", "Path to a specific workspace")
-  .option("--json", "Output as JSON")
-  .option("--show-retrieval", "Show retrieval debug info")
-  .option("--show-debug", "(deprecated, use --show-retrieval)")
-  .action((question, opts) => {
-    if (opts.showDebug) {
-      process.stderr.write(
-        "Warning: --show-debug on 'ask' is deprecated. Use --show-retrieval instead.\n"
-      );
-      opts.showRetrieval = true;
-    }
-    return askCommand(question, opts);
-  });
-
-program
   .command("login")
   .description("Set up Canvas credentials interactively")
   .option("--profile <name>", "Profile name for multiple Canvas instances")
@@ -129,6 +55,13 @@ program
   .description("Show current configuration and connection status")
   .option("--profile <name>", "Profile to inspect")
   .action(statusCommand);
+
+program
+  .command("ingest <course>")
+  .description("Ingest course structure and content into a local cache")
+  .option("--refresh", "Force re-ingestion even if cache exists")
+  .option("--json", "Output machine-readable JSON summary")
+  .action(ingestCourseCommand);
 
 program
   .command("tui", { isDefault: true, hidden: true })
