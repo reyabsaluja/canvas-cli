@@ -1,6 +1,6 @@
 export { CanvasApiError } from "./errors.js";
 export { THROTTLE_THRESHOLD, THROTTLE_DELAY_MS } from "./throttle.js";
-import { RateLimitThrottle } from "./throttle.js";
+import { RateLimitThrottle, abortableSleep, stderrLog } from "./throttle.js";
 export { RateLimitThrottle };
 import type { LogFn, SleepFn } from "./throttle.js";
 export type { LogFn, SleepFn };
@@ -8,8 +8,6 @@ export type { LogFn, SleepFn };
 export const DEFAULT_MAX_RETRIES = 3;
 export const DEFAULT_BASE_DELAY_MS = 1000;
 export const DEFAULT_MAX_DELAY_MS = 30_000;
-
-const stderrLog: LogFn = (msg) => console.error(msg);
 
 const RETRIABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 
@@ -65,23 +63,6 @@ function getRetryDelay(response: Response, attempt: number, baseDelay: number, m
   return exponentialDelay(attempt, baseDelay, maxDelay);
 }
 
-function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
-      return;
-    }
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(signal!.reason ?? new DOMException("Aborted", "AbortError"));
-    };
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
-}
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -105,7 +86,7 @@ export async function fetchWithRetry(
   const maxDelay = options?.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
   const requestTimeout = options?.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const log = options?.log ?? stderrLog;
-  const sleepImpl = options?.sleepFn ?? sleep;
+  const sleepImpl = options?.sleepFn ?? abortableSleep;
   const throttle = options?.throttle ?? null;
   const signal = init?.signal ?? null;
 

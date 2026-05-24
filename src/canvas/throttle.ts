@@ -1,9 +1,9 @@
 export type SleepFn = (ms: number, signal?: AbortSignal | null) => Promise<void>;
 export type LogFn = (message: string) => void;
 
-const stderrLog: LogFn = (msg) => console.error(msg);
+export const stderrLog: LogFn = (msg) => console.error(msg);
 
-const defaultSleep: SleepFn = (ms, signal) =>
+export const abortableSleep: SleepFn = (ms, signal) =>
   new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
@@ -41,7 +41,7 @@ export class RateLimitThrottle {
   constructor(options?: ThrottleOptions) {
     this.threshold = options?.threshold ?? THROTTLE_THRESHOLD;
     this.delayMs = options?.delayMs ?? THROTTLE_DELAY_MS;
-    this.sleepFn = options?.sleepFn ?? defaultSleep;
+    this.sleepFn = options?.sleepFn ?? abortableSleep;
     this.log = options?.log ?? stderrLog;
   }
 
