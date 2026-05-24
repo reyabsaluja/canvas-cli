@@ -169,7 +169,7 @@ async function checkAIProvider(provider: AIProviderName): Promise<CheckResult> {
       envKey: "ANTHROPIC_API_KEY",
     },
     google: {
-      url: "https://generativelanguage.googleapis.com/v1beta/models",
+      url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:countTokens",
       headerKey: "x-goog-api-key",
       envKey: "GOOGLE_API_KEY",
     },
@@ -226,16 +226,23 @@ async function checkAIProvider(provider: AIProviderName): Promise<CheckResult> {
         break;
     }
 
+    const needsPost = provider === "anthropic" || provider === "google";
+    let body: string | undefined;
+    if (provider === "anthropic") {
+      body = JSON.stringify({ model: "_", max_tokens: 1, messages: [] });
+    } else if (provider === "google") {
+      headers["Content-Type"] = "application/json";
+      body = JSON.stringify({ contents: [{ parts: [{ text: "hi" }] }] });
+    }
+
     const response = await fetch(
       ep.url,
       {
-        method: provider === "anthropic" ? "POST" : "GET",
+        method: needsPost ? "POST" : "GET",
         headers,
         redirect: "manual",
         // Anthropic validates auth before body — a 400 (invalid body) confirms the key works.
-        // False negative: if Anthropic adds a WAF/rate-limit layer that rejects before auth,
-        // we'd get a non-400 error and report "warn" instead of "pass". Revisit if users report this.
-        ...(provider === "anthropic" ? { body: JSON.stringify({ model: "_", max_tokens: 1, messages: [] }) } : {}),
+        ...(body ? { body } : {}),
         signal: AbortSignal.timeout(10_000),
       }
     );
@@ -257,8 +264,8 @@ async function checkAIProvider(provider: AIProviderName): Promise<CheckResult> {
       };
     }
 
-    // For Anthropic, a 400 with valid auth means the key works
-    if (provider === "anthropic" && response.status === 400) {
+    // Anthropic/Google validate auth before body — a 400 (invalid body) confirms the key works
+    if ((provider === "anthropic" || provider === "google") && response.status === 400) {
       return {
         label: "AI provider",
         status: "pass",
