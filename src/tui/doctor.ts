@@ -302,7 +302,7 @@ export async function runDoctor(): Promise<string> {
   const results: CheckResult[] = [];
 
   // Check 1: Configuration source
-  if (!baseUrl && !urlSource) {
+  if (!baseUrl) {
     results.push({
       label: "Configuration",
       status: "fail",
