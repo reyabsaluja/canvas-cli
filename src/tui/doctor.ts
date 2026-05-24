@@ -196,6 +196,7 @@ async function checkAIProvider(provider: AIProviderName): Promise<CheckResult> {
       {
         method: provider === "anthropic" ? "POST" : "GET",
         headers,
+        // Anthropic validates auth before request body — an invalid body that gets a 400 confirms the key works
         ...(provider === "anthropic" ? { body: JSON.stringify({ model: "_", max_tokens: 1, messages: [] }) } : {}),
         signal: AbortSignal.timeout(10_000),
       }
