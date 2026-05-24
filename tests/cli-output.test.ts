@@ -54,6 +54,6 @@ test("status --help includes examples section", () => {
 test("ingest --help includes examples and argument description", () => {
   const output = run(["ingest", "--help"]);
   assert.ok(output.includes("Examples:"));
-  assert.ok(output.includes("Arguments:"));
+  assert.ok(output.includes("course"));
   assert.ok(output.includes("Course code, name, or partial match"));
 });

@@ -96,7 +96,11 @@ Examples:
   .action(statusCommand);
 
 program
-  .command("ingest <course>")
+  .command("ingest")
+  .argument(
+    "<course>",
+    'Course code, name, or partial match (e.g., "CS101", "Intro to Bio")'
+  )
   .description(
     "Ingest course structure and content into a local cache for offline access"
   )
@@ -105,9 +109,6 @@ program
   .addHelpText(
     "after",
     `
-Arguments:
-  course        Course code, name, or partial match (e.g., "CS101", "Intro to Bio")
-
 Examples:
   $ canvas-cli ingest CS101           Download modules, pages, and files for CS101
   $ canvas-cli ingest "Intro to"      Match by partial course name
