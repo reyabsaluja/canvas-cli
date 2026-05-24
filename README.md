@@ -75,7 +75,7 @@ All data canvas-cli creates lives in two locations:
 | `~/.config/canvas-cli/` (respects `$XDG_CONFIG_HOME`; macOS uses Keychain) | Your Canvas token, AI provider API keys, and profile configuration |
 | `.canvas-cli/` (in your project directory) | Ingested course data, assignment workspaces, chat sessions, and extracted documents |
 
-Nothing is sent anywhere except the API providers you explicitly configure.
+Nothing is sent anywhere except the destinations listed below.
 
 ### What leaves your machine
 
@@ -83,8 +83,9 @@ Nothing is sent anywhere except the API providers you explicitly configure.
 |---|---|---|
 | Your Canvas instance | Canvas API token (in `Authorization` header) | Any command that fetches courses, assignments, or files |
 | AI provider (Anthropic, OpenAI, Google, or AWS Bedrock) | AI API key + prompt content (assignment text, course materials) | Only when using AI features (`work`, `ask`, `show --smart`, TUI chat) |
+| External URLs linked in course content | HTTP request (no credentials) | During `canvas-cli ingest`, to capture linked documents (Google Docs, PDFs, etc.) |
 
-API keys are sent **only** to their respective providers — your Canvas token is never sent to an AI provider, and AI keys are never sent to Canvas.
+API keys are sent **only** to their respective providers — your Canvas token is never sent to an AI provider, and AI keys are never sent to Canvas. External link fetches during ingestion carry no authentication headers.
 
 ### Debug output
 
