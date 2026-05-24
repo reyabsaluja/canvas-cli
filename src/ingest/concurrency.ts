@@ -1,7 +1,8 @@
 export async function mapWithConcurrency<T, TResult>(
   items: readonly T[],
   limit: number,
-  mapper: (item: T, index: number) => Promise<TResult>
+  mapper: (item: T, index: number) => Promise<TResult>,
+  signal?: AbortSignal | null
 ): Promise<TResult[]> {
   if (limit <= 0) {
     throw new Error("Concurrency limit must be greater than 0.");
@@ -15,6 +16,9 @@ export async function mapWithConcurrency<T, TResult>(
 
   async function runWorker(): Promise<void> {
     while (true) {
+      if (signal?.aborted) {
+        throw signal.reason ?? new DOMException("Aborted", "AbortError");
+      }
       const currentIndex = nextIndex;
       nextIndex += 1;
       if (currentIndex >= items.length) {
