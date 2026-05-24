@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { RateLimitThrottle, THROTTLE_THRESHOLD, THROTTLE_DELAY_MS } from "../src/canvas/throttle.js";
+import { RateLimitThrottle, THROTTLE_THRESHOLD, THROTTLE_DELAY_MS, abortableSleep } from "../src/canvas/throttle.js";
 
 const noop = () => {};
 
@@ -139,4 +139,37 @@ test("throttle ignores invalid x-request-cost values", async () => {
   assert.equal(throttle.currentCost, 1);
   throttle.update(new Response(null, { headers: { "x-request-cost": "abc" } }));
   assert.equal(throttle.currentCost, 1);
+});
+
+test("throttleIfNeeded rejects when abort signal fires during wait", async () => {
+  const controller = new AbortController();
+  const throttle = new RateLimitThrottle({ log: noop });
+  throttle.update(new Response(null, { headers: { "x-rate-limit-remaining": "10" } }));
+  setTimeout(() => controller.abort(), 5);
+  await assert.rejects(
+    () => throttle.throttleIfNeeded(controller.signal),
+    (err: Error) => err.name === "AbortError"
+  );
+});
+
+test("throttleIfNeeded rejects immediately when signal is already aborted", async () => {
+  const throttle = new RateLimitThrottle({ log: noop });
+  throttle.update(new Response(null, { headers: { "x-rate-limit-remaining": "10" } }));
+  await assert.rejects(
+    () => throttle.throttleIfNeeded(AbortSignal.abort()),
+    (err: Error) => err.name === "AbortError"
+  );
+});
+
+test("abortableSleep resolves after specified delay", async () => {
+  const start = Date.now();
+  await abortableSleep(20);
+  assert.ok(Date.now() - start >= 15);
+});
+
+test("abortableSleep rejects when signal is pre-aborted", async () => {
+  await assert.rejects(
+    () => abortableSleep(1000, AbortSignal.abort()),
+    (err: Error) => err.name === "AbortError"
+  );
 });
