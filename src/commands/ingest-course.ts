@@ -70,10 +70,18 @@ export async function ingestCourseCommand(
     result = await ingestCourse(course, client, config, {
       refresh: options.refresh ?? false,
       signal: ac.signal,
+      onProgress: options.json
+        ? null
+        : (msg) => {
+            process.stderr.write(`\r\x1b[K  ${chalk.dim(msg)}`);
+          },
     });
   } catch (err) {
+    if (!options.json) {
+      process.stderr.write("\r\x1b[K");
+    }
     if (isAbortError(err)) {
-      console.error("\nOperation cancelled.");
+      console.error("Operation cancelled.");
       process.exit(USER_ABORT_EXIT_CODE);
     }
     if (err instanceof Error) {
@@ -85,6 +93,11 @@ export async function ingestCourseCommand(
   } finally {
     process.removeListener("SIGINT", onSignal);
     process.removeListener("SIGTERM", onSignal);
+  }
+
+  // Clear progress line before output
+  if (!options.json) {
+    process.stderr.write("\r\x1b[K");
   }
 
   // Output

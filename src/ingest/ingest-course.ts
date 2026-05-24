@@ -40,20 +40,29 @@ const MODULE_FILE_METADATA_CONCURRENCY = 4;
  * 6. Download all selected attachments
  * 7. Write all artifacts to local course directory
  */
+export type ProgressCallback = (message: string) => void;
+
 export async function ingestCourse(
   course: Course,
   client: CanvasClient,
   config: Config,
-  options: { refresh: boolean; signal?: AbortSignal | null }
+  options: {
+    refresh: boolean;
+    signal?: AbortSignal | null;
+    onProgress?: ProgressCallback | null;
+  }
 ): Promise<IngestionResult> {
   const signal = options.signal ?? null;
+  const onProgress = options.onProgress ?? (() => {});
   const slug = makeCourseSlug(course.courseCode, course.id);
   const coursePath = getCoursePath(slug);
 
   // Step 1: Fetch raw content from Canvas
+  onProgress("Fetching course content from Canvas...");
   const raw = await fetchCourseContent(client, course.id, signal);
 
   // Step 2: Normalize
+  onProgress("Processing course structure...");
   const {
     courseMeta,
     assignments,
@@ -77,6 +86,7 @@ export async function ingestCourse(
   );
 
   // Step 4: Select heuristic-matched attachments (syllabus, rubric, etc.)
+  onProgress("Selecting files for download...");
   const heuristicAttachments = selectAttachments(syllabusCandidates, files);
 
   // Step 5: Select ALL module-linked files for download
@@ -130,11 +140,15 @@ export async function ingestCourse(
 
   // Step 6: Download all attachments
   const attachmentsDir = path.join(coursePath, "attachments");
+  onProgress(`Downloading files (0/${allSelected.length})...`);
   const attachmentResults = await downloadSelectedAttachments(
     allSelected,
     attachmentsDir,
     config,
-    signal
+    signal,
+    (completed, total) => {
+      onProgress(`Downloading files (${completed}/${total})...`);
+    }
   );
 
   // Step 7: Discover lectures from module items, front page, and fetched pages
@@ -173,6 +187,7 @@ export async function ingestCourse(
   };
 
   // Step 9: Write all artifacts (including front page and fetched pages)
+  onProgress("Writing course data to disk...");
   await writeIngestionArtifacts(
     coursePath,
     courseMeta,
