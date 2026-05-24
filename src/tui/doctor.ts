@@ -156,45 +156,54 @@ async function checkCanvasConnectivity(config: { baseUrl: string; accessToken: s
   }
 }
 
-async function checkAIProvider(provider: AIProviderName): Promise<CheckResult> {
-  const endpoints: Record<AIProviderName, { url: string; headerKey: string; envKey: string }> = {
-    openai: {
-      url: "https://api.openai.com/v1/models",
-      headerKey: "Authorization",
-      envKey: "OPENAI_API_KEY",
-    },
-    anthropic: {
-      url: "https://api.anthropic.com/v1/messages",
-      headerKey: "x-api-key",
-      envKey: "ANTHROPIC_API_KEY",
-    },
-    google: {
-      url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:countTokens",
-      headerKey: "x-goog-api-key",
-      envKey: "GOOGLE_API_KEY",
-    },
-    bedrock: {
-      url: "",
-      headerKey: "",
-      envKey: "AWS_ACCESS_KEY_ID",
-    },
-  };
+interface AIProviderCredentials {
+  provider: AIProviderName;
+  key: string;
+  secretKey?: string;
+  region?: string;
+}
 
-  const ep = endpoints[provider];
+const AI_ENDPOINTS: Record<AIProviderName, { url: string; headerKey: string; envKey: string }> = {
+  openai: {
+    url: "https://api.openai.com/v1/models",
+    headerKey: "Authorization",
+    envKey: "OPENAI_API_KEY",
+  },
+  anthropic: {
+    url: "https://api.anthropic.com/v1/messages",
+    headerKey: "x-api-key",
+    envKey: "ANTHROPIC_API_KEY",
+  },
+  google: {
+    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:countTokens",
+    headerKey: "x-goog-api-key",
+    envKey: "GOOGLE_API_KEY",
+  },
+  bedrock: {
+    url: "",
+    headerKey: "",
+    envKey: "AWS_ACCESS_KEY_ID",
+  },
+};
+
+export function resolveAICredentials(provider: AIProviderName): AIProviderCredentials | null {
+  const ep = AI_ENDPOINTS[provider];
   const key = process.env[ep.envKey];
+  if (!key) return null;
+  return {
+    provider,
+    key,
+    secretKey: process.env.AWS_SECRET_ACCESS_KEY || undefined,
+    region: process.env.AWS_REGION || undefined,
+  };
+}
 
-  if (!key) {
-    return {
-      label: "AI provider",
-      status: "fail",
-      detail: `${provider} key not found (${ep.envKey})`,
-      fix: `Run \`canvas-cli login\` and configure your ${provider} API key.`,
-    };
-  }
+async function checkAIProvider(creds: AIProviderCredentials): Promise<CheckResult> {
+  const { provider, key } = creds;
+  const ep = AI_ENDPOINTS[provider];
 
   if (provider === "bedrock") {
-    const secretKey = process.env.AWS_SECRET_ACCESS_KEY;
-    if (!secretKey) {
+    if (!creds.secretKey) {
       return {
         label: "AI provider",
         status: "fail",
@@ -205,7 +214,7 @@ async function checkAIProvider(provider: AIProviderName): Promise<CheckResult> {
     return {
       label: "AI provider",
       status: "warn",
-      detail: `bedrock credentials present but not verified (region: ${process.env.AWS_REGION ?? "not set"})`,
+      detail: `bedrock credentials present but not verified (region: ${creds.region ?? "not set"})`,
       fix: "Bedrock uses SigV4 auth which cannot be validated with a simple request. Verify by running an AI command.",
     };
   }
@@ -366,7 +375,8 @@ export async function runDoctor(): Promise<string> {
     aiConfigError = message;
   }
 
-  const aiPromise = aiConfig ? checkAIProvider(aiConfig.provider) : null;
+  const aiCreds = aiConfig ? resolveAICredentials(aiConfig.provider) : null;
+  const aiPromise = aiCreds ? checkAIProvider(aiCreds) : null;
 
   const [canvasResult, aiResult] = await Promise.all([canvasPromise, aiPromise]);
 
@@ -395,7 +405,17 @@ export async function runDoctor(): Promise<string> {
       status: "pass",
       detail: `${aiConfig.provider} · ${aiConfig.model}${aiConfig.effort ? ` · effort: ${aiConfig.effort}` : ""}`,
     });
-    results.push(aiResult!);
+    if (!aiCreds) {
+      const envKey = AI_ENDPOINTS[aiConfig.provider].envKey;
+      results.push({
+        label: "AI provider",
+        status: "fail",
+        detail: `${aiConfig.provider} key not found (${envKey})`,
+        fix: `Run \`canvas-cli login\` and configure your ${aiConfig.provider} API key.`,
+      });
+    } else {
+      results.push(aiResult!);
+    }
   }
 
   return formatResults(profile, results);
