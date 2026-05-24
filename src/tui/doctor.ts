@@ -247,46 +247,61 @@ export async function runDoctor(): Promise<string> {
   const stored = readStoredConfig(profile);
   const results: CheckResult[] = [];
 
-  // Check 1: Profile & config file
-  if (!stored) {
+  // Resolve config from stored profile OR env vars (env takes precedence, same as loadConfig)
+  const envBaseUrl = process.env.CANVAS_BASE_URL;
+  const envToken = process.env.CANVAS_ACCESS_TOKEN;
+  const baseUrl = envBaseUrl || stored?.canvasBaseUrl;
+  const token = envToken || loadCredential(profile, "canvas-token");
+  const configSource = envBaseUrl ? "env" : stored ? "stored" : null;
+
+  // Check 1: Configuration source
+  if (!baseUrl && !stored) {
     results.push({
       label: "Configuration",
       status: "fail",
-      detail: "No stored config found",
-      fix: "Run `canvas-cli login` to set up your configuration.",
+      detail: "No stored config or CANVAS_BASE_URL env var found",
+      fix: "Run `canvas-cli login` to set up, or set CANVAS_BASE_URL and CANVAS_ACCESS_TOKEN in your environment.",
     });
     return formatResults(profile, results);
   }
 
-  results.push({
-    label: "Configuration",
-    status: "pass",
-    detail: `Profile "${profile}" loaded · Canvas URL: ${stored.canvasBaseUrl}`,
-  });
+  if (configSource === "env") {
+    results.push({
+      label: "Configuration",
+      status: "pass",
+      detail: `Profile "${profile}" · Canvas URL: ${baseUrl} (from env)`,
+    });
+  } else {
+    results.push({
+      label: "Configuration",
+      status: "pass",
+      detail: `Profile "${profile}" loaded · Canvas URL: ${baseUrl}`,
+    });
+  }
 
   // Check 2: Canvas token presence & format
-  const token = loadCredential(profile, "canvas-token");
   if (!token) {
     results.push({
       label: "Canvas token",
       status: "fail",
-      detail: "No token found in credential store",
-      fix: "Run `canvas-cli login` to set up your access token.",
+      detail: "No token found in credential store or CANVAS_ACCESS_TOKEN env var",
+      fix: "Run `canvas-cli login` to set up your access token, or set CANVAS_ACCESS_TOKEN in your environment.",
     });
   } else {
+    const tokenSource = envToken ? " (from env)" : "";
     results.push({
       label: "Canvas token",
       status: "pass",
-      detail: "Token found in credential store",
+      detail: `Token found${tokenSource}`,
     });
     results.push(validateTokenFormat(token));
   }
 
   // Check 3: Canvas API connectivity
-  if (token && stored.canvasBaseUrl) {
-    const apiUrl = stored.canvasBaseUrl.endsWith("/api/v1")
-      ? stored.canvasBaseUrl
-      : `${stored.canvasBaseUrl}/api/v1`;
+  if (token && baseUrl) {
+    const apiUrl = baseUrl.endsWith("/api/v1")
+      ? baseUrl
+      : `${baseUrl}/api/v1`;
     results.push(
       await checkCanvasConnectivity({ baseUrl: apiUrl, accessToken: token })
     );
