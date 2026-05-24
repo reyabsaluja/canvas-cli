@@ -180,7 +180,7 @@ async function checkAIProvider(provider: AIProviderName): Promise<CheckResult> {
       headers["Content-Type"] = "application/json";
     } else if (provider === "openai") {
       headers[ep.headerKey] = `Bearer ${key}`;
-    } else {
+    } else if (provider !== "google") {
       headers[ep.headerKey] = key;
     }
 
