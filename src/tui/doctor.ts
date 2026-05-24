@@ -61,6 +61,7 @@ async function checkCanvasConnectivity(config: Config): Promise<CheckResult> {
         Authorization: `Bearer ${config.accessToken}`,
         Accept: "application/json",
       },
+      redirect: "manual",
       signal: AbortSignal.timeout(10_000),
     });
 
@@ -78,6 +79,15 @@ async function checkCanvasConnectivity(config: Config): Promise<CheckResult> {
         status: "fail",
         detail: "403 Forbidden — token lacks required permissions",
         fix: "Ensure your token has not expired and has the correct scope.",
+      };
+    }
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("Location") ?? "unknown";
+      return {
+        label: "Canvas API",
+        status: "fail",
+        detail: `Redirected to ${location} — possible SSO/login page`,
+        fix: "Your Canvas instance may require SSO. Verify the URL and ensure your token bypasses browser-based auth.",
       };
     }
     if (!response.ok) {
