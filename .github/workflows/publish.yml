@@ -57,6 +57,10 @@ jobs:
         env:
           REF_NAME: ${{ github.ref_name }}
         run: |
+          if [[ -z "$REF_NAME" ]]; then
+            echo "::error::REF_NAME is empty — cannot determine dist-tag"
+            exit 1
+          fi
           # Semver pre-release versions contain a hyphen (e.g., v0.2.0-beta.1)
           if [[ "$REF_NAME" == *-* ]]; then
             echo "tag=next" >> "$GITHUB_OUTPUT"
