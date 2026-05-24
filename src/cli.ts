@@ -119,8 +119,7 @@ program
   .command("examples")
   .description("Show common workflows and usage patterns")
   .action(() => {
-    console.log(`
-canvas-cli — Common Workflows
+    console.log(`canvas-cli — Common Workflows
 
 Getting Started:
   $ canvas-cli login                  Interactive setup wizard
