@@ -2,15 +2,15 @@
 
 [![CI](https://github.com/reyabsaluja/canvas-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/reyabsaluja/canvas-cli/actions/workflows/ci.yml)
 
-`canvas-cli` is a TypeScript command-line interface for working with Canvas LMS from the terminal. It combines direct Canvas API access, local course ingestion, an interactive TUI, and optional AI-assisted assignment investigation.
+`canvas-cli` is an interactive terminal interface for Canvas LMS. It provides a TUI for browsing courses, assignments, and course materials, with optional AI-assisted assignment investigation — all from the terminal.
 
 ## Highlights
 
-- Browse Canvas courses and assignments without leaving the terminal
+- Interactive TUI for browsing courses, assignments, modules, and files
 - Ingest course materials into a reusable local cache
-- Generate assignment workspaces with summaries, plans, and extracted artifacts
-- Ask grounded questions against an existing workspace
-- Launch an interactive terminal UI by running the CLI with no subcommand
+- AI-powered assignment workspaces with summaries, plans, and extracted artifacts
+- Grounded Q&A against workspace context
+- Persistent chat sessions across global, course, and workspace scopes
 
 ## Installation
 
@@ -57,26 +57,18 @@ Credentials are stored securely — on macOS in your system Keychain, otherwise 
 ### 2. Verify your connection
 
 ```bash
-canvas-cli courses
+canvas-cli status
 ```
 
-You should see your active courses listed. If not, see [Troubleshooting](#troubleshooting) below.
+You should see your credentials and connection confirmed. If not, see [Troubleshooting](#troubleshooting) below.
 
-### 3. Start using canvas-cli
-
-Launch the interactive TUI:
+### 3. Launch canvas-cli
 
 ```bash
 canvas-cli
 ```
 
-Or use individual commands:
-
-```bash
-canvas-cli assignments                    # see what's due
-canvas-cli ingest ece297                  # cache course materials locally
-canvas-cli work "Milestone 3"            # build an AI-powered assignment workspace
-```
+This opens the interactive TUI where you can browse courses, view assignments, open workspaces, and chat with AI about your coursework. Use `/courses` to get started.
 
 ## Getting a Canvas API Token
 
@@ -117,16 +109,10 @@ Select "Configure AI provider" when prompted, choose your provider, and paste yo
 
 | Feature | Requires AI | Notes |
 |---|---|---|
-| `canvas-cli courses` | No | Direct Canvas API |
-| `canvas-cli assignments` | No | Direct Canvas API (enrichment is local) |
-| `canvas-cli show assignment` | No | Direct Canvas API |
-| `canvas-cli show assignment --smart` | **Yes** | AI-powered assignment overview |
 | `canvas-cli ingest` | No | Downloads and caches locally |
-| `canvas-cli do` | No | Scaffolds assignment workspace (no AI needed) |
-| `canvas-cli work` | **Yes** | AI investigation agent |
-| `canvas-cli ask` | **Yes** | AI-grounded Q&A |
-| TUI conversational mode | **Yes** | AI chat in all scopes |
 | TUI navigation and pickers | No | `/courses`, `/assignments`, `/recent`, etc. |
+| TUI workspace creation | **Yes** | AI investigation agent |
+| TUI conversational mode | **Yes** | AI chat in all scopes |
 
 ### Provider comparison
 
@@ -257,8 +243,7 @@ If you set an API key without specifying `AI_PROVIDER`, canvas-cli auto-detects 
 
 ### "No courses found"
 
-- **Enrollment filtering:** By default, only current/active courses are shown. Use `canvas-cli courses --all` to include past terms.
-- **Completed terms:** Courses from finished terms are hidden by default. If your current term just ended, courses may have already been marked inactive.
+- **Enrollment filtering:** By default, only current/active courses are shown in the TUI. If your current term just ended, courses may have already been marked inactive.
 - **Student role only:** canvas-cli filters to enrollments where you have an active role. If you were recently added to a course, it may take a few minutes to appear.
 - **Wrong account:** Verify you're using a token from the correct Canvas account if your institution has multiple Canvas instances.
 
@@ -267,19 +252,17 @@ If you set an API key without specifying `AI_PROVIDER`, canvas-cli auto-detects 
 - **No provider configured:** Run `canvas-cli login` and select "Configure AI provider" to set up an API key.
 - **Invalid API key:** Verify your key is correct and has not been revoked. Test it directly with your provider's API.
 - **Rate limited:** If you see rate limit errors, wait a few minutes and retry. Consider using a provider with higher rate limits.
-- **Missing course ingestion:** Commands like `work` and `ask` produce better results after running `canvas-cli ingest <course>` first. Without ingestion, the AI has less context to work with.
+- **Missing course ingestion:** Workspaces produce better results after running `canvas-cli ingest <course>` first. Without ingestion, the AI has less context to work with.
 
 ## Commands
 
 | Command | Purpose |
 | --- | --- |
 | `canvas-cli` | Launch the interactive TUI |
-| `canvas-cli courses` | List courses |
-| `canvas-cli assignments` | List assignments |
-| `canvas-cli show assignment <name>` | Show detailed assignment information |
+| `canvas-cli login` | Set up Canvas credentials interactively |
+| `canvas-cli logout` | Remove stored credentials |
+| `canvas-cli status` | Show current configuration and connection status |
 | `canvas-cli ingest <course>` | Cache course materials locally |
-| `canvas-cli work <assignment>` | Build an AI-assisted assignment workspace |
-| `canvas-cli ask <question>` | Ask a question about an existing workspace |
 
 ## Local State
 
@@ -308,7 +291,7 @@ Nothing is sent anywhere except the destinations listed below.
 | Destination | Data sent | When |
 |---|---|---|
 | Your Canvas instance | Canvas API token (in `Authorization` header) | Any command that fetches courses, assignments, or files |
-| AI provider (Anthropic, OpenAI, Google, or AWS Bedrock) | AI API key + prompt content (assignment text, course materials) | Only when using AI features (`work`, `ask`, `show --smart`, TUI chat) |
+| AI provider (Anthropic, OpenAI, Google, or AWS Bedrock) | AI API key + prompt content (assignment text, course materials) | Only when using AI features (workspace creation, chat, Q&A in the TUI) |
 | External URLs linked in course content | HTTP request (no credentials) | During `canvas-cli ingest`, to capture linked documents (Google Docs, PDFs, etc.) |
 
 API keys are sent **only** to their respective providers — your Canvas token is never sent to an AI provider, and AI keys are never sent to Canvas. External link fetches during ingestion carry no authentication headers.
@@ -530,345 +513,9 @@ The TUI is the primary interface, but all data is persisted as local files under
 | `extracted/` | Text extracted from PDFs |
 | `work/` | Your files |
 
-## Non-Interactive Commands
-
-All original CLI commands remain available for scripting and power use:
-
-### `canvas-cli courses`
-
-List your current courses.
-
-```bash
-canvas-cli courses            # current/active courses only
-canvas-cli courses --all      # include past/inactive courses
-canvas-cli courses --json     # JSON output
-```
-
-Example output:
-
-```
-  ECE297  Algorithms and Data Structures  (Winter 2026)
-  ECE216  Signals and Systems  (Winter 2026)
-  ECE221  Electric and Magnetic Fields  (Winter 2026)
-  ECE243  Computer Organization  (Winter 2026)
-  ECE212  Circuit Analysis  (Winter 2026)
-```
-
-### `canvas-cli assignments`
-
-List upcoming assignments across your current courses.
-
-```bash
-canvas-cli assignments                          # upcoming work across all current courses
-canvas-cli assignments --course ece297          # assignments for a specific course
-canvas-cli assignments --all                    # everything, including old/submitted
-canvas-cli assignments --include-submitted      # also show submitted work
-canvas-cli assignments --include-no-due-date    # also show items with no due date
-canvas-cli assignments --json                   # JSON output
-```
-
-Example output:
-
-```
-ECE297
-  - Milestone 3 — Mar 22, 11:59 PM — due in 5d
-  - Milestone 2 — Mar 15, 11:59 PM — overdue
-
-ECE243
-  - Project Week 1 Grade — Mar 21, 11:59 PM — due in 4d
-
-ECE221
-  - Lab5 Quiz — Apr 1, 11:59 PM — due in 15d
-```
-
-Course-scoped view (with ingestion cache available):
-
-```bash
-canvas-cli assignments --course ece297
-```
-
-```
-  - Milestone 3 — Mar 22, 11:59 PM — due in 5d
-    context: high  sources: module_item, attachment
-  - Milestone 2 — Mar 15, 11:59 PM — overdue
-  - OP2: Submit Final Slides — Apr 29, 8:30 AM — not submitted
-    ! likely submission shell
-    context: low  (no related resources found)
-```
-
-Enrichment lines only appear when a course has been ingested. Without ingestion, output is unchanged.
-
-### `canvas-cli show assignment <name>`
-
-Show detailed information for a single assignment.
-
-```bash
-canvas-cli show assignment "Milestone 3" --course ece297   # scoped to a course
-canvas-cli show assignment "Lab5 Quiz"                      # search across all current courses
-canvas-cli show assignment _ --id 1710240 --course ece297   # look up by Canvas ID
-canvas-cli show assignment "Milestone 3" --json             # JSON output
-canvas-cli show assignment "Milestone 3" --course ece297 --smart   # include AI overview
-```
-
-Example output:
-
-```
-Milestone 3: Shortest Path Algorithms and User Interface
-
-  Course      ECE297H1 S LEC0101 20261:Software Design and Communication
-  ID          1710240
-  Due         Sun, Mar 22, 11:59 PM
-  Status      not submitted
-  Points      15
-  Grading     points
-  Submit via  none
-  URL         https://q.utoronto.ca/courses/420471/assignments/1710240
-
-Description
-
-  • M3_Instructions (https://...)
-  • M3_Grading_Rubric (https://...)
-```
-
-The detail view includes: due/unlock/lock dates, points, grading type, submission types, submission status (with grade if available), description (HTML converted to readable text), and attachments if present.
-
-**Assignment matching** is case-insensitive and supports partial names. If multiple assignments match, you'll see a disambiguation list. If none match, you'll get a hint to use `canvas-cli assignments` to browse.
-
-#### `--smart` — AI-powered real overview
-
-When you add `--smart`, the command generates an AI-powered "Real overview" section that synthesizes what the assignment is likely asking based on all available context.
-
-```bash
-canvas-cli show assignment "Milestone 3" --course ece297 --smart
-```
-
-Example output (appended after the standard detail view):
-
-```
-Real overview
-
-  Milestone 3 requires implementing shortest path algorithms (Dijkstra's and
-  A*) and integrating them into the mapping application's UI. Students must
-  provide a functional pathfinding feature with visual route display.
-
-  Due date (from syllabus): March 22, 2026, 11:59 PM
-
-Tasks
-  - Implement Dijkstra's algorithm for shortest path computation
-  - Implement A* search with a suitable heuristic
-  - Integrate pathfinding into the map UI with route visualization
-  - Write tests demonstrating correctness on provided test cases
-  - Submit via the Canvas assignment page
-
-Sources
-  - M3_Instructions.pdf
-  - M3_Grading_Rubric.pdf
-  - Course syllabus (schedule section)
-
-Next steps
-  - Review the grading rubric for specific weight breakdowns
-
-  Confidence: high
-```
-
-**Requirements:**
-- Configure an AI provider in your `.env` file (`AI_PROVIDER` plus the matching credentials)
-- Best results when the course has been ingested first (`canvas-cli ingest <course>`)
-
-**How it works:** The AI reads the actual course materials — including PDF instruction documents, the course syllabus, the module structure, and the full assignment list. It synthesizes a concrete summary of what the assignment requires. When the Canvas due date is missing, it cross-references the syllabus and schedule to find it.
-
-**Fallback behavior:**
-- Without an AI provider configured: the `--smart` flag shows a subtle note that AI is unavailable; the rest of the command works normally
-- Without ingestion cache: AI still works but has less context; confidence will be lower
-- If the AI call fails: the deterministic output is still shown, with a failure note
-
-### `canvas-cli do <assignment>`
-
-Create a local workspace for an assignment.
-
-```bash
-canvas-cli do "Milestone 3" --course ece297    # create workspace for a specific assignment
-canvas-cli do "Lab5 Quiz"                       # resolves across all current courses
-canvas-cli do "Milestone 3" --course ece297    # safe to run again — updates data, preserves your files
-```
-
-Example output:
-
-```
-Workspace ready
-
-  Assignment  Milestone 3: Shortest Path Algorithms and User Interface
-  Course      ECE297H1 S LEC0101 20261:Software Design and Communication
-  Path        .canvas-cli/sessions/ece297h1-s-lec0101-milestone-3-...-1710240
-
-Created:
-  - assignment.json
-  - assignment.md
-  - session.json
-  - notes.md
-  - work/
-
-Next:
-  - open .canvas-cli/sessions/.../assignment.md to review the brief
-  - use .canvas-cli/sessions/.../notes.md for scratch notes
-  - use .canvas-cli/sessions/.../work/ for your files
-```
-
-**Workspace location:** `.canvas-cli/sessions/<slug>/` in the current directory. The slug is deterministic (based on course code, assignment name, and Canvas ID), so running `do` again for the same assignment reuses the same workspace.
-
-**Workspace contents:**
-
-| File | Purpose | On re-run |
-|---|---|---|
-| `assignment.json` | Normalized assignment detail data | Refreshed |
-| `assignment.md` | Human-readable assignment brief | Refreshed |
-| `session.json` | Workspace metadata (timestamps, IDs) | Updated (preserves `createdAt`) |
-| `notes.md` | Your scratch notes | Preserved — never overwritten |
-| `work/` | Directory for your files | Preserved |
-
-**Repeated invocation** is safe: data files are refreshed with latest Canvas info, but `notes.md` and anything in `work/` are never touched.
-
-### `canvas-cli work <assignment>`
-
-The deep assignment setup command. Uses a tool-calling AI agent to investigate the assignment through course materials, then creates a rich local workspace.
-
-```bash
-canvas-cli work "Milestone 3" --course ece297
-canvas-cli work "Lab5 Quiz"
-canvas-cli work "Project" --id 1710240
-```
-
-**Prerequisites:**
-- An AI provider configured in `.env` (`AI_PROVIDER` plus the matching credentials)
-- Course ingested first: `canvas-cli ingest <course>`
-
-**What happens:**
-1. Resolves the assignment from Canvas
-2. Loads the ingested course cache
-3. Runs a bounded investigation agent that:
-   - Searches modules for related content
-   - Reads downloaded PDFs and instruction documents
-   - Checks the syllabus for schedule/due date info
-   - Cross-references the full assignment list
-4. Synthesizes a structured workup
-5. Creates a rich workspace
-
-Example output:
-
-```
-  > resolving assignment
-  > found: Milestone 3: Shortest Path Algorithms and User Interface
-  > loading course cache
-  > enriching assignment context
-  > starting investigation agent
-  > investigating course materials
-  > reading: list_downloaded_files
-  > reading: read_document (M3_Instructions.pdf)
-  > reading: read_document (M3_Grading_Rubric.pdf)
-  > reading: get_syllabus
-  > reading: search_modules (Milestone 3)
-  > synthesizing assignment workup
-  > creating workspace
-
-Workspace ready
-
-  Assignment  Milestone 3: Shortest Path Algorithms and User Interface
-  Course      ECE297H1 S LEC0101 20261:Software Design and Communication
-  Path        .canvas-cli/sessions/ece297h1-s-lec0101-milestone-3-1710240
-  Confidence  high
-
-Generated:
-  - session.json
-  - assignment.json
-  - workup.json
-  - assignment.md
-  - plan.md
-  - notes.md
-  - extracted/ (3 documents)
-
-Next steps:
-  1. Read M3_Instructions.pdf for detailed requirements
-  2. Review the grading rubric for evaluation criteria
-  3. Start implementing shortest path algorithms
-```
-
-**Workspace contents:**
-
-| File/Dir | Purpose | On re-run |
-|---|---|---|
-| `assignment.md` | Rich brief with overview, deliverables, constraints, reading order | Refreshed |
-| `plan.md` | Practical action plan with checklist | Refreshed |
-| `workup.json` | Structured agent result (machine-readable) | Refreshed |
-| `assignment.json` | Raw Canvas assignment data | Refreshed |
-| `session.json` | Workspace metadata | Updated |
-| `notes.md` | Your scratch notes | Preserved |
-| `work/` | Your files | Preserved |
-| `resources/` | Links to relevant course documents | Refreshed |
-| `extracted/` | Extracted text from PDFs and documents | Refreshed |
-
-**How the agent works:**
-The investigation agent uses AI SDK tool calling with the configured provider and a bounded loop (max 10 iterations). It has tools to search modules, read downloaded PDFs, check the syllabus, and browse files. It decides what to investigate based on the assignment context and enrichment data. After investigation, a separate synthesis pass produces the structured workup.
-
-**The agent does NOT:**
-- Make new Canvas API calls (works from ingested cache)
-- Solve the assignment or write code
-- Run indefinitely (bounded iteration limit)
-- Download files not already ingested
-
-### `canvas-cli ask "<question>"`
-
-Ask a question about the current assignment workspace. Answers are grounded in local workspace artifacts — no re-crawling or new agent runs.
-
-```bash
-canvas-cli ask "what exactly do I need to submit?"
-canvas-cli ask "what should I read first?"
-canvas-cli ask "what formulas matter here?"
-canvas-cli ask "what is inferred vs confirmed?"
-canvas-cli ask "what are the constraints?" --json
-canvas-cli ask "what's the due date?" --workspace .canvas-cli/sessions/ece212-lab4-1645539
-canvas-cli ask "what should I focus on?" --debug
-```
-
-**Prerequisites:**
-- An AI provider configured in `.env` (`AI_PROVIDER` plus the matching credentials)
-- A workspace created by `canvas-cli work <assignment>`
-
-Example output:
-
-```
-Question
-  what exactly do I need to submit?
-
-Answer
-  Based on the lab instructions, you need to submit pre-lab simulation results,
-  experimental measurements for three damping conditions, labeled waveform
-  documentation, and a comparison analysis between simulation and experimental
-  results.
-
-Key points
-  - Pre-lab PSpice simulation waveforms
-  - Experimental measurements for underdamped, critically damped, overdamped
-  - Labeled oscilloscope captures
-  - Comparison table: simulation vs experimental
-
-Sources
-  - workup.json [workup] — "Deliverables"
-  - extracted/Lab4_Second-order-Circuits.pdf.txt [extracted]
-
-  Confidence: high
-```
-
-**Workspace detection:** The command automatically finds the most recently updated workspace in `.canvas-cli/sessions/`. Use `--workspace <path>` to target a specific one.
-
-**Retrieval:** Uses BM25 keyword scoring to select the most relevant workspace sections for the question. Workup fields (deliverables, constraints, plan) are treated as high-signal sources. Extracted document text is chunked and scored. Only the top-8 most relevant chunks are sent to the model.
-
-**When no workspace exists:** Shows a helpful error listing available workspaces if any, or suggests running `canvas-cli work` first.
-
-**When retrieval is weak:** The model answers with low confidence and explicitly states what it couldn't find.
-
 ### `canvas-cli ingest <course>`
 
-Ingest course structure and content into a local cache for future commands.
+Ingest course structure and content into a local cache. This is the only data-fetching command outside the TUI — useful for pre-caching course materials before going offline or to ensure the TUI has full context available.
 
 ```bash
 canvas-cli ingest ece297                              # ingest by course code
@@ -877,36 +524,7 @@ canvas-cli ingest ece297 --refresh                    # force re-ingestion
 canvas-cli ingest ece297 --json                       # machine-readable summary
 ```
 
-Example output:
-
-```
-Course ingested
-
-  Course  ECE297H1 S LEC0101 20261:Software Design and Communication
-  Code    ECE297H1 S LEC0101
-  Term    Winter 2026
-  Path    .canvas-cli/courses/ece297h1-s-lec0101-420471
-
-Fetched:
-  - 9 assignments
-  - 11 modules
-  - 42 module items
-  - files (API not accessible)
-  - pages (API not accessible)
-
-Likely syllabus sources:
-  1. ECE297 Course Outline.pdf [file] high
-  2. Course Outline (in Week 1) [module_item] medium
-
-Attachments:
-  - ECE297 Course Outline.pdf downloaded (title contains 'course outline')
-
-Next:
-  - future commands will use this local course cache
-  - this ingestion does not yet infer true assignments
-```
-
-**Storage location:** `.canvas-cli/courses/<course-slug>/` in the current directory. The slug is deterministic (based on course code and Canvas course ID).
+**Storage location:** `.canvas-cli/courses/<course-slug>/` in the current directory.
 
 **What gets stored:**
 
@@ -925,102 +543,9 @@ Next:
 | `attachments/syllabus/` | Downloaded syllabus/outline PDFs and docs |
 | `attachments/important/` | Downloaded important course documents |
 
-**Syllabus candidate heuristics:** The tool identifies likely syllabus sources by matching titles/filenames against keywords like "syllabus", "course outline", "schedule", "calendar", "grading scheme". Each candidate is ranked by confidence (high/medium/low) and source type.
-
-**Attachment selection:** Only a targeted subset of files is downloaded — not the entire course. The tool downloads:
-- High/medium confidence syllabus candidate files
-- Files matching importance heuristics (rubric, instructions, handbook, grading, guidelines)
-- Capped at a reasonable limit to avoid excessive downloads
-
-**What this feature does NOT do:**
-- No AI or LLM integration
-- No assignment inference or "true assignment" reconstruction
-- No PDF parsing (PDFs are downloaded and indexed but not read)
-- No semantic interpretation of content
-
 **Repeated invocation** refreshes all data and re-downloads missing attachments. Use `--refresh` to force a complete re-ingestion.
 
 **Note:** Some institutions block the Files API and/or Pages API for students. When this happens, the file and page indexes will be empty, and attachment selection will be limited. Module items and assignment descriptions remain accessible.
-
-### Ingestion-aware enrichment
-
-When a course has been ingested with `canvas-cli ingest`, both `assignments` and `show assignment` automatically become enrichment-aware. The enrichment layer merges live Canvas data with the local course cache to surface additional context.
-
-**How it works:** For each assignment, the enrichment layer:
-1. Searches the course cache for related module items, pages, files, and downloaded attachments by matching titles
-2. Detects weak/missing Canvas descriptions
-3. Identifies likely submission-shell assignments
-4. Computes a context confidence score
-5. Ranks likely instruction sources
-
-**What appears in the output:**
-
-For `assignments`:
-```
-ECE297
-  - Milestone 3 — Mar 22, 11:59 PM — due in 5d
-    context: high  sources: attachment, module_item
-  - OP2: Submit Final Presentation Slides — Apr 29, 8:30 AM — not submitted
-    ! likely submission shell
-    context: low  (no related resources found)
-```
-
-For `show assignment`:
-```
-Context
-  Confidence            high
-  Weak description      yes
-
-Likely instruction sources
-  - M3_Instructions.pdf [attachment] (attachments/important/M3_Instructions.pdf)
-  - Milestone 3 Instructions (File in Week 8) [module_item]
-
-Warnings
-  ! Canvas description appears incomplete or missing
-  ! This may be a submission-only endpoint; instructions likely live elsewhere
-```
-
-**Key concepts:**
-
-- **Likely submission shell**: An assignment that appears to be a submission-only endpoint. Detected when the Canvas description is weak/blank and the title contains patterns like "submit", "upload", "dropbox", or "grade", or when strong related resources exist elsewhere. Instructions for these assignments likely live in modules, pages, or files.
-
-- **Context confidence**:
-  - `high` — strong Canvas description with related resources, or 3+ related resources
-  - `medium` — some related resources, or downloaded attachments, or strong description alone
-  - `low` — weak description with few/no related resources
-
-- **Weak description**: A Canvas description is considered weak if it is blank, very short (<30 chars), consists only of links, or matches generic submit-only text patterns.
-
-**Title matching** uses case-insensitive normalization with punctuation stripping. Matches are found via exact match, containment (one title contains the other), or token overlap (≥50% of meaningful words shared).
-
-**Graceful fallback:** If no course cache exists, commands behave exactly as before — no enrichment lines are shown. Enrichment never breaks existing functionality.
-
-### Course matching
-
-The `--course` flag matches against course codes and names, case-insensitively:
-
-```bash
-canvas-cli assignments --course ece297
-canvas-cli assignments --course "Algorithms"
-canvas-cli assignments --course ece
-```
-
-If multiple courses match, you'll see a disambiguation message.
-
-## Default filtering
-
-By default, `canvas-cli` optimizes for relevance over completeness:
-
-**Courses:**
-- Only current/active courses are shown
-- A course is considered "past" if its term or end date is more than 30 days ago, its workflow state is completed, or all enrollments are inactive
-- Use `--all` to see everything
-
-**Assignments:**
-- Only upcoming assignments and recently overdue items (last 14 days) from current courses
-- Submitted assignments are hidden by default
-- Assignments with no due date are hidden by default
-- Use `--all`, `--include-submitted`, or `--include-no-due-date` to broaden
 
 ## Project Structure
 
@@ -1029,7 +554,7 @@ By default, `canvas-cli` optimizes for relevance over completeness:
 - `src/workspace/` owns workspace lifecycle orchestration, workspace creation, and persisted session files.
 - `src/work/` contains the bounded assignment investigation pipeline and synthesis logic.
 - `src/ingest/`, `src/enrich/`, and `src/knowledge/` handle local course caching, enrichment, and retrieval.
-- `src/commands/` keeps the non-interactive CLI entrypoints.
+- `src/commands/` keeps the setup CLI entrypoints (`login`, `logout`, `status`, `ingest`) and TUI-invoked flows (`model`).
 - `tests/` covers workspace lifecycle, chat grounding, and regression behavior.
 - Source folders are organized by responsibility rather than by command surface alone.
 - New source files should use kebab-case names.

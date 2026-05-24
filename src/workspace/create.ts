@@ -27,15 +27,6 @@ import {
   type DownloadResult,
 } from "./attachments.js";
 
-export interface WorkspaceResult {
-  slug: string;
-  workspacePath: string;
-  created: boolean;
-  filesWritten: string[];
-  filesSkipped: string[];
-  attachments: DownloadResult;
-}
-
 interface WorkspaceWriteOptions {
   config?: Config;
   workup?: AssignmentWorkup;
@@ -51,32 +42,6 @@ interface UnifiedWorkspaceResult {
   attachments: DownloadResult;
   resourcesCopied: string[];
   documentsExtracted: string[];
-}
-
-/**
- * Create or update a local workspace for an assignment.
- *
- * On first run: creates the full workspace structure and downloads attachments.
- * On repeated runs: refreshes assignment data, downloads new attachments,
- * but never touches user files (notes.md, work/).
- */
-export async function createWorkspace(
-  detail: AssignmentDetail,
-  course: Course,
-  config: Config
-): Promise<WorkspaceResult> {
-  const result = await writeWorkspaceArtifacts(detail, course, {
-    config,
-  });
-
-  return {
-    slug: result.slug,
-    workspacePath: result.workspacePath,
-    created: result.created,
-    filesWritten: result.filesWritten,
-    filesSkipped: result.filesSkipped,
-    attachments: result.attachments,
-  };
 }
 
 export async function createWorkWorkspace(
