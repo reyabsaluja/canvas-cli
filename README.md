@@ -145,7 +145,7 @@ Select "Configure AI provider" when prompted, choose your provider, and paste yo
 2. Sign up or log in
 3. Navigate to **API Keys** in the dashboard
 4. Click **Create Key**, give it a name (e.g., "canvas-cli")
-5. Copy the key (starts with `sk-ant-`)
+5. Copy the key (typically starts with `sk-ant-`)
 
 Then either run `canvas-cli login` and paste the key when prompted, or set it manually:
 
