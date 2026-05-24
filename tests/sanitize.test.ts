@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
 import {
   sanitizeFilename,
@@ -105,7 +106,8 @@ test("sanitizeSubfolder passes through simple folder names", () => {
 
 test("sanitizeSubfolder sanitizes each path segment independently", () => {
   const result = sanitizeSubfolder("foo/bar");
-  assert.match(result, /foo.*bar/);
+  const expected = ["foo", "bar"].join(path.sep);
+  assert.equal(result, expected);
 });
 
 test("sanitizeSubfolder sanitizes traversal segments to unnamed", () => {
