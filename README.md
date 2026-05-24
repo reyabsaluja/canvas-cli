@@ -103,16 +103,142 @@ Your Canvas base URL is the root of your institution's Canvas site. Common forma
 
 ## AI Provider Setup (Optional)
 
-AI features (`work`, `ask`, `show --smart`, and the TUI's conversational mode) require an API key from one supported provider. During `canvas-cli login`, select "Configure AI provider" and choose one:
+AI features require an API key from one supported provider. Only one provider is needed — pick whichever you prefer. All AI features are optional; core Canvas functionality works without any AI configuration.
 
-| Provider | Required credential |
+The fastest way to set up AI is through the interactive login:
+
+```bash
+canvas-cli login
+```
+
+Select "Configure AI provider" when prompted, choose your provider, and paste your API key. You can also change providers later with the `/model` command in the TUI.
+
+### Which features require AI?
+
+| Feature | Requires AI | Notes |
+|---|---|---|
+| `canvas-cli courses` | No | Direct Canvas API |
+| `canvas-cli assignments` | No | Direct Canvas API (enrichment is local) |
+| `canvas-cli show assignment` | No | Direct Canvas API |
+| `canvas-cli show assignment --smart` | **Yes** | AI-powered assignment overview |
+| `canvas-cli ingest` | No | Downloads and caches locally |
+| `canvas-cli do` | No | Creates workspace structure without AI |
+| `canvas-cli work` | **Yes** | AI investigation agent |
+| `canvas-cli ask` | **Yes** | AI-grounded Q&A |
+| TUI conversational mode | **Yes** | AI chat in all scopes |
+| TUI navigation and pickers | No | `/courses`, `/assignments`, `/recent`, etc. |
+
+### Provider comparison
+
+| Provider | Default model | Cost tier | Best for |
+|---|---|---|---|
+| Anthropic | Claude Sonnet 4.6 | Mid | Detailed reasoning, structured output |
+| OpenAI | GPT-5.4 | Mid | General-purpose, fast responses |
+| Google / Gemini | Gemini 3.5 Flash | Low | Budget-friendly, fast |
+| AWS Bedrock | Claude Sonnet 4.6 | Mid | Teams already on AWS, no separate API key |
+
+**Typical usage costs ~$0.50–2/month** for a student using AI features a few times per week. Costs depend on the model you choose and how often you use `work`, `ask`, and TUI chat. Budget models (Gemini Flash, GPT-5.4 Mini) are significantly cheaper; premium models (Claude Opus, GPT-5.5) cost more but produce higher-quality analysis.
+
+### Setting up Anthropic
+
+1. Go to [console.anthropic.com](https://console.anthropic.com/)
+2. Sign up or log in
+3. Navigate to **API Keys** in the dashboard
+4. Click **Create Key**, give it a name (e.g., "canvas-cli")
+5. Copy the key (starts with `sk-ant-`)
+
+Then either run `canvas-cli login` and paste the key when prompted, or set it manually:
+
+```bash
+# In your .env file
+AI_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+### Setting up OpenAI
+
+1. Go to [platform.openai.com](https://platform.openai.com/)
+2. Sign up or log in
+3. Navigate to **API keys** (under your profile or the sidebar)
+4. Click **Create new secret key**, name it (e.g., "canvas-cli")
+5. Copy the key (starts with `sk-`)
+
+```bash
+# In your .env file
+AI_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+```
+
+### Setting up Google / Gemini
+
+1. Go to [aistudio.google.com](https://aistudio.google.com/)
+2. Sign in with your Google account
+3. Click **Get API key** in the top navigation
+4. Click **Create API key** and select or create a project
+5. Copy the generated key
+
+```bash
+# In your .env file
+AI_PROVIDER=google
+GOOGLE_API_KEY=...
+```
+
+### Setting up AWS Bedrock
+
+Bedrock is for users already on AWS. It requires IAM credentials rather than a simple API key, and the Claude models must be enabled in your AWS account first.
+
+1. In the AWS Console, navigate to **Amazon Bedrock** → **Model access**
+2. Request access to the Anthropic Claude models in your preferred region
+3. Create an IAM user or role with `bedrock:InvokeModel` permissions
+4. Generate access keys for that IAM user
+
+```bash
+# In your .env file
+AI_PROVIDER=bedrock
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=AKIA...
+AWS_SECRET_ACCESS_KEY=...
+```
+
+Optional Bedrock variables: `AWS_SESSION_TOKEN` (for temporary credentials) and `AWS_BEARER_TOKEN_BEDROCK` (for Bedrock bearer token auth).
+
+### Overriding the default model
+
+Each provider has a sensible default, but you can override it with `AI_MODEL`:
+
+```bash
+AI_MODEL=claude-opus-4-7        # use Anthropic's most capable model
+AI_MODEL=gpt-5.5                # use OpenAI's most capable model
+AI_MODEL=gemini-2.5-pro         # use Google's legacy reasoning model
+```
+
+Available models per provider:
+
+| Provider | Models |
 |---|---|
-| Anthropic | `ANTHROPIC_API_KEY` |
-| OpenAI | `OPENAI_API_KEY` |
-| Google / Gemini | `GOOGLE_API_KEY` |
-| AWS Bedrock | `AWS_REGION` + `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` |
+| Anthropic | `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6` |
+| OpenAI | `gpt-5.5`, `gpt-5.4-pro`, `gpt-5.4`, `gpt-5.4-mini` |
+| Google | `gemini-3.5-flash`, `gemini-3.1-pro-preview`, `gemini-3-flash-preview`, `gemini-3.1-flash-lite`, `gemini-2.5-pro`, `gemini-2.5-flash` |
+| Bedrock | `us.anthropic.claude-opus-4-7`, `us.anthropic.claude-opus-4-6-v1`, `us.anthropic.claude-sonnet-4-6` |
 
-Only one provider is needed. All AI features are optional — core Canvas browsing, assignment listing, and course ingestion work without any AI configuration.
+You can also set the model interactively with the `/model` command in the TUI, or rotate your API key with `/model key`.
+
+### Thinking effort
+
+For providers that support extended thinking (Anthropic, OpenAI, Bedrock), you can control how much reasoning the model does:
+
+```bash
+AI_EFFORT=low       # fastest, cheapest — good for simple questions
+AI_EFFORT=medium    # balanced (default behavior when unset)
+AI_EFFORT=high      # more thorough analysis
+AI_EFFORT=max       # maximum reasoning — best for complex assignments
+```
+
+Set interactively with `/model effort` in the TUI. Google/Gemini does not support effort levels.
+
+### Auto-detection fallback
+
+If you set an API key without specifying `AI_PROVIDER`, canvas-cli auto-detects the provider from whichever key is present (checking Anthropic, then OpenAI, then Google in that order). Explicit `AI_PROVIDER` is recommended to avoid ambiguity if you have multiple keys set.
 
 ## Troubleshooting
 
