@@ -998,10 +998,10 @@ export async function runChatShell<TExit>(
       if (commandName === "/help") {
         const helpLines = availableCommands.map(
           (command) =>
-            `${C.text(command.name.padEnd(16))}${command.description}`
+            `  ${C.text(command.name.padEnd(16))}${command.description}`
         );
         for (const extra of options.extraHelpCommands ?? []) {
-          helpLines.push(`${C.text(extra.cmd.padEnd(16))}${extra.desc}`);
+          helpLines.push(`  ${C.text(extra.cmd.padEnd(16))}${extra.desc}`);
         }
         await appendPersistedMessage({
           role: "assistant",
