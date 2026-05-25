@@ -14,13 +14,20 @@ import { isAbortError } from "../errors.js";
  * If signal is aborted, stops processing and cleans up any partial download
  * in progress. Already-completed downloads are left intact.
  */
+export type DownloadProgressCallback = (
+  completed: number,
+  total: number
+) => void;
+
 export async function downloadSelectedAttachments(
   attachments: SelectedAttachment[],
   attachmentsDir: string,
   config: Config,
-  signal?: AbortSignal | null
+  signal?: AbortSignal | null,
+  onProgress?: DownloadProgressCallback | null
 ): Promise<DownloadedAttachmentEntry[]> {
   const results: DownloadedAttachmentEntry[] = [];
+  const total = attachments.length;
 
   for (const attachment of attachments) {
     if (signal?.aborted) {
@@ -52,6 +59,7 @@ export async function downloadSelectedAttachments(
         reason: attachment.reason,
         status: "skipped",
       });
+      onProgress?.(results.length, total);
       continue;
     }
 
@@ -75,6 +83,7 @@ export async function downloadSelectedAttachments(
           reason: attachment.reason,
           status: "failed",
         });
+        onProgress?.(results.length, total);
         continue;
       }
 
@@ -93,6 +102,7 @@ export async function downloadSelectedAttachments(
         reason: attachment.reason,
         status: "downloaded",
       });
+      onProgress?.(results.length, total);
     } catch (err) {
       await fs.rm(tmpPath, { force: true }).catch(() => {});
       if (isAbortError(err)) {
@@ -109,6 +119,7 @@ export async function downloadSelectedAttachments(
         reason: attachment.reason,
         status: "failed",
       });
+      onProgress?.(results.length, total);
     }
   }
 

@@ -1,7 +1,10 @@
+import { debug } from "../debug.js";
+
 export type SleepFn = (ms: number, signal?: AbortSignal | null) => Promise<void>;
 export type LogFn = (message: string) => void;
 
 export const stderrLog: LogFn = (msg) => console.error(msg);
+export const debugLog: LogFn = (msg) => debug("api", msg);
 
 export const abortableSleep: SleepFn = (ms, signal) =>
   new Promise((resolve, reject) => {
@@ -42,7 +45,7 @@ export class RateLimitThrottle {
     this.threshold = options?.threshold ?? THROTTLE_THRESHOLD;
     this.delayMs = options?.delayMs ?? THROTTLE_DELAY_MS;
     this.sleepFn = options?.sleepFn ?? abortableSleep;
-    this.log = options?.log ?? stderrLog;
+    this.log = options?.log ?? debugLog;
   }
 
   update(response: Response): void {
