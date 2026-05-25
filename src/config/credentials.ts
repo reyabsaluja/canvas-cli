@@ -117,7 +117,9 @@ export function loadCredential(profile: string, key: string): string | null {
             writeSync(fd, trimmed);
             closeSync(fd);
             debug("config", `Created file backup for keychain credential: ${key}`);
-          } catch {}
+          } catch (err) {
+            debug("config", `Failed to write credential backup: ${err instanceof Error ? err.message : err}`);
+          }
         }
       }
     } catch {

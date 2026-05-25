@@ -41,6 +41,7 @@ const MODULE_FILE_METADATA_CONCURRENCY = 4;
  * 7. Write all artifacts to local course directory
  */
 export type ProgressCallback = (message: string) => void;
+const noop: ProgressCallback = () => {};
 
 export async function ingestCourse(
   course: Course,
@@ -53,7 +54,7 @@ export async function ingestCourse(
   }
 ): Promise<IngestionResult> {
   const signal = options.signal ?? null;
-  const onProgress = options.onProgress ?? (() => {});
+  const onProgress = options.onProgress ?? noop;
   const slug = makeCourseSlug(course.courseCode, course.id);
   const coursePath = getCoursePath(slug);
 
