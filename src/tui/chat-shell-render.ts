@@ -439,8 +439,8 @@ function buildStickyBottomRows(
 ): string[] {
   const { cols, rows: termRows } = getTermSize();
   const boxWidth = Math.max(24, cols - 5);
-  const promptStr = "> ";
-  const promptLen = promptStr.length;
+  const promptStr = "❯ ";
+  const promptLen = 2;
   const firstLineWidth = Math.max(1, boxWidth - 2 - promptLen);
   const contLineWidth = Math.max(1, boxWidth - 2);
   const cursor = chalk.white("█");
