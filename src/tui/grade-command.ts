@@ -99,8 +99,8 @@ export async function fetchGradeSummary(
     if (signal?.aborted) break;
     const enrollment = enrollmentMap.get(course.id);
     if (enrollment) {
-      const score = enrollment.grades?.current_score ?? enrollment.computed_current_score;
-      const grade = enrollment.grades?.current_grade ?? enrollment.computed_current_grade;
+      const score = enrollment.grades?.current_score ?? enrollment.computed_current_score ?? null;
+      const grade = enrollment.grades?.current_grade ?? enrollment.computed_current_grade ?? null;
       rows.push({ courseName: course.courseCode || course.name, score, grade });
     } else {
       try {
@@ -152,7 +152,7 @@ export function renderGradeSummary(rows: SummaryRow[], warnings: string[]): stri
 
   for (const row of rows) {
     const gradeStr = row.grade ?? "—";
-    const scoreStr = row.score !== null ? `${row.score.toFixed(1)}%` : "—";
+    const scoreStr = row.score != null ? `${row.score.toFixed(1)}%` : "—";
     const color = gradeColor(row.grade);
     lines.push(`  ${chalk.white(row.courseName.padEnd(nameWidth))}  ${color(gradeStr.padEnd(5))}  ${color(scoreStr)}`);
   }
