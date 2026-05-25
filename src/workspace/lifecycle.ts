@@ -61,7 +61,7 @@ export interface WorkspaceLifecycleResult {
 
 export class MissingCourseCacheError extends Error {
   constructor(readonly courseCode: string) {
-    super(`No ingestion cache found for ${courseCode}.`);
+    super(`No ingestion cache found for ${courseCode}. Run /refresh at course scope or re-enter the course to trigger ingestion.`);
     this.name = "MissingCourseCacheError";
   }
 }
