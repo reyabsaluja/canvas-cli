@@ -395,6 +395,9 @@ export function buildTimelineOutput(
   const allAssignments = courses.flatMap((c) => c.assignments);
 
   if (courses.length === 0) {
+    if (warnings.length > 0) {
+      return warnings.map((w) => `⚠ ${w}`).join("\n");
+    }
     return "No courses set up yet. Run /courses to add your courses.";
   }
 
