@@ -76,6 +76,8 @@ function formatTimeAgo(isoDate: string | undefined): string {
   return years === 1 ? "1 year ago" : `${years} years ago`;
 }
 
+let activeIngestionAc: AbortController | null = null;
+
 export async function ensureCourseIngested(
   services: AppServices,
   course: Course,
@@ -88,7 +90,14 @@ export async function ensureCourseIngested(
     if (cache) return true;
   }
 
+  // Abort any in-flight ingestion before starting a new one
+  if (activeIngestionAc) {
+    activeIngestionAc.abort();
+    activeIngestionAc = null;
+  }
+
   const ac = new AbortController();
+  activeIngestionAc = ac;
   const label = refresh
     ? `Refreshing ${course.name}`
     : `Ingesting ${course.name}`;
@@ -117,6 +126,10 @@ export async function ensureCourseIngested(
     console.log(C.dim("\n  Press any key to continue..."));
     await waitForKey();
     return false;
+  } finally {
+    if (activeIngestionAc === ac) {
+      activeIngestionAc = null;
+    }
   }
 }
 
@@ -532,7 +545,7 @@ class IngestionProgressRenderer {
   private scrollOffset = 0;
   private ac: AbortController | null;
 
-  constructor(title: string, subtitle: string, ac?: AbortController | null) {
+  constructor(title: string, subtitle: string, ac?: AbortController) {
     this.title = title;
     this.subtitle = subtitle;
     this.ac = ac ?? null;
