@@ -129,6 +129,7 @@ export async function handleCommand(
         return;
       }
       const { window: windowArg, showAll } = parseTimelineArgs(args);
+      await api.addMessage({ role: "system", content: `⠋ Fetching assignments from ${courses.length} course${courses.length === 1 ? "" : "s"}...` });
       const { data, warnings } = await fetchTimelineData(services.client, courses, showAll);
       const output = buildTimelineOutput(data, windowArg, showAll, warnings);
       await api.addMessage({ role: "assistant", content: output });
@@ -171,6 +172,7 @@ export async function handleCommand(
 
     if (command === "/timeline") {
       const { window: windowArg, showAll } = parseTimelineArgs(args);
+      await api.addMessage({ role: "system", content: `⠋ Fetching assignments from ${course.name}...` });
       const { data, warnings } = await fetchTimelineData(services.client, [course], showAll);
       const output = buildTimelineOutput(data, windowArg, showAll, warnings);
       await api.addMessage({ role: "assistant", content: output });
