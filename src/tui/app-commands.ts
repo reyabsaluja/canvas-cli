@@ -26,6 +26,16 @@ import { handleLectureQuery } from "./lecture-resources.js";
 import { formatCourseFilesList } from "./format-course-files.js";
 import { formatCourseModulesList } from "./format-course-modules.js";
 import { runDoctor } from "./doctor.js";
+import {
+  parseGradeArgs,
+  matchCourse,
+  fetchGradeSummary,
+  fetchGradeDetail,
+  renderGradeSummary,
+  renderGradeDetail,
+  renderNeedResult,
+} from "./grade-command.js";
+import { calculateNeeded } from "./grade-calculator.js";
 
 export async function handleCommand(
   command: string,
@@ -137,6 +147,14 @@ export async function handleCommand(
       }
       return buildTimelineTask(api, services, courses, args);
     }
+    if (command === "/grade") {
+      const courses = getDisplayCourses(services);
+      if (courses.length === 0) {
+        await api.addMessage({ role: "system", content: NO_COURSES_MESSAGE });
+        return;
+      }
+      return buildGradeTask(api, services, courses, args, false);
+    }
     if (command === "/announcements") {
       const courses = getDisplayCourses(services);
       if (courses.length === 0) {
@@ -174,6 +192,10 @@ export async function handleCommand(
 
     if (command === "/timeline") {
       return buildTimelineTask(api, services, [course], args);
+    }
+
+    if (command === "/grade") {
+      return buildGradeTask(api, services, [course], args, true);
     }
 
     if (command === "/assignments") {
@@ -476,6 +498,90 @@ function buildTimelineTask(
     run: async (signal) => {
       const { data, warnings } = await fetchTimelineData(services.client, courses, showAll, signal);
       const output = buildTimelineOutput(data, windowArg, showAll, warnings);
+      await api.addMessage({ role: "assistant", content: output });
+    },
+  };
+}
+
+function buildGradeTask(
+  api: CommandApi,
+  services: AppServices,
+  courses: Course[],
+  args: string,
+  inCourseScope: boolean
+): ShellResult | void {
+  const parsed = parseGradeArgs(args, inCourseScope);
+  if (parsed.error) {
+    void api.addMessage({ role: "system", content: `└ ERROR: ${parsed.error}` });
+    return;
+  }
+
+  if (parsed.mode === "summary") {
+    return {
+      type: "background-task",
+      verb: "Fetching grades",
+      run: async (signal) => {
+        const { rows, warnings } = await fetchGradeSummary(services.client, courses, signal);
+        const output = renderGradeSummary(rows, warnings);
+        await api.addMessage({ role: "assistant", content: output });
+      },
+    };
+  }
+
+  if (parsed.mode === "detail") {
+    let targetCourse: Course;
+    if (parsed.courseName) {
+      const match = matchCourse(parsed.courseName, getDisplayCourses(services));
+      if (match.error) {
+        void api.addMessage({ role: "system", content: `└ ERROR: ${match.error}` });
+        return;
+      }
+      targetCourse = match.course!;
+    } else if (courses.length === 1) {
+      targetCourse = courses[0]!;
+    } else {
+      void api.addMessage({ role: "system", content: "└ ERROR: Specify a course name, or use /grade from within a course." });
+      return;
+    }
+
+    return {
+      type: "background-task",
+      verb: `Fetching grades for ${targetCourse.courseCode || targetCourse.name}`,
+      run: async (signal) => {
+        const { data, warnings } = await fetchGradeDetail(services.client, targetCourse, signal);
+        const output = renderGradeDetail(targetCourse, data, warnings);
+        await api.addMessage({ role: "assistant", content: output });
+      },
+    };
+  }
+
+  // mode === "need"
+  let targetCourse: Course;
+  if (parsed.courseName) {
+    const match = matchCourse(parsed.courseName, getDisplayCourses(services));
+    if (match.error) {
+      void api.addMessage({ role: "system", content: `└ ERROR: ${match.error}` });
+      return;
+    }
+    targetCourse = match.course!;
+  } else if (inCourseScope && courses.length === 1) {
+    targetCourse = courses[0]!;
+  } else {
+    void api.addMessage({ role: "system", content: "└ ERROR: Specify a course name for the need calculator (e.g., /grade need A MATH 240)." });
+    return;
+  }
+
+  return {
+    type: "background-task",
+    verb: `Calculating grades for ${targetCourse.courseCode || targetCourse.name}`,
+    run: async (signal) => {
+      const { data } = await fetchGradeDetail(services.client, targetCourse, signal);
+      if (data.currentScore === null) {
+        await api.addMessage({ role: "system", content: "No graded assignments yet. Check back after your first score is posted." });
+        return;
+      }
+      const result = calculateNeeded(data, parsed.target!);
+      const output = renderNeedResult(targetCourse, result);
       await api.addMessage({ role: "assistant", content: output });
     },
   };

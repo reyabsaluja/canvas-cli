@@ -125,6 +125,38 @@ export interface CanvasPage {
   body?: string | null;
 }
 
+export interface CanvasAssignmentGroup {
+  id: number;
+  name: string;
+  group_weight: number;
+  assignments?: CanvasAssignmentGroupAssignment[];
+}
+
+export interface CanvasAssignmentGroupAssignment {
+  id: number;
+  name: string;
+  due_at: string | null;
+  points_possible: number | null;
+  omit_from_final_grade: boolean;
+  submission?: CanvasSubmission;
+}
+
+export interface CanvasEnrollment {
+  course_id: number;
+  type: string;
+  enrollment_state: string;
+  computed_current_score: number | null;
+  computed_current_grade: string | null;
+  computed_final_score: number | null;
+  computed_final_grade: string | null;
+  grades?: {
+    current_score: number | null;
+    current_grade: string | null;
+    final_score: number | null;
+    final_grade: string | null;
+  };
+}
+
 /** A discussion topic or announcement from the Canvas API. */
 export interface CanvasDiscussionTopic {
   id: number;
