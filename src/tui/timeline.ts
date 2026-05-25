@@ -296,13 +296,13 @@ function renderTodayMarker(
   const markerChars = new Array(chartWidth).fill(" ");
 
   if (nowCol >= 0 && nowCol < chartWidth) {
-    const marker = "▼ TODAY";
-    markerChars[nowCol] = "│";
-    if (nowCol + 2 < chartWidth) {
-      const text = "▼ TODAY";
-      for (let i = 0; i < text.length && nowCol + i < chartWidth; i++) {
+    const text = "▼ TODAY";
+    if (nowCol + text.length <= chartWidth) {
+      for (let i = 0; i < text.length; i++) {
         markerChars[nowCol + i] = text[i]!;
       }
+    } else {
+      markerChars[nowCol] = "▼";
     }
   }
 
