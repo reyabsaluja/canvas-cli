@@ -1,6 +1,7 @@
 import { loadCourseCache } from "../enrich/cache-loader.js";
 import type { LoadedWorkspace } from "../ask/types.js";
 import type { AssignmentWorkup } from "../work/types.js";
+import type { Course } from "../domain/models.js";
 import {
   getCourseById,
   getDisplayCourses,
@@ -128,11 +129,7 @@ export async function handleCommand(
         await api.addMessage({ role: "system", content: "No courses set up yet. Run /courses to add your courses." });
         return;
       }
-      const { window: windowArg, showAll } = parseTimelineArgs(args);
-      await api.addMessage({ role: "system", content: `⠋ Fetching assignments from ${courses.length} course${courses.length === 1 ? "" : "s"}...` });
-      const { data, warnings } = await fetchTimelineData(services.client, courses, showAll);
-      const output = buildTimelineOutput(data, windowArg, showAll, warnings);
-      await api.addMessage({ role: "assistant", content: output });
+      await runTimeline(api, services, courses, args);
       return;
     }
     if (command === "/announcements") {
@@ -171,11 +168,7 @@ export async function handleCommand(
     }
 
     if (command === "/timeline") {
-      const { window: windowArg, showAll } = parseTimelineArgs(args);
-      await api.addMessage({ role: "system", content: `⠋ Fetching assignments from ${course.name}...` });
-      const { data, warnings } = await fetchTimelineData(services.client, [course], showAll);
-      const output = buildTimelineOutput(data, windowArg, showAll, warnings);
-      await api.addMessage({ role: "assistant", content: output });
+      await runTimeline(api, services, [course], args);
       return;
     }
 
@@ -460,4 +453,20 @@ export async function handleCommand(
     });
     return;
   }
+}
+
+async function runTimeline(
+  api: CommandApi,
+  services: AppServices,
+  courses: Course[],
+  args: string
+): Promise<void> {
+  const { window: windowArg, showAll } = parseTimelineArgs(args);
+  const label = courses.length === 1
+    ? courses[0]!.name
+    : `${courses.length} course${courses.length === 1 ? "" : "s"}`;
+  await api.addMessage({ role: "system", content: `⠋ Fetching assignments from ${label}...` });
+  const { data, warnings } = await fetchTimelineData(services.client, courses, showAll);
+  const output = buildTimelineOutput(data, windowArg, showAll, warnings);
+  await api.addMessage({ role: "assistant", content: output });
 }
