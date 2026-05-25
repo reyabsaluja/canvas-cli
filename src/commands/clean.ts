@@ -1,4 +1,5 @@
-import { existsSync, rmSync, readdirSync, statSync } from "node:fs";
+import { existsSync, rmSync, readdirSync } from "node:fs";
+import { readdir, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { getConfigDir } from "../config/paths.js";
@@ -20,15 +21,16 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
-function dirSize(dir: string): number {
+async function dirSize(dir: string): Promise<number> {
   let total = 0;
   try {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {
-        total += dirSize(full);
+        total += await dirSize(full);
       } else {
-        total += statSync(full).size;
+        total += (await stat(full)).size;
       }
     }
   } catch {}
@@ -60,13 +62,13 @@ export async function cleanCommand(options: CleanOptions): Promise<void> {
   console.log("");
 
   if (localExists) {
-    const size = dirSize(localPath);
+    const size = await dirSize(localPath);
     console.log(`  ${C.text("Local data:")} ${C.muted(localPath)} ${C.dim(`(${formatBytes(size)})`)}`);
     const subdirs = readdirSync(localPath, { withFileTypes: true })
       .filter((e) => e.isDirectory())
       .map((e) => e.name);
     for (const sub of subdirs) {
-      const subSize = dirSize(join(localPath, sub));
+      const subSize = await dirSize(join(localPath, sub));
       console.log(`    ${C.dim("•")} ${sub}/ ${C.dim(`(${formatBytes(subSize)})`)}`);
     }
   } else if (options.all) {
