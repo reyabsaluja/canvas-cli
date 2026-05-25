@@ -113,7 +113,13 @@ export async function ensureCourseIngested(
     return true;
   } catch (error) {
     progress.stop();
-    if (isAbortError(error)) return false;
+    if (isAbortError(error)) {
+      clearScreen();
+      showCursor();
+      console.log(C.dim("\n  Ingestion cancelled."));
+      await sleep(600);
+      return false;
+    }
     clearScreen();
     showCursor();
     console.log("");
