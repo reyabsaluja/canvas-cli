@@ -130,8 +130,7 @@ export async function handleCommand(
         await api.addMessage({ role: "system", content: NO_COURSES_MESSAGE });
         return;
       }
-      await runTimeline(api, services, courses, args);
-      return;
+      return buildTimelineTask(api, services, courses, args);
     }
     if (command === "/announcements") {
       const courses = getDisplayCourses(services);
@@ -169,8 +168,7 @@ export async function handleCommand(
     }
 
     if (command === "/timeline") {
-      await runTimeline(api, services, [course], args);
-      return;
+      return buildTimelineTask(api, services, [course], args);
     }
 
     if (command === "/assignments") {
@@ -456,18 +454,20 @@ export async function handleCommand(
   }
 }
 
-async function runTimeline(
+function buildTimelineTask(
   api: CommandApi,
   services: AppServices,
   courses: Course[],
   args: string
-): Promise<void> {
+): ShellResult {
   const { window: windowArg, showAll } = parseTimelineArgs(args);
-  const label = courses.length === 1
-    ? courses[0]!.name
-    : `${courses.length} courses`;
-  await api.addMessage({ role: "system", content: `⠋ Fetching assignments from ${label}...` });
-  const { data, warnings } = await fetchTimelineData(services.client, courses, showAll, api.signal);
-  const output = buildTimelineOutput(data, windowArg, showAll, warnings);
-  await api.addMessage({ role: "assistant", content: output });
+  return {
+    type: "background-task",
+    verb: "Fetching timeline",
+    run: async (signal) => {
+      const { data, warnings } = await fetchTimelineData(services.client, courses, showAll, signal);
+      const output = buildTimelineOutput(data, windowArg, showAll, warnings);
+      await api.addMessage({ role: "assistant", content: output });
+    },
+  };
 }

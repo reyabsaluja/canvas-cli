@@ -1059,6 +1059,11 @@ export async function runChatShell<TExit>(
 
       try {
         const exit = await options.onCommand(commandName, args, api);
+        if (exit != null && typeof exit === "object" && "type" in exit && (exit as unknown as { type: string }).type === "background-task") {
+          const task = exit as unknown as { type: "background-task"; verb: string; run: (signal: AbortSignal) => Promise<void> };
+          launchBackgroundCommand(task.verb, task.run);
+          return;
+        }
         if (exit !== undefined) {
           const persistError = await closeShellOnce();
           if (persistError) {
@@ -1240,6 +1245,40 @@ export async function runChatShell<TExit>(
             await appendPersistedMessage({
               role: "system",
               content: `PDF generation failed: ${msg}`,
+            });
+          }
+        } finally {
+          stopSpinner();
+          isProcessing = false;
+          processingAbort = null;
+          currentSpinnerLine = "";
+          render();
+        }
+      })();
+    }
+
+    function launchBackgroundCommand(
+      verb: string,
+      run: (signal: AbortSignal) => Promise<void>
+    ): void {
+      isProcessing = true;
+      processingAbort = new AbortController();
+      currentVerb = verb;
+      spinnerFrame = 0;
+      shimmerFrame = 0;
+      processingStartTime = Date.now();
+      currentSpinnerLine = buildSpinnerLine();
+      render();
+      startSpinner();
+
+      void (async () => {
+        try {
+          await run(processingAbort!.signal);
+        } catch (error) {
+          if (!(error instanceof Error && error.name === "AbortError")) {
+            await appendPersistedMessage({
+              role: "system",
+              content: `Error: ${error instanceof Error ? error.message : "unknown"}`,
             });
           }
         } finally {
