@@ -150,7 +150,7 @@ export async function launchApp(): Promise<void> {
 
       if (
         nextScope.type === "course" &&
-        scope.type !== "course"
+        (scope.type !== "course" || scope.courseId !== nextScope.courseId)
       ) {
         const course = getCourseById(services, nextScope.courseId);
         if (course) {
