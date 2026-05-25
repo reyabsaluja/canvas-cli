@@ -773,7 +773,7 @@ export function getRenderedMessageLines(
       if (isInlineError) {
         lines.length = 0;
         wrapLines(message.content, maxWidth).forEach((line) => {
-          lines.push(`  ${systemColor(line)}`);
+          lines.push(`      ${systemColor(line)}`);
         });
       } else {
         wrapLines(message.content, maxWidth).forEach((line) => {
