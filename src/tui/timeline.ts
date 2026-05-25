@@ -410,15 +410,20 @@ export function buildTimelineOutput(
 
   const allSubmitted = allAssignments.length > 0 && allAssignments.every((a) => a.submitted);
 
+  const hasUndated = allAssignments.some((a) => !a.dueAt && !a.submitted);
+
   if (visibleAssignments.length === 0 && allSubmitted) {
     return "You're all caught up. Nothing outstanding.";
   }
 
-  if (visibleAssignments.length === 0) {
+  if (visibleAssignments.length === 0 && !hasUndated && warnings.length === 0) {
     return "Nothing due in this window. Try /timeline semester to see the full picture.";
   }
 
   const chart = renderTimeline(courses, window, warnings);
+  if (visibleAssignments.length === 0) {
+    return "Nothing due in this window. Try /timeline semester to see the full picture.\n\n" + chart;
+  }
   if (allSubmitted) {
     return "You're all caught up. Nothing outstanding.\n\n" + chart;
   }
