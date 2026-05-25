@@ -561,7 +561,7 @@ class IngestionProgressRenderer {
     this.render();
     this.timer = setInterval(() => {
       this.frame = (this.frame + 1) % SPINNER_FRAMES.length;
-      this.shimmerFrame = (this.shimmerFrame + 1) % 100_000;
+      this.shimmerFrame++;
       this.verbTickCounter++;
       if (this.verbTickCounter >= 25) {
         this.verbTickCounter = 0;
