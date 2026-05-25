@@ -263,6 +263,8 @@ If you set an API key without specifying `AI_PROVIDER`, canvas-cli auto-detects 
 | `canvas-cli logout` | Remove stored credentials |
 | `canvas-cli status` | Show current configuration and connection status |
 | `canvas-cli ingest <course>` | Cache course materials locally |
+| `canvas-cli clean` | Remove local cached data (courses, sessions, chat history) |
+| `canvas-cli clean --all` | Also remove global config and stored credentials |
 
 ## Local State
 
@@ -270,6 +272,19 @@ Generated local state is stored under `.canvas-cli/` and ignored by git:
 
 - `.canvas-cli/courses/`: ingested course data and attachments
 - `.canvas-cli/sessions/`: assignment workspaces, extracted text, notes, and plans
+- `.canvas-cli/chat-sessions/`: persistent chat history (global, course, workspace scopes)
+- `.canvas-cli/exports/`: generated PDFs from chat `/pdf` command
+
+### Data lifecycle
+
+| Action | What happens |
+|---|---|
+| `canvas-cli ingest <course>` | Downloads course data into `.canvas-cli/courses/` |
+| `canvas-cli clean` | Removes the entire `.canvas-cli/` directory in the current project |
+| `canvas-cli clean --all` | Removes `.canvas-cli/` and `~/.config/canvas-cli/` (credentials + config) |
+| `npm uninstall -g canvas-cli` | Removes the CLI binary only — local `.canvas-cli/` directories and `~/.config/canvas-cli/` are **not** removed |
+
+To fully uninstall, run `canvas-cli clean --all` before uninstalling the package.
 
 ## Privacy
 

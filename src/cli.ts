@@ -3,6 +3,7 @@
 import { createRequire } from "node:module";
 import { Command } from "commander";
 import { initDebug, debug } from "./debug.js";
+import { cleanCommand } from "./commands/clean.js";
 import { examplesCommand } from "./commands/examples.js";
 import { ingestCourseCommand } from "./commands/ingest-course.js";
 import { loginCommand } from "./commands/login.js";
@@ -40,7 +41,7 @@ Run canvas-cli <command> --help for detailed usage of each command.
 Run canvas-cli examples for common workflows.`
   );
 
-const SKIP_CREDENTIAL_LOADING = new Set(["login", "logout", "status", "examples"]);
+const SKIP_CREDENTIAL_LOADING = new Set(["login", "logout", "status", "examples", "clean"]);
 
 program.hook("preAction", (_thisCommand, actionCommand) => {
   const opts = program.opts();
@@ -116,6 +117,21 @@ Examples:
   $ canvas-cli ingest CS101 --json     Output JSON for scripting or piping`
   )
   .action(ingestCourseCommand);
+
+program
+  .command("clean")
+  .description("Remove locally cached data (.canvas-cli/)")
+  .option("--all", "Also remove global config and credentials (~/.config/canvas-cli/)")
+  .option("-y, --yes", "Skip confirmation prompt")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ canvas-cli clean         Remove cached courses, sessions, and chat history
+  $ canvas-cli clean --all   Also remove stored credentials and config
+  $ canvas-cli clean -y      Skip confirmation prompt`
+  )
+  .action(cleanCommand);
 
 program
   .command("examples")
