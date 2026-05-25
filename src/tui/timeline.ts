@@ -155,7 +155,7 @@ export async function fetchTimelineData(
   return { data: results, warnings };
 }
 
-export function renderTimeline(
+function renderTimeline(
   courses: TimelineCourse[],
   window: TimeWindow,
   warnings: string[],
