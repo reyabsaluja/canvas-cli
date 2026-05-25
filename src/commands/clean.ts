@@ -69,6 +69,8 @@ export async function cleanCommand(options: CleanOptions): Promise<void> {
       const subSize = dirSize(join(localPath, sub));
       console.log(`    ${C.dim("•")} ${sub}/ ${C.dim(`(${formatBytes(subSize)})`)}`);
     }
+  } else if (options.all) {
+    console.log(`  ${C.dim("No local data at")} ${C.muted(localPath)}`);
   }
 
   if (options.all && configExists) {
