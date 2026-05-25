@@ -762,6 +762,7 @@ export function getRenderedMessageLines(
       break;
     }
     case "system": {
+      const isInlineError = message.content.startsWith("└");
       const isError = message.content.startsWith("Error:");
       const isElapsedSummary = /^(Worked|Thought|Studied|Read|Analyzed|Explored|Reviewed) for \d/.test(message.content);
       const systemColor = isError
@@ -769,6 +770,9 @@ export function getRenderedMessageLines(
         : isElapsedSummary
           ? chalk.hex("#707070")
           : chalk.white;
+      if (isInlineError) {
+        lines.length = 0;
+      }
       wrapLines(message.content, maxWidth).forEach((line) => {
         lines.push(`  ${systemColor(line)}`);
       });
