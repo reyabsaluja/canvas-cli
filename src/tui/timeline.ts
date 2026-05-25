@@ -34,7 +34,7 @@ const COURSE_COLORS: ChalkInstance[] = [
 export function parseTimelineArgs(args: string): { window: string; showAll: boolean } {
   const trimmed = args.trim();
   const showAll = trimmed.includes("--all");
-  const cleaned = trimmed.replace(/--all/g, "").trim();
+  const cleaned = trimmed.replace(/--all/g, "").replace(/\s+/g, " ").trim();
   return { window: cleaned || "default", showAll };
 }
 
