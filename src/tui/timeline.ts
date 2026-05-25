@@ -117,15 +117,8 @@ export async function fetchTimelineData(
   const results: TimelineCourse[] = [];
   const warnings: string[] = [];
 
-  for (let i = 0; i < courses.length; i++) {
-    const course = courses[i]!;
-
-    if (signal?.aborted) break;
-
-    if (courses.length > 8 && i > 0 && i % 8 === 0) {
-      await new Promise((r) => setTimeout(r, 500));
-    }
-
+  const fetchOne = async (course: Course): Promise<void> => {
+    if (signal?.aborted) return;
     try {
       const raw = await client.getAssignments(course.id, signal);
       const assignments: TimelineAssignment[] = raw
@@ -138,12 +131,18 @@ export async function fetchTimelineData(
           submitted: a.has_submitted_submissions || a.submission?.workflow_state === "submitted",
           graded: a.submission?.workflow_state === "graded",
         }));
-
       results.push({ name: course.name, assignments });
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") throw err;
       warnings.push(`Could not fetch ${course.name} (access denied — enrollment may have ended)`);
     }
+  };
+
+  const CONCURRENCY = 4;
+  for (let i = 0; i < courses.length; i += CONCURRENCY) {
+    if (signal?.aborted) break;
+    const batch = courses.slice(i, i + CONCURRENCY);
+    await Promise.all(batch.map(fetchOne));
   }
 
   return { data: results, warnings };
