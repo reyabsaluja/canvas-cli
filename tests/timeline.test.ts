@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import chalk from "chalk";
 import {
   parseTimelineArgs,
   resolveTimeWindow,
+  renderBar,
   buildTimelineOutput,
   type TimelineAssignment,
   type TimelineCourse,
 } from "../src/tui/timeline.js";
+
+function stripAnsi(str: string): string {
+  return str.replace(/\x1b\[[0-9;]*m/g, "");
+}
 
 test("timeline", async (t) => {
   await t.test("parseTimelineArgs: default with no args", () => {
@@ -186,5 +192,85 @@ test("timeline", async (t) => {
     assert.ok(result.includes("available"));
     assert.ok(result.includes("urgent"));
     assert.ok(result.includes("overdue"));
+  });
+
+  await t.test("renderBar: point event when startCol equals dueCol", () => {
+    const now = new Date("2026-03-10T12:00:00Z");
+    const dueAt = new Date("2026-03-15T12:00:00Z");
+    const assignment: TimelineAssignment = {
+      name: "Quiz", dueAt, unlockAt: new Date("2026-03-15T10:00:00Z"), lockAt: null, submitted: false, graded: false,
+    };
+    const chartWidth = 10;
+    const toCol = (_date: Date) => 5;
+    const bar = stripAnsi(renderBar(assignment, toCol, chartWidth, now, chalk.red));
+    assert.equal(bar[5], "■");
+    assert.equal(bar.trim(), "■");
+  });
+
+  await t.test("renderBar: submitted point event is dimmed", () => {
+    const now = new Date("2026-03-10T12:00:00Z");
+    const dueAt = new Date("2026-03-15T12:00:00Z");
+    const assignment: TimelineAssignment = {
+      name: "Quiz", dueAt, unlockAt: new Date("2026-03-15T10:00:00Z"), lockAt: null, submitted: true, graded: false,
+    };
+    const chartWidth = 10;
+    const toCol = (_date: Date) => 5;
+    const bar = stripAnsi(renderBar(assignment, toCol, chartWidth, now, chalk.red));
+    assert.equal(bar[5], "■");
+  });
+
+  await t.test("renderBar: overdue extends past due date to now", () => {
+    const now = new Date("2026-03-20T12:00:00Z");
+    const dueAt = new Date("2026-03-15T12:00:00Z");
+    const assignment: TimelineAssignment = {
+      name: "HW", dueAt, unlockAt: new Date("2026-03-10T00:00:00Z"), lockAt: null, submitted: false, graded: false,
+    };
+    const chartWidth = 20;
+    const toCol = (date: Date) => {
+      const base = new Date("2026-03-08T00:00:00Z").getTime();
+      const span = 20 * 86400000;
+      return Math.round(((date.getTime() - base) / span) * 19);
+    };
+    const bar = stripAnsi(renderBar(assignment, toCol, chartWidth, now, chalk.blue));
+    const nowCol = toCol(now);
+    const dueCol = toCol(dueAt);
+    for (let i = dueCol + 1; i <= nowCol && i < chartWidth; i++) {
+      assert.equal(bar[i], "▓", `expected ▓ at col ${i}`);
+    }
+  });
+
+  await t.test("renderBar: urgent zone uses bold block chars", () => {
+    const now = new Date("2026-03-10T12:00:00Z");
+    const dueAt = new Date("2026-03-12T12:00:00Z");
+    const assignment: TimelineAssignment = {
+      name: "HW", dueAt, unlockAt: new Date("2026-03-05T00:00:00Z"), lockAt: null, submitted: false, graded: false,
+    };
+    const chartWidth = 20;
+    const base = new Date("2026-03-04T00:00:00Z").getTime();
+    const span = 14 * 86400000;
+    const toCol = (date: Date) => Math.round(((date.getTime() - base) / span) * 19);
+    const bar = stripAnsi(renderBar(assignment, toCol, chartWidth, now, chalk.green));
+    const startCol = toCol(assignment.unlockAt!);
+    const dueCol = toCol(dueAt);
+    assert.ok(bar.slice(startCol, dueCol + 1).includes("░"));
+    assert.ok(bar.slice(startCol, dueCol + 1).includes("█"));
+  });
+
+  await t.test("renderBar: submitted assignment uses light chars", () => {
+    const now = new Date("2026-03-10T12:00:00Z");
+    const dueAt = new Date("2026-03-15T12:00:00Z");
+    const assignment: TimelineAssignment = {
+      name: "HW", dueAt, unlockAt: new Date("2026-03-08T00:00:00Z"), lockAt: null, submitted: true, graded: false,
+    };
+    const chartWidth = 20;
+    const base = new Date("2026-03-06T00:00:00Z").getTime();
+    const span = 14 * 86400000;
+    const toCol = (date: Date) => Math.round(((date.getTime() - base) / span) * 19);
+    const bar = stripAnsi(renderBar(assignment, toCol, chartWidth, now, chalk.yellow));
+    const startCol = toCol(assignment.unlockAt!);
+    const dueCol = toCol(dueAt);
+    for (let i = startCol; i <= dueCol; i++) {
+      assert.equal(bar[i], "░", `expected ░ at col ${i}`);
+    }
   });
 });

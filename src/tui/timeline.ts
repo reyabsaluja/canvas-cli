@@ -319,7 +319,7 @@ function renderTodayMarker(
   return `${gutter}${chalk.white.bold(markerChars.join(""))}`;
 }
 
-function renderBar(
+export function renderBar(
   assignment: TimelineAssignment,
   toCol: (date: Date) => number,
   chartWidth: number,
