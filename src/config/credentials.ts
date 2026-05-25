@@ -61,13 +61,16 @@ export function storeCredential(profile: string, key: string, value: string): St
       }
       debug("config", `Stored credential in keychain: ${key} (profile: ${profile})`);
       cache.set(cacheKey(profile, key), value);
-      // Also write file-based backup so credentials survive transient keychain failures
-      const filePath = credentialFilePath(profile, key);
-      const dir = join(getConfigDir(), "credentials");
-      mkdirSync(dir, { recursive: true, mode: 0o700 });
-      const fd = openSync(filePath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC, 0o600);
-      writeSync(fd, value);
-      closeSync(fd);
+      try {
+        const filePath = credentialFilePath(profile, key);
+        const dir = join(getConfigDir(), "credentials");
+        mkdirSync(dir, { recursive: true, mode: 0o700 });
+        const fd = openSync(filePath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC, 0o600);
+        writeSync(fd, value);
+        closeSync(fd);
+      } catch (err) {
+        debug("config", `Failed to write credential backup: ${err instanceof Error ? err.message : err}`);
+      }
       return "keychain";
     } catch {
       debug("config", "Keychain storage failed, falling back to file");
