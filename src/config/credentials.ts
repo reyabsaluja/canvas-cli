@@ -3,7 +3,7 @@ import { readFileSync, mkdirSync, unlinkSync, existsSync, openSync, writeSync, c
 import { join } from "node:path";
 import { platform } from "node:os";
 import { getConfigDir, validateProfileName } from "./paths.js";
-import { debug } from "../debug.js";
+import { debug, warn } from "../debug.js";
 
 const SERVICE_NAME = "canvas-cli";
 
@@ -72,7 +72,7 @@ export function storeCredential(profile: string, key: string, value: string): St
       try {
         writeCredentialFile(profile, key, value);
       } catch (err) {
-        debug("config", `Failed to write credential backup file: ${err instanceof Error ? err.message : err}`);
+        warn("config", `Failed to write credential backup file: ${err instanceof Error ? err.message : err}`);
       }
       return "keychain";
     } catch {
