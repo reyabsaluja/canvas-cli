@@ -217,7 +217,6 @@ export function renderTimeline(
     lines.push("");
     lines.push(`  ${chalk.dim("No due date")}`);
     for (const item of noDueDateAssignments.slice(0, 10)) {
-      const color = COURSE_COLORS[item.colorIdx]!;
       const label = truncatePlainToWidth(`${item.courseName}: ${item.name}`, gutterWidth + chartWidth - 4);
       lines.push(`    ${chalk.dim(label)}`);
     }
