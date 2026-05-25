@@ -151,9 +151,10 @@ export async function fetchTimelineData(
 export function renderTimeline(
   courses: TimelineCourse[],
   window: TimeWindow,
-  warnings: string[]
+  warnings: string[],
+  overrideCols?: number
 ): string {
-  const { cols } = getTermSize();
+  const cols = overrideCols ?? getTermSize().cols;
   const now = new Date();
   const narrow = cols < 80;
 
