@@ -196,7 +196,6 @@ function renderTimeline(
   lines.push(renderTimeAxis(window, gutterWidth, chartWidth, now, narrow));
   lines.push(renderTodayMarker(window, gutterWidth, chartWidth, now));
 
-  const noDueDateAssignments: Array<{ courseName: string; name: string; colorIdx: number }> = [];
 
   for (let ci = 0; ci < courses.length; ci++) {
     const course = courses[ci]!;
@@ -207,10 +206,6 @@ function renderTimeline(
       return a.dueAt.getTime() >= windowStart && a.dueAt.getTime() <= windowEnd;
     });
 
-    const noDue = course.assignments.filter((a) => !a.dueAt);
-    for (const a of noDue) {
-      noDueDateAssignments.push({ courseName: course.name, name: a.name, colorIdx: ci % COURSE_COLORS.length });
-    }
 
     if (visible.length === 0) continue;
 
@@ -228,18 +223,6 @@ function renderTimeline(
       const gutterPad = " ".repeat(Math.max(0, gutterWidth - gutter.length));
       const bar = renderBar(assignment, toCol, chartWidth, now, color, makeGridBackground());
       lines.push(`${gutter}${gutterPad}${bar}`);
-    }
-  }
-
-  if (noDueDateAssignments.length > 0) {
-    lines.push("");
-    lines.push(`  ${chalk.dim("No due date")}`);
-    for (const item of noDueDateAssignments.slice(0, 10)) {
-      const label = truncatePlainToWidth(`${item.courseName}: ${item.name}`, gutterWidth + chartWidth - 4);
-      lines.push(`    ${chalk.dim(label)}`);
-    }
-    if (noDueDateAssignments.length > 10) {
-      lines.push(`    ${chalk.dim(`... and ${noDueDateAssignments.length - 10} more`)}`);
     }
   }
 
@@ -459,8 +442,7 @@ export function buildTimelineOutput(
   });
 
   const allSubmitted = allAssignments.length > 0 && allAssignments.every((a) => a.submitted);
-  const hasUndated = allAssignments.some((a) => !a.dueAt && !a.submitted);
-  const hasChartContent = visibleAssignments.length > 0 || hasUndated || warnings.length > 0;
+  const hasChartContent = visibleAssignments.length > 0 || warnings.length > 0;
 
   if (visibleAssignments.length === 0) {
     if (allSubmitted && !hasChartContent) {
