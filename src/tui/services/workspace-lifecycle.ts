@@ -79,6 +79,8 @@ export async function openWorkspace(
     return loadExistingWorkspaceResult(workspacePath, course, onProgress);
   }
 
+  const preloadedCache = await loadCourseCache(course.courseCode, course.id);
+
   const runWithPolicy = (policy: "require_existing" | "ensure_present") =>
     runWorkspaceLifecycle({
       aiConfig: services.aiConfig,
@@ -87,6 +89,7 @@ export async function openWorkspace(
       client: services.client,
       config: services.config,
       cachePolicy: policy,
+      preloadedCache: preloadedCache ?? undefined,
       onProgress,
       onStateChange: async (workspaceState, lastError) => {
         await persistWorkspaceLifecycleState(
