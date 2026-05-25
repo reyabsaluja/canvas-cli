@@ -79,47 +79,32 @@ export async function openWorkspace(
     return loadExistingWorkspaceResult(workspacePath, course, onProgress);
   }
 
+  const runWithPolicy = (policy: "require_existing" | "ensure_present") =>
+    runWorkspaceLifecycle({
+      aiConfig: services.aiConfig,
+      detail,
+      course,
+      client: services.client,
+      config: services.config,
+      cachePolicy: policy,
+      onProgress,
+      onStateChange: async (workspaceState, lastError) => {
+        await persistWorkspaceLifecycleState(
+          workspacePath,
+          detail,
+          course,
+          workspaceState,
+          lastError ?? null
+        );
+      },
+    });
+
   let lifecycle;
   try {
-    lifecycle = await runWorkspaceLifecycle({
-      aiConfig: services.aiConfig,
-      detail,
-      course,
-      client: services.client,
-      config: services.config,
-      cachePolicy: "require_existing",
-      onProgress,
-      onStateChange: async (workspaceState, lastError) => {
-        await persistWorkspaceLifecycleState(
-          workspacePath,
-          detail,
-          course,
-          workspaceState,
-          lastError ?? null
-        );
-      },
-    });
+    lifecycle = await runWithPolicy("require_existing");
   } catch (error) {
     if (!(error instanceof MissingCourseCacheError)) throw error;
-    // Cache was removed between course entry and workspace open — re-ingest
-    lifecycle = await runWorkspaceLifecycle({
-      aiConfig: services.aiConfig,
-      detail,
-      course,
-      client: services.client,
-      config: services.config,
-      cachePolicy: "ensure_present",
-      onProgress,
-      onStateChange: async (workspaceState, lastError) => {
-        await persistWorkspaceLifecycleState(
-          workspacePath,
-          detail,
-          course,
-          workspaceState,
-          lastError ?? null
-        );
-      },
-    });
+    lifecycle = await runWithPolicy("ensure_present");
   }
 
   onProgress("workspace ready");
