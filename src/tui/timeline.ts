@@ -408,7 +408,7 @@ export function buildTimelineOutput(
     return a.dueAt.getTime() >= window.start.getTime() && a.dueAt.getTime() <= window.end.getTime();
   });
 
-  const allSubmitted = allAssignments.length > 0 && allAssignments.every((a) => a.dueAt === null || a.submitted);
+  const allSubmitted = allAssignments.length > 0 && allAssignments.every((a) => a.submitted);
 
   if (visibleAssignments.length === 0 && allSubmitted) {
     return "You're all caught up. Nothing outstanding.";
