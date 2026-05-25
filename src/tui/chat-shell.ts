@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import chalk from "chalk";
-import { C, getTermSize, stripAnsi } from "./screen.js";
+import { C, clearScreen, getTermSize, hideCursor, stripAnsi } from "./screen.js";
 import { formatAIError } from "../ai/provider.js";
 import type { Observation } from "../agent/observation.js";
 import { executeMakePdf } from "./pdf-command.js";
@@ -36,6 +36,7 @@ import {
   getStickyBottomRows,
   renderChatFrame,
   renderInputFooter,
+  resetChatShellRenderCache,
 } from "./chat-shell-render.js";
 import { ChatShellPersistence } from "./chat-shell-persistence.js";
 import { enterChatShell, leaveChatShell } from "./chat-shell-terminal.js";
@@ -1074,7 +1075,7 @@ export async function runChatShell<TExit>(
       try {
         const exit = await options.onCommand(commandName, args, api);
         if (exit != null && typeof exit === "object" && "type" in exit && (exit as unknown as { type: string }).type === "background-task") {
-          const task = exit as unknown as { type: "background-task"; verb: string; run: (signal: AbortSignal) => Promise<void> };
+          const task = exit as unknown as { type: "background-task"; verb: string; run: (signal: AbortSignal, controls: { pauseShell: () => void; resumeShell: () => void }) => Promise<void> };
           launchBackgroundCommand(task.verb, task.run);
           return;
         }
@@ -1273,11 +1274,11 @@ export async function runChatShell<TExit>(
 
     function launchBackgroundCommand(
       verb: string,
-      run: (signal: AbortSignal) => Promise<void>
+      run: (signal: AbortSignal, controls: { pauseShell: () => void; resumeShell: () => void }) => Promise<void>
     ): void {
       isProcessing = true;
       processingAbort = new AbortController();
-      currentVerb = verb;
+      currentVerb = verb || VERBS[Math.floor(Math.random() * VERBS.length)]!;
       spinnerFrame = 0;
       shimmerFrame = 0;
       processingStartTime = Date.now();
@@ -1285,9 +1286,31 @@ export async function runChatShell<TExit>(
       render();
       startSpinner();
 
+      const controls = {
+        pauseShell: () => {
+          stopSpinner();
+          if (renderTimer) {
+            clearTimeout(renderTimer);
+            renderTimer = null;
+            renderQueued = false;
+          }
+          isProcessing = false;
+          processingAbort = null;
+          currentSpinnerLine = "";
+          stdin.removeListener("data", onData);
+        },
+        resumeShell: () => {
+          hideCursor();
+          clearScreen();
+          resetChatShellRenderCache();
+          stdin.on("data", onData);
+          render();
+        },
+      };
+
       void (async () => {
         try {
-          await run(processingAbort!.signal);
+          await run(processingAbort!.signal, controls);
         } catch (error) {
           if (!(error instanceof Error && error.name === "AbortError")) {
             await appendPersistedMessage({

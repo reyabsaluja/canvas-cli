@@ -119,7 +119,9 @@ export function renderChatFrame(
   const buf = createBuffer();
   const { cols, rows } = getTermSize();
   const isGlobalScope = options.runtime.scope.type === "global";
-  const baseHeaderLines = ["", "", ...options.bannerLines, ""];
+  const baseHeaderLines = isGlobalScope
+    ? ["", "", ...options.bannerLines, ""]
+    : ["", ...options.bannerLines];
   const spinnerLines =
     options.isProcessing && options.currentSpinnerLine
       ? ["", `  ${options.currentSpinnerLine}`]
