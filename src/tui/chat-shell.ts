@@ -892,7 +892,7 @@ export async function runChatShell<TExit>(
         if (error instanceof DOMException && error.name === "AbortError") {
           const lastMsg = messages[messages.length - 1];
           const isEmptyAssistant =
-            lastMsg?.role === "assistant" && !lastMsg.content.trim();
+            lastMsg?.role === "assistant" && typeof lastMsg.content === "string" && !lastMsg.content.trim();
           if (isEmptyAssistant) {
             messages.pop();
             markTranscriptDirty(messages.length);
