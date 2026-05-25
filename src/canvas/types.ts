@@ -35,6 +35,8 @@ export interface CanvasAssignment {
   id: number;
   name: string;
   due_at: string | null;
+  unlock_at?: string | null;
+  lock_at?: string | null;
   html_url: string;
   course_id: number;
   has_submitted_submissions: boolean;

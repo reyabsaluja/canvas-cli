@@ -14,6 +14,7 @@ export const COMMANDS: CommandDefinition[] = [
     description: "Open a resource or file",
     scopes: ["global", "course", "workspace"],
   },
+  { name: "/timeline", description: "Show assignment timeline (Gantt chart)", scopes: ["global", "course"] },
   { name: "/announcements", description: "Browse course announcements", scopes: ["global", "course"], navigation: true },
   { name: "/thread", description: "Read a discussion thread by ID or title", scopes: ["global", "course"] },
   {
