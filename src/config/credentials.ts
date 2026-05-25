@@ -30,6 +30,14 @@ function keychainAccount(profile: string, key: string): string {
   return `${profile}/${key}`;
 }
 
+function writeCredentialFile(profile: string, key: string, value: string): void {
+  const dir = join(getConfigDir(), "credentials");
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const fd = openSync(credentialFilePath(profile, key), fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC, 0o600);
+  writeSync(fd, value);
+  closeSync(fd);
+}
+
 export type StorageBackend = "keychain" | "file";
 
 // macOS `security add-generic-password -w` requires the secret as a CLI arg,
@@ -62,12 +70,7 @@ export function storeCredential(profile: string, key: string, value: string): St
       debug("config", `Stored credential in keychain: ${key} (profile: ${profile})`);
       cache.set(cacheKey(profile, key), value);
       try {
-        const filePath = credentialFilePath(profile, key);
-        const dir = join(getConfigDir(), "credentials");
-        mkdirSync(dir, { recursive: true, mode: 0o700 });
-        const fd = openSync(filePath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC, 0o600);
-        writeSync(fd, value);
-        closeSync(fd);
+        writeCredentialFile(profile, key, value);
       } catch (err) {
         debug("config", `Failed to write credential backup: ${err instanceof Error ? err.message : err}`);
       }
@@ -79,14 +82,9 @@ export function storeCredential(profile: string, key: string, value: string): St
 
   // Fallback: plaintext file with 0600 permissions. On non-macOS systems there
   // is no OS-level secret store; a compromised user session can read these.
-  const filePath = credentialFilePath(profile, key);
-  const dir = join(getConfigDir(), "credentials");
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const fd = openSync(filePath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC, 0o600);
-  writeSync(fd, value);
-  closeSync(fd);
+  writeCredentialFile(profile, key, value);
   cache.set(cacheKey(profile, key), value);
-  debug("config", `Stored credential in file: ${filePath}`);
+  debug("config", `Stored credential in file: ${credentialFilePath(profile, key)}`);
   return "file";
 }
 
@@ -110,15 +108,9 @@ export function loadCredential(profile: string, key: string): string | null {
       if (trimmed) {
         debug("config", `Loaded credential from keychain: ${key} (profile: ${profile})`);
         value = trimmed;
-        // Ensure file-based backup exists for resilience against transient keychain failures
-        const filePath = credentialFilePath(profile, key);
-        if (!existsSync(filePath)) {
+        if (!existsSync(credentialFilePath(profile, key))) {
           try {
-            const dir = join(getConfigDir(), "credentials");
-            mkdirSync(dir, { recursive: true, mode: 0o700 });
-            const fd = openSync(filePath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC, 0o600);
-            writeSync(fd, trimmed);
-            closeSync(fd);
+            writeCredentialFile(profile, key, trimmed);
             debug("config", `Created file backup for keychain credential: ${key}`);
           } catch (err) {
             debug("config", `Failed to write credential backup: ${err instanceof Error ? err.message : err}`);
