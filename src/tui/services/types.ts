@@ -27,6 +27,7 @@ export interface AppServices {
   >;
   radar: RadarService;
   resolvedAssignments: Map<number, Assignment[]>;
+  activeIngestionAc: AbortController | null;
 }
 
 export interface WorkspaceOpenResult {

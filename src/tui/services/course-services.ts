@@ -27,6 +27,7 @@ export async function initServices(): Promise<AppServices> {
     assignmentCache: new Map(),
     radar: new RadarService(client),
     resolvedAssignments: new Map(),
+    activeIngestionAc: null,
   };
 }
 
