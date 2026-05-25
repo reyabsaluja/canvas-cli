@@ -46,7 +46,7 @@ export const COMMANDS: CommandDefinition[] = [
     description: "Copy the last response (or 'all' / 'last N')",
     scopes: ["global", "course", "workspace"],
   },
-  { name: "/refresh", description: "Refresh the current workspace", scopes: ["workspace"] },
+  { name: "/refresh", description: "Re-ingest course data (or refresh workspace)", scopes: ["course", "workspace"] },
   { name: "/back", description: "Go up one scope", scopes: ["course", "workspace"], navigation: true },
   {
     name: "/home",

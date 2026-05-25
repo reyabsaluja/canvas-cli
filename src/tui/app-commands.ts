@@ -156,6 +156,10 @@ export async function handleCommand(
       return { type: "assignment-picker", courseId: course.id };
     }
 
+    if (command === "/refresh") {
+      return { type: "course-refresh", courseId: course.id };
+    }
+
     if (command === "/open") {
       const cache = await loadCourseCache(course.courseCode, course.id);
       const result = await handleOpenResourceQuery(args.trim(), { cache });
