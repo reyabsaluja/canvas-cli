@@ -33,11 +33,20 @@ const COURSE_COLORS: ChalkInstance[] = [
   chalk.cyan,
 ];
 
-export function parseTimelineArgs(args: string): { window: string; showAll: boolean } {
+export function parseTimelineArgs(args: string): { window: string; showAll: boolean; error?: string } {
   const trimmed = args.trim();
   const showAll = trimmed.includes("--all");
   const cleaned = trimmed.replace(/--all/g, "").replace(/\s+/g, " ").trim();
+  if (cleaned && !isValidTimelineArg(cleaned)) {
+    return { window: "default", showAll, error: `Unknown argument "${cleaned}". Usage: /timeline [week | month | semester | next N days/weeks] [--all]` };
+  }
   return { window: cleaned || "default", showAll };
+}
+
+function isValidTimelineArg(arg: string): boolean {
+  if (["week", "month", "semester", "default"].includes(arg)) return true;
+  if (/^next\s+\d+\s+(week|weeks|day|days|month|months)$/i.test(arg)) return true;
+  return false;
 }
 
 export interface ResolvedWindow {

@@ -1,21 +1,22 @@
 import type { CommandDefinition, ScopeType } from "./chat-state.js";
 
 export const COMMANDS: CommandDefinition[] = [
-  { name: "/courses", description: "Open the course picker", scopes: ["global"], navigation: true },
+  { name: "/courses", description: "Open the course picker", scopes: ["global"], navigation: true, noArgs: true },
   {
     name: "/manage-courses",
     description: "Add, remove, or rename courses",
     scopes: ["global", "course", "workspace"],
     navigation: true,
+    noArgs: true,
   },
-  { name: "/recent", description: "Reopen a recent course or workspace", scopes: ["global"], navigation: true },
+  { name: "/recent", description: "Reopen a recent course or workspace", scopes: ["global"], navigation: true, noArgs: true },
   {
     name: "/open",
     description: "Open a resource or file",
     scopes: ["global", "course", "workspace"],
   },
   { name: "/timeline", description: "Show timeline (week | month | semester | next N days/weeks, --all)", scopes: ["global", "course"] },
-  { name: "/announcements", description: "Browse course announcements", scopes: ["global", "course"], navigation: true },
+  { name: "/announcements", description: "Browse course announcements", scopes: ["global", "course"], navigation: true, noArgs: true },
   { name: "/thread", description: "Read a discussion thread by ID or title", scopes: ["global", "course"] },
   {
     name: "/lecture",
@@ -23,20 +24,20 @@ export const COMMANDS: CommandDefinition[] = [
     scopes: ["course", "workspace"],
     aliases: ["/lec"],
   },
-  { name: "/assignments", description: "Open the assignment picker", scopes: ["course"], navigation: true },
-  { name: "/files", description: "List cached course files", scopes: ["course"] },
-  { name: "/modules", description: "List course modules", scopes: ["course"] },
-  { name: "/overview", description: "Show assignment overview", scopes: ["workspace"] },
+  { name: "/assignments", description: "Open the assignment picker", scopes: ["course"], navigation: true, noArgs: true },
+  { name: "/files", description: "List cached course files", scopes: ["course"], noArgs: true },
+  { name: "/modules", description: "List course modules", scopes: ["course"], noArgs: true },
+  { name: "/overview", description: "Show assignment overview", scopes: ["workspace"], noArgs: true },
   {
     name: "/requirements",
     description: "Show deliverables and constraints",
     scopes: ["workspace"],
     aliases: ["/reqs"],
   },
-  { name: "/plan", description: "Show the action plan", scopes: ["workspace"] },
-  { name: "/resources", description: "Show key resources", scopes: ["workspace"] },
-  { name: "/evidence", description: "Show confirmed vs inferred sources", scopes: ["workspace"] },
-  { name: "/status", description: "Show workspace status", scopes: ["workspace"] },
+  { name: "/plan", description: "Show the action plan", scopes: ["workspace"], noArgs: true },
+  { name: "/resources", description: "Show key resources", scopes: ["workspace"], noArgs: true },
+  { name: "/evidence", description: "Show confirmed vs inferred sources", scopes: ["workspace"], noArgs: true },
+  { name: "/status", description: "Show workspace status", scopes: ["workspace"], noArgs: true },
   {
     name: "/clear",
     description: "Clear this chat and reset the current context",
@@ -47,13 +48,14 @@ export const COMMANDS: CommandDefinition[] = [
     description: "Copy the last response (or 'all' / 'last N')",
     scopes: ["global", "course", "workspace"],
   },
-  { name: "/refresh", description: "Re-ingest course data (or refresh workspace)", scopes: ["course", "workspace"] },
-  { name: "/back", description: "Go up one scope", scopes: ["course", "workspace"], navigation: true },
+  { name: "/refresh", description: "Re-ingest course data (or refresh workspace)", scopes: ["course", "workspace"], noArgs: true },
+  { name: "/back", description: "Go up one scope", scopes: ["course", "workspace"], navigation: true, noArgs: true },
   {
     name: "/home",
     description: "Return to the global home session",
     scopes: ["course", "workspace"],
     navigation: true,
+    noArgs: true,
   },
   {
     name: "/help",
@@ -76,12 +78,14 @@ export const COMMANDS: CommandDefinition[] = [
     name: "/doctor",
     description: "Diagnose configuration and connectivity",
     scopes: ["global", "course", "workspace"],
+    noArgs: true,
   },
   {
     name: "/login",
     description: "Re-run login setup",
     scopes: ["global", "course", "workspace"],
     navigation: true,
+    noArgs: true,
   },
   {
     name: "/quit",
@@ -89,6 +93,7 @@ export const COMMANDS: CommandDefinition[] = [
     scopes: ["global", "course", "workspace"],
     aliases: ["/exit", "/q"],
     navigation: true,
+    noArgs: true,
   },
 ];
 

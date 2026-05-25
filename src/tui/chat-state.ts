@@ -85,6 +85,8 @@ export interface CommandDefinition {
   aliases?: string[];
   /** Navigation commands are not persisted to chat transcript. */
   navigation?: boolean;
+  /** Commands that do not accept any arguments. */
+  noArgs?: boolean;
 }
 
 export interface ScopeRuntime {
