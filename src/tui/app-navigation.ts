@@ -378,18 +378,12 @@ export function sleep(ms: number): Promise<void> {
 }
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const SHIMMER_COLORS = [
-  chalk.hex("#6e1114"),
+const SHIMMER_BASE = chalk.hex("#6e1114");
+const SHIMMER_HIGHLIGHT = [
   chalk.hex("#8c1618"),
-  chalk.hex("#ab1b1e"),
   chalk.hex("#c92023"),
-  chalk.hex("#e82429"),
-  chalk.hex("#f25a5e"),
   chalk.hex("#f78e90"),
-  chalk.hex("#f25a5e"),
-  chalk.hex("#e82429"),
   chalk.hex("#c92023"),
-  chalk.hex("#ab1b1e"),
   chalk.hex("#8c1618"),
 ];
 const toolActionColor = chalk.hex("#e8a86d").bold;
@@ -503,14 +497,14 @@ class IngestionProgressRenderer {
     this.render();
     this.timer = setInterval(() => {
       this.frame = (this.frame + 1) % SPINNER_FRAMES.length;
-      this.shimmerFrame = (this.shimmerFrame + 1) % SHIMMER_COLORS.length;
+      this.shimmerFrame = (this.shimmerFrame + 1) % 1_000_000;
       this.verbTickCounter++;
-      if (this.verbTickCounter >= 30) {
+      if (this.verbTickCounter >= 25) {
         this.verbTickCounter = 0;
         this.verbIndex = (this.verbIndex + 1) % INGESTION_VERBS.length;
       }
       this.render();
-    }, 80);
+    }, 120);
 
     process.stdin.setRawMode(true);
     process.stdin.resume();
@@ -635,10 +629,17 @@ class IngestionProgressRenderer {
 
     const verb = INGESTION_VERBS[this.verbIndex % INGESTION_VERBS.length]!;
     const verbText = `${verb}...`;
+    const highlightWidth = SHIMMER_HIGHLIGHT.length;
+    const cycleLength = verbText.length + highlightWidth;
+    const highlightPos = this.shimmerFrame % cycleLength;
     let shimmer = "";
     for (let j = 0; j < verbText.length; j++) {
-      const colorIndex = (this.shimmerFrame + j) % SHIMMER_COLORS.length;
-      shimmer += SHIMMER_COLORS[colorIndex]!(verbText[j]!);
+      const offset = j - highlightPos + Math.floor(highlightWidth / 2);
+      if (offset >= 0 && offset < highlightWidth) {
+        shimmer += SHIMMER_HIGHLIGHT[offset]!(verbText[j]!);
+      } else {
+        shimmer += SHIMMER_BASE(verbText[j]!);
+      }
     }
     allLines.push(`  ${spinnerColor(SPINNER_FRAMES[this.frame]!)} ${shimmer}`);
 
