@@ -58,6 +58,11 @@ export async function handleCommand(
   }
 
   if (command === "/model") {
+    const sub = args.trim().toLowerCase();
+    if (sub && sub !== "effort" && sub !== "key") {
+      await api.addMessage({ role: "system", content: `└ ERROR: Unknown subcommand "${args.trim()}". Usage: /model [effort | key]` });
+      return;
+    }
     return { type: "model", args: args.trim() || undefined };
   }
 
