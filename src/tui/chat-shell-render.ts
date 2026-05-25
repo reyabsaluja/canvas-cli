@@ -713,8 +713,8 @@ export function getRenderedMessageLines(
     case "user": {
       const trimmed = message.content.trim();
       if (trimmed.startsWith("/")) {
-        const rendered = wrapLines(trimmed, Math.max(12, maxWidth - 2)).map(
-          (line) => `  ${commandBg(chalk.white.bold(line))}`
+        const rendered = wrapLines(trimmed, Math.max(12, maxWidth - 4)).map(
+          (line) => `  ${commandBg(` ${chalk.white.bold("❯")} ${chalk.white.bold(line)} `)}`
         );
         cache.set(cacheKey, ["", ...rendered]);
         return ["", ...rendered];
