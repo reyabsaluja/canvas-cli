@@ -33,6 +33,12 @@ test("timeline", async (t) => {
     assert.equal(result.showAll, false);
   });
 
+  await t.test("parseTimelineArgs: --all mid-phrase normalizes whitespace", () => {
+    const result = parseTimelineArgs("next --all 2 weeks");
+    assert.equal(result.window, "next 2 weeks");
+    assert.equal(result.showAll, true);
+  });
+
   await t.test("resolveTimeWindow: default returns 2 weeks back, 4 weeks forward", () => {
     const window = resolveTimeWindow("default", []);
     const now = Date.now();
