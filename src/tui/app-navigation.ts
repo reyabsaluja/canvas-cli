@@ -109,10 +109,8 @@ export async function ensureCourseIngested(
         progress.addStep(msg);
       },
     });
-    progress.stop();
     return true;
   } catch (error) {
-    progress.stop();
     if (isAbortError(error)) {
       clearScreen();
       showCursor();
@@ -130,6 +128,7 @@ export async function ensureCourseIngested(
     await waitForKey();
     return false;
   } finally {
+    progress.stop();
     if (services.activeIngestionAc === ac) {
       services.activeIngestionAc = null;
     }
