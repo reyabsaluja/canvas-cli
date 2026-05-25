@@ -38,7 +38,12 @@ export function parseTimelineArgs(args: string): { window: string; showAll: bool
   return { window: cleaned || "default", showAll };
 }
 
-export function resolveTimeWindow(windowArg: string, assignments: TimelineAssignment[]): TimeWindow {
+export interface ResolvedWindow {
+  window: TimeWindow;
+  fallback?: string;
+}
+
+export function resolveTimeWindow(windowArg: string, assignments: TimelineAssignment[]): ResolvedWindow {
   const now = new Date();
 
   if (windowArg === "default" || !windowArg) {
@@ -46,7 +51,7 @@ export function resolveTimeWindow(windowArg: string, assignments: TimelineAssign
     start.setDate(start.getDate() - 14);
     const end = new Date(now);
     end.setDate(end.getDate() + 28);
-    return { start, end };
+    return { window: { start, end } };
   }
 
   if (windowArg === "week") {
@@ -57,13 +62,13 @@ export function resolveTimeWindow(windowArg: string, assignments: TimelineAssign
     const sunday = new Date(monday);
     sunday.setDate(monday.getDate() + 6);
     sunday.setHours(23, 59, 59, 999);
-    return { start: monday, end: sunday };
+    return { window: { start: monday, end: sunday } };
   }
 
   if (windowArg === "month") {
     const start = new Date(now.getFullYear(), now.getMonth(), 1);
     const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-    return { start, end };
+    return { window: { start, end } };
   }
 
   if (windowArg === "semester") {
@@ -75,13 +80,13 @@ export function resolveTimeWindow(windowArg: string, assignments: TimelineAssign
       start.setDate(start.getDate() - 14);
       const end = new Date(now);
       end.setDate(end.getDate() + 28);
-      return { start, end };
+      return { window: { start, end }, fallback: "No dated assignments found — showing default window." };
     }
     const earliest = new Date(Math.min(...dates.map((d) => d.getTime())));
     const latest = new Date(Math.max(...dates.map((d) => d.getTime())));
     earliest.setDate(earliest.getDate() - 3);
     latest.setDate(latest.getDate() + 3);
-    return { start: earliest, end: latest };
+    return { window: { start: earliest, end: latest } };
   }
 
   const nextMatch = windowArg.match(/^next\s+(\d+)\s+(week|weeks|day|days|month|months)$/i);
@@ -98,14 +103,14 @@ export function resolveTimeWindow(windowArg: string, assignments: TimelineAssign
     } else if (unit.startsWith("month")) {
       end.setMonth(end.getMonth() + count);
     }
-    return { start, end };
+    return { window: { start, end } };
   }
 
   const start = new Date(now);
   start.setDate(start.getDate() - 14);
   const end = new Date(now);
   end.setDate(end.getDate() + 28);
-  return { start, end };
+  return { window: { start, end } };
 }
 
 export async function fetchTimelineData(
@@ -401,7 +406,10 @@ export function buildTimelineOutput(
     return "No courses set up yet. Run /courses to add your courses.";
   }
 
-  const window = resolveTimeWindow(windowArg, allAssignments);
+  const { window, fallback } = resolveTimeWindow(windowArg, allAssignments);
+  if (fallback) {
+    warnings = [...warnings, fallback];
+  }
 
   const visibleAssignments = allAssignments.filter((a) => {
     if (!a.dueAt) return false;
