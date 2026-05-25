@@ -42,6 +42,7 @@ export interface WorkspaceLifecycleOptions {
   client: CanvasClient;
   config: Config;
   cachePolicy: WorkspaceCachePolicy;
+  preloadedCache?: CourseCache;
   onProgress?: (phase: string, content?: string) => void;
   onStateChange?: (
     state: WorkspaceLifecycleCheckpoint,
@@ -160,6 +161,7 @@ async function resolveWorkspaceCache(
 ): Promise<CourseCache> {
   switch (options.cachePolicy) {
     case "require_existing": {
+      if (options.preloadedCache) return options.preloadedCache;
       onProgress(progressLabels.loadCache);
       const cache = await loadCourseCache(
         options.course.courseCode,
