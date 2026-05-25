@@ -108,6 +108,7 @@ export function loadCredential(profile: string, key: string): string | null {
       if (trimmed) {
         debug("config", `Loaded credential from keychain: ${key} (profile: ${profile})`);
         value = trimmed;
+        // Side-effect: lazily create a file backup so the app works if keychain becomes unavailable
         if (!existsSync(credentialFilePath(profile, key))) {
           try {
             writeCredentialFile(profile, key, trimmed);
