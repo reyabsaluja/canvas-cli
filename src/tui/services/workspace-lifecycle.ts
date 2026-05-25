@@ -5,7 +5,7 @@ import { loadCourseCache, type CourseCache } from "../../enrich/cache-loader.js"
 import { matchAssignments } from "../../domain/matching.js";
 import { normalizeAssignmentDetail } from "../../domain/normalize.js";
 import type { Course, AssignmentDetail } from "../../domain/models.js";
-import { runWorkspaceLifecycle } from "../../workspace/lifecycle.js";
+import { MissingCourseCacheError, runWorkspaceLifecycle } from "../../workspace/lifecycle.js";
 import {
   getSessionsRoot,
   getWorkspacePath,
@@ -79,24 +79,48 @@ export async function openWorkspace(
     return loadExistingWorkspaceResult(workspacePath, course, onProgress);
   }
 
-  const lifecycle = await runWorkspaceLifecycle({
-    aiConfig: services.aiConfig,
-    detail,
-    course,
-    client: services.client,
-    config: services.config,
-    cachePolicy: "require_existing",
-    onProgress,
-    onStateChange: async (workspaceState, lastError) => {
-      await persistWorkspaceLifecycleState(
-        workspacePath,
-        detail,
-        course,
-        workspaceState,
-        lastError ?? null
-      );
-    },
-  });
+  let lifecycle;
+  try {
+    lifecycle = await runWorkspaceLifecycle({
+      aiConfig: services.aiConfig,
+      detail,
+      course,
+      client: services.client,
+      config: services.config,
+      cachePolicy: "require_existing",
+      onProgress,
+      onStateChange: async (workspaceState, lastError) => {
+        await persistWorkspaceLifecycleState(
+          workspacePath,
+          detail,
+          course,
+          workspaceState,
+          lastError ?? null
+        );
+      },
+    });
+  } catch (error) {
+    if (!(error instanceof MissingCourseCacheError)) throw error;
+    // Cache was removed between course entry and workspace open — re-ingest
+    lifecycle = await runWorkspaceLifecycle({
+      aiConfig: services.aiConfig,
+      detail,
+      course,
+      client: services.client,
+      config: services.config,
+      cachePolicy: "ensure_present",
+      onProgress,
+      onStateChange: async (workspaceState, lastError) => {
+        await persistWorkspaceLifecycleState(
+          workspacePath,
+          detail,
+          course,
+          workspaceState,
+          lastError ?? null
+        );
+      },
+    });
+  }
 
   onProgress("workspace ready");
   const loaded = await loadWorkspace(lifecycle.result.workspacePath);
