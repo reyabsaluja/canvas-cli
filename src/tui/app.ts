@@ -141,12 +141,6 @@ export async function launchApp(): Promise<void> {
         shellContext.runtime.scope,
         result
       );
-      if (
-        shellContext.runtime.scope.type === "global" &&
-        nextScope.type !== "global"
-      ) {
-        await deleteChatSession(getChatSessionId(shellContext.runtime.scope));
-      }
 
       if (
         nextScope.type === "course" &&
