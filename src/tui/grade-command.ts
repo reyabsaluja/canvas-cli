@@ -272,9 +272,9 @@ function renderAssignmentLine(a: { name: string; pointsPossible: number; score: 
   const nameStr = a.name.length > maxName ? a.name.slice(0, maxName - 1) + "…" : a.name;
   const now = new Date();
 
-  if (a.graded) {
+  if (a.graded && a.score != null) {
     const scoreStr = `${a.score}/${a.pointsPossible}`;
-    const pct = a.pointsPossible > 0 ? `${((a.score! / a.pointsPossible) * 100).toFixed(1)}%` : "";
+    const pct = a.pointsPossible > 0 ? `${((a.score / a.pointsPossible) * 100).toFixed(1)}%` : "";
     return `${chalk.dim("·")} ${chalk.white(nameStr.padEnd(nameCol))}  ${scoreStr.padEnd(10)}  ${pct}`;
   }
 
