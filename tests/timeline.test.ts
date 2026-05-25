@@ -40,7 +40,7 @@ test("timeline", async (t) => {
   });
 
   await t.test("resolveTimeWindow: default returns 2 weeks back, 4 weeks forward", () => {
-    const window = resolveTimeWindow("default", []);
+    const { window } = resolveTimeWindow("default", []);
     const now = Date.now();
     const startDiff = Math.abs(window.start.getTime() - (now - 14 * 86400000));
     const endDiff = Math.abs(window.end.getTime() - (now + 28 * 86400000));
@@ -49,13 +49,13 @@ test("timeline", async (t) => {
   });
 
   await t.test("resolveTimeWindow: week returns Mon-Sun of current week", () => {
-    const window = resolveTimeWindow("week", []);
+    const { window } = resolveTimeWindow("week", []);
     assert.equal(window.start.getDay(), 1);
     assert.equal(window.end.getDay(), 0);
   });
 
   await t.test("resolveTimeWindow: month returns first-to-last of current month", () => {
-    const window = resolveTimeWindow("month", []);
+    const { window } = resolveTimeWindow("month", []);
     assert.equal(window.start.getDate(), 1);
     const nextDay = new Date(window.end);
     nextDay.setDate(nextDay.getDate() + 1);
@@ -67,13 +67,22 @@ test("timeline", async (t) => {
       { name: "A", dueAt: new Date("2026-01-15"), unlockAt: null, lockAt: null, submitted: false, graded: false },
       { name: "B", dueAt: new Date("2026-05-20"), unlockAt: null, lockAt: null, submitted: false, graded: false },
     ];
-    const window = resolveTimeWindow("semester", assignments);
+    const { window } = resolveTimeWindow("semester", assignments);
     assert.ok(window.start.getTime() < new Date("2026-01-15").getTime());
     assert.ok(window.end.getTime() > new Date("2026-05-20").getTime());
   });
 
+  await t.test("resolveTimeWindow: semester with no dated assignments returns fallback warning", () => {
+    const assignments: TimelineAssignment[] = [
+      { name: "A", dueAt: null, unlockAt: null, lockAt: null, submitted: false, graded: false },
+    ];
+    const { fallback } = resolveTimeWindow("semester", assignments);
+    assert.ok(fallback);
+    assert.match(fallback, /No dated assignments/);
+  });
+
   await t.test("resolveTimeWindow: next N weeks", () => {
-    const window = resolveTimeWindow("next 3 weeks", []);
+    const { window } = resolveTimeWindow("next 3 weeks", []);
     const now = Date.now();
     const expectedEnd = now + 21 * 86400000;
     assert.ok(Math.abs(window.end.getTime() - expectedEnd) < 2000);
