@@ -91,6 +91,7 @@ export interface CommandApi {
   addMessage: (message: ChatMessage) => Promise<void>;
   session: ChatSession;
   runtime: ScopeRuntime;
+  signal?: AbortSignal;
   getLoadedWorkspace?: () => LoadedWorkspace | null;
   getCourseCache?: () => CourseCache | null;
 }

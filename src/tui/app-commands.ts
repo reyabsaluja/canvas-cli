@@ -467,7 +467,7 @@ async function runTimeline(
     ? courses[0]!.name
     : `${courses.length} courses`;
   await api.addMessage({ role: "system", content: `⠋ Fetching assignments from ${label}...` });
-  const { data, warnings } = await fetchTimelineData(services.client, courses, showAll);
+  const { data, warnings } = await fetchTimelineData(services.client, courses, showAll, api.signal);
   const output = buildTimelineOutput(data, windowArg, showAll, warnings);
   await api.addMessage({ role: "assistant", content: output });
 }
