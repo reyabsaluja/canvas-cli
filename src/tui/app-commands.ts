@@ -459,8 +459,12 @@ function buildTimelineTask(
   services: AppServices,
   courses: Course[],
   args: string
-): ShellResult {
-  const { window: windowArg, showAll } = parseTimelineArgs(args);
+): ShellResult | void {
+  const { window: windowArg, showAll, error } = parseTimelineArgs(args);
+  if (error) {
+    void api.addMessage({ role: "system", content: `└ ${error}` });
+    return;
+  }
   return {
     type: "background-task",
     verb: "Fetching timeline",

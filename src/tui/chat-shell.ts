@@ -1057,6 +1057,18 @@ export async function runChatShell<TExit>(
         return;
       }
 
+      if (resolvedCommand.noArgs && args.trim()) {
+        if (isNavigationCommand(commandName)) {
+          await appendPersistedMessage({ role: "user", content: rawInput });
+        }
+        await appendPersistedMessage({
+          role: "system",
+          content: `└ ${commandName} does not accept arguments.`,
+        });
+        render();
+        return;
+      }
+
       try {
         const exit = await options.onCommand(commandName, args, api);
         if (exit != null && typeof exit === "object" && "type" in exit && (exit as unknown as { type: string }).type === "background-task") {
