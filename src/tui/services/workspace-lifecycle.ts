@@ -85,7 +85,7 @@ export async function openWorkspace(
     course,
     client: services.client,
     config: services.config,
-    cachePolicy: "ensure_present",
+    cachePolicy: "require_existing",
     onProgress,
     onStateChange: async (workspaceState, lastError) => {
       await persistWorkspaceLifecycleState(

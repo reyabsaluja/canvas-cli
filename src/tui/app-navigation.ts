@@ -19,6 +19,8 @@ import chalk from "chalk";
 import { clearScreen, C, getTermSize, stripAnsi, hideCursor, showCursor, createBuffer, CANVAS_TEXT } from "./screen.js";
 import { loadWorkspace } from "../ask/load-workspace.js";
 import { matchAssignments } from "../domain/matching.js";
+import { loadCourseCache } from "../enrich/cache-loader.js";
+import { ingestCourse } from "../ingest/ingest-course.js";
 
 export async function pickCourse(services: AppServices): Promise<Course | null> {
   const courses = getDisplayCourses(services);
@@ -71,6 +73,47 @@ function formatTimeAgo(isoDate: string | undefined): string {
   if (months < 12) return months === 1 ? "1 month ago" : `${months} months ago`;
   const years = Math.floor(months / 12);
   return years === 1 ? "1 year ago" : `${years} years ago`;
+}
+
+export async function ensureCourseIngested(
+  services: AppServices,
+  course: Course,
+  options?: { refresh?: boolean }
+): Promise<boolean> {
+  const refresh = options?.refresh ?? false;
+
+  if (!refresh) {
+    const cache = await loadCourseCache(course.courseCode, course.id);
+    if (cache) return true;
+  }
+
+  const label = refresh
+    ? `Refreshing ${course.name}`
+    : `Ingesting ${course.name}`;
+  const progress = new IngestionProgressRenderer(label, course.courseCode);
+  progress.start();
+
+  try {
+    await ingestCourse(course, services.client, services.config, {
+      refresh,
+      onProgress: (msg) => {
+        progress.addStep(msg);
+      },
+    });
+    progress.stop();
+    return true;
+  } catch (error) {
+    progress.stop();
+    clearScreen();
+    showCursor();
+    console.log("");
+    console.error(
+      C.error(`  Ingestion failed: ${error instanceof Error ? error.message : "unknown"}`)
+    );
+    console.log(C.dim("\n  Press any key to continue..."));
+    await waitForKey();
+    return false;
+  }
 }
 
 export async function pickAssignmentScope(

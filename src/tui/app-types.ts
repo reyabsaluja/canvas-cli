@@ -27,7 +27,8 @@ export type ShellResult =
       type: "workspace-refresh";
       courseId: number;
       assignmentTarget: AssignmentTarget;
-    };
+    }
+  | { type: "course-refresh"; courseId: number };
 
 export interface ShellPinOption {
   name: string;

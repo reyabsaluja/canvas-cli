@@ -1,5 +1,6 @@
 import { clearScreen, hideCursor, showCursor, C } from "./screen.js";
 import {
+  getCourseById,
   getDisplayCourses,
   invalidateAssignmentCache,
   initServices,
@@ -16,6 +17,7 @@ import { handleCommand } from "./app-commands.js";
 import type { ShellResult } from "./app-types.js";
 import { deleteChatSession, getChatSessionId } from "./chat-sessions.js";
 import {
+  ensureCourseIngested,
   normalizeScopeAfterCourseManagement,
   openAssignmentScope,
   pickAssignmentScope,
@@ -145,6 +147,20 @@ export async function launchApp(): Promise<void> {
       ) {
         await deleteChatSession(getChatSessionId(shellContext.runtime.scope));
       }
+
+      if (
+        nextScope.type === "course" &&
+        scope.type !== "course"
+      ) {
+        const course = getCourseById(services, nextScope.courseId);
+        if (course) {
+          const ok = await ensureCourseIngested(services, course);
+          if (!ok) {
+            continue;
+          }
+        }
+      }
+
       scope = nextScope;
     }
   } finally {
@@ -241,6 +257,14 @@ export async function resolveShellResult(
       result.assignmentTarget,
       runtimeScope
     );
+  }
+
+  if (result.type === "course-refresh") {
+    const course = getCourseById(services, result.courseId);
+    if (course) {
+      await ensureCourseIngested(services, course, { refresh: true });
+    }
+    return runtimeScope;
   }
 
   return runtimeScope;
