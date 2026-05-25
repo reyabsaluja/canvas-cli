@@ -322,11 +322,12 @@ function renderTimeAxis(
   const axisChars = new Array(chartWidth).fill(" ");
   let lastEnd = -1;
   for (const label of labels) {
-    if (label.col <= lastEnd) continue;
-    for (let i = 0; i < label.text.length && label.col + i < chartWidth; i++) {
-      axisChars[label.col + i] = label.text[i]!;
+    const offset = Math.max(0, label.col - Math.floor(label.text.length / 2));
+    if (offset <= lastEnd) continue;
+    for (let i = 0; i < label.text.length && offset + i < chartWidth; i++) {
+      axisChars[offset + i] = label.text[i]!;
     }
-    lastEnd = label.col + label.text.length;
+    lastEnd = offset + label.text.length;
   }
 
   const gutter = " ".repeat(gutterWidth);
