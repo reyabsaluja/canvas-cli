@@ -15,6 +15,11 @@ import {
   parseRadarArgs,
   resolveAndRenderThread,
 } from "./radar-commands.js";
+import {
+  buildTimelineOutput,
+  fetchTimelineData,
+  parseTimelineArgs,
+} from "./timeline.js";
 import { handleLectureQuery } from "./lecture-resources.js";
 import { formatCourseFilesList } from "./format-course-files.js";
 import { formatCourseModulesList } from "./format-course-modules.js";
@@ -117,6 +122,18 @@ export async function handleCommand(
       }
       return { type: "recent-picker" };
     }
+    if (command === "/timeline") {
+      const courses = getDisplayCourses(services);
+      if (courses.length === 0) {
+        await api.addMessage({ role: "system", content: "No courses set up yet. Run /courses to add your courses." });
+        return;
+      }
+      const { window: windowArg, showAll } = parseTimelineArgs(args);
+      const { data, warnings } = await fetchTimelineData(services.client, courses, showAll);
+      const output = buildTimelineOutput(data, windowArg, showAll, warnings);
+      await api.addMessage({ role: "assistant", content: output });
+      return;
+    }
     if (command === "/announcements") {
       const courses = getDisplayCourses(services);
       if (courses.length === 0) {
@@ -150,6 +167,14 @@ export async function handleCommand(
         content: "That course is no longer available. Use /courses to pick another one.",
       });
       return { type: "scope", scope: { type: "global" } };
+    }
+
+    if (command === "/timeline") {
+      const { window: windowArg, showAll } = parseTimelineArgs(args);
+      const { data, warnings } = await fetchTimelineData(services.client, [course], showAll);
+      const output = buildTimelineOutput(data, windowArg, showAll, warnings);
+      await api.addMessage({ role: "assistant", content: output });
+      return;
     }
 
     if (command === "/assignments") {
