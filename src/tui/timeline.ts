@@ -252,11 +252,18 @@ function renderTimeline(
   return lines.join("\n");
 }
 
+function getLabelInterval(window: TimeWindow, narrow: boolean): number {
+  const spanDays = (window.end.getTime() - window.start.getTime()) / 86400000;
+  if (narrow) return spanDays > 60 ? 28 : 14;
+  if (spanDays > 90) return 14;
+  return 7;
+}
+
 function getGridColumns(window: TimeWindow, chartWidth: number, narrow: boolean): number[] {
   const windowStart = window.start.getTime();
   const windowEnd = window.end.getTime();
   const windowSpan = windowEnd - windowStart;
-  const labelInterval = narrow ? 14 : 7;
+  const labelInterval = getLabelInterval(window, narrow);
   const cols: number[] = [];
 
   const cursor = new Date(window.start);
@@ -288,7 +295,7 @@ function renderTimeAxis(
   const windowEnd = window.end.getTime();
   const windowSpan = windowEnd - windowStart;
 
-  const labelInterval = narrow ? 14 : 7;
+  const labelInterval = getLabelInterval(window, narrow);
   const labels: Array<{ col: number; text: string }> = [];
 
   const cursor = new Date(window.start);
@@ -429,6 +436,7 @@ export function renderBar(
     }
   }
 
+  let visualEnd = dueCol;
   if (
     !assignment.submitted &&
     assignment.dueAt.getTime() < now.getTime()
@@ -437,9 +445,10 @@ export function renderBar(
     for (let col = dueCol + 1; col <= overflowCol && col < chartWidth; col++) {
       barChars[col] = chalk.red("▓");
     }
+    visualEnd = overflowCol;
   }
 
-  overlayGrid(barChars, chartWidth, startCol, dueCol, gridCols, nowCol);
+  overlayGrid(barChars, chartWidth, startCol, visualEnd, gridCols, nowCol);
   return barChars.join("");
 }
 
