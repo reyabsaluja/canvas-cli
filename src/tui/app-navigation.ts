@@ -20,6 +20,7 @@ import { clearScreen, C, getTermSize, stripAnsi, hideCursor, showCursor, createB
 import { loadWorkspace } from "../ask/load-workspace.js";
 import { matchAssignments } from "../domain/matching.js";
 import { loadCourseCache } from "../enrich/cache-loader.js";
+import { isAbortError } from "../errors.js";
 import { ingestCourse } from "../ingest/ingest-course.js";
 
 export async function pickCourse(services: AppServices): Promise<Course | null> {
@@ -87,15 +88,17 @@ export async function ensureCourseIngested(
     if (cache) return true;
   }
 
+  const ac = new AbortController();
   const label = refresh
     ? `Refreshing ${course.name}`
     : `Ingesting ${course.name}`;
-  const progress = new IngestionProgressRenderer(label, course.courseCode);
+  const progress = new IngestionProgressRenderer(label, course.courseCode, ac);
   progress.start();
 
   try {
     await ingestCourse(course, services.client, services.config, {
       refresh,
+      signal: ac.signal,
       onProgress: (msg) => {
         progress.addStep(msg);
       },
@@ -104,6 +107,7 @@ export async function ensureCourseIngested(
     return true;
   } catch (error) {
     progress.stop();
+    if (isAbortError(error)) return false;
     clearScreen();
     showCursor();
     console.log("");
@@ -526,10 +530,12 @@ class IngestionProgressRenderer {
   private timer: ReturnType<typeof setInterval> | null = null;
   private startTime: number;
   private scrollOffset = 0;
+  private ac: AbortController | null;
 
-  constructor(title: string, subtitle: string) {
+  constructor(title: string, subtitle: string, ac?: AbortController | null) {
     this.title = title;
     this.subtitle = subtitle;
+    this.ac = ac ?? null;
     this.startTime = Date.now();
     this.verbIndex = Math.floor(Math.random() * INGESTION_VERBS.length);
   }
@@ -593,6 +599,10 @@ class IngestionProgressRenderer {
   }
 
   private onKey = (key: string): void => {
+    if ((key === "\x1B" || key === "\x03") && this.ac) {
+      this.ac.abort();
+      return;
+    }
     if (key === "\x0F") {
       let lastWithContent = -1;
       for (let i = this.steps.length - 1; i >= 0; i--) {
