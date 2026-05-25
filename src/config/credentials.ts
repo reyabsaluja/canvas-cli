@@ -72,7 +72,7 @@ export function storeCredential(profile: string, key: string, value: string): St
       try {
         writeCredentialFile(profile, key, value);
       } catch (err) {
-        console.error(`Warning: failed to write credential backup file: ${err instanceof Error ? err.message : err}`);
+        debug("config", `Failed to write credential backup file: ${err instanceof Error ? err.message : err}`);
       }
       return "keychain";
     } catch {
@@ -113,7 +113,7 @@ export function loadCredential(profile: string, key: string): string | null {
             writeCredentialFile(profile, key, trimmed);
             debug("config", `Created file backup for keychain credential: ${key}`);
           } catch (err) {
-            console.error(`Warning: failed to write credential backup file: ${err instanceof Error ? err.message : err}`);
+            debug("config", `Failed to write credential backup file: ${err instanceof Error ? err.message : err}`);
           }
         }
       }
