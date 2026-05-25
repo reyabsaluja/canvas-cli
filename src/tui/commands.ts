@@ -61,6 +61,7 @@ export const COMMANDS: CommandDefinition[] = [
     name: "/help",
     description: "Show available commands",
     scopes: ["global", "course", "workspace"],
+    noArgs: true,
   },
   {
     name: "/pdf",

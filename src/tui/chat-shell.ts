@@ -995,6 +995,19 @@ export async function runChatShell<TExit>(
         await appendPersistedMessage({ role: "user", content: rawInput });
       }
 
+      const earlyResolved = resolveCommand(options.commands, commandName);
+      if (earlyResolved?.noArgs && args.trim()) {
+        if (isNavigationCommand(commandName)) {
+          await appendPersistedMessage({ role: "user", content: rawInput });
+        }
+        await appendPersistedMessage({
+          role: "system",
+          content: `└ ERROR: ${commandName} does not accept arguments.`,
+        });
+        render();
+        return;
+      }
+
       if (commandName === "/help") {
         const helpLines = availableCommands.map(
           (command) =>
@@ -1057,17 +1070,6 @@ export async function runChatShell<TExit>(
         return;
       }
 
-      if (resolvedCommand.noArgs && args.trim()) {
-        if (isNavigationCommand(commandName)) {
-          await appendPersistedMessage({ role: "user", content: rawInput });
-        }
-        await appendPersistedMessage({
-          role: "system",
-          content: `└ ERROR: ${commandName} does not accept arguments.`,
-        });
-        render();
-        return;
-      }
 
       try {
         const exit = await options.onCommand(commandName, args, api);
