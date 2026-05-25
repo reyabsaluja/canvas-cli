@@ -135,7 +135,7 @@ const EFFORT_OPTIONS_OPENAI: PickerOption[] = [
 
 function printHeader(): void {
   const current = readCurrentConfig();
-  const titleLine = `${C.whiteBold("canvas-cli")} ${C.dim("·")} ${C.muted("model")}`;
+  const titleLine = C.whiteBold("Select model");
 
   const rightLines: string[] = [];
   rightLines.push(titleLine);
