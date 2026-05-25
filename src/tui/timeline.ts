@@ -22,6 +22,8 @@ interface TimeWindow {
   end: Date;
 }
 
+export const NO_COURSES_MESSAGE = "No courses set up yet. Run /courses to add your courses.";
+
 const COURSE_COLORS: ChalkInstance[] = [
   chalk.red,
   chalk.blue,
@@ -403,7 +405,7 @@ export function buildTimelineOutput(
     if (warnings.length > 0) {
       return warnings.map((w) => `⚠ ${w}`).join("\n");
     }
-    return "No courses set up yet. Run /courses to add your courses.";
+    return NO_COURSES_MESSAGE;
   }
 
   const { window, fallback } = resolveTimeWindow(windowArg, allAssignments);

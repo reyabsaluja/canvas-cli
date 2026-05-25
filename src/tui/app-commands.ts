@@ -19,6 +19,7 @@ import {
 import {
   buildTimelineOutput,
   fetchTimelineData,
+  NO_COURSES_MESSAGE,
   parseTimelineArgs,
 } from "./timeline.js";
 import { handleLectureQuery } from "./lecture-resources.js";
@@ -126,7 +127,7 @@ export async function handleCommand(
     if (command === "/timeline") {
       const courses = getDisplayCourses(services);
       if (courses.length === 0) {
-        await api.addMessage({ role: "system", content: "No courses set up yet. Run /courses to add your courses." });
+        await api.addMessage({ role: "system", content: NO_COURSES_MESSAGE });
         return;
       }
       await runTimeline(api, services, courses, args);
