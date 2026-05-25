@@ -98,6 +98,12 @@ function formatTimestamp(): string {
   return new Date().toISOString();
 }
 
+export function warn(category: DebugCategory, message: string): void {
+  const safeMessage = maskSecrets(message);
+  const prefix = `[WARN ${formatTimestamp()} ${category.toUpperCase()}]`;
+  process.stderr.write(`${prefix} ${safeMessage}\n`);
+}
+
 export function debug(category: DebugCategory, message: string, data?: Record<string, unknown>): void {
   if (!debugEnabled) return;
 
