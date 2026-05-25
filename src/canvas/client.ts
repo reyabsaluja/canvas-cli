@@ -13,10 +13,12 @@ import { fetchWithRetry, type RetryOptions, RateLimitThrottle } from "./retry.js
 import type {
   CanvasAssignment,
   CanvasAssignmentDetail,
+  CanvasAssignmentGroup,
   CanvasCourse,
   CanvasCourseDetail,
   CanvasDiscussionTopic,
   CanvasDiscussionTopicView,
+  CanvasEnrollment,
   CanvasFile,
   CanvasModule,
   CanvasModuleItem,
@@ -323,6 +325,24 @@ export class CanvasClient {
       if (isAbortError(err)) throw err;
       return null;
     }
+  }
+
+  /** Get assignment groups with assignments and submissions for grade calculations. */
+  async getAssignmentGroups(courseId: number, signal?: AbortSignal | null): Promise<CanvasAssignmentGroup[]> {
+    const url = `${this.baseUrl}/courses/${courseId}/assignment_groups?per_page=50&include[]=assignments&include[]=submission`;
+    return this.fetchPaginated<CanvasAssignmentGroup>(url, signal);
+  }
+
+  /** Get assignment groups safely (returns [] on error). */
+  async getAssignmentGroupsSafe(courseId: number, signal?: AbortSignal | null): Promise<CanvasAssignmentGroup[]> {
+    const url = `${this.baseUrl}/courses/${courseId}/assignment_groups?per_page=50&include[]=assignments&include[]=submission`;
+    return this.fetchPaginatedSafe<CanvasAssignmentGroup>(url, signal);
+  }
+
+  /** Get enrollments for the current user (includes computed grades). */
+  async getMyEnrollments(signal?: AbortSignal | null): Promise<CanvasEnrollment[]> {
+    const url = `${this.baseUrl}/users/self/enrollments?per_page=50&include[]=computed_current_score&include[]=computed_final_score`;
+    return this.fetchPaginated<CanvasEnrollment>(url, signal);
   }
 
   /**

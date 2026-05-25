@@ -16,6 +16,7 @@ export const COMMANDS: CommandDefinition[] = [
     scopes: ["global", "course", "workspace"],
   },
   { name: "/timeline", description: "Show timeline (week | month | semester | next N days/weeks, --all)", scopes: ["global", "course"] },
+  { name: "/grade", description: "Show grades (or /grade need A, /grade <course>)", scopes: ["global", "course"] },
   { name: "/announcements", description: "Browse course announcements", scopes: ["global", "course"], navigation: true, noArgs: true },
   { name: "/thread", description: "Read a discussion thread by ID or title", scopes: ["global", "course"] },
   {
