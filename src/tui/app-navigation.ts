@@ -458,6 +458,7 @@ interface IngestionStep {
   content?: string;
   completedAt?: number;
   stageKey: string;
+  updatingInPlace?: boolean;
 }
 
 const CONTENT_PREVIEW_LINES = 8;
@@ -607,6 +608,13 @@ class IngestionProgressRenderer {
 
     if (this.steps.length > 0) {
       const last = this.steps[this.steps.length - 1]!;
+      if (!last.completedAt && last.action === action) {
+        last.target = target;
+        last.stageKey = stageKey;
+        last.updatingInPlace = true;
+        this.render();
+        return;
+      }
       if (!last.completedAt) last.completedAt = now;
     }
     this.steps.push({ action, target, content, stageKey });
@@ -665,7 +673,11 @@ class IngestionProgressRenderer {
       const bar = isDone ? dimMarker : marker;
 
       allLines.push("");
-      if (!isDone) {
+      if (step.updatingInPlace) {
+        allLines.push(
+          `  ${C.dim("└")} ${C.dim(step.action)} ${C.dim(step.target)}`
+        );
+      } else if (!isDone) {
         allLines.push(
           `  ${bar} ${toolActionColor(step.action)} ${toolTargetGreen(step.target)}`
         );
