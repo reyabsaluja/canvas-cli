@@ -179,9 +179,6 @@ function renderTimeline(
     return Math.round((offset / windowSpan) * (chartWidth - 1));
   };
 
-  const gridCols = getGridColumns(window, chartWidth, narrow);
-  const nowCol = toCol(now);
-
   const lines: string[] = [];
 
   lines.push(renderTimeAxis(window, gutterWidth, chartWidth, now, narrow));
@@ -206,13 +203,7 @@ function renderTimeline(
     if (visible.length === 0) continue;
 
     const courseLabel = truncatePlainToWidth(course.name, maxCourseName);
-    const coursePad = " ".repeat(Math.max(0, gutterWidth - courseLabel.length - 2));
-    const courseGridChars = new Array(chartWidth).fill(" ");
-    for (const gc of gridCols) {
-      if (gc >= 0 && gc < chartWidth) courseGridChars[gc] = chalk.dim("│");
-    }
-    if (nowCol >= 0 && nowCol < chartWidth) courseGridChars[nowCol] = chalk.white.bold("│");
-    lines.push(`  ${color.bold(courseLabel)}${coursePad}${courseGridChars.join("")}`);
+    lines.push(`  ${color.bold(courseLabel)}`);
 
     const sorted = [...visible].sort(
       (a, b) => (a.dueAt?.getTime() ?? 0) - (b.dueAt?.getTime() ?? 0)
@@ -222,7 +213,7 @@ function renderTimeline(
       const assignLabel = truncatePlainToWidth(assignment.name, maxAssignmentName);
       const gutter = " ".repeat(4) + assignLabel;
       const gutterPad = " ".repeat(Math.max(0, gutterWidth - gutter.length));
-      const bar = renderBar(assignment, toCol, chartWidth, now, color, gridCols, nowCol);
+      const bar = renderBar(assignment, toCol, chartWidth, now, color);
       lines.push(`${gutter}${gutterPad}${bar}`);
     }
   }
@@ -257,31 +248,6 @@ function getLabelInterval(window: TimeWindow, narrow: boolean): number {
   if (narrow) return spanDays > 60 ? 28 : 14;
   if (spanDays > 90) return 14;
   return 7;
-}
-
-function getGridColumns(window: TimeWindow, chartWidth: number, narrow: boolean): number[] {
-  const windowStart = window.start.getTime();
-  const windowEnd = window.end.getTime();
-  const windowSpan = windowEnd - windowStart;
-  const labelInterval = getLabelInterval(window, narrow);
-  const cols: number[] = [];
-
-  const cursor = new Date(window.start);
-  cursor.setHours(0, 0, 0, 0);
-  while (cursor.getDay() !== 1) {
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
-  while (cursor.getTime() <= windowEnd) {
-    const col = Math.round(
-      ((cursor.getTime() - windowStart) / windowSpan) * (chartWidth - 1)
-    );
-    if (col >= 0 && col < chartWidth) {
-      cols.push(col);
-    }
-    cursor.setDate(cursor.getDate() + labelInterval);
-  }
-  return cols;
 }
 
 function renderTimeAxis(
@@ -359,33 +325,12 @@ function renderTodayMarker(
   return `${gutter}${chalk.white.bold(markerChars.join(""))}`;
 }
 
-function renderGridRow(
-  gutterWidth: number,
-  chartWidth: number,
-  gridCols: number[],
-  nowCol: number
-): string {
-  const chars = new Array(chartWidth).fill(" ");
-  for (const gc of gridCols) {
-    if (gc >= 0 && gc < chartWidth) {
-      chars[gc] = chalk.dim("│");
-    }
-  }
-  if (nowCol >= 0 && nowCol < chartWidth) {
-    chars[nowCol] = chalk.white.bold("│");
-  }
-  const gutter = " ".repeat(gutterWidth);
-  return `${gutter}${chars.join("")}`;
-}
-
 export function renderBar(
   assignment: TimelineAssignment,
   toCol: (date: Date) => number,
   chartWidth: number,
   now: Date,
-  courseColor: ChalkInstance,
-  gridCols?: number[],
-  nowCol?: number
+  courseColor: ChalkInstance
 ): string {
   const barChars = new Array(chartWidth).fill(" ");
 
@@ -414,7 +359,6 @@ export function renderBar(
     } else {
       barChars[dueCol] = courseColor.bold("■");
     }
-    overlayGrid(barChars, chartWidth, startCol, dueCol, gridCols, nowCol);
     return barChars.join("");
   }
 
@@ -436,7 +380,6 @@ export function renderBar(
     }
   }
 
-  let visualEnd = dueCol;
   if (
     !assignment.submitted &&
     assignment.dueAt.getTime() < now.getTime()
@@ -445,32 +388,11 @@ export function renderBar(
     for (let col = dueCol + 1; col <= overflowCol && col < chartWidth; col++) {
       barChars[col] = chalk.red("▓");
     }
-    visualEnd = overflowCol;
   }
 
-  overlayGrid(barChars, chartWidth, startCol, visualEnd, gridCols, nowCol);
   return barChars.join("");
 }
 
-function overlayGrid(
-  barChars: string[],
-  chartWidth: number,
-  barStart: number,
-  barEnd: number,
-  gridCols?: number[],
-  nowCol?: number
-): void {
-  if (gridCols) {
-    for (const gc of gridCols) {
-      if (gc >= 0 && gc < chartWidth && (gc < barStart || gc > barEnd)) {
-        barChars[gc] = chalk.dim("│");
-      }
-    }
-  }
-  if (nowCol != null && nowCol >= 0 && nowCol < chartWidth && (nowCol < barStart || nowCol > barEnd)) {
-    barChars[nowCol] = chalk.white.bold("│");
-  }
-}
 
 function renderLegend(): string {
   return [
