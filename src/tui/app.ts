@@ -153,11 +153,10 @@ export async function launchApp(): Promise<void> {
         (scope.type !== "course" || scope.courseId !== nextScope.courseId)
       ) {
         const course = getCourseById(services, nextScope.courseId);
-        if (course) {
-          const ok = await ensureCourseIngested(services, course);
-          if (!ok) {
-            continue;
-          }
+        if (!course) continue;
+        const ok = await ensureCourseIngested(services, course);
+        if (!ok) {
+          continue;
         }
       }
 
