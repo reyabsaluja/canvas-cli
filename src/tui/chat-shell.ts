@@ -886,6 +886,8 @@ export async function runChatShell<TExit>(
       } catch (error) {
         flushPendingStreamDelta();
         stopSpinner();
+        streamingStarted = false;
+        streamedText = "";
 
         if (error instanceof DOMException && error.name === "AbortError") {
           const lastMsg = messages[messages.length - 1];
