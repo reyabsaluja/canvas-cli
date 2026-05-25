@@ -269,10 +269,13 @@ function renderTimeAxis(
   }
 
   const axisChars = new Array(chartWidth).fill(" ");
+  let lastEnd = -1;
   for (const label of labels) {
+    if (label.col <= lastEnd) continue;
     for (let i = 0; i < label.text.length && label.col + i < chartWidth; i++) {
       axisChars[label.col + i] = label.text[i]!;
     }
+    lastEnd = label.col + label.text.length;
   }
 
   const gutter = " ".repeat(gutterWidth);
