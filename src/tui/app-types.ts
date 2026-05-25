@@ -28,7 +28,8 @@ export type ShellResult =
       courseId: number;
       assignmentTarget: AssignmentTarget;
     }
-  | { type: "course-refresh"; courseId: number };
+  | { type: "course-refresh"; courseId: number }
+  | { type: "background-task"; verb: string; run: (signal: AbortSignal) => Promise<void> };
 
 export interface ShellPinOption {
   name: string;
@@ -91,6 +92,7 @@ export interface CommandApi {
   addMessage: (message: ChatMessage) => Promise<void>;
   session: ChatSession;
   runtime: ScopeRuntime;
+  signal?: AbortSignal;
   getLoadedWorkspace?: () => LoadedWorkspace | null;
   getCourseCache?: () => CourseCache | null;
 }

@@ -1,6 +1,7 @@
 import { loadCourseCache } from "../enrich/cache-loader.js";
 import type { LoadedWorkspace } from "../ask/types.js";
 import type { AssignmentWorkup } from "../work/types.js";
+import type { Course } from "../domain/models.js";
 import {
   getCourseById,
   getDisplayCourses,
@@ -15,6 +16,12 @@ import {
   parseRadarArgs,
   resolveAndRenderThread,
 } from "./radar-commands.js";
+import {
+  buildTimelineOutput,
+  fetchTimelineData,
+  NO_COURSES_MESSAGE,
+  parseTimelineArgs,
+} from "./timeline.js";
 import { handleLectureQuery } from "./lecture-resources.js";
 import { formatCourseFilesList } from "./format-course-files.js";
 import { formatCourseModulesList } from "./format-course-modules.js";
@@ -117,6 +124,14 @@ export async function handleCommand(
       }
       return { type: "recent-picker" };
     }
+    if (command === "/timeline") {
+      const courses = getDisplayCourses(services);
+      if (courses.length === 0) {
+        await api.addMessage({ role: "system", content: NO_COURSES_MESSAGE });
+        return;
+      }
+      return buildTimelineTask(api, services, courses, args);
+    }
     if (command === "/announcements") {
       const courses = getDisplayCourses(services);
       if (courses.length === 0) {
@@ -150,6 +165,10 @@ export async function handleCommand(
         content: "That course is no longer available. Use /courses to pick another one.",
       });
       return { type: "scope", scope: { type: "global" } };
+    }
+
+    if (command === "/timeline") {
+      return buildTimelineTask(api, services, [course], args);
     }
 
     if (command === "/assignments") {
@@ -433,4 +452,22 @@ export async function handleCommand(
     });
     return;
   }
+}
+
+function buildTimelineTask(
+  api: CommandApi,
+  services: AppServices,
+  courses: Course[],
+  args: string
+): ShellResult {
+  const { window: windowArg, showAll } = parseTimelineArgs(args);
+  return {
+    type: "background-task",
+    verb: "Fetching timeline",
+    run: async (signal) => {
+      const { data, warnings } = await fetchTimelineData(services.client, courses, showAll, signal);
+      const output = buildTimelineOutput(data, windowArg, showAll, warnings);
+      await api.addMessage({ role: "assistant", content: output });
+    },
+  };
 }
