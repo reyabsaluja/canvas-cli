@@ -353,9 +353,7 @@ function renderBar(
     if (assignment.submitted) {
       barChars[col] = chalk.dim("░");
     } else if (assignment.dueAt.getTime() < now.getTime()) {
-      if (col > dueCol) {
-        barChars[col] = chalk.red("▓");
-      } else if (col >= urgentCol) {
+      if (col >= urgentCol) {
         barChars[col] = chalk.red("▓");
       } else {
         barChars[col] = courseColor("░");
