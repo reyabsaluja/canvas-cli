@@ -94,9 +94,19 @@ test("timeline", async (t) => {
     assert.ok(Math.abs(window.end.getTime() - expectedEnd) < 2000);
   });
 
-  await t.test("buildTimelineOutput: empty courses returns setup message", () => {
-    const result = buildTimelineOutput([], "default", false, []);
-    assert.match(result, /No courses set up/);
+  await t.test("buildTimelineOutput: no visible assignments and no extras returns guidance", () => {
+    const farFuture = new Date();
+    farFuture.setFullYear(farFuture.getFullYear() + 5);
+    const courses: TimelineCourse[] = [
+      {
+        name: "CS 301",
+        assignments: [
+          { name: "HW 1", dueAt: farFuture, unlockAt: null, lockAt: null, submitted: false, graded: false },
+        ],
+      },
+    ];
+    const result = buildTimelineOutput(courses, "week", false, []);
+    assert.match(result, /Nothing due in this window/);
   });
 
   await t.test("buildTimelineOutput: all submitted shows caught up message with chart", () => {
