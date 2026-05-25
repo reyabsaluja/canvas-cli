@@ -61,6 +61,13 @@ export function storeCredential(profile: string, key: string, value: string): St
       }
       debug("config", `Stored credential in keychain: ${key} (profile: ${profile})`);
       cache.set(cacheKey(profile, key), value);
+      // Also write file-based backup so credentials survive transient keychain failures
+      const filePath = credentialFilePath(profile, key);
+      const dir = join(getConfigDir(), "credentials");
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      const fd = openSync(filePath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC, 0o600);
+      writeSync(fd, value);
+      closeSync(fd);
       return "keychain";
     } catch {
       debug("config", "Keychain storage failed, falling back to file");
@@ -100,6 +107,18 @@ export function loadCredential(profile: string, key: string): string | null {
       if (trimmed) {
         debug("config", `Loaded credential from keychain: ${key} (profile: ${profile})`);
         value = trimmed;
+        // Ensure file-based backup exists for resilience against transient keychain failures
+        const filePath = credentialFilePath(profile, key);
+        if (!existsSync(filePath)) {
+          try {
+            const dir = join(getConfigDir(), "credentials");
+            mkdirSync(dir, { recursive: true, mode: 0o700 });
+            const fd = openSync(filePath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC, 0o600);
+            writeSync(fd, trimmed);
+            closeSync(fd);
+            debug("config", `Created file backup for keychain credential: ${key}`);
+          } catch {}
+        }
       }
     } catch {
       // Not found in keychain, try file fallback
