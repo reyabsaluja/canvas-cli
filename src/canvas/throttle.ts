@@ -1,13 +1,10 @@
-import { isDebugEnabled } from "../debug.js";
+import { debug } from "../debug.js";
 
 export type SleepFn = (ms: number, signal?: AbortSignal | null) => Promise<void>;
 export type LogFn = (message: string) => void;
 
-export const noopLog: LogFn = () => {};
 export const stderrLog: LogFn = (msg) => console.error(msg);
-export const debugLog: LogFn = (msg) => {
-  if (isDebugEnabled()) process.stderr.write(`[DEBUG RETRY] ${msg}\n`);
-};
+export const debugLog: LogFn = (msg) => debug("api", msg);
 
 export const abortableSleep: SleepFn = (ms, signal) =>
   new Promise((resolve, reject) => {
