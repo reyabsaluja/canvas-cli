@@ -1,4 +1,4 @@
-import { existsSync, rmSync, readdirSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -64,9 +64,8 @@ export async function cleanCommand(options: CleanOptions): Promise<void> {
   if (localExists) {
     const size = await dirSize(localPath);
     console.log(`  ${C.text("Local data:")} ${C.muted(localPath)} ${C.dim(`(${formatBytes(size)})`)}`);
-    const subdirs = readdirSync(localPath, { withFileTypes: true })
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name);
+    const entries = await readdir(localPath, { withFileTypes: true });
+    const subdirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
     for (const sub of subdirs) {
       const subSize = await dirSize(join(localPath, sub));
       console.log(`    ${C.dim("•")} ${sub}/ ${C.dim(`(${formatBytes(subSize)})`)}`);
