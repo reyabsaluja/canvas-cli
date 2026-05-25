@@ -8,7 +8,7 @@ import {
   isAbortError,
   isNetworkError,
 } from "../errors.js";
-import { debugApiRequest, debugApiResponse, maskUrl } from "../debug.js";
+import { debug, debugApiRequest, debugApiResponse, maskUrl } from "../debug.js";
 import { fetchWithRetry, type RetryOptions, RateLimitThrottle } from "./retry.js";
 import type {
   CanvasAssignment,
@@ -336,6 +336,7 @@ export class CanvasClient {
     } catch (err) {
       if (err instanceof CanvasCliError && err.kind !== "network" && err.kind !== "unknown") {
         this._skippedEndpoints.push(url);
+        debug("api", `Skipping endpoint (${err.kind}): ${maskUrl(url)}`);
         return [];
       }
       throw err;
