@@ -1,8 +1,13 @@
+import { isDebugEnabled } from "../debug.js";
+
 export type SleepFn = (ms: number, signal?: AbortSignal | null) => Promise<void>;
 export type LogFn = (message: string) => void;
 
 export const noopLog: LogFn = () => {};
 export const stderrLog: LogFn = (msg) => console.error(msg);
+export const debugLog: LogFn = (msg) => {
+  if (isDebugEnabled()) process.stderr.write(`[DEBUG RETRY] ${msg}\n`);
+};
 
 export const abortableSleep: SleepFn = (ms, signal) =>
   new Promise((resolve, reject) => {
@@ -43,7 +48,7 @@ export class RateLimitThrottle {
     this.threshold = options?.threshold ?? THROTTLE_THRESHOLD;
     this.delayMs = options?.delayMs ?? THROTTLE_DELAY_MS;
     this.sleepFn = options?.sleepFn ?? abortableSleep;
-    this.log = options?.log ?? noopLog;
+    this.log = options?.log ?? debugLog;
   }
 
   update(response: Response): void {
