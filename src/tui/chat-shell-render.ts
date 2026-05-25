@@ -714,7 +714,7 @@ export function getRenderedMessageLines(
       const trimmed = message.content.trim();
       if (trimmed.startsWith("/")) {
         const rendered = wrapLines(trimmed, Math.max(12, maxWidth - 4)).map(
-          (line) => `  ${commandBg(` ${chalk.hex("#808080")("❯")} ${chalk.white.bold(line)} `)}`
+          (line) => `  ${commandBg(`${chalk.hex("#808080")("❯")} ${chalk.white.bold(line)} `)}`
         );
         cache.set(cacheKey, ["", ...rendered]);
         return ["", ...rendered];
@@ -773,7 +773,7 @@ export function getRenderedMessageLines(
       if (isInlineError) {
         lines.length = 0;
         wrapLines(message.content, maxWidth).forEach((line) => {
-          lines.push(`   ${systemColor(line)}`);
+          lines.push(`  ${systemColor(line)}`);
         });
       } else {
         wrapLines(message.content, maxWidth).forEach((line) => {
