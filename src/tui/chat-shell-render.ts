@@ -438,7 +438,7 @@ function buildStickyBottomRows(
   availableCommands?: CommandDefinition[]
 ): string[] {
   const { cols, rows: termRows } = getTermSize();
-  const boxWidth = Math.max(24, cols - 5);
+  const boxWidth = Math.max(24, cols - 4);
   const promptStr = "> ";
   const promptLen = promptStr.length;
   const firstLineWidth = Math.max(1, boxWidth - 2 - promptLen);
