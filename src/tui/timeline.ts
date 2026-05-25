@@ -22,7 +22,6 @@ interface TimeWindow {
   end: Date;
 }
 
-
 const COURSE_COLORS: ChalkInstance[] = [
   chalk.red,
   chalk.blue,
@@ -31,7 +30,6 @@ const COURSE_COLORS: ChalkInstance[] = [
   chalk.magenta,
   chalk.cyan,
 ];
-
 
 export function parseTimelineArgs(args: string): { window: string; showAll: boolean } {
   const trimmed = args.trim();
