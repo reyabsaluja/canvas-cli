@@ -772,10 +772,14 @@ export function getRenderedMessageLines(
           : chalk.white;
       if (isInlineError) {
         lines.length = 0;
+        wrapLines(message.content, maxWidth).forEach((line) => {
+          lines.push(`   ${systemColor(line)}`);
+        });
+      } else {
+        wrapLines(message.content, maxWidth).forEach((line) => {
+          lines.push(`  ${systemColor(line)}`);
+        });
       }
-      wrapLines(message.content, maxWidth).forEach((line) => {
-        lines.push(`  ${systemColor(line)}`);
-      });
       break;
     }
     case "tool": {

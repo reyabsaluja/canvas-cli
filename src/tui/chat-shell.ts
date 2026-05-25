@@ -1063,7 +1063,7 @@ export async function runChatShell<TExit>(
         }
         await appendPersistedMessage({
           role: "system",
-          content: `└ ${commandName} does not accept arguments.`,
+          content: `└ ERROR: ${commandName} does not accept arguments.`,
         });
         render();
         return;
