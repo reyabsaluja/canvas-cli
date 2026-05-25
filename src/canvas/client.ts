@@ -148,12 +148,6 @@ export class CanvasClient {
     return this.fetchPaginated<CanvasAssignment>(url, signal);
   }
 
-  /** Get assignments ordered by due date with extended fields for timeline display. */
-  async getAssignmentsForTimeline(courseId: number, signal?: AbortSignal | null): Promise<CanvasAssignment[]> {
-    const url = `${this.baseUrl}/courses/${courseId}/assignments?per_page=100&order_by=due_at&include[]=submission`;
-    return this.fetchPaginated<CanvasAssignment>(url, signal);
-  }
-
   /** Get full detail for a single assignment. */
   async getAssignmentDetail(
     courseId: number,

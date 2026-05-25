@@ -127,7 +127,7 @@ export async function fetchTimelineData(
     }
 
     try {
-      const raw = await client.getAssignmentsForTimeline(course.id, signal);
+      const raw = await client.getAssignments(course.id, signal);
       const assignments: TimelineAssignment[] = raw
         .filter((a) => showAll || a.submission?.workflow_state !== "graded")
         .map((a) => ({
