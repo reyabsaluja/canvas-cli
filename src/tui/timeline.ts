@@ -179,6 +179,18 @@ function renderTimeline(
     return Math.round((offset / windowSpan) * (chartWidth - 1));
   };
 
+  const gridCols = getGridColumns(window, chartWidth, narrow);
+  const nowCol = toCol(now);
+
+  const makeGridBackground = (): string[] => {
+    const bg = new Array(chartWidth).fill(" ");
+    for (const gc of gridCols) {
+      if (gc >= 0 && gc < chartWidth) bg[gc] = chalk.dim("│");
+    }
+    if (nowCol >= 0 && nowCol < chartWidth) bg[nowCol] = chalk.white.bold("│");
+    return bg;
+  };
+
   const lines: string[] = [];
 
   lines.push(renderTimeAxis(window, gutterWidth, chartWidth, now, narrow));
@@ -203,7 +215,8 @@ function renderTimeline(
     if (visible.length === 0) continue;
 
     const courseLabel = truncatePlainToWidth(course.name, maxCourseName);
-    lines.push(`  ${color.bold(courseLabel)}`);
+    const coursePad = " ".repeat(Math.max(0, gutterWidth - courseLabel.length - 2));
+    lines.push(`  ${color.bold(courseLabel)}${coursePad}${makeGridBackground().join("")}`);
 
     const sorted = [...visible].sort(
       (a, b) => (a.dueAt?.getTime() ?? 0) - (b.dueAt?.getTime() ?? 0)
@@ -213,7 +226,7 @@ function renderTimeline(
       const assignLabel = truncatePlainToWidth(assignment.name, maxAssignmentName);
       const gutter = " ".repeat(4) + assignLabel;
       const gutterPad = " ".repeat(Math.max(0, gutterWidth - gutter.length));
-      const bar = renderBar(assignment, toCol, chartWidth, now, color);
+      const bar = renderBar(assignment, toCol, chartWidth, now, color, makeGridBackground());
       lines.push(`${gutter}${gutterPad}${bar}`);
     }
   }
@@ -248,6 +261,31 @@ function getLabelInterval(window: TimeWindow, narrow: boolean): number {
   if (narrow) return spanDays > 60 ? 28 : 14;
   if (spanDays > 90) return 14;
   return 7;
+}
+
+function getGridColumns(window: TimeWindow, chartWidth: number, narrow: boolean): number[] {
+  const windowStart = window.start.getTime();
+  const windowEnd = window.end.getTime();
+  const windowSpan = windowEnd - windowStart;
+  const labelInterval = getLabelInterval(window, narrow);
+  const cols: number[] = [];
+
+  const cursor = new Date(window.start);
+  cursor.setHours(0, 0, 0, 0);
+  while (cursor.getDay() !== 1) {
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  while (cursor.getTime() <= windowEnd) {
+    const col = Math.round(
+      ((cursor.getTime() - windowStart) / windowSpan) * (chartWidth - 1)
+    );
+    if (col >= 0 && col < chartWidth) {
+      cols.push(col);
+    }
+    cursor.setDate(cursor.getDate() + labelInterval);
+  }
+  return cols;
 }
 
 function renderTimeAxis(
@@ -330,9 +368,10 @@ export function renderBar(
   toCol: (date: Date) => number,
   chartWidth: number,
   now: Date,
-  courseColor: ChalkInstance
+  courseColor: ChalkInstance,
+  gridBackground?: string[]
 ): string {
-  const barChars = new Array(chartWidth).fill(" ");
+  const barChars = gridBackground ? [...gridBackground] : new Array(chartWidth).fill(" ");
 
   if (!assignment.dueAt) return barChars.join("");
 
