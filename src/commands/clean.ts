@@ -93,8 +93,14 @@ export async function cleanCommand(options: CleanOptions): Promise<void> {
   }
 
   if (localExists) {
-    rmSync(localPath, { recursive: true, force: true });
-    console.log(`  ${C.success("✓")} ${C.text("Removed")} ${C.muted(localPath)}`);
+    try {
+      rmSync(localPath, { recursive: true, force: true });
+      console.log(`  ${C.success("✓")} ${C.text("Removed")} ${C.muted(localPath)}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`  ${C.error("✗")} ${C.text("Failed to remove")} ${C.muted(localPath)}: ${msg}`);
+      process.exitCode = 1;
+    }
   }
 
   if (options.all && configExists) {
@@ -103,8 +109,14 @@ export async function cleanCommand(options: CleanOptions): Promise<void> {
       deleteAllCredentials(profile);
       deleteStoredConfig(profile);
     }
-    rmSync(configDir, { recursive: true, force: true });
-    console.log(`  ${C.success("✓")} ${C.text("Removed")} ${C.muted(configDir)}`);
+    try {
+      rmSync(configDir, { recursive: true, force: true });
+      console.log(`  ${C.success("✓")} ${C.text("Removed")} ${C.muted(configDir)}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`  ${C.error("✗")} ${C.text("Failed to remove")} ${C.muted(configDir)}: ${msg}`);
+      process.exitCode = 1;
+    }
   }
 
   console.log("");
