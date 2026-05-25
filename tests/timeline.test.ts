@@ -9,10 +9,7 @@ import {
   type TimelineAssignment,
   type TimelineCourse,
 } from "../src/tui/timeline.js";
-
-function stripAnsi(str: string): string {
-  return str.replace(/\x1b\[[0-9;]*m/g, "");
-}
+import { stripAnsi } from "../src/tui/screen.js";
 
 test("timeline", async (t) => {
   await t.test("parseTimelineArgs: default with no args", () => {
