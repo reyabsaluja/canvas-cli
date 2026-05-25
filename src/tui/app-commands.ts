@@ -36,6 +36,8 @@ import {
   renderNeedResult,
 } from "./grade-command.js";
 import { calculateNeeded } from "./grade-calculator.js";
+import { parseQuizArgs, gatherMaterial, generateQuestions, checkConversationRelevance } from "./quiz-command.js";
+import { runQuizSession, renderScoreScreen } from "./quiz-session.js";
 
 export async function handleCommand(
   command: string,
@@ -198,6 +200,10 @@ export async function handleCommand(
       return buildGradeTask(api, services, [course], args, true);
     }
 
+    if (command === "/quiz") {
+      return buildQuizTask(api, services, args, null);
+    }
+
     if (command === "/assignments") {
       return { type: "assignment-picker", courseId: course.id };
     }
@@ -285,6 +291,11 @@ export async function handleCommand(
     }
 
     return;
+  }
+
+  if (command === "/quiz") {
+    const loaded = getCurrentWorkspace();
+    return buildQuizTask(api, services, args, loaded);
   }
 
   if (command === "/overview") {
@@ -585,4 +596,116 @@ function buildGradeTask(
       await api.addMessage({ role: "assistant", content: output });
     },
   };
+}
+
+function buildQuizTask(
+  api: CommandApi,
+  services: AppServices,
+  args: string,
+  workspace: LoadedWorkspace | null
+): ShellResult | void {
+  if (!services.aiConfig) {
+    void api.addMessage({ role: "system", content: "└ ERROR: No AI model configured. Run /model first." });
+    return;
+  }
+
+  const parsed = parseQuizArgs(args);
+  if (parsed.error) {
+    void api.addMessage({ role: "system", content: `└ ERROR: ${parsed.error}` });
+    return;
+  }
+
+  const cache = api.getCourseCache?.() ?? null;
+  if (!workspace && !cache) {
+    void api.addMessage({ role: "system", content: "└ ERROR: No course material available. Open a course or workspace first." });
+    return;
+  }
+
+  const conversationContext = buildConversationContext(api);
+  const userContext = buildUserContext(api);
+  const courseName = workspace?.courseName ?? null;
+
+  const needsRelevanceCheck = !workspace && !parsed.topic;
+  if (needsRelevanceCheck && !userContext.trim()) {
+    void api.addMessage({ role: "system", content: "Start a conversation or specify a topic first so the quiz is relevant. Try /quiz <topic> or ask about something first." });
+    return;
+  }
+
+  const topicLabel = parsed.topic ?? courseName ?? "course material";
+
+  return {
+    type: "background-task",
+    verb: "",
+    run: async (signal, controls) => {
+      if (needsRelevanceCheck) {
+        const relevant = await checkConversationRelevance(services.aiConfig!, userContext, signal);
+        if (!relevant) {
+          await api.addMessage({ role: "system", content: "The conversation doesn't reference specific course content yet. Ask about a topic or specify one with /quiz <topic>." });
+          return;
+        }
+      }
+
+      await api.addMessage({ role: "assistant", content: `Got it. I'll generate ${parsed.count} questions on ${topicLabel}.` });
+
+      const { material } = await gatherMaterial(workspace, cache, parsed.topic, conversationContext);
+      if (!material || material.trim().length < 50) {
+        await api.addMessage({ role: "system", content: "Not enough material found. Try discussing a topic or specify one with /quiz <topic>." });
+        return;
+      }
+
+      let questions: import("./quiz-command.js").QuizQuestion[];
+      try {
+        questions = await generateQuestions(services.aiConfig!, material, parsed, signal);
+      } catch (err) {
+        if (err instanceof SyntaxError) {
+          try {
+            questions = await generateQuestions(services.aiConfig!, material, parsed, signal);
+          } catch {
+            await api.addMessage({ role: "system", content: "Couldn't generate quiz — try narrowing the topic with /quiz <topic>." });
+            return;
+          }
+        } else {
+          throw err;
+        }
+      }
+
+      if (questions.length === 0) {
+        await api.addMessage({ role: "system", content: "No questions could be generated from the available material." });
+        return;
+      }
+
+      controls.pauseShell();
+      try {
+        const result = await runQuizSession(questions, courseName);
+        const scoreOutput = renderScoreScreen(result, courseName);
+        await api.addMessage({ role: "assistant", content: scoreOutput });
+      } finally {
+        controls.resumeShell();
+      }
+    },
+  };
+}
+
+function buildConversationContext(api: CommandApi): string {
+  const recent = api.session.messages.slice(-6);
+  const parts: string[] = [];
+  for (const msg of recent) {
+    if (msg.role === "user" && !msg.content.startsWith("/")) {
+      parts.push(`User: ${msg.content.slice(0, 500)}`);
+    } else if (msg.role === "assistant") {
+      parts.push(`Assistant: ${msg.content.slice(0, 500)}`);
+    }
+  }
+  return parts.join("\n").slice(0, 2000);
+}
+
+function buildUserContext(api: CommandApi): string {
+  const recent = api.session.messages.slice(-10);
+  const parts: string[] = [];
+  for (const msg of recent) {
+    if (msg.role === "user" && !msg.content.startsWith("/")) {
+      parts.push(msg.content.slice(0, 300));
+    }
+  }
+  return parts.join("\n").slice(0, 1000);
 }
