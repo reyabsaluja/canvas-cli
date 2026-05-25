@@ -133,8 +133,8 @@ export async function fetchTimelineData(
         .map((a) => ({
           name: a.name,
           dueAt: a.due_at ? new Date(a.due_at) : null,
-          unlockAt: a.unlock_at ? new Date(a.unlock_at) : null,
-          lockAt: a.lock_at ? new Date(a.lock_at) : null,
+          unlockAt: a.unlock_at != null ? new Date(a.unlock_at) : null,
+          lockAt: a.lock_at != null ? new Date(a.lock_at) : null,
           submitted: a.has_submitted_submissions || a.submission?.workflow_state === "submitted",
           graded: a.submission?.workflow_state === "graded",
         }));
