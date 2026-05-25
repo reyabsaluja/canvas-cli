@@ -140,22 +140,27 @@ interface SummaryRow {
 export function renderGradeSummary(rows: SummaryRow[], warnings: string[]): string {
   const lines: string[] = [];
   if (rows.length === 0) {
-    return "No graded courses found.";
+    return "  No graded courses found.";
   }
 
-  const nameWidth = Math.max(8, ...rows.map((r) => r.courseName.length));
-  const header = `  ${chalk.dim("Course".padEnd(nameWidth))}  ${chalk.dim("Grade".padEnd(5))}  ${chalk.dim("Score")}`;
-  const separator = `  ${chalk.dim("─".repeat(nameWidth + 16))}`;
+  const nameWidth = Math.max(10, ...rows.map((r) => r.courseName.length));
+  const gradeWidth = 6;
+  const scoreWidth = 7;
 
-  lines.push(header);
-  lines.push(separator);
+  lines.push(`  ${chalk.white.bold("Grades")}`);
+  lines.push("");
+  lines.push(`  ${chalk.dim("┌" + "─".repeat(nameWidth + 2) + "┬" + "─".repeat(gradeWidth + 2) + "┬" + "─".repeat(scoreWidth + 2) + "┐")}`);
+  lines.push(`  ${chalk.dim("│")} ${chalk.dim("Course".padEnd(nameWidth))} ${chalk.dim("│")} ${chalk.dim("Grade".padEnd(gradeWidth))} ${chalk.dim("│")} ${chalk.dim("Score".padEnd(scoreWidth))} ${chalk.dim("│")}`);
+  lines.push(`  ${chalk.dim("├" + "─".repeat(nameWidth + 2) + "┼" + "─".repeat(gradeWidth + 2) + "┼" + "─".repeat(scoreWidth + 2) + "┤")}`);
 
   for (const row of rows) {
     const gradeStr = row.grade ?? "—";
     const scoreStr = row.score != null ? `${row.score.toFixed(1)}%` : "—";
     const color = gradeColor(row.grade);
-    lines.push(`  ${chalk.white(row.courseName.padEnd(nameWidth))}  ${color(gradeStr.padEnd(5))}  ${color(scoreStr)}`);
+    lines.push(`  ${chalk.dim("│")} ${chalk.white(row.courseName.padEnd(nameWidth))} ${chalk.dim("│")} ${color(gradeStr.padEnd(gradeWidth))} ${chalk.dim("│")} ${color(scoreStr.padEnd(scoreWidth))} ${chalk.dim("│")}`);
   }
+
+  lines.push(`  ${chalk.dim("└" + "─".repeat(nameWidth + 2) + "┴" + "─".repeat(gradeWidth + 2) + "┴" + "─".repeat(scoreWidth + 2) + "┘")}`);
 
   for (const w of warnings) {
     lines.push("");
@@ -170,38 +175,45 @@ export function renderGradeDetail(course: Course, data: CourseGradeData, warning
   const courseName = course.courseCode ? `${course.courseCode} — ${course.name}` : course.name;
 
   if (data.currentScore === null) {
-    return `${chalk.white.bold(courseName)}\n\n  ${chalk.dim("No graded assignments yet. Check back after your first score is posted.")}`;
+    return `  ${chalk.white.bold(courseName)}\n\n  ${chalk.dim("No graded assignments yet. Check back after your first score is posted.")}`;
   }
 
   const scoreStr = `${data.currentScore.toFixed(1)}%`;
   const gradeStr = data.currentGrade ?? "";
+  const color = gradeColor(data.currentGrade);
+
   lines.push(`  ${chalk.white.bold(courseName)}`);
-  lines.push(`  ${chalk.dim("Current:")} ${gradeColor(data.currentGrade)(scoreStr)} ${chalk.dim(`(${gradeStr})`)}`);
-  lines.push(`  ${chalk.dim("─".repeat(50))}`);
+  lines.push(`  ${chalk.dim("Current:")} ${color(scoreStr)} ${color(`(${gradeStr})`)}`);
   lines.push("");
 
   for (const group of data.groups) {
-    if (group.assignments.length === 0) continue;
-    const weightStr = data.isWeighted ? ` ${chalk.dim(`(${group.weight}%)`)}` : "";
-    const groupPct = group.percentage !== null ? `${group.percentage.toFixed(1)}%` : "";
-    lines.push(`  ${chalk.white.bold(group.name)}${weightStr}${groupPct ? "  " + chalk.dim(groupPct) : ""}`);
+    const visible = group.assignments.filter((a) => !a.omitted);
+    if (visible.length === 0) continue;
 
-    for (const a of group.assignments) {
-      if (a.omitted) continue;
-      const line = renderAssignmentLine(a);
+    const weightStr = data.isWeighted ? chalk.dim(` (${group.weight}%)`) : "";
+    const groupPct = group.percentage !== null
+      ? chalk.white(`${group.percentage.toFixed(1)}%`)
+      : chalk.dim("—");
+
+    lines.push(`  ${chalk.hex("#e8a86d").bold(group.name)}${weightStr}  ${groupPct}`);
+
+    const nameCol = Math.max(20, ...visible.map((a) => Math.min(a.name.length, 30)));
+
+    for (const a of visible) {
+      const line = renderAssignmentLine(a, nameCol);
       lines.push(`    ${line}`);
     }
     lines.push("");
   }
 
-  lines.push(`  ${chalk.dim("─".repeat(50))}`);
   const gradedPct = (data.gradedWeightFraction * 100).toFixed(0);
   const remainingPct = (data.remainingWeightFraction * 100).toFixed(0);
-  lines.push(`  ${chalk.dim(`Graded: ${gradedPct}% of total weight`)}`);
+  lines.push(`  ${chalk.dim("─".repeat(46))}`);
+  lines.push(`  ${chalk.dim("Graded:")} ${chalk.white(gradedPct + "%")} ${chalk.dim("of total weight")}`);
 
   const remaining = countRemaining(data.groups);
   if (remaining) {
-    lines.push(`  ${chalk.dim(`Remaining: ${remainingPct}% (${remaining})`)}`);
+    lines.push(`  ${chalk.dim("Remaining:")} ${chalk.white(remainingPct + "%")} ${chalk.dim(`(${remaining})`)}`);
   }
 
   for (const w of warnings) {
@@ -255,30 +267,31 @@ export function renderNeedResult(course: Course, result: NeedResult): string {
   return lines.join("\n");
 }
 
-function renderAssignmentLine(a: { name: string; pointsPossible: number; score: number | null; dueAt: Date | null; submitted: boolean; graded: boolean; missing: boolean }): string {
-  const nameStr = a.name.length > 28 ? a.name.slice(0, 26) + "…" : a.name;
+function renderAssignmentLine(a: { name: string; pointsPossible: number; score: number | null; dueAt: Date | null; submitted: boolean; graded: boolean; missing: boolean }, nameCol: number): string {
+  const maxName = Math.min(nameCol, 30);
+  const nameStr = a.name.length > maxName ? a.name.slice(0, maxName - 1) + "…" : a.name;
   const now = new Date();
 
   if (a.graded) {
     const scoreStr = `${a.score}/${a.pointsPossible}`;
     const pct = a.pointsPossible > 0 ? `${((a.score! / a.pointsPossible) * 100).toFixed(1)}%` : "";
-    return `${chalk.white(nameStr.padEnd(28))} ${chalk.dim(scoreStr.padEnd(12))} ${chalk.dim(pct)}`;
+    return `${chalk.dim("·")} ${chalk.white(nameStr.padEnd(nameCol))}  ${scoreStr.padEnd(10)}  ${pct}`;
   }
 
   if (a.missing) {
-    return `${chalk.white(nameStr.padEnd(28))} ${chalk.red("missing".padEnd(12))}`;
+    return `${chalk.red("·")} ${chalk.white(nameStr.padEnd(nameCol))}  ${chalk.red("missing")}`;
   }
 
   if (a.submitted) {
-    return `${chalk.white(nameStr.padEnd(28))} ${chalk.dim("submitted".padEnd(12))}`;
+    return `${chalk.dim("·")} ${chalk.white(nameStr.padEnd(nameCol))}  ${chalk.dim("submitted")}`;
   }
 
   const dueSuffix = a.dueAt
     ? a.dueAt > now
-      ? chalk.dim(`(due ${formatShortDate(a.dueAt)})`)
-      : chalk.red(`(past due ${formatShortDate(a.dueAt)})`)
+      ? chalk.dim(`due ${formatShortDate(a.dueAt)}`)
+      : chalk.red(`past due ${formatShortDate(a.dueAt)}`)
     : "";
-  return `${chalk.white(nameStr.padEnd(28))} ${chalk.dim("—".padEnd(12))} ${dueSuffix}`;
+  return `${chalk.dim("·")} ${chalk.dim(nameStr.padEnd(nameCol))}  ${chalk.dim("—")}  ${dueSuffix}`;
 }
 
 function formatShortDate(d: Date): string {
