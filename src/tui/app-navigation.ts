@@ -83,14 +83,14 @@ export async function ensureCourseIngested(
 ): Promise<boolean> {
   const refresh = options?.refresh ?? false;
 
-  if (!refresh) {
-    const cache = await loadCourseCache(course.courseCode, course.id);
-    if (cache) return true;
-  }
-
   if (services.activeIngestionAc) {
     services.activeIngestionAc.abort();
     services.activeIngestionAc = null;
+  }
+
+  if (!refresh) {
+    const cache = await loadCourseCache(course.courseCode, course.id);
+    if (cache) return true;
   }
 
   const ac = new AbortController();
