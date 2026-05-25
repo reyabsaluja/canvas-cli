@@ -844,6 +844,10 @@ function renderWrappedContent(
       index += codeConsumed - 1;
       continue;
     }
+    if (line.includes("\x1b[")) {
+      lines.push(line);
+      continue;
+    }
     const trimmed = line.trim();
     if (!trimmed) {
       lines.push("");
