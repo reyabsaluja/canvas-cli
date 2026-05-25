@@ -112,22 +112,22 @@ export async function fetchTimelineData(
   client: CanvasClient,
   courses: Course[],
   showAll: boolean,
-  onProgress?: (msg: string) => void
+  signal?: AbortSignal | null
 ): Promise<{ data: TimelineCourse[]; warnings: string[] }> {
   const results: TimelineCourse[] = [];
   const warnings: string[] = [];
 
-  onProgress?.(`Fetching assignments from ${courses.length} course${courses.length === 1 ? "" : "s"}...`);
-
   for (let i = 0; i < courses.length; i++) {
     const course = courses[i]!;
+
+    if (signal?.aborted) break;
 
     if (courses.length > 8 && i > 0 && i % 8 === 0) {
       await new Promise((r) => setTimeout(r, 500));
     }
 
     try {
-      const raw = await client.getAssignmentsForTimeline(course.id);
+      const raw = await client.getAssignmentsForTimeline(course.id, signal);
       const assignments: TimelineAssignment[] = raw
         .filter((a) => showAll || a.submission?.workflow_state !== "graded")
         .map((a) => ({
@@ -140,7 +140,8 @@ export async function fetchTimelineData(
         }));
 
       results.push({ name: course.name, assignments });
-    } catch {
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") throw err;
       warnings.push(`Could not fetch ${course.name} (access denied — enrollment may have ended)`);
     }
   }
