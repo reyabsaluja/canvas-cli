@@ -1841,6 +1841,53 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.equal(verifiedNoHeadingsInContent.confidence, "high");
     assert.equal(verifiedNoHeadingsInContent.sources[0]?.title, "brief.txt");
     assert.equal(verifiedNoHeadingsInContent.sources[0]?.section, undefined);
+
+    const verifiedMultiSectionAnswer = verifyWorkspaceAnswer({
+      question: "What is the late penalty and what's the grading breakdown?",
+      answer: "Late assignments lose 10% per day. Grading is 40% assignments, 30% labs, 30% final.",
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read syllabus.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-syllabus-multi",
+              title: "syllabus.txt",
+              kind: "extracted",
+              excerpt: "Course syllabus covering policies and grading.",
+            },
+          ],
+          content: [
+            "# Course Syllabus",
+            "## Overview",
+            "This course covers embedded systems programming.",
+            "## Grading Breakdown",
+            "Assignments: 40%, Labs: 30%, Final: 30%",
+            "## Late Submission Policy",
+            "Late assignments receive a 10% deduction per day, up to 5 days.",
+            "## Academic Integrity",
+            "All work must be your own.",
+          ].join("\n"),
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedMultiSectionAnswer.confidence, "high");
+    assert.ok(
+      verifiedMultiSectionAnswer.sources.length >= 2,
+      `expected at least 2 section-level sources but got ${verifiedMultiSectionAnswer.sources.length}`
+    );
+    const sectionLabels = verifiedMultiSectionAnswer.sources.map((s) => s.section);
+    assert.ok(
+      sectionLabels.includes("Late Submission Policy"),
+      `expected 'Late Submission Policy' in sources but got: ${JSON.stringify(sectionLabels)}`
+    );
+    assert.ok(
+      sectionLabels.includes("Grading Breakdown"),
+      `expected 'Grading Breakdown' in sources but got: ${JSON.stringify(sectionLabels)}`
+    );
   });
 });
 

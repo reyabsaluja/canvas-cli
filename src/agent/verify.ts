@@ -187,22 +187,31 @@ function collectSources(
       continue;
     }
     for (const artifact of observation.artifacts) {
-      const section =
-        normalizeSourceSection(artifact.sectionLabel) ??
-        (isGroundedContentObservation(observation)
-          ? inferSectionFromContent(question, answer, observation.content!)
-          : null);
-      const key = `${artifact.kind}:${artifact.title}:${section ?? ""}`;
-      if (seen.has(key)) {
-        continue;
+      const explicitSection = normalizeSourceSection(artifact.sectionLabel);
+      const inferredSections =
+        !explicitSection && isGroundedContentObservation(observation)
+          ? inferSectionsFromContent(question, answer, observation.content!)
+          : [];
+      const sections =
+        explicitSection
+          ? [explicitSection]
+          : inferredSections.length > 0
+            ? inferredSections
+            : [null];
+
+      for (const section of sections) {
+        const key = `${artifact.kind}:${artifact.title}:${section ?? ""}`;
+        if (seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        resolved.push({
+          title: artifact.title,
+          kind: artifact.kind,
+          ...(section ? { section } : {}),
+          excerpt: artifact.excerpt ?? buildExcerpt(observation.content ?? observation.summary),
+        });
       }
-      seen.add(key);
-      resolved.push({
-        title: artifact.title,
-        kind: artifact.kind,
-        ...(section ? { section } : {}),
-        excerpt: artifact.excerpt ?? buildExcerpt(observation.content ?? observation.summary),
-      });
     }
   }
 
@@ -225,23 +234,22 @@ function collectSources(
   return resolved;
 }
 
-function inferSectionFromContent(
+function inferSectionsFromContent(
   question: string,
   answer: string,
   content: string
-): string | null {
+): string[] {
   const sections = extractContentSections(content);
   if (sections.length === 0) {
-    return null;
+    return [];
   }
 
   const queryTokens = tokenizeForMatch(`${question}\n${answer}`);
   if (queryTokens.length === 0) {
-    return null;
+    return [];
   }
 
-  let bestSection: ContentSection | null = null;
-  let bestScore = 0;
+  const scored: Array<{ title: string; score: number; level: number }> = [];
 
   for (const section of sections) {
     const headingTokens = new Set(tokenizeForMatch(section.title));
@@ -255,19 +263,42 @@ function inferSectionFromContent(
         score += 2;
       }
     }
-    if (
-      score > bestScore ||
-      (score === bestScore &&
-        score > 0 &&
-        bestSection &&
-        section.level > bestSection.level)
-    ) {
-      bestScore = score;
-      bestSection = section;
+    if (score > 0) {
+      scored.push({ title: section.title, score, level: section.level });
     }
   }
 
-  return bestSection && bestScore > 0 ? bestSection.title : null;
+  if (scored.length === 0) {
+    return [];
+  }
+
+  scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return b.level - a.level;
+  });
+
+  const best = scored[0]!;
+  const threshold = best.score * 0.6;
+  const relevant = scored.filter((entry) => entry.score >= threshold);
+  const seen = new Set<string>();
+  const titles: string[] = [];
+  for (const entry of relevant.slice(0, 3)) {
+    if (!seen.has(entry.title)) {
+      seen.add(entry.title);
+      titles.push(entry.title);
+    }
+  }
+
+  return titles;
+}
+
+function inferSectionFromContent(
+  question: string,
+  answer: string,
+  content: string
+): string | null {
+  const sections = inferSectionsFromContent(question, answer, content);
+  return sections.length > 0 ? sections[0]! : null;
 }
 
 interface ContentSection {
