@@ -6,7 +6,6 @@ import type { AssignmentWorkup } from "../work/types.js";
 import type { ChatMessage } from "./chat-state.js";
 import {
   filterActionableUpcomingAssignments,
-  formatDueCompact,
 } from "./services.js";
 import type { ShellPinOption } from "./app-types.js";
 import { extractFileText } from "../extract/extract-text.js";
@@ -58,22 +57,11 @@ export function buildGlobalIntroMessages(
 }
 
 export function buildCourseIntroMessages(
-  course: Course,
-  assignments: Assignment[],
+  _course: Course,
+  _assignments: Assignment[],
   _hasCache: boolean
 ): ChatMessage[] {
-  const actionableUpcoming = filterActionableUpcomingAssignments(assignments);
-  const visibleAssignments = actionableUpcoming.length > 0
-    ? actionableUpcoming
-    : assignments.filter((assignment) => !assignment.submitted && assignment.dueAt === null);
-  if (visibleAssignments.length === 0) {
-    return [];
-  }
-  const lines = ["**Upcoming work**"];
-  for (const assignment of visibleAssignments.slice(0, 5)) {
-    lines.push(`• ${assignment.name} — ${formatDueCompact(assignment.dueAt)}`);
-  }
-  return [{ role: "assistant", content: lines.join("\n") }];
+  return [];
 }
 
 export function buildWorkspaceIntroMessages(
