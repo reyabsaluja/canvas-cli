@@ -177,12 +177,12 @@ export async function createShellContext(
               const nearest = upcoming.reduce((a, b) =>
                 new Date(a.dueAt!).getTime() < new Date(b.dueAt!).getTime() ? a : b
               );
-              setCourseStatus(runtime, `Status: next due ${formatDueCompact(nearest.dueAt)}`);
+              setCourseStatus(runtime, `next due ${formatDueCompact(nearest.dueAt)}`);
             } else {
               const count = nextAssignments.length;
               setCourseStatus(
                 runtime,
-                count > 0 ? "Status: assignments ready" : "Status: course data ready"
+                count > 0 ? `${count} assignment${count === 1 ? "" : "s"}` : ""
               );
             }
           }
@@ -232,8 +232,8 @@ export async function createShellContext(
         title: course.name,
         subtitle: course.courseCode,
         description: course.publicDescription ?? undefined,
-        scopeLabel: `Course: ${course.name}`,
-        statusLabel: "Status: loading course data",
+        scopeLabel: course.name,
+        statusLabel: "loading course data",
         placeholder: "Ask about this course, or use /assignments",
       },
       getOpenOptions: () => openOptions,
@@ -388,7 +388,7 @@ async function loadOrCreateWorkspaceShell(
         lifecycleState === "stale"
           ? `${loaded.courseName} · stale workspace`
           : loaded.courseName,
-      scopeLabel: `Workspace: ${loaded.courseName} / ${loaded.assignmentName}`,
+      scopeLabel: `${loaded.courseName} > ${loaded.assignmentName}`,
       statusLabel: formatWorkspaceStatusLabel(lifecycleState),
       placeholder: "Ask about this assignment, or use /help",
     },

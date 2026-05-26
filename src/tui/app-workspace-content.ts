@@ -16,15 +16,15 @@ export function formatWorkspaceStatusLabel(
 ): string | undefined {
   switch (lifecycleState) {
     case "stale":
-      return "Status: stale · /refresh recommended";
+      return "stale · /refresh recommended";
     case "refreshing":
-      return "Status: refreshing";
+      return "refreshing";
     case "ingesting":
-      return "Status: ingesting";
+      return "ingesting";
     case "creating":
-      return "Status: creating";
+      return "creating";
     case "error":
-      return "Status: error";
+      return "error";
     default:
       return undefined;
   }

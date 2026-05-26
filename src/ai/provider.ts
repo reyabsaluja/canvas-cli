@@ -38,6 +38,31 @@ const DEFAULT_MODEL_BY_PROVIDER: Record<AIProviderName, string> = {
   bedrock: "us.anthropic.claude-sonnet-4-6",
 };
 
+const MODEL_DISPLAY_NAMES: Record<string, string> = {
+  "claude-opus-4-7": "Opus 4.7",
+  "claude-opus-4-6": "Opus 4.6",
+  "claude-sonnet-4-6": "Sonnet 4.6",
+  "us.anthropic.claude-opus-4-7": "Opus 4.7",
+  "us.anthropic.claude-opus-4-6-v1": "Opus 4.6",
+  "us.anthropic.claude-sonnet-4-6": "Sonnet 4.6",
+  "gpt-5.5": "GPT 5.5",
+  "gpt-5.4-pro": "GPT 5.4 Pro",
+  "gpt-5.4": "GPT 5.4",
+  "gpt-5.4-mini": "GPT 5.4 Mini",
+  "gemini-3.5-flash": "Gemini 3.5 Flash",
+  "gemini-3.1-pro-preview": "Gemini 3.1 Pro",
+  "gemini-3-flash-preview": "Gemini 3 Flash",
+  "gemini-3.1-flash-lite": "Gemini 3.1 Lite",
+  "gemini-2.5-pro": "Gemini 2.5 Pro",
+  "gemini-2.5-flash": "Gemini 2.5 Flash",
+};
+
+export function formatModelName(modelId: string, effort?: AIEffortLevel): string {
+  const name = MODEL_DISPLAY_NAMES[modelId] ?? modelId;
+  if (effort) return `${name} · ${effort}`;
+  return name;
+}
+
 /**
  * Detect which AI provider is configured from environment variables.
  * Honors AI_PROVIDER first, then falls back to legacy key-based detection.
