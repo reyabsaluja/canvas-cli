@@ -3,8 +3,6 @@ import {
   clearScreen,
   createBuffer,
   getTermSize,
-  showCursor,
-  hideCursor,
   wrapText,
   visibleWidth,
 } from "./screen.js";
@@ -29,7 +27,6 @@ export async function runQuizSession(
   const times: number[] = [];
 
   const stdin = process.stdin;
-  showCursor();
 
   for (let i = 0; i < questions.length; i++) {
     const q = questions[i]!;
@@ -46,7 +43,6 @@ export async function runQuizSession(
     await showFeedback(q, result, stdin);
   }
 
-  hideCursor();
   return { questions, answers, times };
 }
 
@@ -178,32 +174,40 @@ function renderQuestionBox(
   footer?: string
 ): void {
   const { cols } = getTermSize();
-  const boxWidth = Math.min(60, cols - 6);
+  const boxWidth = Math.min(cols - 6, 90);
   const innerWidth = boxWidth - 4;
+  const optionIndent = 2;
+  const optionWidth = innerWidth - optionIndent;
   const buf = createBuffer();
 
   clearScreen();
   buf.push("");
 
-  const headerLeft = `  Question ${index + 1} of ${total}`;
+  const headerLeft = `Question ${index + 1} of ${total}`;
   const headerRight = `[${tag}]`;
-  const headerGap = Math.max(1, boxWidth - headerLeft.length - headerRight.length + 2);
+  const headerGap = Math.max(1, innerWidth - headerLeft.length - headerRight.length);
 
   buf.push(`  ${B.dim("┌" + "─".repeat(boxWidth) + "┐")}`);
-  buf.push(`  ${B.dim("│")}  ${B.muted(headerLeft.trim())}${" ".repeat(headerGap)}${B.muted(headerRight)}  ${B.dim("│")}`);
+  buf.push(`  ${B.dim("│")}  ${B.muted(headerLeft)}${" ".repeat(headerGap)}${B.muted(headerRight)}  ${B.dim("│")}`);
   buf.push(`  ${B.dim("│")}${" ".repeat(boxWidth)}${B.dim("│")}`);
 
   const stemLines = wrapText(stem, innerWidth).split("\n");
   for (const line of stemLines) {
-    const pad = " ".repeat(Math.max(0, boxWidth - visibleWidth(line) - 2));
-    buf.push(`  ${B.dim("│")}  ${B.white(line)}${pad}${B.dim("│")}`);
+    const pad = " ".repeat(Math.max(0, innerWidth - visibleWidth(line)));
+    buf.push(`  ${B.dim("│")}  ${B.white(line)}${pad}  ${B.dim("│")}`);
   }
 
   if (options.length > 0) {
     buf.push(`  ${B.dim("│")}${" ".repeat(boxWidth)}${B.dim("│")}`);
     for (const opt of options) {
-      const pad = " ".repeat(Math.max(0, boxWidth - opt.length - 4));
-      buf.push(`  ${B.dim("│")}    ${B.white(opt)}${pad}${B.dim("│")}`);
+      const optLines = wrapText(opt, optionWidth).split("\n");
+      for (let j = 0; j < optLines.length; j++) {
+        const prefix = j === 0 ? " ".repeat(optionIndent) : " ".repeat(optionIndent + 3);
+        const text = optLines[j]!;
+        const totalUsed = optionIndent + (j === 0 ? 0 : 3) + visibleWidth(text);
+        const pad = " ".repeat(Math.max(0, innerWidth - totalUsed));
+        buf.push(`  ${B.dim("│")}  ${prefix}${B.white(text)}${pad}  ${B.dim("│")}`);
+      }
     }
   }
 
@@ -213,7 +217,8 @@ function renderQuestionBox(
   if (footer) {
     buf.push(footer);
   } else {
-    buf.push(`  ${B.muted("Answer: ")}█`);
+    buf.push("");
+    buf.push(`  ${B.muted("Answer:")} █`);
   }
 
   buf.push("");
@@ -284,21 +289,21 @@ export function renderScoreScreen(result: QuizResult, courseName: string | null)
   const total = answered.length;
   const pct = total > 0 ? Math.round((correct / total) * 100) : 0;
 
-  const title = courseName ? `Quiz Complete — ${courseName}` : "Quiz Complete";
-  const barWidth = 20;
-  const filled = Math.round((correct / Math.max(total, 1)) * barWidth);
-  const bar = "█".repeat(filled) + "░".repeat(barWidth - filled);
-
   const scoreColor = pct >= 90 ? B.green : pct >= 70 ? B.yellow : B.red;
-  const verdict = pct >= 90 ? "Excellent!" : pct >= 70 ? "Good — review missed topics." : "Needs work — focus on the areas below.";
+  const verdict = pct >= 90
+    ? "Excellent work!"
+    : pct >= 70
+      ? "Good — review the topics you missed."
+      : "Keep studying — review the topics below.";
 
-  lines.push(`  ${B.dim("━".repeat(50))}`);
+  const barWidth = 30;
+  const filled = Math.round((correct / Math.max(total, 1)) * barWidth);
+  const bar = scoreColor("━".repeat(filled)) + B.dim("━".repeat(barWidth - filled));
+
   lines.push("");
-  lines.push(`  ${B.bold(title)}`);
+  lines.push(`  ${B.bold(courseName ? `${courseName} — Quiz Results` : "Quiz Results")}`);
   lines.push("");
-  lines.push(`  ${B.muted("Score:")} ${scoreColor(`${correct}/${total} (${pct}%)`)}`);
-  lines.push("");
-  lines.push(`  ${scoreColor(bar)}  ${correct}/${total}`);
+  lines.push(`  ${bar}  ${scoreColor(`${correct}/${total}`)} ${B.dim(`(${pct}%)`)}`);
   lines.push("");
   lines.push(`  ${scoreColor(verdict)}`);
 
@@ -307,36 +312,33 @@ export function renderScoreScreen(result: QuizResult, courseName: string | null)
     const q = result.questions[i]!;
     const a = result.answers[i];
     if (a === null) continue;
-    const topic = q.topic;
-    const entry = topics.get(topic) ?? { correct: 0, total: 0 };
+    const entry = topics.get(q.topic) ?? { correct: 0, total: 0 };
     entry.total++;
     if (a) entry.correct++;
-    topics.set(topic, entry);
+    topics.set(q.topic, entry);
   }
 
-  if (topics.size > 1) {
+  if (topics.size > 0) {
+    const topicNames = [...topics.keys()];
+    const maxTopicLen = Math.max(...topicNames.map(t => t.length));
+    const scoreColWidth = Math.max(...[...topics.values()].map(s => `${s.correct}/${s.total}`.length));
+    // padding(2) + icon(1) + space(1) + topic + space(2) + score + padding(2)
+    const rowWidth = 2 + 1 + 1 + maxTopicLen + 2 + scoreColWidth + 2;
+    const headerLabel = " Topics ";
+    const dashTotal = Math.max(0, rowWidth - headerLabel.length);
+    const dashLeft = Math.floor(dashTotal / 3);
+    const dashRight = dashTotal - dashLeft;
+
     lines.push("");
-    lines.push(`  ${B.muted("By topic:")}`);
+    lines.push(`  ${B.dim("┌" + "─".repeat(dashLeft) + headerLabel + "─".repeat(dashRight) + "┐")}`);
     for (const [topic, stats] of topics) {
-      const topicColor = stats.correct === stats.total ? B.green : stats.correct === 0 ? B.red : B.white;
-      lines.push(`    ${topicColor(topic.padEnd(22))} ${stats.correct}/${stats.total}`);
+      const topicColor = stats.correct === stats.total ? B.green : stats.correct === 0 ? B.red : B.yellow;
+      const icon = stats.correct === stats.total ? "●" : stats.correct === 0 ? "○" : "◐";
+      const scoreStr = `${stats.correct}/${stats.total}`;
+      const gap = " ".repeat(Math.max(1, maxTopicLen - topic.length + 2 + scoreColWidth - scoreStr.length));
+      lines.push(`  ${B.dim("│")}  ${topicColor(icon)} ${B.white(topic)}${gap}${B.dim(scoreStr)}  ${B.dim("│")}`);
     }
-  }
-
-  const missed: string[] = [];
-  for (let i = 0; i < result.questions.length; i++) {
-    if (result.answers[i] === false) {
-      const q = result.questions[i]!;
-      missed.push(`Q${i + 1} — ${q.topic}`);
-    }
-  }
-
-  if (missed.length > 0) {
-    lines.push("");
-    lines.push(`  ${B.muted("Missed questions:")}`);
-    for (const m of missed) {
-      lines.push(`    ${B.red("·")} ${B.white(m)}`);
-    }
+    lines.push(`  ${B.dim("└" + "─".repeat(rowWidth) + "┘")}`);
   }
 
   const avgTime = result.times.length > 0
@@ -344,18 +346,12 @@ export function renderScoreScreen(result: QuizResult, courseName: string | null)
     : 0;
   if (avgTime > 0) {
     lines.push("");
-    lines.push(`  ${B.muted(`Average time per question: ${avgTime}s`)}`);
-    const slowest = result.times.indexOf(Math.max(...result.times));
-    if (result.times[slowest]! > avgTime * 1.5) {
-      lines.push(`  ${B.muted(`Slowest: Q${slowest + 1} (${result.times[slowest]}s)`)}`);
-    }
+    lines.push(`  ${B.dim("Time:")} ${B.muted(`${avgTime}s avg`)}`);
   }
 
   lines.push("");
-  lines.push(`  ${B.dim("━".repeat(50))}`);
-  lines.push("");
-  lines.push(`  ${B.muted("/quiz")}       ${B.dim("→ new questions")}`);
-  lines.push(`  ${B.muted("/quiz retry")} ${B.dim("→ retry missed questions")}`);
+  lines.push(`  ${B.dim("─".repeat(40))}`);
+  lines.push(`  ${B.muted("/quiz")} ${B.dim("new")}  ${B.muted("/quiz retry")} ${B.dim("missed")}`);
 
   return lines.join("\n");
 }

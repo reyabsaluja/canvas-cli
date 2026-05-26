@@ -469,9 +469,13 @@ function renderCenteredAscii(
     return;
   }
 
+  const boxInner = Math.min(termCols - 5, 98);
+  const boxTotalWidth = boxInner + 4;
+  const boxLeftPad = Math.max(0, Math.floor((termCols - boxTotalWidth) / 2));
+  const logoLeftPad = boxLeftPad + Math.max(0, Math.floor((boxTotalWidth - textWidth) / 2));
+
   for (const line of textLines) {
-    const pad = Math.max(0, Math.floor((termCols - textWidth) / 2));
-    buf.push(" ".repeat(pad) + C.primary(line));
+    buf.push(" ".repeat(logoLeftPad) + C.primary(line));
   }
 }
 
