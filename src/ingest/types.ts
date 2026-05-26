@@ -103,6 +103,9 @@ export interface AnnouncementIndexEntry {
   userName: string | null;
   hasMessage: boolean;
   messageFileLinkCount: number;
+  threadEntryCount: number;
+  participantCount: number;
+  replyFileLinkCount: number;
 }
 
 export interface DiscussionIndexEntry {
@@ -191,6 +194,14 @@ export interface DownloadedAttachmentEntry {
   zipEntries?: ZipAttachmentEntry[];
 }
 
+export interface GradingGroupIndexEntry {
+  id: number;
+  name: string;
+  weight: number;
+  assignmentCount: number;
+  assignmentNames: string[];
+}
+
 export interface LectureIndexEntry {
   title: string;
   url: string;
@@ -232,6 +243,7 @@ export interface IngestionResult {
   announcements?: AnnouncementIndexEntry[];
   discussions?: DiscussionIndexEntry[];
   externalLinks?: ExternalLinkIndexEntry[];
+  gradingGroups?: GradingGroupIndexEntry[];
   syllabusCandidates: SyllabusCandidate[];
   attachments: DownloadedAttachmentEntry[];
   lectures: LectureIndexEntry[];

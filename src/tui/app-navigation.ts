@@ -16,7 +16,7 @@ import { listChatSessions } from "./chat-sessions.js";
 import type { AppScope, ChatSessionSummary } from "./chat-state.js";
 import type { Course, Assignment } from "../domain/models.js";
 import chalk from "chalk";
-import { clearScreen, C, getTermSize, stripAnsi, hideCursor, showCursor, createBuffer, CANVAS_TEXT } from "./screen.js";
+import { clearScreen, C, getTermSize, stripAnsi, hideCursor, showCursor, createBuffer, buildLogoBanner, CANVAS_TEXT } from "./screen.js";
 import { loadWorkspace } from "../ask/load-workspace.js";
 import { matchAssignments } from "../domain/matching.js";
 import { loadCourseCache } from "../enrich/cache-loader.js";
@@ -669,10 +669,10 @@ class IngestionProgressRenderer {
 
     allLines.push("");
 
-    const dividerWidth = Math.max(24, cols - 4);
-    const accentWidth = Math.min(6, dividerWidth);
-    allLines.push("  " + C.primaryBold("▎") + " " + C.pureWhiteBold(this.title) + "  " + C.secondary(this.subtitle) + "  " + C.secondary(elapsed));
-    allLines.push("  " + C.primary("─".repeat(accentWidth)) + C.dimmer("─".repeat(dividerWidth - accentWidth)));
+    const styledSubtitle = C.dimmer(this.subtitle) + "  " + C.secondary(elapsed);
+    for (const line of buildLogoBanner(this.title, undefined, { styledSubtitle })) {
+      allLines.push(line);
+    }
 
     for (let i = 0; i < this.steps.length; i++) {
       const step = this.steps[i]!;
@@ -682,7 +682,7 @@ class IngestionProgressRenderer {
       allLines.push("");
       if (step.updatingInPlace) {
         allLines.push(
-          `  ${C.dim("└")} ${C.dim(step.action)} ${C.dim(step.target)}`
+          `  ${dimMarker}  ${C.dim(step.action)} ${C.dim(step.target)}`
         );
       } else if (!isDone) {
         allLines.push(

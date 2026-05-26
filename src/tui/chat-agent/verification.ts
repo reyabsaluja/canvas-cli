@@ -244,6 +244,37 @@ export function shouldRecoverFromToolLoop(
   return observations.some(canObservationSupportAnswerRecovery);
 }
 
+export function shouldGroundUnverifiedAnswer(
+  answer: string,
+  currentTurnObservations: Observation[],
+  question: string
+): boolean {
+  if (answer.trim().length === 0) {
+    return false;
+  }
+
+  const hasGroundedRead = currentTurnObservations.some((observation) =>
+    isGroundedContentObservation(observation)
+  );
+  if (hasGroundedRead) {
+    return false;
+  }
+
+  const hasBreadcrumbs = currentTurnObservations.some(
+    isSuccessfulSearchBreadcrumbObservation
+  );
+  if (!hasBreadcrumbs) {
+    return false;
+  }
+
+  const hasRecoverableTarget = selectRecoveryReadArtifactId(
+    question,
+    currentTurnObservations,
+    currentTurnObservations
+  );
+  return hasRecoverableTarget !== null;
+}
+
 export function shouldContinueToolLoopAfterGateRead(
   question: string,
   observation: Observation,

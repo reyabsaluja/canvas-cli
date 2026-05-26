@@ -31,6 +31,7 @@ import type {
   AnnouncementIndexEntry,
   DiscussionIndexEntry,
   ExternalLinkIndexEntry,
+  GradingGroupIndexEntry,
   SyllabusCandidate,
   DownloadedAttachmentEntry,
   LectureIndexEntry,
@@ -55,6 +56,7 @@ export async function writeIngestionArtifacts(
   announcements: AnnouncementIndexEntry[],
   discussions: DiscussionIndexEntry[],
   externalLinks: ExternalLinkIndexEntry[],
+  gradingGroups: GradingGroupIndexEntry[],
   syllabusCandidates: SyllabusCandidate[],
   attachments: DownloadedAttachmentEntry[],
   lectures: LectureIndexEntry[],
@@ -64,13 +66,7 @@ export async function writeIngestionArtifacts(
   rawCalendarEvents?: CanvasCalendarEvent[],
   frontPageBody?: string | null,
   fetchedPages?: Array<{ slug: string; title: string; body: string }>,
-  rawAnnouncements?: Array<{
-    id: number;
-    title: string;
-    message: string | null;
-    posted_at: string | null;
-    html_url?: string | null;
-  }>,
+  rawAnnouncementThreads?: RawDiscussionThread[],
   rawDiscussionThreads?: RawDiscussionThread[],
   capturedExternalLinks?: CapturedExternalLink[]
 ): Promise<void> {
@@ -95,6 +91,7 @@ export async function writeIngestionArtifacts(
     ["announcements.json", announcements],
     ["discussions.json", discussions],
     ["external-links.json", externalLinks],
+    ["grading-groups.json", gradingGroups],
     ["syllabus-candidates.json", syllabusCandidates],
     ["attachments.json", attachments],
     ["lectures.json", lectures],
@@ -123,13 +120,20 @@ export async function writeIngestionArtifacts(
     (rawAssignments ?? []).map((assignment) => [assignment.id, assignment])
   );
 
+  const assignmentContext = buildAssignmentContext(assignments, modules, gradingGroups);
+
   if (assignments.length > 0) {
     await fs.mkdir(path.join(coursePath, "extracted", "assignments"), {
       recursive: true,
     });
     for (const assignment of assignments) {
       const rawAssignment = rawAssignmentsById.get(assignment.id);
-      const assignmentText = formatAssignmentText(assignment, rawAssignment);
+      const context = assignmentContext.get(assignment.id);
+      const assignmentText = formatAssignmentText(
+        assignment,
+        rawAssignment,
+        context
+      );
       await writeAtomic(
         getExtractedAssignmentPath(coursePath, assignment.id),
         assignmentText
@@ -201,24 +205,15 @@ export async function writeIngestionArtifacts(
     }
   }
 
-  if (rawAnnouncements && rawAnnouncements.length > 0) {
+  if (rawAnnouncementThreads && rawAnnouncementThreads.length > 0) {
     await fs.mkdir(path.join(coursePath, "extracted", "announcements"), {
       recursive: true,
     });
-    for (const announcement of rawAnnouncements) {
-      if (!announcement.message) continue;
-      const postedAt = announcement.posted_at
-        ? `Posted: ${announcement.posted_at}\n\n`
-        : "";
-      const content =
-        `# ${announcement.title}\n\n` +
-        postedAt +
-        `${htmlToText(announcement.message, {
-          baseUrl: announcement.html_url ?? courseMeta.htmlUrl,
-        })}\n`;
+    for (const thread of rawAnnouncementThreads) {
+      if (!thread.topic.message && thread.entries.length === 0) continue;
       await writeAtomic(
-        getExtractedAnnouncementPath(coursePath, announcement.id),
-        content
+        getExtractedAnnouncementPath(coursePath, thread.topic.id),
+        formatAnnouncementThreadText(thread, courseMeta.htmlUrl)
       );
     }
   }
@@ -246,6 +241,13 @@ export async function writeIngestionArtifacts(
       );
     }
   }
+
+  if (gradingGroups.length > 0) {
+    await writeAtomic(
+      path.join(coursePath, "extracted", "grading-breakdown.txt"),
+      formatGradingBreakdownText(gradingGroups)
+    );
+  }
 }
 
 /**
@@ -258,12 +260,80 @@ async function writeAtomic(filePath: string, content: string): Promise<void> {
   await fs.rename(tmpPath, filePath);
 }
 
+interface AssignmentContext {
+  moduleName: string | null;
+  modulePosition: number | null;
+  gradingCategory: string | null;
+  categoryWeight: number | null;
+}
+
+function buildAssignmentContext(
+  assignments: AssignmentIndexEntry[],
+  modules: ModuleIndexEntry[],
+  gradingGroups: GradingGroupIndexEntry[]
+): Map<number, AssignmentContext> {
+  const contextMap = new Map<number, AssignmentContext>();
+
+  const moduleByAssignmentId = new Map<number, { name: string; position: number }>();
+  for (const mod of modules) {
+    for (const item of mod.items) {
+      if (item.type === "Assignment" && item.contentId !== null) {
+        moduleByAssignmentId.set(item.contentId, {
+          name: mod.name,
+          position: mod.position,
+        });
+      }
+    }
+  }
+
+  const totalWeight = gradingGroups.reduce((sum, g) => sum + g.weight, 0);
+  const isWeighted = totalWeight > 0;
+  const categoryByAssignmentName = new Map<
+    string,
+    { name: string; weight: number }
+  >();
+  if (isWeighted) {
+    for (const group of gradingGroups) {
+      for (const assignmentName of group.assignmentNames) {
+        categoryByAssignmentName.set(assignmentName, {
+          name: group.name,
+          weight: group.weight,
+        });
+      }
+    }
+  }
+
+  for (const assignment of assignments) {
+    const mod = moduleByAssignmentId.get(assignment.id);
+    const category = categoryByAssignmentName.get(assignment.name);
+    if (mod || category) {
+      contextMap.set(assignment.id, {
+        moduleName: mod?.name ?? null,
+        modulePosition: mod?.position ?? null,
+        gradingCategory: category?.name ?? null,
+        categoryWeight: category?.weight ?? null,
+      });
+    }
+  }
+
+  return contextMap;
+}
+
 function formatAssignmentText(
   assignment: AssignmentIndexEntry,
-  rawAssignment?: RawAssignmentRecord
+  rawAssignment?: RawAssignmentRecord,
+  context?: AssignmentContext
 ): string {
   const lines = [`# ${assignment.name}`, ""];
 
+  if (context?.moduleName) {
+    lines.push(`Module: ${context.moduleName}`);
+  }
+  if (context?.gradingCategory) {
+    const weightLabel =
+      context.categoryWeight !== null ? ` (${context.categoryWeight}% of grade)` : "";
+    lines.push(`Category: ${context.gradingCategory}${weightLabel}`);
+  }
   lines.push(`Due: ${assignment.dueAt ?? "No due date"}`);
   if (assignment.unlockAt) {
     lines.push(`Unlocks: ${assignment.unlockAt}`);
@@ -545,6 +615,89 @@ function formatDiscussionThreadText(thread: RawDiscussionThread): string {
         lines.push(
           htmlToText(entry.message, { baseUrl: thread.topic.html_url }) ||
             "No reply text captured."
+        );
+      } else {
+        lines.push("No reply text captured.");
+      }
+      lines.push("");
+    }
+  }
+
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+}
+
+function formatGradingBreakdownText(
+  gradingGroups: GradingGroupIndexEntry[]
+): string {
+  const totalWeight = gradingGroups.reduce((sum, g) => sum + g.weight, 0);
+  const isWeighted = totalWeight > 0;
+  const lines = ["# Grading Breakdown", ""];
+
+  if (isWeighted) {
+    lines.push(`Grading scheme: weighted (total ${totalWeight}%)`, "");
+  } else {
+    lines.push("Grading scheme: unweighted (equal weight per assignment)", "");
+  }
+
+  const sorted = [...gradingGroups].sort((a, b) => b.weight - a.weight);
+  for (const group of sorted) {
+    const weightLabel = isWeighted ? ` (${group.weight}%)` : "";
+    lines.push(`## ${group.name}${weightLabel}`);
+    lines.push("");
+    lines.push(`Assignments in this category: ${group.assignmentCount}`);
+    if (group.assignmentNames.length > 0) {
+      for (const name of group.assignmentNames) {
+        lines.push(`- ${name}`);
+      }
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n").trimEnd() + "\n";
+}
+
+function formatAnnouncementThreadText(
+  thread: RawDiscussionThread,
+  courseHtmlUrl: string | null
+): string {
+  const baseUrl = thread.topic.html_url ?? courseHtmlUrl;
+  const lines = [`# ${thread.topic.title}`, ""];
+
+  if (thread.topic.posted_at) {
+    lines.push(`Posted: ${thread.topic.posted_at}`);
+  }
+  if (thread.topic.user_name) {
+    lines.push(`Author: ${thread.topic.user_name}`);
+  }
+  if (thread.entries.length > 0) {
+    lines.push(`Replies: ${thread.entries.length}`);
+  }
+  lines.push("");
+
+  if (thread.topic.message && thread.topic.message.trim().length > 0) {
+    lines.push(
+      htmlToText(thread.topic.message, { baseUrl }) ||
+        "No announcement message provided."
+    );
+  } else {
+    lines.push("No announcement message provided.");
+  }
+
+  if (thread.entries.length > 0) {
+    lines.push("");
+    lines.push("## Replies");
+    lines.push("");
+
+    for (const entry of thread.entries) {
+      const headingParts = [
+        entry.user_name ?? `User ${entry.user_id}`,
+        entry.created_at,
+      ].filter((part) => typeof part === "string" && part.length > 0);
+      lines.push(`### ${headingParts.join(" — ")}`);
+      lines.push("");
+      if (entry.message && entry.message.trim().length > 0) {
+        lines.push(
+          htmlToText(entry.message, { baseUrl }) || "No reply text captured."
         );
       } else {
         lines.push("No reply text captured.");

@@ -505,7 +505,7 @@ function buildTimelineTask(
   }
   return {
     type: "background-task",
-    verb: "Fetching timeline",
+    verb: "",
     run: async (signal) => {
       const { data, warnings } = await fetchTimelineData(services.client, courses, showAll, signal);
       const output = buildTimelineOutput(data, windowArg, showAll, warnings);
@@ -530,7 +530,7 @@ function buildGradeTask(
   if (parsed.mode === "summary") {
     return {
       type: "background-task",
-      verb: "Fetching grades",
+      verb: "",
       run: async (signal) => {
         const { rows, warnings } = await fetchGradeSummary(services.client, courses, signal);
         const output = renderGradeSummary(rows, warnings);
@@ -557,7 +557,7 @@ function buildGradeTask(
 
     return {
       type: "background-task",
-      verb: `Fetching grades for ${targetCourse.courseCode || targetCourse.name}`,
+      verb: "",
       run: async (signal) => {
         const { data, warnings } = await fetchGradeDetail(services.client, targetCourse, signal);
         const output = renderGradeDetail(targetCourse, data, warnings);
@@ -584,7 +584,7 @@ function buildGradeTask(
 
   return {
     type: "background-task",
-    verb: `Calculating grades for ${targetCourse.courseCode || targetCourse.name}`,
+    verb: "",
     run: async (signal) => {
       const { data } = await fetchGradeDetail(services.client, targetCourse, signal);
       if (data.currentScore === null) {

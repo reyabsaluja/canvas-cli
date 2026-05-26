@@ -4,11 +4,11 @@ import type { ChatAgentContext } from "./types.js";
 const SEARCH_WORKSPACE_TOOL: ToolDefinition = {
   name: "search_workspace",
   description:
-    "Discovery-only search across the workspace and ingested course knowledge. Returns relevant snippets and source names, not the full document text. Use it to find the best source, then call read_file for exact wording, requirements, quotes, or detailed answers. For compare, changed, or conflict questions, use search to identify the best two candidate sources before concluding.",
+    "Discovery-only keyword search across the workspace and ingested course knowledge. Returns relevant snippets and source names, not the full document text. Use it to find the best source, then call read_file for exact wording, requirements, quotes, or detailed answers. For compare, changed, or conflict questions, use search to identify the best two candidate sources before concluding. QUERY TIPS: Use 2–4 specific keywords, not full questions. Good: 'calibration threshold voltage'. Bad: 'what does the assignment say about the calibration threshold'. The engine matches individual words and stems (submit matches submissions), so pick distinctive nouns/verbs from the student's question.",
   parameters: {
     type: "object",
     properties: {
-      query: { type: "string", description: "Search query" },
+      query: { type: "string", description: "2–4 distinctive keywords (not a full question)" },
     },
     required: ["query"],
   },
@@ -45,14 +45,14 @@ const LIST_FILES_TOOL: ToolDefinition = {
 const SEARCH_COURSE_TOOL: ToolDefinition = {
   name: "search_course",
   description:
-    "Discovery-only search of the course cache — modules, pages, assignments, announcements, discussions, attachments, and file index entries. Returns candidate matches, not full document text. After finding the right item, use read_file for readable artifacts or download_course_file for undownloaded course files. For compare, changed, or conflict questions, identify the best two course sources before concluding.",
+    "Discovery-only keyword search of the course cache — modules, pages, assignments, announcements, discussions, attachments, and file index entries. Returns candidate matches, not full document text. After finding the right item, use read_file for readable artifacts or download_course_file for undownloaded course files. For compare, changed, or conflict questions, identify the best two course sources before concluding. QUERY TIPS: Use 2–4 specific keywords, not full questions. Good: 'late penalty submission'. Bad: 'what is the policy on late submissions'. The engine matches individual words and stems (grade matches grading), so pick distinctive terms.",
   parameters: {
     type: "object",
     properties: {
       query: {
         type: "string",
         description:
-          "Search keyword to match against module names, item titles, and file names",
+          "2–4 distinctive keywords to match against titles, sections, and content",
       },
     },
     required: ["query"],

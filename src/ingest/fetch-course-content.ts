@@ -1,5 +1,6 @@
 import type { CanvasClient } from "../canvas/client.js";
 import type {
+  CanvasAssignmentGroup,
   CanvasCourseDetail,
   CanvasAssignment,
   CanvasAssignmentDetail,
@@ -34,7 +35,9 @@ export interface RawCourseContent {
   calendarEvents: CanvasCalendarEvent[];
   announcements: CanvasDiscussionTopic[];
   discussions: CanvasDiscussionTopic[];
+  announcementThreads: RawDiscussionThread[];
   discussionThreads: RawDiscussionThread[];
+  assignmentGroups: CanvasAssignmentGroup[];
   /** Front page (home page) HTML body, if accessible. */
   frontPageBody: string | null;
   /** Individual page bodies fetched from the Pages index and discovered same-course Canvas links. */
@@ -108,6 +111,12 @@ export async function fetchCourseContent(
       signal?: AbortSignal | null
     ) => Promise<CanvasDiscussionTopicView | null>;
   }).getDiscussionTopicViewSafe;
+  const assignmentGroupFetcher = (client as CanvasClient & {
+    getAssignmentGroupsSafe?: (
+      courseId: number,
+      signal?: AbortSignal | null
+    ) => Promise<CanvasAssignmentGroup[]>;
+  }).getAssignmentGroupsSafe;
   const [
     rawModules,
     files,
@@ -118,6 +127,7 @@ export async function fetchCourseContent(
     discussions,
     frontPage,
     assignmentDetailResult,
+    assignmentGroups,
   ] =
     await Promise.all([
       client.getModulesSafe(courseId, signal),
@@ -135,6 +145,9 @@ export async function fetchCourseContent(
         : Promise.resolve([]),
       client.getFrontPageSafe(courseId, signal),
       assignmentDetailsPromise,
+      assignmentGroupFetcher
+        ? assignmentGroupFetcher.call(client, courseId, signal)
+        : Promise.resolve([] as CanvasAssignmentGroup[]),
     ]);
   const assignments = assignmentDetailResult.assignments;
   if (assignmentDetailResult.warning) {
@@ -179,6 +192,26 @@ export async function fetchCourseContent(
   if (frontPage?.body) {
     frontPageBody = frontPage.body;
   }
+
+  const announcementThreads = discussionViewFetcher
+    ? await mapWithConcurrency(
+        announcements,
+        DISCUSSION_VIEW_CONCURRENCY,
+        async (topic) => {
+          const view = await discussionViewFetcher.call(client, courseId, topic.id, signal);
+          return {
+            topic,
+            entries: flattenDiscussionEntries(view),
+            participantCount: view?.participants.length ?? 0,
+          };
+        },
+        signal
+      )
+    : announcements.map((topic) => ({
+        topic,
+        entries: [],
+        participantCount: 0,
+      }));
 
   const discussionThreads = discussionViewFetcher
     ? await mapWithConcurrency(
@@ -266,8 +299,11 @@ export async function fetchCourseContent(
   for (const event of calendarEvents) {
     enqueueLinkedPageSlugs(event.description);
   }
-  for (const announcement of announcements) {
-    enqueueLinkedPageSlugs(announcement.message);
+  for (const thread of announcementThreads) {
+    enqueueLinkedPageSlugs(thread.topic.message);
+    for (const entry of thread.entries) {
+      enqueueLinkedPageSlugs(entry.message);
+    }
   }
   for (const thread of discussionThreads) {
     enqueueLinkedPageSlugs(thread.topic.message);
@@ -310,7 +346,9 @@ export async function fetchCourseContent(
     calendarEvents,
     announcements,
     discussions,
+    announcementThreads,
     discussionThreads,
+    assignmentGroups,
     frontPageBody,
     fetchedPages: Array.from(fetchedPagesBySlug.values()),
     warnings,

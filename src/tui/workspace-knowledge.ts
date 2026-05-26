@@ -81,6 +81,7 @@ const COURSE_READABLE_KINDS: ArtifactKind[] = [
   "attachment",
   "syllabus",
   "front_page",
+  "grading",
 ];
 
 const CHAT_READABLE_KINDS: ArtifactKind[] = [

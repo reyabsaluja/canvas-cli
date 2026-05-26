@@ -13,7 +13,6 @@ import type {
   CanvasAssignment,
   CanvasAttachment,
   CanvasCalendarEvent,
-  CanvasDiscussionTopic,
   CanvasQuiz,
 } from "../canvas/types.js";
 import { extractLinkedFiles } from "../workspace/attachments.js";
@@ -81,6 +80,7 @@ export async function ingestCourse(
     calendarEvents,
     announcements,
     discussions,
+    gradingGroups,
   } =
     normalizeCourseContent(raw);
 
@@ -124,7 +124,7 @@ export async function ingestCourse(
 
   // Step 5d: Download files attached directly to announcements/discussions.
   const discussionAttachments = selectAnnouncementDiscussionAttachedFiles(
-    raw.announcements,
+    raw.announcementThreads,
     raw.discussionThreads,
     [
       ...heuristicAttachments,
@@ -142,7 +142,7 @@ export async function ingestCourse(
     courseMeta.syllabusBody,
     raw.quizzes,
     raw.calendarEvents,
-    raw.announcements,
+    raw.announcementThreads,
     raw.discussionThreads,
     [
       ...heuristicAttachments,
@@ -163,7 +163,7 @@ export async function ingestCourse(
     frontPageBody: raw.frontPageBody,
     fetchedPages: raw.fetchedPages,
     syllabusBody: courseMeta.syllabusBody,
-    announcements: raw.announcements,
+    announcementThreads: raw.announcementThreads,
     discussionThreads: raw.discussionThreads,
     config,
   });
@@ -240,6 +240,7 @@ export async function ingestCourse(
     announcements,
     discussions,
     externalLinks,
+    gradingGroups,
     syllabusCandidates,
     attachmentResults,
     lectures,
@@ -249,7 +250,7 @@ export async function ingestCourse(
     raw.calendarEvents,
     raw.frontPageBody,
     raw.fetchedPages,
-    raw.announcements,
+    raw.announcementThreads,
     raw.discussionThreads,
     capturedExternalLinks
   );
@@ -265,6 +266,7 @@ export async function ingestCourse(
     announcements,
     discussions,
     externalLinks,
+    gradingGroups,
     syllabusCandidates,
     attachments: attachmentResults,
     lectures,
@@ -458,7 +460,7 @@ function selectDescriptionLinkedFiles(
  * HTML message body.
  */
 function selectAnnouncementDiscussionAttachedFiles(
-  announcements: CanvasDiscussionTopic[],
+  announcementThreads: RawDiscussionThread[],
   discussionThreads: RawDiscussionThread[],
   alreadySelected: SelectedAttachment[]
 ): SelectedAttachment[] {
@@ -502,14 +504,26 @@ function selectAnnouncementDiscussionAttachedFiles(
     });
   };
 
-  for (const announcement of announcements) {
-    for (const attachment of getCanvasAttachments(announcement)) {
+  for (const thread of announcementThreads) {
+    for (const attachment of getCanvasAttachments(thread.topic)) {
       addAttachment(attachment, {
         sourceType: "announcement_attachment",
-        fallbackPrefix: `announcement-${announcement.id}-attachment`,
-        reason: `attached to announcement "${announcement.title}"`,
+        fallbackPrefix: `announcement-${thread.topic.id}-attachment`,
+        reason: `attached to announcement "${thread.topic.title}"`,
         subfolder: "announcements",
       });
+    }
+
+    for (const entry of thread.entries) {
+      const author = entry.user_name ?? `User ${entry.user_id}`;
+      for (const attachment of getCanvasAttachments(entry)) {
+        addAttachment(attachment, {
+          sourceType: "announcement_attachment",
+          fallbackPrefix: `announcement-${thread.topic.id}-reply-${entry.id}-attachment`,
+          reason: `attached to announcement reply in "${thread.topic.title}" by ${author}`,
+          subfolder: "announcements",
+        });
+      }
     }
   }
 
@@ -565,7 +579,7 @@ function selectHtmlLinkedFiles(
   syllabusBody: string | null,
   quizzes: CanvasQuiz[],
   calendarEvents: CanvasCalendarEvent[],
-  announcements: Array<{ title: string; message: string | null }>,
+  announcementThreads: RawDiscussionThread[],
   discussionThreads: RawDiscussionThread[],
   alreadySelected: SelectedAttachment[]
 ): SelectedAttachment[] {
@@ -617,14 +631,25 @@ function selectHtmlLinkedFiles(
       subfolder: "calendar-events",
     });
   }
-  for (const announcement of announcements) {
-    if (!announcement.message) continue;
-    htmlSources.push({
-      title: `Announcement: ${announcement.title}`,
-      body: announcement.message,
-      sourceType: "page_linked",
-      subfolder: "pages",
-    });
+  for (const thread of announcementThreads) {
+    if (thread.topic.message) {
+      htmlSources.push({
+        title: `Announcement: ${thread.topic.title}`,
+        body: thread.topic.message,
+        sourceType: "page_linked",
+        subfolder: "pages",
+      });
+    }
+    for (const entry of thread.entries) {
+      if (!entry.message) continue;
+      const author = entry.user_name ?? `User ${entry.user_id}`;
+      htmlSources.push({
+        title: `Announcement reply in "${thread.topic.title}" by ${author}`,
+        body: entry.message,
+        sourceType: "page_linked",
+        subfolder: "pages",
+      });
+    }
   }
   for (const thread of discussionThreads) {
     if (thread.topic.message) {

@@ -38,6 +38,34 @@ test("htmlToText preserves structure from lists, tables, figures, and embeds", (
   );
 });
 
+test("htmlToText preserves preformatted block indentation", () => {
+  const html = [
+    "<p>Sample output:</p>",
+    "<pre>  if (x &gt; 0) {\n    return y;\n  }</pre>",
+    "<p>End of example.</p>",
+  ].join("");
+
+  const text = htmlToText(html);
+
+  assert.match(text, /```\n {2}if \(x > 0\) \{\n {4}return y;\n {2}\}\n```/);
+  assert.match(text, /Sample output:/);
+  assert.match(text, /End of example\./);
+});
+
+test("htmlToText preserves multiple pre blocks independently", () => {
+  const html = [
+    "<pre>block one\n  indented</pre>",
+    "<p>middle</p>",
+    "<pre>block two\n    deeper</pre>",
+  ].join("");
+
+  const text = htmlToText(html);
+
+  assert.match(text, /```\nblock one\n {2}indented\n```/);
+  assert.match(text, /```\nblock two\n {4}deeper\n```/);
+  assert.match(text, /middle/);
+});
+
 test("htmlToText preserves Canvas-style key-value tables", () => {
   const html = [
     "<h2>Assignment details</h2>",

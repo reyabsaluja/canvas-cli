@@ -20,6 +20,7 @@ import {
   selectArtifactSupportObservations,
   selectRecoveryReadArtifactId,
   shouldContinueToolLoopAfterGateRead,
+  shouldGroundUnverifiedAnswer,
   shouldRecoverFromToolLoop,
 } from "../src/tui/chat-agent.js";
 import { buildSystemPrompt } from "../src/tui/chat-agent/prompt.js";
@@ -1655,6 +1656,71 @@ test("workspace answer verification derives sources and confidence deterministic
     });
     assert.equal(verifiedComparisonFromTwoReads.confidence, "high");
     assert.equal(verifiedComparisonFromTwoReads.note, null);
+
+    const verifiedWithInferredSection = verifyWorkspaceAnswer({
+      question: "What is the late submission penalty?",
+      answer: "10% per day, up to 5 days.",
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read syllabus.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-syllabus",
+              title: "syllabus.txt",
+              kind: "extracted",
+              excerpt: "Course syllabus covering policies and grading.",
+            },
+          ],
+          content: [
+            "# Course Syllabus",
+            "## Overview",
+            "This course covers embedded systems.",
+            "## Grading",
+            "Assignments: 40%, Labs: 30%, Final: 30%",
+            "## Late Submission Policy",
+            "Late assignments receive a 10% deduction per day, up to 5 days.",
+            "## Academic Integrity",
+            "All work must be your own.",
+          ].join("\n"),
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedWithInferredSection.confidence, "high");
+    assert.equal(verifiedWithInferredSection.sources[0]?.title, "syllabus.txt");
+    assert.equal(
+      verifiedWithInferredSection.sources[0]?.section,
+      "Late Submission Policy"
+    );
+
+    const verifiedNoHeadingsInContent = verifyWorkspaceAnswer({
+      question: "What is the late penalty?",
+      answer: "10% per day.",
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read brief.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-brief",
+              title: "brief.txt",
+              kind: "extracted",
+              excerpt: "Late penalty is 10% per day.",
+            },
+          ],
+          content: "Late penalty is 10% per day, up to 5 days maximum.",
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedNoHeadingsInContent.confidence, "high");
+    assert.equal(verifiedNoHeadingsInContent.sources[0]?.title, "brief.txt");
+    assert.equal(verifiedNoHeadingsInContent.sources[0]?.section, undefined);
   });
 });
 
@@ -2623,6 +2689,14 @@ test("chat agent prompt and tool definitions teach search-then-read behavior", a
     assert.match(prompt, /Tool-result checkpoint/i);
     assert.match(
       prompt,
+      /GROUNDING RULE:.*Never state a specific date, point value, filename/i
+    );
+    assert.match(
+      prompt,
+      /Cite sources at the most specific level/i
+    );
+    assert.match(
+      prompt,
       /Discovery breadcrumbs \(search_workspace, search_course\).*section labels and excerpts/i
     );
     assert.match(
@@ -2636,15 +2710,18 @@ test("chat agent prompt and tool definitions teach search-then-read behavior", a
     const readFile = tools.find((tool) => tool.name === "read_file");
     const listFiles = tools.find((tool) => tool.name === "list_files");
 
-    assert.match(workspaceSearch?.description ?? "", /Discovery-only search/i);
+    assert.match(workspaceSearch?.description ?? "", /Discovery-only keyword search/i);
     assert.match(workspaceSearch?.description ?? "", /call read_file/i);
     assert.match(
       workspaceSearch?.description ?? "",
       /best two candidate sources/i
     );
-    assert.match(courseSearch?.description ?? "", /Discovery-only search/i);
+    assert.match(courseSearch?.description ?? "", /Discovery-only keyword search/i);
     assert.match(courseSearch?.description ?? "", /download_course_file/i);
     assert.match(courseSearch?.description ?? "", /best two course sources/i);
+    assert.match(workspaceSearch?.description ?? "", /QUERY TIPS/);
+    assert.match(workspaceSearch?.description ?? "", /not full questions/i);
+    assert.match(courseSearch?.description ?? "", /QUERY TIPS/);
     assert.match(readFile?.description ?? "", /grounding tool/i);
     assert.match(readFile?.description ?? "", /read each relevant source/i);
     assert.match(listFiles?.description ?? "", /failed or ambiguous read\/open/i);
@@ -3675,3 +3752,117 @@ test("artifact-backed download observations count as already-read evidence for r
     });
   });
 });
+
+test("shouldGroundUnverifiedAnswer triggers when model answered from search snippets without reading", () => {
+  const searchOnlyObservations = [
+    {
+      tool: "search_workspace",
+      status: "ok" as const,
+      summary: 'Found 2 relevant workspace matches for "branch hazard".',
+      artifacts: [
+        {
+          artifactId: "workspace:extracted:docs/reference.txt",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          excerpt: "The waveform must show stall cycles around the branch hazard.",
+        },
+      ],
+    },
+  ];
+
+  assert.equal(
+    shouldGroundUnverifiedAnswer(
+      "The branch hazard requires stall cycles.",
+      searchOnlyObservations,
+      "What does the branch hazard requirement say?"
+    ),
+    true
+  );
+});
+
+test("shouldGroundUnverifiedAnswer does not trigger when model already read a document", () => {
+  const groundedObservations = [
+    {
+      tool: "search_workspace",
+      status: "ok" as const,
+      summary: 'Found a workspace match for "branch hazard".',
+      artifacts: [
+        {
+          artifactId: "workspace:extracted:docs/reference.txt",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          excerpt: "The waveform must show stall cycles.",
+        },
+      ],
+    },
+    {
+      tool: "read_file",
+      status: "ok" as const,
+      summary: "Read docs/reference.txt.",
+      artifacts: [
+        {
+          artifactId: "workspace:extracted:docs/reference.txt",
+          title: "docs/reference.txt",
+          kind: "extracted",
+        },
+      ],
+      content: "The waveform must show stall cycles around the branch hazard.",
+    },
+  ];
+
+  assert.equal(
+    shouldGroundUnverifiedAnswer(
+      "The branch hazard requires stall cycles in the waveform.",
+      groundedObservations,
+      "What does the branch hazard requirement say?"
+    ),
+    false
+  );
+});
+
+test("shouldGroundUnverifiedAnswer does not trigger when answer is empty", () => {
+  const searchOnlyObservations = [
+    {
+      tool: "search_workspace",
+      status: "ok" as const,
+      summary: 'Found a workspace match.',
+      artifacts: [
+        {
+          artifactId: "workspace:extracted:docs/reference.txt",
+          title: "docs/reference.txt",
+          kind: "extracted",
+        },
+      ],
+    },
+  ];
+
+  assert.equal(
+    shouldGroundUnverifiedAnswer(
+      "",
+      searchOnlyObservations,
+      "What does the branch hazard requirement say?"
+    ),
+    false
+  );
+});
+
+test("shouldGroundUnverifiedAnswer does not trigger when there are no search breadcrumbs", () => {
+  const noSearchObservations = [
+    {
+      tool: "list_files",
+      status: "ok" as const,
+      summary: "Listed workspace files.",
+      artifacts: [],
+    },
+  ];
+
+  assert.equal(
+    shouldGroundUnverifiedAnswer(
+      "I found these files in the workspace.",
+      noSearchObservations,
+      "What files are available?"
+    ),
+    false
+  );
+});
+

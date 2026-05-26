@@ -62,11 +62,7 @@ export async function captureExternalCourseLinks(options: {
   frontPageBody: string | null;
   fetchedPages: Array<{ slug: string; title: string; body: string }>;
   syllabusBody: string | null;
-  announcements: Array<{
-    title: string;
-    message: string | null;
-    html_url?: string | null;
-  }>;
+  announcementThreads: RawDiscussionThread[];
   discussionThreads: RawDiscussionThread[];
   config: Config;
 }): Promise<CapturedExternalLink[]> {
@@ -183,12 +179,20 @@ export async function captureExternalCourseLinks(options: {
     addHtmlCandidates(page.body, `page "${page.title}"`, baseUrl);
   }
 
-  for (const announcement of options.announcements) {
+  for (const thread of options.announcementThreads) {
     addHtmlCandidates(
-      announcement.message,
-      `announcement "${announcement.title}"`,
-      announcement.html_url ?? options.courseHtmlUrl
+      thread.topic.message,
+      `announcement "${thread.topic.title}"`,
+      thread.topic.html_url
     );
+    for (const entry of thread.entries) {
+      const author = entry.user_name ?? `User ${entry.user_id}`;
+      addHtmlCandidates(
+        entry.message,
+        `announcement reply in "${thread.topic.title}" by ${author}`,
+        thread.topic.html_url
+      );
+    }
   }
 
   for (const thread of options.discussionThreads) {
@@ -357,6 +361,40 @@ async function fetchExternalLink(
         pageTitle: null,
         text: "",
         note: `The PDF was reachable, but text extraction failed: ${
+          error instanceof Error ? error.message : "unknown error"
+        }.`,
+      };
+    }
+  }
+
+  if (looksLikeOfficeDocument(contentType, finalUrl)) {
+    try {
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const filename =
+        guessFilenameFromUrl(finalUrl) ?? guessOfficeFilename(contentType);
+      const extracted = (await extractFileBufferText(buffer, filename))
+        .trim()
+        .slice(0, MAX_CAPTURED_TEXT);
+      const isUsable =
+        extracted.length > 0 && !extracted.startsWith("[Binary file:") && !extracted.startsWith("[Error");
+      return {
+        status: isUsable ? "captured" : "metadata_only",
+        resolvedUrl: finalUrl,
+        contentType,
+        pageTitle: null,
+        text: isUsable ? extracted : "",
+        note: isUsable
+          ? null
+          : "The Office document was reachable, but no readable text could be extracted.",
+      };
+    } catch (error) {
+      return {
+        status: "metadata_only",
+        resolvedUrl: finalUrl,
+        contentType,
+        pageTitle: null,
+        text: "",
+        note: `The Office document was reachable, but text extraction failed: ${
           error instanceof Error ? error.message : "unknown error"
         }.`,
       };
@@ -581,6 +619,38 @@ function extractExternalLinksFromHtml(
 
     results.push({
       title: normalizeLinkTitle(match[1], normalizedUrl),
+      url: normalizedUrl,
+    });
+  }
+
+  const iframeRegex = /<iframe\b[^>]*>/gi;
+  let iframeMatch: RegExpExecArray | null;
+
+  while ((iframeMatch = iframeRegex.exec(html)) !== null) {
+    const tag = iframeMatch[0];
+    const src = extractAttr(tag, "src");
+    if (!src) continue;
+
+    const resolvedUrl = resolveHref(src, options.baseUrl);
+    if (
+      !resolvedUrl ||
+      !isCapturableExternalUrl(resolvedUrl, {
+        courseId: options.courseId,
+        canvasOrigin: options.canvasOrigin,
+      })
+    ) {
+      continue;
+    }
+
+    const normalizedUrl = normalizeExternalUrl(resolvedUrl);
+    if (!normalizedUrl || seen.has(normalizedUrl)) {
+      continue;
+    }
+    seen.add(normalizedUrl);
+
+    const title = extractAttr(tag, "title") ?? normalizedUrl;
+    results.push({
+      title: decodeEntities(title),
       url: normalizedUrl,
     });
   }
@@ -821,6 +891,42 @@ function looksLikeHtml(contentType: string | null, url: string): boolean {
     normalized.includes("application/xhtml") ||
     normalized.includes("application/xml")
   );
+}
+
+function looksLikeOfficeDocument(contentType: string | null, url: string): boolean {
+  if (/\.(?:docx|pptx|xlsx)(?:$|[?#])/i.test(url)) {
+    return true;
+  }
+  if (!contentType) return false;
+  const normalized = contentType.toLowerCase();
+  return (
+    normalized.includes("application/vnd.openxmlformats-officedocument") ||
+    normalized.includes("application/vnd.ms-powerpoint") ||
+    normalized.includes("application/vnd.ms-excel") ||
+    normalized.includes("application/msword")
+  );
+}
+
+function guessFilenameFromUrl(url: string): string | null {
+  try {
+    const pathname = new URL(url).pathname;
+    const lastSegment = pathname.split("/").pop() ?? "";
+    const decoded = decodeURIComponent(lastSegment);
+    if (/\.(docx|pptx|xlsx)$/i.test(decoded)) {
+      return decoded;
+    }
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
+function guessOfficeFilename(contentType: string | null): string {
+  if (!contentType) return "document.docx";
+  const ct = contentType.toLowerCase();
+  if (ct.includes("presentation") || ct.includes("powerpoint")) return "document.pptx";
+  if (ct.includes("spreadsheet") || ct.includes("excel")) return "document.xlsx";
+  return "document.docx";
 }
 
 function looksLikePlainText(contentType: string | null, url: string): boolean {

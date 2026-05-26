@@ -238,7 +238,8 @@ function buildNextToolStep(
   const needsMultipleSources = questionNeedsMultipleSources(question);
   if (groundedArtifactIds.size > 0) {
     if (!needsMultipleSources || groundedArtifactIds.size > 1) {
-      return null;
+      const sourceCount = groundedArtifactIds.size;
+      return `Evidence sufficient: you have grounded text from ${sourceCount} source${sourceCount > 1 ? "s" : ""}. Answer directly from this evidence — do not call another tool.`;
     }
     if (candidateTitles.length === 0) {
       return buildFailureRecoveryNextStep(observations, {

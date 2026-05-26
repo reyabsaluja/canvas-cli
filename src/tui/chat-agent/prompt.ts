@@ -54,9 +54,10 @@ IMPORTANT tool usage rules:
 Rules:
 - When the user asks for detail or "in depth", give thorough answers with specific requirements, addresses, values, and steps from the documents.
 - If the workup already contains the answer, respond immediately (no tool calls needed).
-- Cite sources when relevant. When a source label includes a section, cite that section rather than only the document title.
+- Cite sources at the most specific level you can. When your evidence came from a named section, cite the section: "according to the Calibration section of the lab spec" rather than "according to the lab spec". When you paraphrase a requirement, parenthetically note the source: "(from Submission Guidelines in the syllabus)". This helps students locate the original text quickly.
 - Do NOT solve the assignment — help the student understand it.
 - For simple questions, keep it brief. For "explain" or "in depth" questions, be thorough and specific.
+- GROUNDING RULE: Never state a specific date, point value, filename, time, percentage, or numeric quantity unless it appears verbatim in the pre-loaded context or in grounded tool evidence. If a student asks for a specific detail you cannot find in your evidence, say "I don't see that specific [date/value/detail] in the materials I have" and suggest where they might find it (e.g., "check the assignment page on Canvas" or offer to search). Do not guess or infer numeric specifics.
 
 IMPORTANT: Before calling any tool, ALWAYS write a brief sentence explaining what you're about to do. For example, write "Let me read the lab document..." before calling read_file, or "Searching for that..." before calling search_workspace. This sentence must come BEFORE the tool call, not after. The student needs to see your thought process in real-time.
 
@@ -185,7 +186,7 @@ export async function answerWithoutTools(
   const userMessage = buildEvidenceBackedQuestion(question, observations);
   const answer = await callModel(
     ctx.aiConfig,
-    `${systemPrompt}\n\nNo tools are available for this turn. Answer only from the pre-loaded assignment context and any supplemental evidence provided in the user message.`,
+    `${systemPrompt}\n\nNo tools are available for this turn. Answer only from the pre-loaded assignment context and any supplemental evidence provided in the user message. When citing, refer to the specific section or document (e.g. "in the Submission Guidelines" rather than just "in the course materials"). If the evidence doesn't fully answer the question, state what you found and what you cannot confirm.`,
     buildConversationPrompt(ctx.conversationHistory, userMessage)
   );
   if (answer && onTextDelta && !abortSignal?.aborted) {
@@ -233,6 +234,13 @@ export function buildEvidenceBackedQuestion(
     }
     sections.push("");
   }
+  sections.push(
+    "Answer rules for this evidence:",
+    "- Cite at the section level when possible (e.g. \"according to the Grading section of the syllabus\"), not just the document title.",
+    "- When quoting a specific requirement, due date, or threshold, use the exact wording from the evidence rather than paraphrasing it loosely.",
+    "- If the evidence partially answers the question but leaves something unaddressed, say what you found and what remains unclear — do not fill gaps with assumptions.",
+    "- When multiple sources address the same point, synthesize them: note if they agree, and flag if they conflict.",
+  );
   return sections.join("\n");
 }
 

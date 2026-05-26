@@ -381,3 +381,250 @@ test("artifact index cache invalidates when extracted workspace content changes"
     assert.match(secondText ?? "", /final waveform evidence/);
   });
 });
+
+test("section search discriminates numbered course items by single-digit tokens", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "assignments"), {
+      recursive: true,
+    });
+
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "assignments", "1.txt"),
+      "# Lab 3: Pipelining\n\nPoints: 80\nDue: March 1\n\nImplement forwarding logic for the 5-stage pipeline.\n",
+      "utf-8"
+    );
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "assignments", "2.txt"),
+      "# Lab 4: Cache Memory\n\nPoints: 100\nDue: March 15\n\nImplement a direct-mapped cache simulator.\n",
+      "utf-8"
+    );
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "assignments", "3.txt"),
+      "# Lab 5: I/O Devices\n\nPoints: 90\nDue: March 29\n\nProgram device registers for UART communication.\n",
+      "utf-8"
+    );
+
+    const cache: CourseCache = {
+      courseId: 17,
+      coursePath,
+      assignments: [
+        {
+          id: 1,
+          name: "Lab 3: Pipelining",
+          dueAt: "2026-03-01T23:59:00.000Z",
+          unlockAt: null,
+          lockAt: null,
+          pointsPossible: 80,
+          gradingType: "points",
+          submissionTypes: ["online_upload"],
+          htmlUrl: "https://canvas.example/assignments/1",
+          hasDescription: true,
+          descriptionLinkCount: 0,
+        },
+        {
+          id: 2,
+          name: "Lab 4: Cache Memory",
+          dueAt: "2026-03-15T23:59:00.000Z",
+          unlockAt: null,
+          lockAt: null,
+          pointsPossible: 100,
+          gradingType: "points",
+          submissionTypes: ["online_upload"],
+          htmlUrl: "https://canvas.example/assignments/2",
+          hasDescription: true,
+          descriptionLinkCount: 0,
+        },
+        {
+          id: 3,
+          name: "Lab 5: I/O Devices",
+          dueAt: "2026-03-29T23:59:00.000Z",
+          unlockAt: null,
+          lockAt: null,
+          pointsPossible: 90,
+          gradingType: "points",
+          submissionTypes: ["online_upload"],
+          htmlUrl: "https://canvas.example/assignments/3",
+          hasDescription: true,
+          descriptionLinkCount: 0,
+        },
+      ],
+      modules: [],
+      files: [],
+      pages: [],
+      announcements: [],
+      discussions: [],
+      syllabusCandidates: [],
+      attachments: [],
+      lectures: [],
+      ingestion: {
+        version: 1,
+        ingestedAt: "2026-04-01T12:00:00.000Z",
+        courseId: 17,
+        courseName: "ECE243",
+        courseCode: "ECE243H1",
+        refresh: false,
+        counts: {
+          assignments: 3,
+          modules: 0,
+          moduleItems: 0,
+          files: 0,
+          pages: 0,
+          syllabusCandidates: 0,
+          lectures: 0,
+          attachmentsDownloaded: 0,
+          attachmentsSkipped: 0,
+          attachmentsFailed: 0,
+        },
+      },
+    };
+
+    const index = await loadArtifactIndex({ cache });
+
+    const lab4Results = searchArtifactSections(index, "lab 4", {
+      scope: "course",
+      limit: 3,
+    });
+    assert.ok(lab4Results.length >= 1);
+    assert.equal(lab4Results[0]!.section.source, "Lab 4: Cache Memory");
+
+    const lab3Results = searchArtifactSections(index, "lab 3", {
+      scope: "course",
+      limit: 3,
+    });
+    assert.ok(lab3Results.length >= 1);
+    assert.equal(lab3Results[0]!.section.source, "Lab 3: Pipelining");
+
+    const lab5Results = searchArtifactSections(index, "lab 5", {
+      scope: "course",
+      limit: 3,
+    });
+    assert.ok(lab5Results.length >= 1);
+    assert.equal(lab5Results[0]!.section.source, "Lab 5: I/O Devices");
+
+    // Verify score separation — correct lab should score much higher
+    const lab4Score = lab4Results[0]!.score;
+    const lab4SecondScore = lab4Results[1]?.score ?? 0;
+    assert.ok(
+      lab4Score > lab4SecondScore * 1.5,
+      `Lab 4 should score much higher than other labs (${lab4Score} vs ${lab4SecondScore})`
+    );
+  });
+});
+
+test("section search matches morphological variants through stemming", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "assignments"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "assignments", "1.txt"),
+      [
+        "# Homework 1",
+        "",
+        "## Submission Guidelines",
+        "",
+        "Submit your report as a PDF. All submissions must include a cover page.",
+        "Files submitted after the deadline receive a 10% penalty.",
+      ].join("\n"),
+      "utf-8"
+    );
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "assignments", "2.txt"),
+      [
+        "# Homework 2",
+        "",
+        "## Requirements",
+        "",
+        "Students are required to implement the algorithm described in lecture.",
+        "Each requirement must be satisfied for full marks.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache: CourseCache = {
+      coursePath,
+      courseId: 10,
+      courseName: "CS101",
+      courseCode: "CS101",
+      assignments: [
+        {
+          id: 1,
+          name: "Homework 1",
+          dueAt: null,
+          pointsPossible: 100,
+          gradingType: "points",
+          submissionTypes: ["online_upload"],
+        },
+        {
+          id: 2,
+          name: "Homework 2",
+          dueAt: null,
+          pointsPossible: 100,
+          gradingType: "points",
+          submissionTypes: ["online_upload"],
+        },
+      ],
+      pages: [],
+      modules: [],
+      moduleItems: [],
+      files: [],
+      attachments: [],
+      quizzes: [],
+      calendarEvents: [],
+      announcements: [],
+      discussions: [],
+      externalLinks: [],
+      lectures: [],
+      ingestion: {
+        version: 1,
+        ingestedAt: "2026-04-01T12:00:00.000Z",
+        courseId: 10,
+        courseName: "CS101",
+        courseCode: "CS101",
+        refresh: false,
+        counts: {
+          assignments: 2,
+          modules: 0,
+          moduleItems: 0,
+          files: 0,
+          pages: 0,
+          syllabusCandidates: 0,
+          lectures: 0,
+          attachmentsDownloaded: 0,
+          attachmentsSkipped: 0,
+          attachmentsFailed: 0,
+        },
+      },
+    };
+
+    const index = await loadArtifactIndex({ cache });
+
+    // "submitting" should match content containing "submit", "submissions", "submitted"
+    const submitResults = searchArtifactSections(index, "submitting", {
+      scope: "course",
+      limit: 5,
+    });
+    assert.ok(
+      submitResults.length > 0,
+      "should find results for 'submitting' matching 'submit/submissions/submitted'"
+    );
+    assert.equal(submitResults[0]!.section.source, "Homework 1");
+
+    // "required" should match content containing "requirements", "required", "requirement"
+    const requireResults = searchArtifactSections(index, "required", {
+      scope: "course",
+      limit: 5,
+    });
+    assert.ok(
+      requireResults.length > 0,
+      "should find results for 'required' matching 'requirements/required/requirement'"
+    );
+    assert.equal(requireResults[0]!.section.source, "Homework 2");
+  });
+});

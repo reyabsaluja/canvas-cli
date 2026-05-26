@@ -38,6 +38,7 @@ import {
   selectRecoveryReadArtifactId,
   shouldContinueToolLoopAfterGateRead,
   shouldRecoverFromToolLoop,
+  shouldGroundUnverifiedAnswer,
 } from "./chat-agent/verification.js";
 
 const MAX_RECOVERY_READ_ATTEMPTS = 2;
@@ -252,7 +253,10 @@ async function runToolLoopTurn(
     observationStart,
     question
   );
-  if (fullText.trim().length === 0) {
+  const needsRecoveryRead =
+    fullText.trim().length === 0 ||
+    shouldGroundUnverifiedAnswer(fullText, supportingObservations, question);
+  if (needsRecoveryRead) {
     const attemptedRecoveryArtifactIds = new Set<string>();
     while (attemptedRecoveryArtifactIds.size < MAX_RECOVERY_READ_ATTEMPTS) {
       const recoveryArtifactId = selectRecoveryReadArtifactId(
@@ -328,6 +332,7 @@ export {
   selectArtifactSupportObservations,
   selectRecoveryReadArtifactId,
   shouldContinueToolLoopAfterGateRead,
+  shouldGroundUnverifiedAnswer,
   shouldRecoverFromToolLoop,
 };
 

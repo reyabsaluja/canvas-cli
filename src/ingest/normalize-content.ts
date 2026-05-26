@@ -9,6 +9,7 @@ import type {
   CalendarEventIndexEntry,
   AnnouncementIndexEntry,
   DiscussionIndexEntry,
+  GradingGroupIndexEntry,
 } from "./types.js";
 import { extractLinkedFiles } from "../workspace/attachments.js";
 
@@ -25,6 +26,7 @@ export function normalizeCourseContent(raw: RawCourseContent): {
   calendarEvents: CalendarEventIndexEntry[];
   announcements: AnnouncementIndexEntry[];
   discussions: DiscussionIndexEntry[];
+  gradingGroups: GradingGroupIndexEntry[];
 } {
   const courseMeta: CourseMetadata = {
     id: raw.courseDetail.id,
@@ -162,21 +164,40 @@ export function normalizeCourseContent(raw: RawCourseContent): {
     }
   );
 
+  const announcementThreadByTopicId = new Map(
+    raw.announcementThreads.map((thread) => [thread.topic.id, thread])
+  );
   const announcements: AnnouncementIndexEntry[] = raw.announcements.map(
-    (announcement) => ({
-      id: announcement.id,
-      title: announcement.title,
-      postedAt: announcement.posted_at,
-      htmlUrl: announcement.html_url,
-      userName: announcement.user_name,
-      hasMessage:
-        typeof announcement.message === "string" &&
-        announcement.message.length > 0,
-      messageFileLinkCount:
-        typeof announcement.message === "string"
-          ? extractLinkedFiles(announcement.message).length
-          : 0,
-    })
+    (announcement) => {
+      const thread = announcementThreadByTopicId.get(announcement.id);
+      const replyFileLinkCount = (thread?.entries ?? []).reduce(
+        (count, entry) => {
+          if (typeof entry.message !== "string") {
+            return count;
+          }
+          return count + extractLinkedFiles(entry.message).length;
+        },
+        0
+      );
+
+      return {
+        id: announcement.id,
+        title: announcement.title,
+        postedAt: announcement.posted_at,
+        htmlUrl: announcement.html_url,
+        userName: announcement.user_name,
+        hasMessage:
+          typeof announcement.message === "string" &&
+          announcement.message.length > 0,
+        messageFileLinkCount:
+          typeof announcement.message === "string"
+            ? extractLinkedFiles(announcement.message).length
+            : 0,
+        threadEntryCount: thread?.entries.length ?? 0,
+        participantCount: thread?.participantCount ?? 0,
+        replyFileLinkCount,
+      };
+    }
   );
 
   const threadByTopicId = new Map(
@@ -209,6 +230,21 @@ export function normalizeCourseContent(raw: RawCourseContent): {
     };
   });
 
+  const gradingGroups: GradingGroupIndexEntry[] = raw.assignmentGroups.map(
+    (group) => {
+      const groupAssignments = group.assignments ?? [];
+      return {
+        id: group.id,
+        name: group.name,
+        weight: group.group_weight,
+        assignmentCount: groupAssignments.length,
+        assignmentNames: groupAssignments
+          .map((a) => a.name)
+          .slice(0, 20),
+      };
+    }
+  );
+
   return {
     courseMeta,
     assignments,
@@ -219,5 +255,6 @@ export function normalizeCourseContent(raw: RawCourseContent): {
     calendarEvents,
     announcements,
     discussions,
+    gradingGroups,
   };
 }

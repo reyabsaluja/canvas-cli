@@ -24,6 +24,16 @@ export function questionNeedsMultipleSources(question: string): boolean {
 
   return (
     questionExplicitlyComparesSources(normalized) ||
-    /\b(changed|change since|what changed)\b/i.test(normalized)
+    /\b(changed|change since|what changed)\b/i.test(normalized) ||
+    questionAsksAboutMultipleTopics(normalized)
   );
+}
+
+function questionAsksAboutMultipleTopics(normalized: string): boolean {
+  const multiPartPatterns = [
+    /\b(?:what|how|where|when|explain|describe|tell)\b[^?]*\band\s+(?:what|how|where|when|also|explain|describe|tell)\b/i,
+    /\b(?:both|each of)\b/i,
+    /\?\s*(?:also|and)\b/i,
+  ];
+  return multiPartPatterns.some((pattern) => pattern.test(normalized));
 }

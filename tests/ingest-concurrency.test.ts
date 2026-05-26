@@ -1034,29 +1034,37 @@ test("ingestCourse downloads files attached to announcements and discussion repl
             },
           ];
         },
-        async getDiscussionTopicViewSafe() {
+        async getDiscussionTopicViewSafe(_courseId: number, topicId: number) {
+          if (topicId === 9) {
+            return {
+              participants: [{ id: 1, display_name: "Prof. Ada" }],
+              unread_entries: [],
+              view: [
+                {
+                  id: 101,
+                  user_id: 1,
+                  user_name: "Prof. Ada",
+                  message: "<p>Use this patch for the starter files.</p>",
+                  created_at: "2026-04-03T15:30:00.000Z",
+                  updated_at: "2026-04-03T15:30:00.000Z",
+                  read_state: "read",
+                  attachment: {
+                    id: 52,
+                    display_name: "starter-patch.txt",
+                    filename: "starter-patch.txt",
+                    url: "https://canvas.example/files/52/download",
+                    content_type: "text/plain",
+                    size: 41,
+                  },
+                },
+              ],
+              new_entries: [],
+            };
+          }
           return {
             participants: [{ id: 1, display_name: "Prof. Ada" }],
             unread_entries: [],
-            view: [
-              {
-                id: 101,
-                user_id: 1,
-                user_name: "Prof. Ada",
-                message: "<p>Use this patch for the starter files.</p>",
-                created_at: "2026-04-03T15:30:00.000Z",
-                updated_at: "2026-04-03T15:30:00.000Z",
-                read_state: "read",
-                attachment: {
-                  id: 52,
-                  display_name: "starter-patch.txt",
-                  filename: "starter-patch.txt",
-                  url: "https://canvas.example/files/52/download",
-                  content_type: "text/plain",
-                  size: 41,
-                },
-              },
-            ],
+            view: [],
             new_entries: [],
           };
         },
@@ -1126,6 +1134,147 @@ test("ingestCourse downloads files attached to announcements and discussion repl
         "utf-8"
       );
       assert.match(discussionText, /Downloaded body/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+test("ingestCourse captures announcement thread replies in extracted text", async () => {
+  await withTempCwd(async () => {
+    const course: Course = {
+      id: 17,
+      name: "ECE243",
+      courseCode: "ECE243H1",
+      termName: "Winter 2026",
+      isCurrent: true,
+    };
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response("", { status: 200, headers: { "content-type": "text/plain" } });
+
+    try {
+      const client = {
+        async getCourseDetail() {
+          return {
+            id: course.id,
+            name: course.name,
+            course_code: course.courseCode,
+            syllabus_body: null,
+            start_at: null,
+            end_at: null,
+            term: null,
+            html_url: "https://canvas.example/courses/17",
+          };
+        },
+        async getAssignments() {
+          return [];
+        },
+        async getModulesSafe() {
+          return [];
+        },
+        async getModuleItemsSafe() {
+          return [];
+        },
+        async getFilesSafe() {
+          return [];
+        },
+        async getPagesSafe() {
+          return [];
+        },
+        async getAnnouncementsSafe() {
+          return [
+            {
+              id: 5,
+              title: "Exam is now open book",
+              message: "<p>Due to feedback, the midterm is open book.</p>",
+              context_code: "course_17",
+              posted_at: "2026-04-01T10:00:00.000Z",
+              last_reply_at: "2026-04-02T14:00:00.000Z",
+              discussion_type: "side_comment",
+              read_state: "read",
+              unread_count: 0,
+              user_name: "Prof. Ada",
+              html_url: "https://canvas.example/courses/17/discussion_topics/5",
+              published: true,
+              is_announcement: true,
+              locked: false,
+            },
+          ];
+        },
+        async getDiscussionTopicsSafe() {
+          return [];
+        },
+        async getDiscussionTopicViewSafe(_courseId: number, topicId: number) {
+          if (topicId === 5) {
+            return {
+              participants: [
+                { id: 1, display_name: "Prof. Ada" },
+                { id: 2, display_name: "Student Bob" },
+              ],
+              unread_entries: [],
+              view: [
+                {
+                  id: 201,
+                  user_id: 2,
+                  user_name: "Student Bob",
+                  message: "<p>Does this include the formula sheet?</p>",
+                  created_at: "2026-04-01T12:00:00.000Z",
+                  updated_at: "2026-04-01T12:00:00.000Z",
+                  read_state: "read",
+                },
+                {
+                  id: 202,
+                  user_id: 1,
+                  user_name: "Prof. Ada",
+                  message: "<p>Yes, you can bring the formula sheet and any notes.</p>",
+                  created_at: "2026-04-02T14:00:00.000Z",
+                  updated_at: "2026-04-02T14:00:00.000Z",
+                  read_state: "read",
+                },
+              ],
+              new_entries: [],
+            };
+          }
+          return { participants: [], unread_entries: [], view: [], new_entries: [] };
+        },
+        async getFrontPageSafe() {
+          return null;
+        },
+        async getPageBySlugSafe() {
+          return null;
+        },
+        skippedEndpoints: [] as string[],
+        resetSkippedEndpoints() {},
+      } as any;
+
+      const result = await ingestCourse(
+        course,
+        client,
+        {
+          baseUrl: "https://canvas.example/api/v1",
+          accessToken: "token",
+        },
+        { refresh: false }
+      );
+
+      assert.equal(result.announcements?.length, 1);
+      const entry = result.announcements![0];
+      assert.equal(entry.threadEntryCount, 2);
+      assert.equal(entry.participantCount, 2);
+
+      const announcementExtract = await fs.readFile(
+        path.join(result.coursePath, "extracted", "announcements", "5.txt"),
+        "utf-8"
+      );
+      assert.match(announcementExtract, /Exam is now open book/);
+      assert.match(announcementExtract, /midterm is open book/);
+      assert.match(announcementExtract, /## Replies/);
+      assert.match(announcementExtract, /Student Bob/);
+      assert.match(announcementExtract, /Does this include the formula sheet/);
+      assert.match(announcementExtract, /Prof\. Ada/);
+      assert.match(announcementExtract, /you can bring the formula sheet/);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -2149,6 +2298,136 @@ test("ingestCourse uses bounded concurrency for fallback module file metadata fe
       assert.equal(result.attachments.length, 6);
       assert.ok(maxFileMetadataRequests > 1);
       assert.ok(maxFileMetadataRequests <= 4);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+test("ingestCourse captures assignment group grading breakdown", async () => {
+  await withTempCwd(async () => {
+    const course: Course = {
+      id: 17,
+      name: "ECE243",
+      courseCode: "ECE243H1",
+      termName: "Winter 2026",
+      isCurrent: true,
+    };
+
+    const client = {
+      async getCourseDetail() {
+        return {
+          id: course.id,
+          name: course.name,
+          course_code: course.courseCode,
+          syllabus_body: null,
+          start_at: null,
+          end_at: null,
+          term: null,
+          html_url: "https://canvas.example/courses/17",
+        };
+      },
+      async getAssignments() {
+        return [
+          { id: 1, name: "Lab 1", due_at: null, html_url: "https://canvas.example/courses/17/assignments/1", has_submitted_submissions: false, course_id: 17 },
+          { id: 2, name: "Lab 2", due_at: null, html_url: "https://canvas.example/courses/17/assignments/2", has_submitted_submissions: false, course_id: 17 },
+          { id: 3, name: "Midterm", due_at: null, html_url: "https://canvas.example/courses/17/assignments/3", has_submitted_submissions: false, course_id: 17 },
+        ];
+      },
+      async getModulesSafe() {
+        return [];
+      },
+      async getModuleItemsSafe() {
+        return [];
+      },
+      async getFilesSafe() {
+        return [];
+      },
+      async getPagesSafe() {
+        return [];
+      },
+      async getAnnouncementsSafe() {
+        return [];
+      },
+      async getDiscussionTopicsSafe() {
+        return [];
+      },
+      async getFrontPageSafe() {
+        return null;
+      },
+      async getPageBySlugSafe() {
+        return null;
+      },
+      async getAssignmentGroupsSafe() {
+        return [
+          {
+            id: 100,
+            name: "Labs",
+            group_weight: 30,
+            assignments: [
+              { id: 1, name: "Lab 1", due_at: null, points_possible: 10, omit_from_final_grade: false },
+              { id: 2, name: "Lab 2", due_at: null, points_possible: 10, omit_from_final_grade: false },
+            ],
+          },
+          {
+            id: 101,
+            name: "Exams",
+            group_weight: 70,
+            assignments: [
+              { id: 3, name: "Midterm", due_at: null, points_possible: 100, omit_from_final_grade: false },
+            ],
+          },
+        ];
+      },
+      skippedEndpoints: [] as string[],
+      resetSkippedEndpoints() {},
+    } as any;
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (() => {
+      throw new Error("unexpected fetch during test");
+    }) as any;
+
+    try {
+      const result = await ingestCourse(
+        course,
+        client,
+        {
+          baseUrl: "https://canvas.example/api/v1",
+          accessToken: "token",
+        },
+        { refresh: false }
+      );
+
+      assert.equal(result.gradingGroups?.length, 2);
+      const labs = result.gradingGroups!.find((g) => g.name === "Labs");
+      assert.ok(labs);
+      assert.equal(labs.weight, 30);
+      assert.equal(labs.assignmentCount, 2);
+      assert.deepEqual(labs.assignmentNames, ["Lab 1", "Lab 2"]);
+
+      const exams = result.gradingGroups!.find((g) => g.name === "Exams");
+      assert.ok(exams);
+      assert.equal(exams.weight, 70);
+      assert.equal(exams.assignmentCount, 1);
+
+      // Verify the extracted text was written
+      const coursePath = result.coursePath;
+      const breakdownText = await fs.readFile(
+        path.join(coursePath, "extracted", "grading-breakdown.txt"),
+        "utf-8"
+      );
+      assert.match(breakdownText, /Grading Breakdown/);
+      assert.match(breakdownText, /Exams \(70%\)/);
+      assert.match(breakdownText, /Labs \(30%\)/);
+      assert.match(breakdownText, /Lab 1/);
+      assert.match(breakdownText, /Midterm/);
+      assert.match(breakdownText, /weighted \(total 100%\)/);
+
+      // Verify the JSON index was written
+      const jsonPath = path.join(coursePath, "grading-groups.json");
+      const jsonContent = JSON.parse(await fs.readFile(jsonPath, "utf-8"));
+      assert.equal(jsonContent.length, 2);
     } finally {
       globalThis.fetch = originalFetch;
     }

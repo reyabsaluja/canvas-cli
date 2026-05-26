@@ -246,6 +246,97 @@ test("buildToolPromptMessages does not force a second read for ordinary single-s
   assert.match(latestMessage, /docs\/reference\.txt/);
   assert.match(latestMessage, /docs\/walkthrough\.txt/);
   assert.doesNotMatch(latestMessage, /Unresolved next step:/i);
+  assert.match(latestMessage, /Evidence sufficient.*1 source/i);
+});
+
+test("buildToolPromptMessages emits sufficiency signal for multi-source question with enough reads", () => {
+  const promptMessages = buildToolPromptMessages(
+    [],
+    "Compare the branch hazard walkthrough to the reference.",
+    {
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read docs/reference.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-1",
+              title: "docs/reference.txt",
+              kind: "extracted",
+              excerpt: "The waveform must show stall cycles around the branch hazard.",
+            },
+          ],
+          content: "The waveform must show stall cycles around the branch hazard.",
+        },
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read docs/walkthrough.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-2",
+              title: "docs/walkthrough.txt",
+              kind: "extracted",
+              excerpt: "The walkthrough explains each branch hazard stall step-by-step.",
+            },
+          ],
+          content: "The walkthrough explains each branch hazard stall step-by-step.",
+        },
+      ],
+      readArtifactIds: ["artifact-1", "artifact-2"],
+      stepCount: 2,
+    }
+  );
+
+  const latestMessage = promptMessages.at(-1)?.content ?? "";
+  assert.match(latestMessage, /Evidence sufficient.*2 sources/i);
+  assert.doesNotMatch(latestMessage, /Unresolved next step:/i);
+});
+
+test("buildToolPromptMessages treats multi-topic questions as needing multiple sources", () => {
+  const promptMessages = buildToolPromptMessages(
+    [],
+    "What are the requirements for part A and how does the grading work?",
+    {
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read assignment.md.",
+          artifacts: [
+            {
+              artifactId: "artifact-1",
+              title: "assignment.md",
+              kind: "assignment",
+              excerpt: "Part A requires implementing a cache controller.",
+            },
+          ],
+          content: "Part A requires implementing a cache controller.",
+        },
+        {
+          tool: "search_workspace",
+          status: "ok",
+          summary: "Found 2 workspace matches for 'grading'.",
+          artifacts: [
+            {
+              artifactId: "artifact-2",
+              title: "syllabus.pdf",
+              kind: "attachment",
+              excerpt: "Grading breakdown: 40% assignments, 30% midterm, 30% final.",
+            },
+          ],
+        },
+      ],
+      readArtifactIds: ["artifact-1"],
+      stepCount: 2,
+    }
+  );
+
+  const latestMessage = promptMessages.at(-1)?.content ?? "";
+  assert.match(latestMessage, /Unresolved next step:/i);
+  assert.match(latestMessage, /syllabus\.pdf/i);
+  assert.doesNotMatch(latestMessage, /Evidence sufficient/i);
 });
 
 test("buildToolPromptMessages prefers viable breadcrumbs over already-failed artifacts", () => {

@@ -176,13 +176,15 @@ function collectSources(
   const citationObservations = selectCitationObservations(question, observations);
 
   for (const observation of citationObservations) {
-    // Only successful tool observations count as evidence. Failed lookups like
-    // missing_text/not_found should never create grounding-looking citations.
     if (observation.status !== "ok") {
       continue;
     }
     for (const artifact of observation.artifacts) {
-      const section = normalizeSourceSection(artifact.sectionLabel);
+      const section =
+        normalizeSourceSection(artifact.sectionLabel) ??
+        (isGroundedContentObservation(observation)
+          ? inferSectionFromContent(question, observation.content!)
+          : null);
       const key = `${artifact.kind}:${artifact.title}:${section ?? ""}`;
       if (seen.has(key)) {
         continue;
@@ -214,6 +216,61 @@ function collectSources(
   }
 
   return resolved;
+}
+
+function inferSectionFromContent(
+  question: string,
+  content: string
+): string | null {
+  const headings = extractContentHeadings(content);
+  if (headings.length === 0) {
+    return null;
+  }
+
+  const questionTokens = tokenizeForMatch(question);
+  if (questionTokens.length === 0) {
+    return null;
+  }
+
+  let bestHeading: string | null = null;
+  let bestScore = 0;
+
+  for (const heading of headings) {
+    const headingTokens = tokenizeForMatch(heading);
+    let score = 0;
+    for (const token of questionTokens) {
+      if (headingTokens.includes(token)) {
+        score += 1;
+      }
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestHeading = heading;
+    }
+  }
+
+  return bestScore > 0 ? bestHeading : null;
+}
+
+function extractContentHeadings(content: string): string[] {
+  const headings: string[] = [];
+  for (const line of content.split("\n")) {
+    const match = line.match(/^#{1,4}\s+(.+)/);
+    if (match) {
+      const heading = match[1]!.trim();
+      if (heading.length > 0 && heading.length <= 80) {
+        headings.push(heading);
+      }
+    }
+  }
+  return headings;
+}
+
+function tokenizeForMatch(value: string): string[] {
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length >= 3);
 }
 
 function selectCitationObservations(

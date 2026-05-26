@@ -29,6 +29,7 @@ export type ArtifactKind =
   | "discussion"
   | "external_link"
   | "attachment"
+  | "grading"
   | "syllabus"
   | "front_page"
   | "workup"
@@ -96,7 +97,7 @@ export interface RankedArtifactSection {
 }
 
 const artifactIndexCache = new Map<string, Promise<ArtifactIndexInternal>>();
-const SEARCH_QUERY_STOP_WORDS = new Set([
+const SEARCH_QUERY_STOP_WORDS_RAW = [
   "a",
   "an",
   "and",
@@ -143,8 +144,15 @@ const SEARCH_QUERY_STOP_WORDS = new Set([
   "which",
   "with",
   "you",
-]);
-const SNIPPET_QUERY_STOP_WORDS = new Set([
+];
+let _searchQueryStopWords: Set<string> | null = null;
+function getSearchQueryStopWords(): Set<string> {
+  if (!_searchQueryStopWords) {
+    _searchQueryStopWords = new Set(SEARCH_QUERY_STOP_WORDS_RAW.map(stemToken));
+  }
+  return _searchQueryStopWords;
+}
+const SNIPPET_QUERY_STOP_WORDS_RAW = [
   "about",
   "assignment",
   "course",
@@ -162,7 +170,14 @@ const SNIPPET_QUERY_STOP_WORDS = new Set([
   "where",
   "which",
   "with",
-]);
+];
+let _snippetQueryStopWords: Set<string> | null = null;
+function getSnippetQueryStopWords(): Set<string> {
+  if (!_snippetQueryStopWords) {
+    _snippetQueryStopWords = new Set(SNIPPET_QUERY_STOP_WORDS_RAW.map(stemToken));
+  }
+  return _snippetQueryStopWords;
+}
 
 export function formatArtifactLabel(
   artifact: Pick<ArtifactRecord, "kind" | "title">
@@ -437,9 +452,10 @@ export async function readArtifactContent(
 }
 
 function buildSearchQueryTokens(normalizedQuery: string): string[] {
+  const stopWords = getSearchQueryStopWords();
   const tokens = tokenize(normalizedQuery);
   const meaningfulTokens = tokens.filter(
-    (token) => !SEARCH_QUERY_STOP_WORDS.has(token)
+    (token) => !stopWords.has(token)
   );
   return meaningfulTokens.length > 0 ? meaningfulTokens : tokens;
 }
@@ -543,6 +559,8 @@ export function searchArtifactSections(
       Math.max(1, sections.length)
   );
 
+  const isPhraseQuery = queryTokens.length >= 2;
+
   const scored = sections
     .map((section) => {
       const tokenSet = new Set(section.tokens);
@@ -598,6 +616,14 @@ export function searchArtifactSections(
       }
 
       score *= section.scoreBoost;
+
+      if (isPhraseQuery && score > 0) {
+        const sectionBody = normalizeText(section.text);
+        if (sectionBody.includes(normalizedQuery)) {
+          score += 10;
+        }
+      }
+
       return { section, score };
     })
     .filter((entry) => entry.score > 0);
@@ -660,7 +686,7 @@ function findQueryMatchIndex(text: string, query: string): number | null {
   }
 
   const queryTokens = [...new Set(tokenize(normalizedQuery))]
-    .filter((token) => token.length >= 3 && !SNIPPET_QUERY_STOP_WORDS.has(token))
+    .filter((token) => token.length >= 3 && !getSnippetQueryStopWords().has(token))
     .sort((left, right) => right.length - left.length);
   for (const token of queryTokens) {
     const match = normalizedText.match(new RegExp(`\\b${escapeRegExp(token)}\\b`));
@@ -892,6 +918,30 @@ async function addCourseArtifacts(
       fallbackText: "Course front page",
       contentPath: frontPagePath,
       scoreBoost: 1,
+      metadata: {},
+      skipIfMissingContent: true,
+    },
+    registerArtifact,
+    registerSection,
+    contentCache,
+    loaders
+  );
+
+  const gradingBreakdownPath = path.join(
+    cache.coursePath,
+    "extracted",
+    "grading-breakdown.txt"
+  );
+  await registerCourseTextArtifact(
+    {
+      id: "course:grading:breakdown",
+      kind: "grading",
+      title: "Grading breakdown",
+      source: "Grading breakdown",
+      location: "grading",
+      fallbackText: "Course grading weight breakdown",
+      contentPath: gradingBreakdownPath,
+      scoreBoost: 1.2,
       metadata: {},
       skipIfMissingContent: true,
     },
@@ -1748,7 +1798,82 @@ function isSpecificSectionLabel(value: string): boolean {
 function tokenize(value: string): string[] {
   return normalizeText(value)
     .split(/[^a-z0-9]+/)
-    .filter((token) => token.length >= 2);
+    .filter((token) => token.length >= 2 || /^\d+$/.test(token))
+    .map(stemToken);
+}
+
+function stemToken(token: string): string {
+  if (token.length <= 3 || /^\d+$/.test(token)) return token;
+
+  let stem = token;
+
+  if (stem.endsWith("ies") && stem.length > 4) {
+    stem = stem.slice(0, -3) + "y";
+  } else if (stem.endsWith("sses")) {
+    stem = stem.slice(0, -2);
+  } else if (stem.endsWith("ves") && stem.length > 4) {
+    stem = stem.slice(0, -3) + "f";
+  } else if (
+    stem.endsWith("s") &&
+    !stem.endsWith("ss") &&
+    !stem.endsWith("us") &&
+    !stem.endsWith("is")
+  ) {
+    stem = stem.slice(0, -1);
+  }
+
+  if (stem.endsWith("ying")) {
+    stem = stem.slice(0, -4) + "y";
+  } else if (stem.endsWith("ing") && stem.length > 5) {
+    const base = stem.slice(0, -3);
+    if (hasDoubledConsonant(base)) {
+      stem = base.slice(0, -1);
+    } else if (base.endsWith("e") || endsWithCVC(base)) {
+      stem = base;
+    } else {
+      stem = base;
+    }
+  }
+
+  if (stem.endsWith("ied") && stem.length > 4) {
+    stem = stem.slice(0, -3) + "y";
+  } else if (stem.endsWith("ed") && stem.length > 4) {
+    const base = stem.slice(0, -2);
+    if (hasDoubledConsonant(base)) {
+      stem = base.slice(0, -1);
+    } else {
+      stem = base;
+    }
+  }
+
+  if (stem.endsWith("ment") && stem.length > 5) {
+    stem = stem.slice(0, -4);
+  } else if (stem.endsWith("ness") && stem.length > 5) {
+    stem = stem.slice(0, -4);
+  } else if (stem.endsWith("able") && stem.length > 5) {
+    stem = stem.slice(0, -4);
+  } else if (stem.endsWith("ful") && stem.length > 4) {
+    stem = stem.slice(0, -3);
+  } else if (stem.endsWith("ly") && stem.length > 4) {
+    stem = stem.slice(0, -2);
+  }
+
+  return stem.length >= 3 ? stem : token;
+}
+
+function hasDoubledConsonant(word: string): boolean {
+  if (word.length < 2) return false;
+  const last = word[word.length - 1]!;
+  const secondLast = word[word.length - 2]!;
+  return last === secondLast && !"aeiou".includes(last);
+}
+
+function endsWithCVC(word: string): boolean {
+  if (word.length < 3) return false;
+  const c1 = !"aeiou".includes(word[word.length - 3]!);
+  const v = "aeiou".includes(word[word.length - 2]!);
+  const c2 = !"aeiou".includes(word[word.length - 1]!);
+  return c1 && v && c2;
 }
 
 function hashKey(prefix: string, value: string): string {

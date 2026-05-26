@@ -7,13 +7,18 @@ export function htmlToText(
   html: string,
   options?: { baseUrl?: string | null }
 ): string {
+  const savedPreBlocks: string[] = [];
+  preBlocks = savedPreBlocks;
+
   let text = html.replace(/\r\n/g, "\n");
 
   text = stripCommentsScriptsAndStyles(text);
   text = replaceFigures(text, options);
   text = replaceTables(text, options);
+  text = replaceDefinitionLists(text, options);
   text = replaceLists(text, options);
   text = replaceMedia(text, options);
+  text = replacePreformatted(text, options);
 
   text = text.replace(/<br\s*\/?>/gi, "\n");
   text = text.replace(/<hr\s*\/?>/gi, "\n---\n");
@@ -60,11 +65,11 @@ export function htmlToText(
   });
 
   text = text.replace(
-    /<\/(p|div|section|article|header|footer|aside|nav|blockquote|pre|main)>/gi,
+    /<\/(p|div|section|article|header|footer|aside|nav|blockquote|main)>/gi,
     "\n\n"
   );
   text = text.replace(
-    /<(p|div|section|article|header|footer|aside|nav|blockquote|pre|main)\b[^>]*>/gi,
+    /<(p|div|section|article|header|footer|aside|nav|blockquote|main)\b[^>]*>/gi,
     ""
   );
 
@@ -75,7 +80,11 @@ export function htmlToText(
   text = stripTags(text);
   text = decodeEntities(text);
 
-  return normalizeOutput(text);
+  text = normalizeOutput(text);
+  if (savedPreBlocks.length > 0) {
+    text = restorePreBlocks(text, savedPreBlocks);
+  }
+  return text;
 }
 
 function stripCommentsScriptsAndStyles(html: string): string {
@@ -253,6 +262,60 @@ function renderList(
   return lines.join("\n");
 }
 
+function replaceDefinitionLists(
+  html: string,
+  options?: { baseUrl?: string | null }
+): string {
+  return html.replace(/<dl\b[^>]*>([\s\S]*?)<\/dl>/gi, (_match, inner) => {
+    const rendered = renderDefinitionList(inner, options);
+    return rendered ? `\n${rendered}\n` : "\n";
+  });
+}
+
+function renderDefinitionList(
+  dlHtml: string,
+  options?: { baseUrl?: string | null }
+): string {
+  const lines: string[] = [];
+  const tokens: Array<{ type: "dt" | "dd"; content: string }> = [];
+  dlHtml.replace(
+    /<(dt|dd)\b[^>]*>([\s\S]*?)<\/\1>/gi,
+    (_m, tag, content) => {
+      tokens.push({ type: tag.toLowerCase() as "dt" | "dd", content });
+      return "";
+    }
+  );
+
+  let currentTerm: string | null = null;
+  for (const token of tokens) {
+    if (token.type === "dt") {
+      currentTerm = htmlFragmentToSingleLineText(token.content, options);
+    } else {
+      const def = htmlFragmentToText(token.content, options);
+      if (!def) continue;
+      const defLines = def
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
+      if (currentTerm && defLines.length > 0) {
+        lines.push(`- **${currentTerm}**: ${defLines[0]}`);
+        for (const continuation of defLines.slice(1)) {
+          lines.push(`  ${continuation}`);
+        }
+      } else if (defLines.length > 0) {
+        lines.push(`- ${defLines.join("\n  ")}`);
+      }
+      currentTerm = null;
+    }
+  }
+
+  if (currentTerm) {
+    lines.push(`- **${currentTerm}**`);
+  }
+
+  return lines.join("\n");
+}
+
 function replaceFigures(
   html: string,
   options?: { baseUrl?: string | null }
@@ -366,6 +429,41 @@ function extractMediaDescriptions(
   }
 
   return descriptions;
+}
+
+const PRE_PLACEHOLDER_PREFIX = "\x00PRE:";
+const PRE_PLACEHOLDER_SUFFIX = "\x00";
+
+let preBlocks: string[] = [];
+
+function replacePreformatted(
+  html: string,
+  _options?: { baseUrl?: string | null }
+): string {
+  return html.replace(
+    /<pre\b[^>]*>([\s\S]*?)<\/pre>/gi,
+    (_match, inner) => {
+      let content = inner as string;
+      content = content.replace(/<br\s*\/?>/gi, "\n");
+      content = content.replace(/<[^>]*>/g, "");
+      content = decodeEntities(content);
+      const trimmed = content.replace(/^\n/, "").replace(/\n$/, "");
+      const index = preBlocks.length;
+      preBlocks.push(trimmed);
+      return `\n${PRE_PLACEHOLDER_PREFIX}${index}${PRE_PLACEHOLDER_SUFFIX}\n`;
+    }
+  );
+}
+
+function restorePreBlocks(text: string, blocks: string[]): string {
+  return text.replace(
+    /\x00PRE:(\d+)\x00/g,
+    (_match, indexStr) => {
+      const index = Number.parseInt(indexStr, 10);
+      const block = blocks[index] ?? "";
+      return `\`\`\`\n${block}\n\`\`\``;
+    }
+  );
 }
 
 function htmlFragmentToText(
