@@ -123,8 +123,10 @@ export async function gatherMaterial(
     courseName = cache.coursePath?.split("/").pop() ?? null;
   }
 
-  if (topic) {
-    const results = searchArtifacts(index, topic, { limit: 8 });
+  const searchTopic = topic || extractTopicFromContext(conversationContext);
+
+  if (searchTopic) {
+    const results = searchArtifacts(index, searchTopic, { limit: 8 });
     for (const result of results) {
       const content = await readArtifactContent(index, result.artifact.id);
       if (content) {
@@ -218,7 +220,8 @@ Respond with ONLY a JSON object in this exact format (no markdown, no code fence
 }
 
 Rules:
-- Questions must be derived from the provided material, not general knowledge
+- Questions must be derived ONLY from the provided material — never from general knowledge or unrelated content
+- If conversation context mentions a specific assignment, lab, or topic, ALL questions must be about that specific item — do not reference other assignments or labs
 - Each question should cover a different aspect of the material
 - Explanations should be educational and reinforce learning
 - For MC questions, make distractors plausible but clearly wrong
@@ -251,3 +254,16 @@ export async function checkConversationRelevance(
   return response.trim().toLowerCase().startsWith("yes");
 }
 
+function extractTopicFromContext(context: string | undefined): string | null {
+  if (!context || context.trim().length < 20) return null;
+  const patterns = [
+    /(?:assignment|lab|homework|hw|project)\s*(\d+)/i,
+    /(?:lecture|lec|chapter|ch|module|unit)\s*(\d+)/i,
+    /(?:explain|about|help with|working on|looking at)\s+(.{3,40}?)(?:\.|$|\n)/i,
+  ];
+  for (const pat of patterns) {
+    const match = context.match(pat);
+    if (match) return match[0].trim();
+  }
+  return null;
+}
