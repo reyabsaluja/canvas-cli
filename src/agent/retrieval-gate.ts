@@ -15,6 +15,14 @@ import { searchWorkspaceKnowledge } from "../tui/workspace-knowledge.js";
 
 const MAX_MEMORY_REUSE_ARTIFACTS = 3;
 const MIN_MEMORY_REUSE_SCORE = 12;
+const EXPLICIT_TOOL_REQUEST_RE =
+  /\b(open|launch|pull up|download|list files|show files|search course)\b/i;
+const COURSE_COMMUNICATION_INTENT_RE =
+  /\bannouncements?\b|\bdiscussions\b|\bdiscussion\s+(?:topics?|threads?|boards?|posts?)\b|\bthreads?\b|\breplies\b/i;
+const LECTURE_INTENT_RE =
+  /\b(?:lectures?|lec|recordings?|slides?)\b/i;
+const COURSE_WORKLOAD_INTENT_RE =
+  /\b(?:upcoming work|what'?s due|what is due|due (?:today|tomorrow|this week|next week|soon)|list assignments?|show assignments?|other assignments?|all assignments?)\b/i;
 
 export type RetrievalDecision =
   | { action: "answer_from_workup"; reason: string }
@@ -157,7 +165,12 @@ export async function decideWorkspaceRetrieval(
 }
 
 function shouldBypassGate(question: string): boolean {
-  return /\b(open|launch|pull up|download|list files|show files|search course)\b/i.test(question);
+  return (
+    EXPLICIT_TOOL_REQUEST_RE.test(question) ||
+    COURSE_COMMUNICATION_INTENT_RE.test(question) ||
+    LECTURE_INTENT_RE.test(question) ||
+    COURSE_WORKLOAD_INTENT_RE.test(question)
+  );
 }
 
 function workupLikelyCoversQuestion(

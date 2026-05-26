@@ -307,3 +307,46 @@ test("captureExternalCourseLinks captures iframe embeds from fetched pages", asy
     await server.close();
   }
 });
+
+test("captureExternalCourseLinks captures media caption tracks from Canvas HTML", async () => {
+  const server = await startServer({
+    "/lecture-captions.vtt": {
+      contentType: "text/vtt",
+      body: Buffer.from(
+        "WEBVTT\n\n00:00:00.000 --> 00:00:03.000\nPipeline hazard walkthrough.\n"
+      ),
+    },
+  });
+
+  try {
+    const result = await captureExternalCourseLinks({
+      courseId: 1,
+      courseHtmlUrl: null,
+      modules: [],
+      assignments: [],
+      quizzes: [],
+      calendarEvents: [],
+      frontPageBody: [
+        '<video title="Lecture walkthrough">',
+        `<track kind="captions" label="English" srclang="en" src="${server.url}/lecture-captions.vtt">`,
+        "</video>",
+      ].join(""),
+      fetchedPages: [],
+      syllabusBody: null,
+      announcementThreads: [],
+      discussionThreads: [],
+      config: { baseUrl: "https://canvas.example.com", accessToken: "tok" } as Config,
+    });
+
+    assert.equal(result.length, 1);
+    assert.equal(result[0].entry.title, "Captions: English en");
+    assert.equal(result[0].entry.contentStatus, "captured");
+    assert.ok(
+      result[0].text.includes("Pipeline hazard walkthrough"),
+      `Expected captured text to contain VTT transcript, got: ${result[0].text.slice(0, 200)}`
+    );
+    assert.deepEqual(result[0].entry.sources, ["front page"]);
+  } finally {
+    await server.close();
+  }
+});

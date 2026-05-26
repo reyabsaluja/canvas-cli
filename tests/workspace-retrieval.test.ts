@@ -201,6 +201,68 @@ test("workspace retrieval prefers exact section headings over noisier repeated b
   });
 });
 
+test("workspace retrieval maps student deadline wording to due date sections", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const workspacePath = path.join(tempDir, "workspace");
+    await fs.mkdir(path.join(workspacePath, "extracted", "docs"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(workspacePath, "assignment.md"),
+      [
+        "# Lab 4",
+        "",
+        "## Overview",
+        "",
+        "The lab uses branch hazard waveforms and pipeline recovery notes.",
+        "",
+        "## Due date",
+        "",
+        "The report is due on April 10 at 11:59 PM.",
+      ].join("\n"),
+      "utf-8"
+    );
+    await fs.writeFile(path.join(workspacePath, "plan.md"), "# Plan\n", "utf-8");
+    await fs.writeFile(path.join(workspacePath, "notes.md"), "# Notes\n", "utf-8");
+    await fs.writeFile(
+      path.join(workspacePath, "workup.json"),
+      JSON.stringify({ overview: "Lab 4 workspace." }, null, 2) + "\n",
+      "utf-8"
+    );
+
+    const workspace: LoadedWorkspace = {
+      path: workspacePath,
+      sessionSlug: "lab-4",
+      assignmentId: 42,
+      assignmentName: "Lab 4",
+      courseId: 17,
+      courseName: "ECE243",
+      courseCode: "ECE243H1",
+      preparedAt: "2026-04-02T09:00:00.000Z",
+      workspaceState: "ready",
+      assignmentMd: await fs.readFile(
+        path.join(workspacePath, "assignment.md"),
+        "utf-8"
+      ),
+      planMd: await fs.readFile(path.join(workspacePath, "plan.md"), "utf-8"),
+      notesMd: await fs.readFile(path.join(workspacePath, "notes.md"), "utf-8"),
+      workupJson: JSON.parse(
+        await fs.readFile(path.join(workspacePath, "workup.json"), "utf-8")
+      ) as Record<string, unknown>,
+      extractedFiles: [],
+      extractedFileCache: new Map<string, string>(),
+    };
+
+    const retrievalContext = await buildWorkspaceRetrievalContext(workspace);
+    const relevant = retrieveRelevant("deadline for lab 4", retrievalContext, 3);
+
+    assert.equal(relevant[0]?.source, "assignment.md");
+    assert.equal(relevant[0]?.section, "Due date");
+    assert.match(relevant[0]?.excerpt ?? "", /due on April 10 at 11:59 PM/);
+  });
+});
+
 test("workspace answer parsing resolves source ids back to canonical sources", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();

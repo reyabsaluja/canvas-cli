@@ -85,3 +85,55 @@ test("htmlToText preserves Canvas-style key-value tables", () => {
   assert.match(text, /- Submission: PDF report \| starter\.zip/);
   assert.doesNotMatch(text, /Due date: Points/);
 });
+
+test("htmlToText preserves collapsible details sections", () => {
+  const html = [
+    "<p>Before the checklist.</p>",
+    "<details open>",
+    "<summary>Submission checklist</summary>",
+    "<ul>",
+    "<li>Upload your waveform screenshot.</li>",
+    '<li>Review the <a href="../pages/lab-4-rubric">rubric</a>.</li>',
+    "</ul>",
+    "</details>",
+    "<p>After the checklist.</p>",
+  ].join("");
+
+  const text = htmlToText(html, {
+    baseUrl: "https://canvas.example/courses/17/assignments/42",
+  });
+
+  assert.match(text, /Before the checklist\./);
+  assert.match(text, /Details: Submission checklist/);
+  assert.match(text, /- Upload your waveform screenshot\./);
+  assert.match(
+    text,
+    /- Review the rubric \(https:\/\/canvas\.example\/courses\/17\/pages\/lab-4-rubric\)\./
+  );
+  assert.match(text, /After the checklist\./);
+  assert.doesNotMatch(text, /checklistUpload/);
+});
+
+test("htmlToText preserves media sources and caption tracks", () => {
+  const html = [
+    '<video title="Pipeline walkthrough" poster="/media/poster.png">',
+    '<source src="/media/pipeline.mp4" type="video/mp4">',
+    '<track kind="captions" label="English" srclang="en" src="/media/pipeline.vtt">',
+    "</video>",
+  ].join("");
+
+  const text = htmlToText(html, {
+    baseUrl: "https://canvas.example/courses/17/pages/week-4",
+  });
+
+  assert.match(text, /Video: Pipeline walkthrough/);
+  assert.match(
+    text,
+    /Source: https:\/\/canvas\.example\/media\/pipeline\.mp4 \(video\/mp4\)/
+  );
+  assert.match(
+    text,
+    /Captions: English en \(https:\/\/canvas\.example\/media\/pipeline\.vtt\)/
+  );
+  assert.match(text, /Poster: https:\/\/canvas\.example\/media\/poster\.png/);
+});

@@ -1,7 +1,8 @@
 /**
  * Structure-aware HTML-to-text converter for ingested Canvas content.
  * Preserves the information retrieval cares about most: headings, numbered
- * steps, table header/value pairs, captions, media labels, and resolved links.
+ * steps, collapsible details, table header/value pairs, captions, media labels,
+ * and resolved links.
  */
 export function htmlToText(
   html: string,
@@ -17,6 +18,7 @@ export function htmlToText(
   text = replaceTables(text, options);
   text = replaceDefinitionLists(text, options);
   text = replaceLists(text, options);
+  text = replaceDetails(text, options);
   text = replaceMedia(text, options);
   text = replacePreformatted(text, options);
 
@@ -316,6 +318,41 @@ function renderDefinitionList(
   return lines.join("\n");
 }
 
+function replaceDetails(
+  html: string,
+  options?: { baseUrl?: string | null }
+): string {
+  return html.replace(/<details\b[^>]*>([\s\S]*?)<\/details>/gi, (_match, inner) => {
+    const rendered = renderDetails(String(inner), options);
+    return rendered ? `\n${rendered}\n` : "\n";
+  });
+}
+
+function renderDetails(
+  detailsHtml: string,
+  options?: { baseUrl?: string | null }
+): string {
+  const summaryMatch = detailsHtml.match(
+    /<summary\b[^>]*>([\s\S]*?)<\/summary>/i
+  );
+  const summary = summaryMatch
+    ? htmlFragmentToSingleLineText(summaryMatch[1] ?? "", options)
+    : "";
+  const bodyHtml = detailsHtml.replace(
+    /<summary\b[^>]*>[\s\S]*?<\/summary>/i,
+    ""
+  );
+  const body = htmlFragmentToText(bodyHtml, options);
+
+  if (summary && body) {
+    return `Details: ${summary}\n${body}`;
+  }
+  if (summary) {
+    return `Details: ${summary}`;
+  }
+  return body ? `Details:\n${body}` : "";
+}
+
 function replaceFigures(
   html: string,
   options?: { baseUrl?: string | null }
@@ -361,14 +398,24 @@ function replaceMedia(
   current = current.replace(/<img\b([^>]*)\/?>/gi, (_match, attrs) => {
     return renderImage(attrs, options);
   });
-  current = current.replace(/<iframe\b([^>]*)>([\s\S]*?)<\/iframe>/gi, (_match, attrs) => {
-    return renderEmbed("Embedded content", attrs, options);
-  });
-  current = current.replace(/<video\b([^>]*)>([\s\S]*?)<\/video>/gi, (_match, attrs) => {
-    return renderEmbed("Video", attrs, options);
-  });
-  current = current.replace(/<audio\b([^>]*)>([\s\S]*?)<\/audio>/gi, (_match, attrs) => {
-    return renderEmbed("Audio", attrs, options);
+  current = current.replace(
+    /<iframe\b([^>]*)>([\s\S]*?)<\/iframe>/gi,
+    (_match, attrs) => renderEmbed("Embedded content", attrs, options)
+  );
+  current = current.replace(
+    /<video\b([^>]*)>([\s\S]*?)<\/video>/gi,
+    (_match, attrs, inner) => renderMediaElement("Video", attrs, inner, options)
+  );
+  current = current.replace(
+    /<audio\b([^>]*)>([\s\S]*?)<\/audio>/gi,
+    (_match, attrs, inner) => renderMediaElement("Audio", attrs, inner, options)
+  );
+  current = current.replace(
+    /<object\b([^>]*)>([\s\S]*?)<\/object>/gi,
+    (_match, attrs) => renderEmbed("Embedded object", attrs, options)
+  );
+  current = current.replace(/<embed\b([^>]*)\/?>/gi, (_match, attrs) => {
+    return renderEmbed("Embedded object", attrs, options);
   });
 
   return current;
@@ -396,13 +443,98 @@ function renderEmbed(
 ): string {
   const title = extractAttr(attrs, "title");
   const ariaLabel = extractAttr(attrs, "aria-label");
-  const src = extractAttr(attrs, "src");
+  const src =
+    extractAttr(attrs, "src") ??
+    extractAttr(attrs, "data-src") ??
+    extractAttr(attrs, "data");
   const resolvedSrc = src ? resolveHref(src, options?.baseUrl ?? null) : "";
   const label = title || ariaLabel || resolvedSrc;
   if (!label) return "";
   return resolvedSrc && label !== resolvedSrc
     ? `${kind}: ${label} (${resolvedSrc})`
     : `${kind}: ${label}`;
+}
+
+function renderMediaElement(
+  kind: "Audio" | "Video",
+  attrs: string,
+  inner: string,
+  options?: { baseUrl?: string | null }
+): string {
+  const title = extractAttr(attrs, "title");
+  const ariaLabel = extractAttr(attrs, "aria-label");
+  const poster = extractAttr(attrs, "poster");
+  const directSrc =
+    extractAttr(attrs, "src") ?? extractAttr(attrs, "data-src");
+  const resolvedDirectSrc = directSrc
+    ? resolveHref(directSrc, options?.baseUrl ?? null)
+    : "";
+  const resolvedPoster = poster
+    ? resolveHref(poster, options?.baseUrl ?? null)
+    : "";
+  const sources = extractSourceDescriptions(inner, options);
+  const tracks = extractTrackDescriptions(inner, options);
+  const fallback = htmlFragmentToSingleLineText(
+    inner.replace(/<(source|track)\b[^>]*\/?>/gi, ""),
+    options
+  );
+
+  const label =
+    title || ariaLabel || fallback || resolvedDirectSrc || sources[0] || "";
+  const parts = [label];
+  if (resolvedDirectSrc && label !== resolvedDirectSrc) {
+    parts.push(`Source: ${resolvedDirectSrc}`);
+  }
+  if (resolvedPoster) {
+    parts.push(`Poster: ${resolvedPoster}`);
+  }
+  parts.push(...sources.filter((source) => source !== label));
+  parts.push(...tracks);
+
+  const cleaned = parts.filter((part) => part.trim().length > 0);
+  return cleaned.length > 0 ? `${kind}: ${cleaned.join(" — ")}` : "";
+}
+
+function extractSourceDescriptions(
+  html: string,
+  options?: { baseUrl?: string | null }
+): string[] {
+  const descriptions: string[] = [];
+  for (const match of html.matchAll(/<source\b([^>]*)\/?>/gi)) {
+    const attrs = match[1] ?? "";
+    const src = extractAttr(attrs, "src");
+    if (!src) continue;
+    const resolvedSrc = resolveHref(src, options?.baseUrl ?? null);
+    const type = extractAttr(attrs, "type");
+    descriptions.push(
+      type ? `Source: ${resolvedSrc} (${type})` : `Source: ${resolvedSrc}`
+    );
+  }
+  return unique(descriptions);
+}
+
+function extractTrackDescriptions(
+  html: string,
+  options?: { baseUrl?: string | null }
+): string[] {
+  const descriptions: string[] = [];
+  for (const match of html.matchAll(/<track\b([^>]*)\/?>/gi)) {
+    const attrs = match[1] ?? "";
+    const src = extractAttr(attrs, "src");
+    if (!src) continue;
+    const resolvedSrc = resolveHref(src, options?.baseUrl ?? null);
+    const kind = extractAttr(attrs, "kind");
+    const label = extractAttr(attrs, "label");
+    const srclang = extractAttr(attrs, "srclang");
+    const descriptor = [label, srclang].filter(Boolean).join(" ");
+    const trackType = kind ? titleCase(kind) : "Track";
+    descriptions.push(
+      descriptor
+        ? `${trackType}: ${descriptor} (${resolvedSrc})`
+        : `${trackType}: ${resolvedSrc}`
+    );
+  }
+  return unique(descriptions);
 }
 
 function extractMediaDescriptions(
@@ -420,15 +552,46 @@ function extractMediaDescriptions(
     if (rendered) descriptions.push(rendered);
   }
   for (const match of html.matchAll(/<video\b([^>]*)>([\s\S]*?)<\/video>/gi)) {
-    const rendered = renderEmbed("Video", match[1] ?? "", options);
+    const rendered = renderMediaElement(
+      "Video",
+      match[1] ?? "",
+      match[2] ?? "",
+      options
+    );
     if (rendered) descriptions.push(rendered);
   }
   for (const match of html.matchAll(/<audio\b([^>]*)>([\s\S]*?)<\/audio>/gi)) {
-    const rendered = renderEmbed("Audio", match[1] ?? "", options);
+    const rendered = renderMediaElement(
+      "Audio",
+      match[1] ?? "",
+      match[2] ?? "",
+      options
+    );
+    if (rendered) descriptions.push(rendered);
+  }
+  for (const match of html.matchAll(/<object\b([^>]*)>([\s\S]*?)<\/object>/gi)) {
+    const rendered = renderEmbed("Embedded object", match[1] ?? "", options);
+    if (rendered) descriptions.push(rendered);
+  }
+  for (const match of html.matchAll(/<embed\b([^>]*)\/?>/gi)) {
+    const rendered = renderEmbed("Embedded object", match[1] ?? "", options);
     if (rendered) descriptions.push(rendered);
   }
 
   return descriptions;
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+function titleCase(value: string): string {
+  const cleaned = value.replace(/[-_]+/g, " ").trim();
+  if (!cleaned) return "";
+  return cleaned
+    .split(/\s+/)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
 }
 
 const PRE_PLACEHOLDER_PREFIX = "\x00PRE:";

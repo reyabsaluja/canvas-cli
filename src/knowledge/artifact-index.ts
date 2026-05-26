@@ -96,6 +96,16 @@ export interface RankedArtifactSection {
   score: number;
 }
 
+interface SearchQueryConcept {
+  original: string;
+  tokens: string[];
+}
+
+interface SearchQueryTerms {
+  concepts: SearchQueryConcept[];
+  allTokens: string[];
+}
+
 const artifactIndexCache = new Map<string, Promise<ArtifactIndexInternal>>();
 const SEARCH_QUERY_STOP_WORDS_RAW = [
   "a",
@@ -178,6 +188,16 @@ function getSnippetQueryStopWords(): Set<string> {
   }
   return _snippetQueryStopWords;
 }
+
+const SEARCH_TOKEN_ALIASES: Record<string, string[]> = {
+  deadline: ["due", "date"],
+  grade: ["point", "mark", "score"],
+  grad: ["point", "mark", "score"],
+  mark: ["point", "score", "grade"],
+  point: ["mark", "score", "grade"],
+  score: ["point", "mark", "grade"],
+  worth: ["point", "grade"],
+};
 
 export function formatArtifactLabel(
   artifact: Pick<ArtifactRecord, "kind" | "title">
@@ -451,13 +471,34 @@ export async function readArtifactContent(
   return content;
 }
 
-function buildSearchQueryTokens(normalizedQuery: string): string[] {
+function buildSearchQueryTerms(normalizedQuery: string): SearchQueryTerms {
   const stopWords = getSearchQueryStopWords();
   const tokens = tokenize(normalizedQuery);
   const meaningfulTokens = tokens.filter(
     (token) => !stopWords.has(token)
   );
-  return meaningfulTokens.length > 0 ? meaningfulTokens : tokens;
+  const originalTokens = meaningfulTokens.length > 0 ? meaningfulTokens : tokens;
+  const concepts = originalTokens.map((token) => ({
+    original: token,
+    tokens: expandSearchToken(token),
+  }));
+
+  return {
+    concepts,
+    allTokens: unique(concepts.flatMap((concept) => concept.tokens)),
+  };
+}
+
+function expandSearchToken(token: string): string[] {
+  const aliases = SEARCH_TOKEN_ALIASES[token] ?? [];
+  return unique([
+    token,
+    ...aliases.flatMap((alias) => tokenize(alias)),
+  ]);
+}
+
+function unique<T>(values: T[]): T[] {
+  return [...new Set(values)];
 }
 
 export function searchArtifacts(
@@ -470,7 +511,8 @@ export function searchArtifacts(
   }
 ): RankedArtifact[] {
   const normalizedQuery = normalizeText(query);
-  const queryTokens = buildSearchQueryTokens(normalizedQuery);
+  const queryTerms = buildSearchQueryTerms(normalizedQuery);
+  const queryTokens = queryTerms.allTokens;
   if (queryTokens.length === 0) return [];
 
   const allowedKinds = options?.kinds ? new Set(options.kinds) : null;
@@ -484,7 +526,8 @@ export function searchArtifacts(
   for (const artifact of candidates) {
     const titleNormalized = normalizeText(artifact.title);
     let score = 0;
-    let matchedTokens = 0;
+    let matchedConcepts = 0;
+    let matchedExactConcepts = 0;
 
     if (titleNormalized.includes(normalizedQuery)) {
       score += 25;
@@ -493,18 +536,33 @@ export function searchArtifacts(
       score += 10;
     }
 
-    for (const token of queryTokens) {
-      if (artifact.titleTokens.includes(token)) {
-        score += 8;
-        matchedTokens += 1;
-      } else if (artifact.bodyTokens.includes(token)) {
-        score += 3;
-        matchedTokens += 1;
+    for (const concept of queryTerms.concepts) {
+      let conceptMatched = false;
+      let exactMatched = false;
+      for (const token of concept.tokens) {
+        const isExactToken = token === concept.original;
+        if (artifact.titleTokens.includes(token)) {
+          score += isExactToken ? 8 : 5;
+          conceptMatched = true;
+          exactMatched ||= isExactToken;
+        } else if (artifact.bodyTokens.includes(token)) {
+          score += isExactToken ? 3 : 2;
+          conceptMatched = true;
+          exactMatched ||= isExactToken;
+        }
+      }
+      if (conceptMatched) {
+        matchedConcepts += 1;
+      }
+      if (exactMatched) {
+        matchedExactConcepts += 1;
       }
     }
 
-    if (matchedTokens === queryTokens.length) {
+    if (matchedExactConcepts === queryTerms.concepts.length) {
       score += 12;
+    } else if (matchedConcepts === queryTerms.concepts.length) {
+      score += 7;
     }
 
     score *= artifact.scoreBoost;
@@ -532,7 +590,8 @@ export function searchArtifactSections(
   }
 ): RankedArtifactSection[] {
   const normalizedQuery = normalizeText(query);
-  const queryTokens = buildSearchQueryTokens(normalizedQuery);
+  const queryTerms = buildSearchQueryTerms(normalizedQuery);
+  const queryTokens = queryTerms.allTokens;
   if (queryTokens.length === 0) return [];
 
   const allowedKinds = options?.kinds ? new Set(options.kinds) : null;
@@ -570,8 +629,8 @@ export function searchArtifactSections(
       const sourceLabelTokens = tokenize(section.source);
       const hasSpecificSectionLabel = isSpecificSectionLabel(section.section);
       let score = 0;
-      let matchedSectionLabelTokens = 0;
-      let matchedSourceLabelTokens = 0;
+      let matchedSectionLabelConcepts = 0;
+      let matchedSourceLabelConcepts = 0;
 
       if (hasSpecificSectionLabel && sectionLabel.includes(normalizedQuery)) {
         score += 14;
@@ -580,38 +639,52 @@ export function searchArtifactSections(
         score += 6;
       }
 
-      for (const token of queryTokens) {
-        if (hasSpecificSectionLabel && sectionLabelTokens.includes(token)) {
-          score += 4;
-          matchedSectionLabelTokens += 1;
-        }
-        if (sourceLabelTokens.includes(token)) {
-          score += 2;
-          matchedSourceLabelTokens += 1;
-        }
-        if (!tokenSet.has(token)) continue;
+      for (const concept of queryTerms.concepts) {
+        let sectionLabelConceptMatched = false;
+        let sourceLabelConceptMatched = false;
 
-        const termFrequency = section.tokens.filter(
-          (candidate) => candidate === token
-        ).length;
-        const documentFrequency = df.get(token) ?? 1;
-        const inverseDocumentFrequency = Math.log(
-          (docCount + 1) / (documentFrequency + 0.5)
-        );
-        const normalization =
-          1 - 0.75 + 0.75 * (section.text.length / averageLength);
-        score +=
-          inverseDocumentFrequency *
-          ((termFrequency * 2.5) / (termFrequency + 1.5 * normalization));
+        for (const token of concept.tokens) {
+          const isExactToken = token === concept.original;
+          const aliasWeight = isExactToken ? 1 : 0.72;
+          if (hasSpecificSectionLabel && sectionLabelTokens.includes(token)) {
+            score += 4 * aliasWeight;
+            sectionLabelConceptMatched = true;
+          }
+          if (sourceLabelTokens.includes(token)) {
+            score += 2 * aliasWeight;
+            sourceLabelConceptMatched = true;
+          }
+          if (!tokenSet.has(token)) continue;
+
+          const termFrequency = section.tokens.filter(
+            (candidate) => candidate === token
+          ).length;
+          const documentFrequency = df.get(token) ?? 1;
+          const inverseDocumentFrequency = Math.log(
+            (docCount + 1) / (documentFrequency + 0.5)
+          );
+          const normalization =
+            1 - 0.75 + 0.75 * (section.text.length / averageLength);
+          score +=
+            aliasWeight *
+            inverseDocumentFrequency *
+            ((termFrequency * 2.5) / (termFrequency + 1.5 * normalization));
+        }
+        if (sectionLabelConceptMatched) {
+          matchedSectionLabelConcepts += 1;
+        }
+        if (sourceLabelConceptMatched) {
+          matchedSourceLabelConcepts += 1;
+        }
       }
 
       if (
         hasSpecificSectionLabel &&
-        matchedSectionLabelTokens === queryTokens.length
+        matchedSectionLabelConcepts === queryTerms.concepts.length
       ) {
         score += 8;
       }
-      if (matchedSourceLabelTokens === queryTokens.length) {
+      if (matchedSourceLabelConcepts === queryTerms.concepts.length) {
         score += 4;
       }
 
@@ -685,7 +758,7 @@ function findQueryMatchIndex(text: string, query: string): number | null {
     return phraseIndex;
   }
 
-  const queryTokens = [...new Set(tokenize(normalizedQuery))]
+  const queryTokens = buildSearchQueryTerms(normalizedQuery).allTokens
     .filter((token) => token.length >= 3 && !getSnippetQueryStopWords().has(token))
     .sort((left, right) => right.length - left.length);
   for (const token of queryTokens) {
@@ -1605,7 +1678,7 @@ function splitMarkdownIntoSections(
   };
 
   for (const line of lines) {
-    const headingMatch = line.match(/^#{1,3}\s+(.+)/);
+    const headingMatch = line.match(/^#{1,6}\s+(.+)/);
     if (headingMatch) {
       flush();
       currentSection = headingMatch[1] ?? "Top";

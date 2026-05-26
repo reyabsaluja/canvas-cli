@@ -436,6 +436,33 @@ test("workspace retrieval gate prefers workup, then direct reads, then prior mem
   });
 });
 
+test("workspace retrieval gate defers course navigation intents to the tool loop", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+    const runState = createEmptyRunState();
+
+    for (const question of [
+      "Any announcements about the branch hazard?",
+      "Which lecture covers branch hazard?",
+      "What assignments are due this week?",
+    ]) {
+      const decision = await decideWorkspaceRetrieval({
+        question,
+        runState,
+        loaded,
+        cache,
+      });
+
+      assert.deepEqual(decision, {
+        action: "let_model_decide",
+        reason: "explicit_tool_request",
+      });
+    }
+  });
+});
+
 test("workspace retrieval gate prefers an already-read strong match over a higher-ranked unread one", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
@@ -1396,6 +1423,62 @@ test("workspace answer verification derives sources and confidence deterministic
       },
     ]);
 
+    const verifiedFromAnswerOnlySupportingDetail = verifyWorkspaceAnswer({
+      question: "What should I submit?",
+      answer: "Submit the PDF report by April 10 at 11:59 PM.",
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read assignment submission details.",
+          artifacts: [
+            {
+              artifactId: "artifact-submission-read",
+              title: "assignment.md",
+              kind: "assignment",
+              excerpt: "Submit a PDF report through Canvas.",
+              sectionLabel: "Submission format",
+            },
+          ],
+          content: "Submit a PDF report through Canvas.",
+        },
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read assignment due date details.",
+          artifacts: [
+            {
+              artifactId: "artifact-due-read",
+              title: "assignment.md",
+              kind: "assignment",
+              excerpt: "The report is due on April 10 at 11:59 PM.",
+              sectionLabel: "Due date",
+            },
+          ],
+          content: "The report is due on April 10 at 11:59 PM.",
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedFromAnswerOnlySupportingDetail.ok, true);
+    assert.equal(verifiedFromAnswerOnlySupportingDetail.confidence, "high");
+    assert.deepEqual(verifiedFromAnswerOnlySupportingDetail.missing, []);
+    assert.deepEqual(verifiedFromAnswerOnlySupportingDetail.sources, [
+      {
+        title: "assignment.md",
+        kind: "assignment",
+        section: "Submission format",
+        excerpt: "Submit a PDF report through Canvas.",
+      },
+      {
+        title: "assignment.md",
+        kind: "assignment",
+        section: "Due date",
+        excerpt: "The report is due on April 10 at 11:59 PM.",
+      },
+    ]);
+
     const verifiedFromIsoWorkupDate = verifyWorkspaceAnswer({
       question: "When is the assignment due?",
       answer: "The assignment is due on April 10.",
@@ -1694,6 +1777,43 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.equal(
       verifiedWithInferredSection.sources[0]?.section,
       "Late Submission Policy"
+    );
+
+    const verifiedWithNestedBodyInferredSection = verifyWorkspaceAnswer({
+      question: "What should I do before measuring setup time?",
+      answer: "Use 1.2V before measuring setup time.",
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read lab-spec.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-lab-spec",
+              title: "lab-spec.txt",
+              kind: "extracted",
+              excerpt: "Lab measurement instructions.",
+            },
+          ],
+          content: [
+            "# Lab Spec",
+            "General setup guidance.",
+            "## Measurements",
+            "Confirm the scope is connected.",
+            "##### Threshold voltage",
+            "Use 1.2V before measuring setup time.",
+            "##### Cache policy",
+            "Use least-recently-used replacement.",
+          ].join("\n"),
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedWithNestedBodyInferredSection.confidence, "high");
+    assert.equal(
+      verifiedWithNestedBodyInferredSection.sources[0]?.section,
+      "Threshold voltage"
     );
 
     const verifiedNoHeadingsInContent = verifyWorkspaceAnswer({
@@ -2662,6 +2782,16 @@ test("chat agent prompt and tool definitions teach search-then-read behavior", a
   await withTempDir(async (tempDir) => {
     const loaded = await createWorkspace(tempDir);
     const cache = createCourseCache(path.join(tempDir, "course"));
+    cache.lectures = [
+      {
+        title: "Lecture 4 slides",
+        url: "https://canvas.example/courses/17/files/4",
+        contentType: "slides",
+        source: "modules",
+        lectureNumber: 4,
+        topic: "Branch hazards",
+      },
+    ];
     const ctx = createChatContext(
       { provider: "anthropic", model: "test-model" },
       loaded,
@@ -2673,6 +2803,10 @@ test("chat agent prompt and tool definitions teach search-then-read behavior", a
       prompt,
       /Treat search_workspace and search_course as discovery tools only/i
     );
+    assert.match(prompt, /Choose the most specific tool for action\/navigation requests/i);
+    assert.match(prompt, /open_lecture for lectures, recordings, or slides/i);
+    assert.match(prompt, /list_announcements then read_thread/i);
+    assert.match(prompt, /list_assignments for course workload\/upcoming due questions/i);
     assert.match(prompt, /follow a search with read_file/i);
     assert.match(
       prompt,
@@ -2687,6 +2821,8 @@ test("chat agent prompt and tool definitions teach search-then-read behavior", a
       /If a read or search just failed, do not repeat the same tool call with the same target/i
     );
     assert.match(prompt, /Tool-result checkpoint/i);
+    assert.match(prompt, /compare the evidence against every requested detail/i);
+    assert.match(prompt, /one targeted follow-up search\/read/i);
     assert.match(
       prompt,
       /GROUNDING RULE:.*Never state a specific date, point value, filename/i
@@ -2709,6 +2845,14 @@ test("chat agent prompt and tool definitions teach search-then-read behavior", a
     const courseSearch = tools.find((tool) => tool.name === "search_course");
     const readFile = tools.find((tool) => tool.name === "read_file");
     const listFiles = tools.find((tool) => tool.name === "list_files");
+    const openResource = tools.find((tool) => tool.name === "open_resource");
+    const openLecture = tools.find((tool) => tool.name === "open_lecture");
+    const listAnnouncements = buildChatTools({
+      cache,
+      client: null,
+      radar: {} as any,
+      courseId: 17,
+    }).find((tool) => tool.name === "list_announcements");
 
     assert.match(workspaceSearch?.description ?? "", /Discovery-only keyword search/i);
     assert.match(workspaceSearch?.description ?? "", /call read_file/i);
@@ -2726,6 +2870,11 @@ test("chat agent prompt and tool definitions teach search-then-read behavior", a
     assert.match(readFile?.description ?? "", /read each relevant source/i);
     assert.match(listFiles?.description ?? "", /failed or ambiguous read\/open/i);
     assert.match(listFiles?.description ?? "", /search came up empty/i);
+    assert.match(openResource?.description ?? "", /non-lecture PDF, file, page, or resource/i);
+    assert.match(openResource?.description ?? "", /prefer open_lecture/i);
+    assert.match(openLecture?.description ?? "", /Prefer this over open_resource/i);
+    assert.match(listAnnouncements?.description ?? "", /discovery\/orientation tool/i);
+    assert.match(listAnnouncements?.description ?? "", /Use read_thread/i);
   });
 });
 
@@ -3865,4 +4014,3 @@ test("shouldGroundUnverifiedAnswer does not trigger when there are no search bre
     false
   );
 });
-

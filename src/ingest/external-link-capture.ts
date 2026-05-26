@@ -592,70 +592,84 @@ function extractExternalLinksFromHtml(
 ): Array<{ title: string; url: string }> {
   const results: Array<{ title: string; url: string }> = [];
   const seen = new Set<string>();
+  const addCandidate = (rawUrl: string | null, title: string | null): void => {
+    if (!rawUrl) return;
+
+    const resolvedUrl = resolveHref(rawUrl, options.baseUrl);
+    if (
+      !resolvedUrl ||
+      !isCapturableExternalUrl(resolvedUrl, {
+        courseId: options.courseId,
+        canvasOrigin: options.canvasOrigin,
+      })
+    ) {
+      return;
+    }
+
+    const normalizedUrl = normalizeExternalUrl(resolvedUrl);
+    if (!normalizedUrl || seen.has(normalizedUrl)) {
+      return;
+    }
+    seen.add(normalizedUrl);
+
+    results.push({
+      title:
+        decodeEntities(title ?? "").replace(/\s+/g, " ").trim() ||
+        normalizedUrl,
+      url: normalizedUrl,
+    });
+  };
+
   const anchorRegex = /<a\b[^>]*>([\s\S]*?)<\/a>/gi;
   let match: RegExpExecArray | null;
 
   while ((match = anchorRegex.exec(html)) !== null) {
     const tag = match[0];
     const href = extractAttr(tag, "href");
-    if (!href) continue;
-
-    const resolvedUrl = resolveHref(href, options.baseUrl);
-    if (
-      !resolvedUrl ||
-      !isCapturableExternalUrl(resolvedUrl, {
-        courseId: options.courseId,
-        canvasOrigin: options.canvasOrigin,
-      })
-    ) {
-      continue;
-    }
-
-    const normalizedUrl = normalizeExternalUrl(resolvedUrl);
-    if (!normalizedUrl || seen.has(normalizedUrl)) {
-      continue;
-    }
-    seen.add(normalizedUrl);
-
-    results.push({
-      title: normalizeLinkTitle(match[1], normalizedUrl),
-      url: normalizedUrl,
-    });
+    addCandidate(href, normalizeLinkTitle(match[1], ""));
   }
 
-  const iframeRegex = /<iframe\b[^>]*>/gi;
-  let iframeMatch: RegExpExecArray | null;
+  const embeddedTagRegex =
+    /<(iframe|embed|object|video|audio|source|track)\b[^>]*>/gi;
+  let embeddedMatch: RegExpExecArray | null;
 
-  while ((iframeMatch = iframeRegex.exec(html)) !== null) {
-    const tag = iframeMatch[0];
-    const src = extractAttr(tag, "src");
-    if (!src) continue;
-
-    const resolvedUrl = resolveHref(src, options.baseUrl);
-    if (
-      !resolvedUrl ||
-      !isCapturableExternalUrl(resolvedUrl, {
-        courseId: options.courseId,
-        canvasOrigin: options.canvasOrigin,
-      })
-    ) {
-      continue;
-    }
-
-    const normalizedUrl = normalizeExternalUrl(resolvedUrl);
-    if (!normalizedUrl || seen.has(normalizedUrl)) {
-      continue;
-    }
-    seen.add(normalizedUrl);
-
-    const title = extractAttr(tag, "title") ?? normalizedUrl;
-    results.push({
-      title: decodeEntities(title),
-      url: normalizedUrl,
-    });
+  while ((embeddedMatch = embeddedTagRegex.exec(html)) !== null) {
+    const tagName = (embeddedMatch[1] ?? "").toLowerCase();
+    const tag = embeddedMatch[0];
+    const attrName = tagName === "object" ? "data" : "src";
+    const url =
+      extractAttr(tag, attrName) ??
+      extractAttr(tag, "data-src") ??
+      (tagName === "object" ? extractAttr(tag, "src") : null);
+    addCandidate(url, mediaLinkTitle(tagName, tag));
   }
 
   return results;
+}
+
+function mediaLinkTitle(tagName: string, tag: string): string | null {
+  const title = extractAttr(tag, "title") ?? extractAttr(tag, "aria-label");
+  if (title) return title;
+
+  if (tagName === "track") {
+    const kind = extractAttr(tag, "kind");
+    const label = extractAttr(tag, "label");
+    const srclang = extractAttr(tag, "srclang");
+    const descriptor = [label, srclang].filter(Boolean).join(" ");
+    const prefix = kind ? titleCase(kind) : "Media track";
+    return descriptor ? `${prefix}: ${descriptor}` : prefix;
+  }
+
+  if (tagName === "source") {
+    const type = extractAttr(tag, "type");
+    return type ? `Media source: ${type}` : "Media source";
+  }
+
+  if (tagName === "video" || tagName === "audio") {
+    return `${titleCase(tagName)} media`;
+  }
+
+  return "Embedded content";
 }
 
 function isCapturableExternalUrl(
@@ -823,6 +837,15 @@ function normalizeLinkTitle(rawHtml: string, fallbackUrl: string): string {
   return text.length > 0 ? text : fallbackUrl;
 }
 
+function titleCase(value: string): string {
+  const cleaned = value.replace(/[-_]+/g, " ").trim();
+  if (!cleaned) return "";
+  return cleaned
+    .split(/\s+/)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
 function stripTags(value: string): string {
   return value.replace(/<[^>]*>/g, "");
 }
@@ -931,7 +954,7 @@ function guessOfficeFilename(contentType: string | null): string {
 
 function looksLikePlainText(contentType: string | null, url: string): boolean {
   if (!contentType) {
-    return /\.(txt|md|csv|json|xml)(?:$|[?#])/i.test(url);
+    return /\.(txt|md|csv|json|xml|vtt|srt)(?:$|[?#])/i.test(url);
   }
 
   const normalized = contentType.toLowerCase();

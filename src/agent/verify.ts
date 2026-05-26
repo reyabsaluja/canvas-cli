@@ -30,6 +30,7 @@ export function verifyWorkspaceAnswer(
   const trimmedAnswer = input.answer.trim();
   const relevantGroundedObservations = selectRelevantGroundedObservations(
     input.question,
+    trimmedAnswer,
     input.observations
   );
   const specificClaimEvidence = buildSpecificClaimEvidenceText(input);
@@ -38,6 +39,7 @@ export function verifyWorkspaceAnswer(
     : [];
   const sources = collectSources(
     input.question,
+    trimmedAnswer,
     input.observations,
     input.usedWorkup,
     input.loaded
@@ -167,13 +169,18 @@ function applyComparisonEvidenceConfidenceCap(
 
 function collectSources(
   question: string,
+  answer: string,
   observations: Observation[],
   usedWorkup: boolean,
   loaded: LoadedWorkspace
 ): AnswerSource[] {
   const resolved: AnswerSource[] = [];
   const seen = new Set<string>();
-  const citationObservations = selectCitationObservations(question, observations);
+  const citationObservations = selectCitationObservations(
+    question,
+    answer,
+    observations
+  );
 
   for (const observation of citationObservations) {
     if (observation.status !== "ok") {
@@ -183,7 +190,7 @@ function collectSources(
       const section =
         normalizeSourceSection(artifact.sectionLabel) ??
         (isGroundedContentObservation(observation)
-          ? inferSectionFromContent(question, observation.content!)
+          ? inferSectionFromContent(question, answer, observation.content!)
           : null);
       const key = `${artifact.kind}:${artifact.title}:${section ?? ""}`;
       if (seen.has(key)) {
@@ -220,69 +227,155 @@ function collectSources(
 
 function inferSectionFromContent(
   question: string,
+  answer: string,
   content: string
 ): string | null {
-  const headings = extractContentHeadings(content);
-  if (headings.length === 0) {
+  const sections = extractContentSections(content);
+  if (sections.length === 0) {
     return null;
   }
 
-  const questionTokens = tokenizeForMatch(question);
-  if (questionTokens.length === 0) {
+  const queryTokens = tokenizeForMatch(`${question}\n${answer}`);
+  if (queryTokens.length === 0) {
     return null;
   }
 
-  let bestHeading: string | null = null;
+  let bestSection: ContentSection | null = null;
   let bestScore = 0;
 
-  for (const heading of headings) {
-    const headingTokens = tokenizeForMatch(heading);
+  for (const section of sections) {
+    const headingTokens = new Set(tokenizeForMatch(section.title));
+    const bodyTokens = new Set(tokenizeForMatch(section.body));
     let score = 0;
-    for (const token of questionTokens) {
-      if (headingTokens.includes(token)) {
-        score += 1;
+    for (const token of queryTokens) {
+      if (headingTokens.has(token)) {
+        score += 4;
+      }
+      if (bodyTokens.has(token)) {
+        score += 2;
       }
     }
-    if (score > bestScore) {
+    if (
+      score > bestScore ||
+      (score === bestScore &&
+        score > 0 &&
+        bestSection &&
+        section.level > bestSection.level)
+    ) {
       bestScore = score;
-      bestHeading = heading;
+      bestSection = section;
     }
   }
 
-  return bestScore > 0 ? bestHeading : null;
+  return bestSection && bestScore > 0 ? bestSection.title : null;
 }
 
-function extractContentHeadings(content: string): string[] {
-  const headings: string[] = [];
+interface ContentSection {
+  level: number;
+  title: string;
+  body: string;
+}
+
+function extractContentSections(content: string): ContentSection[] {
+  const sections: ContentSection[] = [];
+  let current:
+    | { level: number; title: string; bodyLines: string[] }
+    | null = null;
+
   for (const line of content.split("\n")) {
-    const match = line.match(/^#{1,4}\s+(.+)/);
+    const match = line.match(/^(#{1,6})\s+(.+)/);
     if (match) {
-      const heading = match[1]!.trim();
-      if (heading.length > 0 && heading.length <= 80) {
-        headings.push(heading);
+      if (current) {
+        sections.push({
+          level: current.level,
+          title: current.title,
+          body: current.bodyLines.join("\n").trim(),
+        });
       }
+
+      const title = match[2]!.replace(/\s+#+\s*$/, "").trim();
+      current =
+        title.length > 0 && title.length <= 80
+          ? { level: match[1]!.length, title, bodyLines: [] }
+          : null;
+      continue;
+    }
+
+    if (current) {
+      current.bodyLines.push(line);
     }
   }
-  return headings;
+
+  if (current) {
+    sections.push({
+      level: current.level,
+      title: current.title,
+      body: current.bodyLines.join("\n").trim(),
+    });
+  }
+
+  return sections;
 }
+
+const SECTION_MATCH_STOP_WORDS = new Set([
+  "about",
+  "after",
+  "also",
+  "and",
+  "are",
+  "because",
+  "before",
+  "does",
+  "from",
+  "have",
+  "how",
+  "into",
+  "should",
+  "that",
+  "the",
+  "this",
+  "what",
+  "when",
+  "where",
+  "which",
+  "with",
+]);
 
 function tokenizeForMatch(value: string): string[] {
-  return value
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((token) => token.length >= 3);
+  const seen = new Set<string>();
+  const tokens: string[] = [];
+  for (const token of value.toLowerCase().split(/[^a-z0-9]+/)) {
+    if (
+      token.length >= 3 &&
+      !SECTION_MATCH_STOP_WORDS.has(token) &&
+      !seen.has(token)
+    ) {
+      seen.add(token);
+      tokens.push(token);
+    }
+  }
+  return tokens;
 }
 
 function selectCitationObservations(
   question: string,
+  answer: string,
   observations: Observation[]
 ): Observation[] {
-  const relevantGrounded = selectRelevantGroundedObservations(question, observations);
+  const relevantGrounded = selectRelevantGroundedObservations(
+    question,
+    answer,
+    observations
+  );
   if (relevantGrounded.length > 0) {
     return relevantGrounded;
   }
 
-  const relevant = selectRelevantCitationObservations(question, observations);
+  const relevant = selectRelevantCitationObservations(
+    question,
+    answer,
+    observations
+  );
   if (relevant.length > 0) {
     return relevant;
   }
@@ -295,26 +388,45 @@ function selectCitationObservations(
 
 function selectRelevantGroundedObservations(
   question: string,
+  answer: string,
   observations: Observation[]
 ): Observation[] {
   return selectRelevantCitationObservations(
     question,
+    answer,
     observations.filter((observation) => isGroundedContentObservation(observation))
   );
 }
 
 function selectRelevantCitationObservations(
   question: string,
+  answer: string,
   observations: Observation[]
 ): Observation[] {
   const trimmedQuestion = question.trim();
-  if (!trimmedQuestion) {
+  const trimmedAnswer = answer.trim();
+  if (!trimmedQuestion && !trimmedAnswer) {
     return [];
   }
 
-  return observations.filter(
-    (observation) => scoreObservationRelevance(trimmedQuestion, observation) > 0
+  return observations.filter((observation) =>
+    isObservationRelevantToQuestionOrAnswer(
+      trimmedQuestion,
+      trimmedAnswer,
+      observation
+    )
   );
+}
+
+function isObservationRelevantToQuestionOrAnswer(
+  question: string,
+  answer: string,
+  observation: Observation
+): boolean {
+  if (question && scoreObservationRelevance(question, observation) > 0) {
+    return true;
+  }
+  return Boolean(answer && scoreObservationRelevance(answer, observation) > 0);
 }
 
 function canObservationProduceCitation(observation: Observation): boolean {
@@ -383,6 +495,7 @@ function buildSpecificClaimEvidenceText(input: VerifyWorkspaceAnswerInput): stri
   const parts: string[] = [];
   for (const observation of selectCitationObservations(
     input.question,
+    input.answer,
     input.observations
   )) {
     if (observation.status !== "ok") {

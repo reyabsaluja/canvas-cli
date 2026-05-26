@@ -78,7 +78,7 @@ const DOWNLOAD_COURSE_FILE_TOOL: ToolDefinition = {
 const OPEN_RESOURCE_TOOL: ToolDefinition = {
   name: "open_resource",
   description:
-    "Open a workspace or course resource on the user's machine. Use this when the user asks to open a PDF, file, page, or resource. Pass the most specific filename or resource name you can infer from the user's request as the query — e.g. 'M3_Instructions.pdf' rather than 'the m3 pdf'. If the user mentions a milestone, lab, or assignment number, include it.",
+    "Open a workspace or course resource on the user's machine. Use this when the user asks to open a non-lecture PDF, file, page, or resource. For lecture videos, recordings, or slides, prefer open_lecture when that tool is available. Pass the most specific filename or resource name you can infer from the user's request as the query — e.g. 'M3_Instructions.pdf' rather than 'the m3 pdf'. If the user mentions a milestone, lab, or assignment number, include it.",
   parameters: {
     type: "object",
     properties: {
@@ -106,7 +106,7 @@ const LIST_ASSIGNMENTS_TOOL: ToolDefinition = {
 const OPEN_LECTURE_TOOL: ToolDefinition = {
   name: "open_lecture",
   description:
-    "Find and open lecture content (video, slides, or page) for this course. Use when the user asks about lectures, recordings, or slides by number, title, or topic.",
+    "Find and open lecture content (video, slides, recording, or page) for this course. Prefer this over open_resource whenever the user asks to open lectures, lecture slides, recordings, or videos by number, title, or topic.",
   parameters: {
     type: "object",
     properties: {
@@ -123,7 +123,7 @@ const OPEN_LECTURE_TOOL: ToolDefinition = {
 const LIST_ANNOUNCEMENTS_TOOL: ToolDefinition = {
   name: "list_announcements",
   description:
-    "List announcements and discussion topics for this course. Optionally filter by type and search by keyword. Use when the student asks about announcements, discussions, posts, or what's new in the course. Use read_thread on a listed item when the student needs the full post or replies.",
+    "List announcements and discussion topics for this course. Optionally filter by type and search by keyword. This is a discovery/orientation tool for announcements, discussions, posts, or what's new in the course. Use read_thread on a listed item before answering what a specific post says, whether an instructor clarified something, or what replies contain.",
   parameters: {
     type: "object",
     properties: {

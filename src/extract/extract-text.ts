@@ -403,14 +403,16 @@ function renderDocxEntries(
   const lines = [`# ${filename}`, ""];
   const body = entries.get("word/document.xml");
   if (body) {
+    const relationshipTargets = relationshipTargetsForPart(
+      entries,
+      "word/document.xml"
+    );
     appendSection(
       lines,
       "Body",
-      extractOfficeParagraphs(
-        body,
-        relationshipTargetsForPart(entries, "word/document.xml")
-      )
+      extractOfficeParagraphs(stripOfficeTables(body), relationshipTargets)
     );
+    appendSection(lines, "Tables", extractOfficeTables(body, relationshipTargets));
   }
 
   const supplementalEntries = [...entries.entries()]
@@ -419,10 +421,17 @@ function renderDocxEntries(
     )
     .sort(([left], [right]) => left.localeCompare(right));
   for (const [name, xml] of supplementalEntries) {
+    const relationshipTargets = relationshipTargetsForPart(entries, name);
+    const heading = formatOfficeEntryHeading(name);
     appendSection(
       lines,
-      formatOfficeEntryHeading(name),
-      extractOfficeParagraphs(xml, relationshipTargetsForPart(entries, name))
+      heading,
+      extractOfficeParagraphs(stripOfficeTables(xml), relationshipTargets)
+    );
+    appendSection(
+      lines,
+      `${heading} Tables`,
+      extractOfficeTables(xml, relationshipTargets)
     );
   }
 
@@ -513,6 +522,159 @@ function extractOfficeParagraphs(
     .trim();
   return fallback ? [fallback] : [];
 }
+
+function stripOfficeTables(xml: string): string {
+  return xml.replace(
+    /<(?:[a-z]+:)?tbl\b[^>]*>[\s\S]*?<\/(?:[a-z]+:)?tbl>/gi,
+    ""
+  );
+}
+
+function extractOfficeTables(
+  xml: string,
+  relationshipTargets: Map<string, string> = new Map()
+): string[] {
+  const rendered: string[] = [];
+  let tableNumber = 1;
+
+  for (const tableMatch of xml.matchAll(
+    /<(?:[a-z]+:)?tbl\b[^>]*>([\s\S]*?)<\/(?:[a-z]+:)?tbl>/gi
+  )) {
+    const rows = extractOfficeTableRows(tableMatch[1] ?? "", relationshipTargets);
+    if (rows.length === 0) {
+      continue;
+    }
+
+    rendered.push(`Table ${tableNumber}:`);
+    rendered.push(...renderOfficeTableRows(rows));
+    tableNumber += 1;
+  }
+
+  return rendered;
+}
+
+function extractOfficeTableRows(
+  tableXml: string,
+  relationshipTargets: Map<string, string>
+): string[][] {
+  const rows: string[][] = [];
+  for (const rowMatch of tableXml.matchAll(
+    /<(?:[a-z]+:)?tr\b[^>]*>([\s\S]*?)<\/(?:[a-z]+:)?tr>/gi
+  )) {
+    const cells: string[] = [];
+    for (const cellMatch of (rowMatch[1] ?? "").matchAll(
+      /<(?:[a-z]+:)?tc\b[^>]*>([\s\S]*?)<\/(?:[a-z]+:)?tc>/gi
+    )) {
+      const text = extractOfficeParagraphs(cellMatch[1] ?? "", relationshipTargets)
+        .join(" / ")
+        .replace(/\s+/g, " ")
+        .trim();
+      cells.push(text);
+    }
+    if (cells.some((cell) => cell.length > 0)) {
+      rows.push(trimTrailingEmptyCells(cells));
+    }
+  }
+  return rows;
+}
+
+function renderOfficeTableRows(rows: string[][]): string[] {
+  const nonEmptyRows = rows
+    .map((row) => trimTrailingEmptyCells(row.map((cell) => cell.trim())))
+    .filter((row) => row.some((cell) => cell.length > 0));
+  if (nonEmptyRows.length === 0) {
+    return [];
+  }
+
+  const headerRow = nonEmptyRows[0] ?? [];
+  if (
+    nonEmptyRows.length > 1 &&
+    headerRow.length > 1 &&
+    isLikelyOfficeHeaderRow(headerRow)
+  ) {
+    return renderOfficeRowsWithHeader(headerRow, nonEmptyRows.slice(1));
+  }
+
+  if (nonEmptyRows.every((row) => row.length === 2 && row[0] && row[1])) {
+    return nonEmptyRows.map((row) => `- ${row[0]}: ${row[1]}`);
+  }
+
+  if (nonEmptyRows.length > 1 && headerRow.length > 1) {
+    return renderOfficeRowsWithHeader(headerRow, nonEmptyRows.slice(1));
+  }
+
+  return nonEmptyRows.map(
+    (row, index) => `- Row ${index + 1}: ${row.filter(Boolean).join(" | ")}`
+  );
+}
+
+function renderOfficeRowsWithHeader(
+  headerRow: string[],
+  rows: string[][]
+): string[] {
+  return rows.map((row) => {
+    const width = Math.max(headerRow.length, row.length);
+    const parts: string[] = [];
+    for (let index = 0; index < width; index += 1) {
+      const header = headerRow[index] || `Column ${index + 1}`;
+      const value = row[index] || "-";
+      parts.push(`${header}: ${value}`);
+    }
+    return `- ${parts.join(" | ")}`;
+  });
+}
+
+function isLikelyOfficeHeaderRow(row: string[]): boolean {
+  return row.every((cell) => isLikelyOfficeHeaderCell(cell));
+}
+
+function isLikelyOfficeHeaderCell(cell: string): boolean {
+  const normalized = cell
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized || /\d/.test(normalized) || normalized.length > 40) {
+    return false;
+  }
+
+  return normalized
+    .split(" ")
+    .every((token) => OFFICE_TABLE_HEADER_WORDS.has(token));
+}
+
+function trimTrailingEmptyCells(cells: string[]): string[] {
+  let end = cells.length;
+  while (end > 0 && cells[end - 1]?.trim().length === 0) {
+    end -= 1;
+  }
+  return cells.slice(0, end);
+}
+
+const OFFICE_TABLE_HEADER_WORDS = new Set([
+  "category",
+  "criterion",
+  "criteria",
+  "date",
+  "deadline",
+  "deliverable",
+  "description",
+  "due",
+  "evidence",
+  "grade",
+  "item",
+  "milestone",
+  "notes",
+  "outcome",
+  "points",
+  "reading",
+  "requirement",
+  "score",
+  "task",
+  "topic",
+  "weight",
+  "week",
+]);
 
 function extractOfficeBlockText(
   xml: string,

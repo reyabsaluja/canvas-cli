@@ -132,6 +132,7 @@ function buildToolRuntimeMemory(
 
   const lines = [
     "Previously gathered tool memory (reuse this before calling tools again):",
+    "Coverage checkpoint: compare this memory to every requested detail in the student's question before acting. If it fully answers the question, answer directly. If one detail is missing, make one targeted follow-up search/read for that missing detail or state exactly what could not be verified.",
   ];
 
   for (const observation of selected) {

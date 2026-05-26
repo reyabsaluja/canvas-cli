@@ -24,7 +24,7 @@ You already have a detailed workup of this assignment pre-loaded below. For most
 
 Decision ladder:
 1. If the pre-loaded assignment context already answers the question, answer directly.
-2. If the student asks to open, show, launch, or pull up a resource, call open_resource immediately.
+2. Choose the most specific tool for action/navigation requests: open_lecture for lectures, recordings, or slides; list_announcements then read_thread for announcements, discussions, posts, or replies; list_assignments for course workload/upcoming due questions; open_resource for non-lecture files, PDFs, pages, or resources.
 3. If you need to locate the right source, use search_workspace or search_course.
 4. Treat search_workspace and search_course as discovery tools only: they return snippets and candidate sources, not full evidence. For exact wording, requirements, quotes, section-level detail, or in-depth explanations, follow a search with read_file on the best matching source before answering.
 5. For compare, changed, agree/disagree, or conflict questions, do not stop after one source if a second relevant source exists. Read the complementary source before answering.
@@ -33,7 +33,7 @@ Decision ladder:
 8. If a read or search just failed, do not repeat the same tool call with the same target. Change tactics: reuse a different breadcrumb, use list_files to see what is actually available, or try a more specific search.
 
 Tool-result checkpoint:
-- Grounded evidence (read_file, download_course_file, list_assignments, read_thread): answer from it, unless a comparison question still needs another source.
+- Grounded evidence (read_file, download_course_file, list_assignments, read_thread): first compare the evidence against every requested detail in the student's question. If it covers the question, answer from it. If one requested detail is missing, make one targeted follow-up search/read for that missing detail or state exactly what could not be verified.
 - Discovery breadcrumbs (search_workspace, search_course): use the section labels and excerpts to choose the best source, then read that source before answering about requirements, dates, files, points, quotes, or detailed explanations.
 - Dead ends (not_found, missing_text, failed download): do not repeat the same target. Try a different breadcrumb, list_files, or one sharper search; if that still fails, say exactly what could not be verified.
 
@@ -46,7 +46,8 @@ IMPORTANT tool usage rules:
 - If you already read a file earlier in this conversation, DO NOT read it again. Use the content from the earlier read.
 - read_file returns the FULL content of the file. After reading, IMMEDIATELY use that content to answer in detail.
 - If a file is inside a zip (e.g., lab4.pdf inside lab4.zip), use read_file with the PDF name — it extracts the content from the zip.
-- IMPORTANT: If the user asks to open, launch, show, or pull up ANY file, PDF, page, or resource (e.g. "open the m3 pdf", "can you open a3", "pull up the instructions"), you MUST call open_resource immediately. Do NOT answer from the workup or describe the resource — the user wants it opened on their machine. After a successful open, just confirm it was opened.
+- IMPORTANT: If the user asks to open, launch, show, or pull up lecture content, use open_lecture. If they ask to open, launch, show, or pull up any non-lecture file, PDF, page, or resource (e.g. "open the m3 pdf", "can you open a3", "pull up the instructions"), use open_resource. Do NOT answer from the workup or describe the resource — the user wants it opened on their machine. After a successful open, just confirm it was opened.
+- For announcements and discussions, list_announcements is a discovery/orientation tool. If the student asks what a specific post says, whether an instructor clarified something, or needs reply details, call read_thread on the best matching listed item before answering.
 - After reading a file, give a DETAILED and SPECIFIC answer based on what you read. Do not give vague summaries.
 - When the user asks to "explain part X in depth", find the specific section in the document and quote the actual requirements, addresses, functionality needed, etc.
 - Do NOT re-read files you already have in the conversation. Just reference the earlier content.
@@ -61,7 +62,7 @@ Rules:
 
 IMPORTANT: Before calling any tool, ALWAYS write a brief sentence explaining what you're about to do. For example, write "Let me read the lab document..." before calling read_file, or "Searching for that..." before calling search_workspace. This sentence must come BEFORE the tool call, not after. The student needs to see your thought process in real-time.
 
-Course-level tools (when available): use list_assignments to orient across the course's other work, open_lecture to launch lecture content by number or topic, list_announcements for announcements and discussions, and read_thread to pull a full discussion thread. list_assignments and read_thread return grounded evidence; after using them, answer from what they returned unless a specific missing detail requires another source. These are the same capabilities the course assistant has — stay assignment-focused but reach for them when the student's question points outside this assignment.
+Course-level tools (when available): use list_assignments to orient across the course's other work, open_lecture to launch lecture content by number or topic, list_announcements for announcements and discussions, and read_thread to pull a full discussion thread. list_assignments and read_thread return grounded evidence; after using them, answer from what they returned unless a specific missing detail requires another source. list_announcements returns a list of candidates, so read_thread before answering about the content of one post. These are the same capabilities the course assistant has — stay assignment-focused but reach for them when the student's question points outside this assignment.
 
 When you have enough information, respond with your answer directly (no tool calls).`);
 
@@ -159,7 +160,7 @@ When you have enough information, respond with your answer directly (no tool cal
 
   if (ctx.cache && ctx.cache.lectures.length > 0) {
     const lectureTitles = ctx.cache.lectures.slice(0, 30);
-    parts.push(`\nCourse lectures (use open_resource to open for the user):`);
+    parts.push(`\nCourse lectures (use open_lecture to open for the user):`);
     for (const lecture of lectureTitles) {
       const type = lecture.contentType !== "unknown" ? ` [${lecture.contentType}]` : "";
       const topic = lecture.topic ? ` — ${lecture.topic}` : "";
@@ -169,7 +170,7 @@ When you have enough information, respond with your answer directly (no tool cal
     if (ctx.cache.lectures.length > 30) {
       parts.push(`- ... and ${ctx.cache.lectures.length - 30} more`);
     }
-    parts.push(`\nIMPORTANT: When the student asks about lectures, topics to review, or preparation — answer DIRECTLY from the assignment context above combined with this lecture list and module structure. Use the MODULE NAMES to understand what each lecture covers (e.g. if a module is named "LEC05 - Polling and Timers" then Lecture 5 covers polling and timers). Do NOT hallucinate lecture descriptions — if you cannot determine what a lecture covers from the module name or title, say so honestly. Do NOT read plan.md or call any tools for lecture questions. Offer to open relevant lectures with open_resource.`);
+    parts.push(`\nIMPORTANT: When the student asks about lectures, topics to review, or preparation — answer DIRECTLY from the assignment context above combined with this lecture list and module structure. Use the MODULE NAMES to understand what each lecture covers (e.g. if a module is named "LEC05 - Polling and Timers" then Lecture 5 covers polling and timers). Do NOT hallucinate lecture descriptions — if you cannot determine what a lecture covers from the module name or title, say so honestly. Do NOT read plan.md or call any tools for lecture questions. Offer to open relevant lectures with open_lecture.`);
   }
 
   return parts.join("\n");

@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Config } from "../config/env.js";
+import { decodeEntities } from "../format/html-to-text.js";
 import { sanitizeFilename, confineToDirectory } from "../sanitize.js";
 
 export interface LinkedFile {
@@ -10,47 +11,41 @@ export interface LinkedFile {
 }
 
 /**
- * Extract Canvas file links from assignment description HTML.
- * Canvas file links have the class "instructure_file_link" and a title attribute
- * with the real filename. The href points to a preview page; we convert it to
- * a download URL by appending /download before the query string.
+ * Extract Canvas file links from rich Canvas HTML.
+ * Canvas often marks file links with the "instructure_file_link" class and a
+ * title attribute, but instructors can also paste plain /courses/:id/files/:id
+ * links next to those richer anchors. Capture both forms in one pass.
  */
 export function extractLinkedFiles(descriptionHtml: string): LinkedFile[] {
   const files: LinkedFile[] = [];
+  const seen = new Set<string>();
 
-  // Match <a> tags with instructure_file_link class
-  const linkRegex =
-    /<a[^>]*class="[^"]*instructure_file_link[^"]*"[^>]*>/gi;
+  const linkRegex = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
   let match;
 
   while ((match = linkRegex.exec(descriptionHtml)) !== null) {
-    const tag = match[0];
+    const attrs = match[1] ?? "";
+    const innerHtml = match[2] ?? "";
+    const className = extractAttr(attrs, "class") ?? "";
+    const href = extractAttr(attrs, "href");
 
-    const title = extractAttr(tag, "title");
-    const href = extractAttr(tag, "href");
-
-    if (!href) continue;
-
-    // Decode HTML entities in the URL
-    const cleanUrl = href.replace(/&amp;/g, "&");
-
-    const downloadUrl = toDownloadUrl(cleanUrl);
-    const filename = title || filenameFromUrl(cleanUrl) || `file-${files.length}`;
-
-    files.push({ title: filename, url: cleanUrl, downloadUrl });
-  }
-
-  // Fallback: if no instructure_file_link found, look for any Canvas file URLs
-  if (files.length === 0) {
-    const hrefRegex =
-      /href="([^"]*\/courses\/\d+\/files\/\d+[^"]*)"/gi;
-    let hrefMatch;
-    while ((hrefMatch = hrefRegex.exec(descriptionHtml)) !== null) {
-      const cleanUrl = hrefMatch[1].replace(/&amp;/g, "&");
-      const downloadUrl = toDownloadUrl(cleanUrl);
-      const filename = filenameFromUrl(cleanUrl) || `file-${files.length}`;
-      files.push({ title: filename, url: cleanUrl, downloadUrl });
+    if (!href || (!isInstructureFileLink(className) && !isCanvasFileUrl(href))) {
+      continue;
     }
+
+    const cleanUrl = href;
+    const downloadUrl = toDownloadUrl(cleanUrl);
+    const dedupKey = getLinkedFileDedupKey(downloadUrl);
+    if (seen.has(dedupKey)) {
+      continue;
+    }
+    seen.add(dedupKey);
+
+    const title = extractAttr(attrs, "title");
+    const label = extractLinkLabel(innerHtml);
+    const filename =
+      title || label || filenameFromUrl(cleanUrl) || `file-${files.length}`;
+    files.push({ title: filename, url: cleanUrl, downloadUrl });
   }
 
   return files;
@@ -72,14 +67,56 @@ function toDownloadUrl(url: string): string {
         .join("&")
     : "";
 
-  const downloadPath = pathPart.replace(/\/$/, "") + "/download";
+  const normalizedPath = pathPart.replace(/\/$/, "");
+  const downloadPath = normalizedPath.endsWith("/download")
+    ? normalizedPath
+    : normalizedPath + "/download";
   return cleanQuery ? `${downloadPath}?${cleanQuery}` : downloadPath;
 }
 
 function extractAttr(tag: string, attr: string): string | null {
-  const regex = new RegExp(`${attr}="([^"]*)"`, "i");
+  const regex = new RegExp(
+    `(?:^|\\s)${attr}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`,
+    "i"
+  );
   const match = tag.match(regex);
-  return match ? match[1] : null;
+  const value = match?.[1] ?? match?.[2] ?? match?.[3] ?? "";
+  const decoded = decodeEntities(value).trim();
+  return decoded.length > 0 ? decoded : null;
+}
+
+function isInstructureFileLink(className: string): boolean {
+  return className.split(/\s+/).includes("instructure_file_link");
+}
+
+function isCanvasFileUrl(url: string): boolean {
+  return /\/courses\/\d+\/files\/\d+(?:\/|[?#]|$)/i.test(url);
+}
+
+function extractLinkLabel(innerHtml: string): string | null {
+  const label = decodeEntities(innerHtml.replace(/<[^>]*>/g, " "))
+    .replace(/\s+/g, " ")
+    .trim();
+  return label.length > 0 ? label : null;
+}
+
+function getLinkedFileDedupKey(downloadUrl: string): string {
+  const fileId = filenameFromUrl(downloadUrl);
+  if (fileId) {
+    return fileId;
+  }
+
+  try {
+    const trimmed = downloadUrl.trim();
+    const parsed = new URL(trimmed, "https://canvas.invalid");
+    parsed.searchParams.delete("wrap");
+    parsed.pathname = parsed.pathname.replace(/\/download\/?$/, "");
+    parsed.pathname = parsed.pathname.replace(/\/$/, "");
+    const isRelative = !/^[a-z][a-z0-9+.-]*:/i.test(trimmed);
+    return isRelative ? `${parsed.pathname}${parsed.search}` : parsed.toString();
+  } catch {
+    return downloadUrl;
+  }
 }
 
 function filenameFromUrl(url: string): string | null {

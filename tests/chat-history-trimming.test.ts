@@ -66,6 +66,8 @@ test("buildToolPromptMessages carries forward compact tool memory for the next t
   assert.match(latestMessage, /docs\/reference\.txt/);
   assert.match(latestMessage, /stall cycles around the branch hazard/i);
   assert.match(latestMessage, /missing\.pdf/);
+  assert.match(latestMessage, /Coverage checkpoint/i);
+  assert.match(latestMessage, /every requested detail/i);
   assert.match(latestMessage, /Only call a tool if you still need new evidence/i);
 });
 

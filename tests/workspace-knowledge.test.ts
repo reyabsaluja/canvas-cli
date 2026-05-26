@@ -399,6 +399,115 @@ test("searchWorkspaceKnowledge prefers exact section headings over noisy longer 
   });
 });
 
+test("searchWorkspaceKnowledge indexes nested Canvas headings as precise sections", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const workspace = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "pages"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "pages", "week-4-notes.txt"),
+      [
+        "# Week 4 Notes",
+        "",
+        "## Overview",
+        "",
+        "General pipeline notes and reminders.",
+        "",
+        "#### Calibration thresholds",
+        "",
+        "Set the threshold voltage to 1.2V before measuring setup time.",
+        "",
+        "#### Cache policy",
+        "",
+        "Use least-recently-used replacement for the cache exercise.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache = createCourseCache(coursePath);
+    cache.pages = [
+      {
+        pageId: "week-4-notes",
+        title: "Week 4 Notes",
+        htmlUrl: "https://canvas.example/courses/17/pages/week-4-notes",
+        updatedAt: null,
+        hasBody: true,
+      },
+    ];
+
+    const matches = await searchWorkspaceKnowledge(
+      workspace,
+      cache,
+      "threshold voltage",
+      3
+    );
+
+    assert.equal(matches[0]?.artifact.scope, "course");
+    assert.equal(matches[0]?.artifact.kind, "page");
+    assert.equal(matches[0]?.section.section, "Calibration thresholds");
+    assert.match(matches[0]?.preview ?? "", /threshold voltage to 1\.2V/);
+    assert.doesNotMatch(matches[0]?.preview ?? "", /cache exercise/i);
+  });
+});
+
+test("searchWorkspaceKnowledge maps deadline wording to due date evidence", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const workspace = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "assignments"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "assignments", "42.txt"),
+      [
+        "# Lab 4",
+        "",
+        "## Overview",
+        "",
+        "The lab focuses on branch hazard waveforms.",
+        "",
+        "## Due date",
+        "",
+        "The report is due on April 18 at 11:59 PM.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache = createCourseCache(coursePath);
+    cache.assignments = [
+      {
+        id: 42,
+        name: "Lab 4",
+        dueAt: "2026-04-18T23:59:00.000Z",
+        unlockAt: null,
+        lockAt: null,
+        pointsPossible: 100,
+        gradingType: "points",
+        submissionTypes: ["online_upload"],
+        htmlUrl: "https://canvas.example/courses/17/assignments/42",
+        hasDescription: true,
+        descriptionLinkCount: 0,
+      },
+    ];
+
+    const matches = await searchWorkspaceKnowledge(
+      workspace,
+      cache,
+      "deadline for lab 4",
+      3
+    );
+
+    assert.equal(matches[0]?.artifact.scope, "course");
+    assert.equal(matches[0]?.artifact.kind, "assignment");
+    assert.match(matches[0]?.header ?? "", /Due date/);
+    assert.match(matches[0]?.preview ?? "", /due on April 18 at 11:59 PM/i);
+  });
+});
+
 test("searchWorkspaceKnowledge keeps strongly relevant sibling sections together", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();

@@ -755,6 +755,146 @@ test("ingestCourse downloads assignment detail attachments that are not module f
   });
 });
 
+test("ingestCourse captures plain Canvas file links mixed with rich file links", async () => {
+  await withTempCwd(async () => {
+    const course: Course = {
+      id: 17,
+      name: "ECE243",
+      courseCode: "ECE243H1",
+      termName: "Winter 2026",
+      isCurrent: true,
+    };
+
+    const downloadUrls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const headers =
+        init?.headers instanceof Headers
+          ? init.headers
+          : new Headers((init?.headers as Record<string, string> | undefined) ?? {});
+
+      downloadUrls.push(url);
+      assert.equal(headers.get("Authorization"), "Bearer token");
+      return new Response(`downloaded ${url}\n`, {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      });
+    };
+
+    try {
+      const client = {
+        async getCourseDetail() {
+          return {
+            id: course.id,
+            name: course.name,
+            course_code: course.courseCode,
+            syllabus_body: null,
+            start_at: null,
+            end_at: null,
+            term: null,
+            html_url: "https://canvas.example/courses/17",
+          };
+        },
+        async getAssignments() {
+          return [
+            {
+              id: 42,
+              name: "Lab 4",
+              due_at: "2026-04-30T23:59:00.000Z",
+              html_url: "https://canvas.example/courses/17/assignments/42",
+              course_id: course.id,
+              has_submitted_submissions: false,
+              description: [
+                "<p>Download both resources:</p>",
+                '<p><a class="instructure_file_link" title="lab4-starter.txt" href="https://canvas.example/courses/17/files/77?wrap=1&amp;verifier=abc">Starter mirror</a></p>',
+                "<p><a href='https://canvas.example/courses/17/files/88?verifier=plain'>plain-notes.txt</a></p>",
+              ].join(""),
+            },
+          ];
+        },
+        async getModulesSafe() {
+          return [];
+        },
+        async getModuleItemsSafe() {
+          return [];
+        },
+        async getFilesSafe() {
+          return [];
+        },
+        async getPagesSafe() {
+          return [];
+        },
+        async getAnnouncementsSafe() {
+          return [];
+        },
+        async getDiscussionTopicsSafe() {
+          return [];
+        },
+        async getFrontPageSafe() {
+          return null;
+        },
+        async getPageBySlugSafe() {
+          return null;
+        },
+        skippedEndpoints: [] as string[],
+        resetSkippedEndpoints() {},
+      } as any;
+
+      const result = await ingestCourse(
+        course,
+        client,
+        {
+          baseUrl: "https://canvas.example/api/v1",
+          accessToken: "token",
+        },
+        { refresh: false }
+      );
+
+      assert.deepEqual(downloadUrls.sort(), [
+        "https://canvas.example/courses/17/files/77/download?verifier=abc",
+        "https://canvas.example/courses/17/files/88/download?verifier=plain",
+      ]);
+      assert.equal(result.assignments[0]?.descriptionLinkCount, 2);
+      assert.deepEqual(
+        result.attachments
+          .map((attachment) => ({
+            name: attachment.originalFilename,
+            sourceType: attachment.sourceType,
+            status: attachment.status,
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+        [
+          {
+            name: "lab4-starter.txt",
+            sourceType: "assignment_linked",
+            status: "downloaded",
+          },
+          {
+            name: "plain-notes.txt",
+            sourceType: "assignment_linked",
+            status: "downloaded",
+          },
+        ]
+      );
+
+      const plainNotesText = await fs.readFile(
+        path.join(
+          result.coursePath,
+          "extracted",
+          "attachments",
+          "assignments",
+          "plain-notes.txt.txt"
+        ),
+        "utf-8"
+      );
+      assert.match(plainNotesText, /downloaded .*files\/88\/download/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
 test("ingestCourse captures discussion thread clarifications and linked resources", async () => {
   await withTempCwd(async () => {
     const course: Course = {

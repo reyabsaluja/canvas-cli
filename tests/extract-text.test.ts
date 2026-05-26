@@ -117,6 +117,70 @@ test("extractFileText extracts Word paragraphs and spreadsheet shared strings", 
   });
 });
 
+test("extractFileText preserves Word tables as structured rows", async () => {
+  await withTempDir(async (tempDir) => {
+    const docxPath = path.join(tempDir, "rubric-table.docx");
+    await fs.writeFile(
+      docxPath,
+      buildZipBuffer([
+        {
+          name: "word/document.xml",
+          content: [
+            "<w:document><w:body>",
+            "<w:p><w:r><w:t>Submission rubric</w:t></w:r></w:p>",
+            "<w:tbl>",
+            "<w:tr>",
+            "<w:tc><w:p><w:r><w:t>Criterion</w:t></w:r></w:p></w:tc>",
+            "<w:tc><w:p><w:r><w:t>Points</w:t></w:r></w:p></w:tc>",
+            "<w:tc><w:p><w:r><w:t>Evidence</w:t></w:r></w:p></w:tc>",
+            "</w:tr>",
+            "<w:tr>",
+            "<w:tc><w:p><w:r><w:t>Correctness</w:t></w:r></w:p></w:tc>",
+            "<w:tc><w:p><w:r><w:t>10</w:t></w:r></w:p></w:tc>",
+            "<w:tc><w:p><w:r><w:t>Passes edge-case tests</w:t></w:r></w:p></w:tc>",
+            "</w:tr>",
+            "<w:tr>",
+            "<w:tc><w:p><w:r><w:t>Reflection</w:t></w:r></w:p></w:tc>",
+            "<w:tc><w:p><w:r><w:t>5</w:t></w:r></w:p></w:tc>",
+            "<w:tc><w:p><w:r><w:t>Explains tradeoffs</w:t></w:r></w:p></w:tc>",
+            "</w:tr>",
+            "</w:tbl>",
+            "<w:tbl>",
+            "<w:tr>",
+            "<w:tc><w:p><w:r><w:t>Due date</w:t></w:r></w:p></w:tc>",
+            "<w:tc><w:p><w:r><w:t>April 10</w:t></w:r></w:p></w:tc>",
+            "</w:tr>",
+            "<w:tr>",
+            "<w:tc><w:p><w:r><w:t>Submission</w:t></w:r></w:p></w:tc>",
+            "<w:tc><w:p><w:r><w:t>PDF report</w:t></w:r></w:p></w:tc>",
+            "</w:tr>",
+            "</w:tbl>",
+            "</w:body></w:document>",
+          ].join(""),
+        },
+      ])
+    );
+
+    const text = await extractFileText(docxPath, "rubric-table.docx");
+
+    assert.match(text, /## Body\n\nSubmission rubric/);
+    assert.match(text, /## Tables/);
+    assert.match(text, /Table 1:/);
+    assert.match(
+      text,
+      /- Criterion: Correctness \| Points: 10 \| Evidence: Passes edge-case tests/
+    );
+    assert.match(
+      text,
+      /- Criterion: Reflection \| Points: 5 \| Evidence: Explains tradeoffs/
+    );
+    assert.match(text, /Table 2:/);
+    assert.match(text, /- Due date: April 10/);
+    assert.match(text, /- Submission: PDF report/);
+    assert.doesNotMatch(text, /Submission rubric\nCriterion\nPoints\nEvidence/);
+  });
+});
+
 test("extractFileText preserves Word document hyperlinks from relationships", async () => {
   await withTempDir(async (tempDir) => {
     const docxPath = path.join(tempDir, "brief.docx");
