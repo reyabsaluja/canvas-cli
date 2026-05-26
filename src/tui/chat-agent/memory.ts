@@ -221,9 +221,11 @@ function buildNextToolStep(
   question: string,
   observations: Observation[]
 ): string | null {
+  const groundedObservations = observations.filter(
+    (observation) => observation.status === "ok" && observation.content?.trim()
+  );
   const groundedArtifactIds = new Set(
-    observations
-      .filter((observation) => observation.status === "ok" && observation.content?.trim())
+    groundedObservations
       .flatMap((observation) => observation.artifacts)
       .map((artifact) => artifact.artifactId)
   );
@@ -239,8 +241,10 @@ function buildNextToolStep(
   const needsMultipleSources = questionNeedsMultipleSources(question);
   if (groundedArtifactIds.size > 0) {
     if (!needsMultipleSources || groundedArtifactIds.size > 1) {
-      const sourceCount = groundedArtifactIds.size;
-      return `Evidence sufficient: you have grounded text from ${sourceCount} source${sourceCount > 1 ? "s" : ""}. Answer directly from this evidence — do not call another tool.`;
+      return buildEvidenceSufficientDirective(
+        groundedObservations,
+        candidateTitles
+      );
     }
     if (candidateTitles.length === 0) {
       return buildFailureRecoveryNextStep(observations, {
@@ -274,6 +278,65 @@ function buildNextToolStep(
           .join(", ");
 
   return `Unresolved next step: you already found candidate sources but do not have grounded text yet. Reuse those breadcrumbs and call read_file on ${candidates} before running another search or answering from snippets.`;
+}
+
+function buildEvidenceSufficientDirective(
+  groundedObservations: Observation[],
+  remainingCandidateTitles: string[]
+): string {
+  const sourceCount = new Set(
+    groundedObservations
+      .flatMap((observation) => observation.artifacts)
+      .map((artifact) => artifact.artifactId)
+  ).size;
+
+  const coverageLabels = collectGroundedCoverageLabels(groundedObservations);
+  const coverageSummary = coverageLabels.length > 0
+    ? ` covering: ${coverageLabels.join("; ")}.`
+    : ".";
+
+  const parts = [
+    `Evidence checkpoint: you have grounded text from ${sourceCount} source${sourceCount > 1 ? "s" : ""}${coverageSummary}`,
+    "Compare this evidence against the student's question: does it address every specific detail they asked about?",
+    "If yes, answer directly — do not call another tool.",
+  ];
+
+  if (remainingCandidateTitles.length > 0) {
+    const candidates = remainingCandidateTitles
+      .slice(0, 2)
+      .map((title) => `"${title}"`)
+      .join(", ");
+    parts.push(
+      `If one specific detail is still missing, make one targeted follow-up: read_file on ${candidates}, or a focused search for the missing detail.`
+    );
+  } else {
+    parts.push(
+      "If one specific detail is missing and you cannot find it in the evidence, state exactly what you found and what could not be verified."
+    );
+  }
+
+  return parts.join(" ");
+}
+
+function collectGroundedCoverageLabels(
+  groundedObservations: Observation[]
+): string[] {
+  const labels: string[] = [];
+  const seen = new Set<string>();
+
+  for (const observation of groundedObservations) {
+    for (const artifact of observation.artifacts) {
+      const section = artifact.sectionLabel?.trim();
+      const title = artifact.title.trim();
+      const label = section ? `${title} — ${section}` : title;
+      if (label && !seen.has(label)) {
+        seen.add(label);
+        labels.push(label);
+      }
+    }
+  }
+
+  return labels.slice(0, 3);
 }
 
 function collectViableSearchCandidateTitles(

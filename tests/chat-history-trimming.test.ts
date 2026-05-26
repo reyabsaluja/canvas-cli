@@ -248,7 +248,9 @@ test("buildToolPromptMessages does not force a second read for ordinary single-s
   assert.match(latestMessage, /docs\/reference\.txt/);
   assert.match(latestMessage, /docs\/walkthrough\.txt/);
   assert.doesNotMatch(latestMessage, /Unresolved next step:/i);
-  assert.match(latestMessage, /Evidence sufficient.*1 source/i);
+  assert.match(latestMessage, /Evidence checkpoint.*1 source/i);
+  assert.match(latestMessage, /covering:.*docs\/reference\.txt/i);
+  assert.match(latestMessage, /targeted follow-up/i);
 });
 
 test("buildToolPromptMessages emits sufficiency signal for multi-source question with enough reads", () => {
@@ -292,8 +294,41 @@ test("buildToolPromptMessages emits sufficiency signal for multi-source question
   );
 
   const latestMessage = promptMessages.at(-1)?.content ?? "";
-  assert.match(latestMessage, /Evidence sufficient.*2 sources/i);
+  assert.match(latestMessage, /Evidence checkpoint.*2 sources/i);
   assert.doesNotMatch(latestMessage, /Unresolved next step:/i);
+});
+
+test("buildToolPromptMessages includes section-level coverage labels in evidence checkpoint", () => {
+  const promptMessages = buildToolPromptMessages(
+    [],
+    "What is the late penalty?",
+    {
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read syllabus.pdf.",
+          artifacts: [
+            {
+              artifactId: "artifact-1",
+              title: "syllabus.pdf",
+              kind: "attachment",
+              excerpt: "Late penalty: 10% per day.",
+              sectionLabel: "Late Policy",
+            },
+          ],
+          content: "Late penalty: 10% per day. Maximum 3 days late.",
+        },
+      ],
+      readArtifactIds: ["artifact-1"],
+      stepCount: 1,
+    }
+  );
+
+  const latestMessage = promptMessages.at(-1)?.content ?? "";
+  assert.match(latestMessage, /Evidence checkpoint.*1 source/i);
+  assert.match(latestMessage, /covering:.*syllabus\.pdf.*Late Policy/i);
+  assert.match(latestMessage, /does it address every specific detail/i);
 });
 
 test("buildToolPromptMessages treats multi-topic questions as needing multiple sources", () => {
@@ -338,7 +373,7 @@ test("buildToolPromptMessages treats multi-topic questions as needing multiple s
   const latestMessage = promptMessages.at(-1)?.content ?? "";
   assert.match(latestMessage, /Unresolved next step:/i);
   assert.match(latestMessage, /syllabus\.pdf/i);
-  assert.doesNotMatch(latestMessage, /Evidence sufficient/i);
+  assert.doesNotMatch(latestMessage, /Evidence checkpoint/i);
 });
 
 test("buildToolPromptMessages prefers viable breadcrumbs over already-failed artifacts", () => {
