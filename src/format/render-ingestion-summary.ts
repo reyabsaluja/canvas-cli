@@ -36,6 +36,14 @@ export function renderIngestionSummary(result: IngestionResult): string {
   } else {
     lines.push(`  ${chalk.dim("-")} pages ${chalk.dim("(API not accessible)")}`);
   }
+  if ((result.quizzes?.length ?? 0) > 0) {
+    lines.push(`  ${chalk.dim("-")} ${result.quizzes?.length ?? 0} quizzes`);
+  }
+  if ((result.calendarEvents?.length ?? 0) > 0) {
+    lines.push(
+      `  ${chalk.dim("-")} ${result.calendarEvents?.length ?? 0} calendar events`
+    );
+  }
   if ((result.announcements?.length ?? 0) > 0) {
     lines.push(
       `  ${chalk.dim("-")} ${result.announcements?.length ?? 0} announcements`
@@ -123,6 +131,8 @@ export function renderIngestionJson(result: IngestionResult): object {
   return {
     ingestion: result.ingestion,
     coursePath: result.coursePath,
+    quizzes: result.quizzes ?? [],
+    calendarEvents: result.calendarEvents ?? [],
     announcements: result.announcements ?? [],
     discussions: result.discussions ?? [],
     externalLinks: result.externalLinks ?? [],

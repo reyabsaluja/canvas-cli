@@ -73,13 +73,18 @@ export function normalizeAssignmentDetail(
     grade: raw.submission?.grade ?? null,
     late: raw.submission?.late ?? false,
     missing: raw.submission?.missing ?? false,
-    attachments: (raw.attachments ?? []).map((a) => ({
-      id: a.id,
-      displayName: a.display_name,
-      filename: a.filename,
-      url: a.url,
-      contentType: a.content_type,
-      size: a.size,
-    })),
+    attachments: (raw.attachments ?? [])
+      .filter((a) => !!a.url)
+      .map((a) => {
+        const filename = a.filename || a.display_name || `attachment-${a.id}`;
+        return {
+          id: a.id,
+          displayName: a.display_name || filename,
+          filename,
+          url: a.url!,
+          contentType: a.content_type ?? "",
+          size: a.size ?? 0,
+        };
+      }),
   };
 }

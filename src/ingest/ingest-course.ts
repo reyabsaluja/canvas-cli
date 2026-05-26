@@ -9,11 +9,18 @@ import type {
   LectureIndexEntry,
 } from "./types.js";
 import type { SelectedAttachment } from "./attachment-selection.js";
-import type { CanvasAssignment } from "../canvas/types.js";
+import type {
+  CanvasAssignment,
+  CanvasAttachment,
+  CanvasCalendarEvent,
+  CanvasDiscussionTopic,
+  CanvasQuiz,
+} from "../canvas/types.js";
 import { extractLinkedFiles } from "../workspace/attachments.js";
 import { makeCourseSlug, getCoursePath } from "./slug.js";
 import {
   fetchCourseContent,
+  type RawAssignmentRecord,
   type RawDiscussionThread,
 } from "./fetch-course-content.js";
 import { mapWithConcurrency } from "./concurrency.js";
@@ -70,6 +77,8 @@ export async function ingestCourse(
     modules,
     files,
     pages,
+    quizzes,
+    calendarEvents,
     announcements,
     discussions,
   } =
@@ -100,22 +109,48 @@ export async function ingestCourse(
     signal
   );
 
-  // Step 5b: Also download files linked in assignment descriptions
-  // These have verifier tokens making them downloadable even when Files API is blocked
-  const descriptionAttachments = selectDescriptionLinkedFiles(
+  // Step 5b: Also download files attached directly to assignment details.
+  const assignmentAttachments = selectAssignmentAttachedFiles(
     raw.assignments,
     [...heuristicAttachments, ...moduleAttachments]
   );
 
-  // Step 5c: Download files linked in fetched Canvas pages, front page,
-  // syllabus, announcements, and discussion threads.
+  // Step 5c: Also download files linked in assignment descriptions
+  // These have verifier tokens making them downloadable even when Files API is blocked
+  const descriptionAttachments = selectDescriptionLinkedFiles(
+    raw.assignments,
+    [...heuristicAttachments, ...moduleAttachments, ...assignmentAttachments]
+  );
+
+  // Step 5d: Download files attached directly to announcements/discussions.
+  const discussionAttachments = selectAnnouncementDiscussionAttachedFiles(
+    raw.announcements,
+    raw.discussionThreads,
+    [
+      ...heuristicAttachments,
+      ...moduleAttachments,
+      ...assignmentAttachments,
+      ...descriptionAttachments,
+    ]
+  );
+
+  // Step 5e: Download files linked in fetched Canvas pages, front page,
+  // syllabus, quizzes, calendar events, announcements, and discussion threads.
   const htmlLinkedAttachments = selectHtmlLinkedFiles(
     raw.fetchedPages,
     raw.frontPageBody,
     courseMeta.syllabusBody,
+    raw.quizzes,
+    raw.calendarEvents,
     raw.announcements,
     raw.discussionThreads,
-    [...heuristicAttachments, ...moduleAttachments, ...descriptionAttachments]
+    [
+      ...heuristicAttachments,
+      ...moduleAttachments,
+      ...assignmentAttachments,
+      ...descriptionAttachments,
+      ...discussionAttachments,
+    ]
   );
 
   const capturedExternalLinks = await captureExternalCourseLinks({
@@ -123,6 +158,8 @@ export async function ingestCourse(
     courseHtmlUrl: courseMeta.htmlUrl,
     modules,
     assignments: raw.assignments,
+    quizzes: raw.quizzes,
+    calendarEvents: raw.calendarEvents,
     frontPageBody: raw.frontPageBody,
     fetchedPages: raw.fetchedPages,
     syllabusBody: courseMeta.syllabusBody,
@@ -135,7 +172,9 @@ export async function ingestCourse(
   const allSelected = [
     ...heuristicAttachments,
     ...moduleAttachments,
+    ...assignmentAttachments,
     ...descriptionAttachments,
+    ...discussionAttachments,
     ...htmlLinkedAttachments,
   ];
 
@@ -196,6 +235,8 @@ export async function ingestCourse(
     modules,
     files,
     pages,
+    quizzes,
+    calendarEvents,
     announcements,
     discussions,
     externalLinks,
@@ -204,6 +245,8 @@ export async function ingestCourse(
     lectures,
     ingestion,
     raw.assignments,
+    raw.quizzes,
+    raw.calendarEvents,
     raw.frontPageBody,
     raw.fetchedPages,
     raw.announcements,
@@ -217,6 +260,8 @@ export async function ingestCourse(
     modules,
     files,
     pages,
+    quizzes,
+    calendarEvents,
     announcements,
     discussions,
     externalLinks,
@@ -327,6 +372,49 @@ async function selectModuleFiles(
 }
 
 /**
+ * Extract files exposed by the assignment detail API's attachments field.
+ * These can be instructor-provided specs or starter files even when they are
+ * not linked in the rich-text assignment description.
+ */
+function selectAssignmentAttachedFiles(
+  assignments: RawAssignmentRecord[],
+  alreadySelected: SelectedAttachment[]
+): SelectedAttachment[] {
+  const selected: SelectedAttachment[] = [];
+  const tryMarkSelected = createAttachmentDeduper(alreadySelected);
+
+  for (const assignment of assignments) {
+    for (const attachment of assignment.attachments ?? []) {
+      if (!attachment.url) continue;
+      if (
+        !tryMarkSelected({
+          fileId: attachment.id,
+          downloadUrl: attachment.url,
+        })
+      ) {
+        continue;
+      }
+
+      selected.push({
+        sourceType: "assignment_attachment",
+        fileId: attachment.id,
+        filename:
+          attachment.display_name ||
+          attachment.filename ||
+          `assignment-${assignment.id}-file-${attachment.id}`,
+        downloadUrl: attachment.url,
+        reason: `attached to assignment "${assignment.name}"`,
+        contentType: attachment.content_type ?? null,
+        size: attachment.size ?? null,
+        subfolder: "assignments",
+      });
+    }
+  }
+
+  return selected;
+}
+
+/**
  * Extract files linked in assignment descriptions (with verifier tokens).
  * These are often instruction PDFs, rubrics, etc. that Canvas links directly
  * in the assignment body with download-ready URLs.
@@ -336,7 +424,7 @@ function selectDescriptionLinkedFiles(
   alreadySelected: SelectedAttachment[]
 ): SelectedAttachment[] {
   const selected: SelectedAttachment[] = [];
-  const alreadyUrls = new Set(alreadySelected.map((a) => a.downloadUrl));
+  const tryMarkSelected = createAttachmentDeduper(alreadySelected);
 
   for (const assignment of assignments) {
     const desc = (assignment as any).description;
@@ -344,8 +432,9 @@ function selectDescriptionLinkedFiles(
 
     const linked = extractLinkedFiles(desc);
     for (const file of linked) {
-      if (alreadyUrls.has(file.downloadUrl)) continue;
-      alreadyUrls.add(file.downloadUrl);
+      if (!tryMarkSelected({ fileId: null, downloadUrl: file.downloadUrl })) {
+        continue;
+      }
 
       selected.push({
         sourceType: "assignment_linked",
@@ -364,35 +453,177 @@ function selectDescriptionLinkedFiles(
 }
 
 /**
+ * Extract files attached to announcement/discussion API records. Canvas can
+ * expose these as attachment objects without also placing a file link in the
+ * HTML message body.
+ */
+function selectAnnouncementDiscussionAttachedFiles(
+  announcements: CanvasDiscussionTopic[],
+  discussionThreads: RawDiscussionThread[],
+  alreadySelected: SelectedAttachment[]
+): SelectedAttachment[] {
+  const selected: SelectedAttachment[] = [];
+  const tryMarkSelected = createAttachmentDeduper(alreadySelected);
+
+  const addAttachment = (
+    attachment: CanvasAttachment,
+    options: {
+      sourceType: "announcement_attachment" | "discussion_attachment";
+      fallbackPrefix: string;
+      reason: string;
+      subfolder: string;
+    }
+  ): void => {
+    if (!attachment.url) {
+      return;
+    }
+    const fileId = Number.isFinite(attachment.id) ? attachment.id : null;
+    if (
+      !tryMarkSelected({
+        fileId,
+        downloadUrl: attachment.url,
+      })
+    ) {
+      return;
+    }
+
+    selected.push({
+      sourceType: options.sourceType,
+      fileId,
+      filename:
+        attachment.display_name ||
+        attachment.filename ||
+        `${options.fallbackPrefix}-${fileId ?? selected.length + 1}`,
+      downloadUrl: attachment.url,
+      reason: options.reason,
+      contentType: attachment.content_type ?? null,
+      size: attachment.size ?? null,
+      subfolder: options.subfolder,
+    });
+  };
+
+  for (const announcement of announcements) {
+    for (const attachment of getCanvasAttachments(announcement)) {
+      addAttachment(attachment, {
+        sourceType: "announcement_attachment",
+        fallbackPrefix: `announcement-${announcement.id}-attachment`,
+        reason: `attached to announcement "${announcement.title}"`,
+        subfolder: "announcements",
+      });
+    }
+  }
+
+  for (const thread of discussionThreads) {
+    for (const attachment of getCanvasAttachments(thread.topic)) {
+      addAttachment(attachment, {
+        sourceType: "discussion_attachment",
+        fallbackPrefix: `discussion-${thread.topic.id}-attachment`,
+        reason: `attached to discussion "${thread.topic.title}"`,
+        subfolder: "discussions",
+      });
+    }
+
+    for (const entry of thread.entries) {
+      const author = entry.user_name ?? `User ${entry.user_id}`;
+      for (const attachment of getCanvasAttachments(entry)) {
+        addAttachment(attachment, {
+          sourceType: "discussion_attachment",
+          fallbackPrefix: `discussion-${thread.topic.id}-reply-${entry.id}-attachment`,
+          reason: `attached to discussion reply in "${thread.topic.title}" by ${author}`,
+          subfolder: "discussions",
+        });
+      }
+    }
+  }
+
+  return selected;
+}
+
+function getCanvasAttachments(value: {
+  attachment?: CanvasAttachment | null;
+  attachments?: CanvasAttachment[] | null;
+}): CanvasAttachment[] {
+  const attachments: CanvasAttachment[] = [];
+  if (value.attachment) {
+    attachments.push(value.attachment);
+  }
+  if (Array.isArray(value.attachments)) {
+    attachments.push(...value.attachments);
+  }
+  return attachments;
+}
+
+/**
  * Extract files linked in fetched Canvas page bodies, front page, syllabus,
- * and announcements. Pages like "Labs" or announcement posts often contain
- * direct download links to worksheets, handouts, and other course materials.
+ * quizzes, calendar events, announcements, and discussions. Pages like "Labs"
+ * or announcement posts often contain direct download links to worksheets,
+ * handouts, and other course materials.
  */
 function selectHtmlLinkedFiles(
   fetchedPages: Array<{ slug: string; title: string; body: string }>,
   frontPageBody: string | null,
   syllabusBody: string | null,
+  quizzes: CanvasQuiz[],
+  calendarEvents: CanvasCalendarEvent[],
   announcements: Array<{ title: string; message: string | null }>,
   discussionThreads: RawDiscussionThread[],
   alreadySelected: SelectedAttachment[]
 ): SelectedAttachment[] {
   const selected: SelectedAttachment[] = [];
-  const alreadyUrls = new Set(alreadySelected.map((a) => a.downloadUrl));
+  const tryMarkSelected = createAttachmentDeduper(alreadySelected);
 
-  const htmlSources: Array<{ title: string; body: string }> = [
-    ...fetchedPages,
-  ];
+  const htmlSources: Array<{
+    title: string;
+    body: string;
+    sourceType: "page_linked" | "quiz_linked" | "calendar_event_linked";
+    subfolder: string;
+  }> = fetchedPages.map((page) => ({
+    title: page.title,
+    body: page.body,
+    sourceType: "page_linked",
+    subfolder: "pages",
+  }));
   if (frontPageBody) {
-    htmlSources.push({ title: "Front Page", body: frontPageBody });
+    htmlSources.push({
+      title: "Front Page",
+      body: frontPageBody,
+      sourceType: "page_linked",
+      subfolder: "pages",
+    });
   }
   if (syllabusBody) {
-    htmlSources.push({ title: "Syllabus", body: syllabusBody });
+    htmlSources.push({
+      title: "Syllabus",
+      body: syllabusBody,
+      sourceType: "page_linked",
+      subfolder: "pages",
+    });
+  }
+  for (const quiz of quizzes) {
+    if (!quiz.description) continue;
+    htmlSources.push({
+      title: `Quiz: ${quiz.title}`,
+      body: quiz.description,
+      sourceType: "quiz_linked",
+      subfolder: "quizzes",
+    });
+  }
+  for (const event of calendarEvents) {
+    if (!event.description) continue;
+    htmlSources.push({
+      title: `Calendar event: ${event.title}`,
+      body: event.description,
+      sourceType: "calendar_event_linked",
+      subfolder: "calendar-events",
+    });
   }
   for (const announcement of announcements) {
     if (!announcement.message) continue;
     htmlSources.push({
       title: `Announcement: ${announcement.title}`,
       body: announcement.message,
+      sourceType: "page_linked",
+      subfolder: "pages",
     });
   }
   for (const thread of discussionThreads) {
@@ -400,6 +631,8 @@ function selectHtmlLinkedFiles(
       htmlSources.push({
         title: `Discussion: ${thread.topic.title}`,
         body: thread.topic.message,
+        sourceType: "page_linked",
+        subfolder: "pages",
       });
     }
     for (const entry of thread.entries) {
@@ -408,6 +641,8 @@ function selectHtmlLinkedFiles(
       htmlSources.push({
         title: `Discussion reply in "${thread.topic.title}" by ${author}`,
         body: entry.message,
+        sourceType: "page_linked",
+        subfolder: "pages",
       });
     }
   }
@@ -415,21 +650,97 @@ function selectHtmlLinkedFiles(
   for (const source of htmlSources) {
     const linked = extractLinkedFiles(source.body);
     for (const file of linked) {
-      if (alreadyUrls.has(file.downloadUrl)) continue;
-      alreadyUrls.add(file.downloadUrl);
+      if (!tryMarkSelected({ fileId: null, downloadUrl: file.downloadUrl })) {
+        continue;
+      }
 
       selected.push({
-        sourceType: "page_linked",
+        sourceType: source.sourceType,
         fileId: null,
         filename: file.title,
         downloadUrl: file.downloadUrl,
         reason: `linked in "${source.title}"`,
         contentType: null,
         size: null,
-        subfolder: "pages",
+        subfolder: source.subfolder,
       });
     }
   }
 
   return selected;
+}
+
+function createAttachmentDeduper(
+  alreadySelected: SelectedAttachment[]
+): (candidate: { fileId: number | null; downloadUrl: string }) => boolean {
+  const seenKeys = new Set<string>();
+  for (const attachment of alreadySelected) {
+    for (const key of getAttachmentDedupKeys(
+      attachment.fileId,
+      attachment.downloadUrl
+    )) {
+      seenKeys.add(key);
+    }
+  }
+
+  return (candidate) => {
+    const keys = getAttachmentDedupKeys(
+      candidate.fileId,
+      candidate.downloadUrl
+    );
+    if (keys.some((key) => seenKeys.has(key))) {
+      return false;
+    }
+    for (const key of keys) {
+      seenKeys.add(key);
+    }
+    return true;
+  };
+}
+
+function getAttachmentDedupKeys(
+  fileId: number | null,
+  downloadUrl: string
+): string[] {
+  const keys = new Set<string>();
+  const canvasFileId = fileId ?? extractCanvasFileId(downloadUrl);
+  if (canvasFileId !== null) {
+    keys.add(`canvas-file:${canvasFileId}`);
+  }
+
+  const normalizedUrl = normalizeAttachmentUrl(downloadUrl);
+  if (normalizedUrl) {
+    keys.add(`url:${normalizedUrl}`);
+  }
+
+  return Array.from(keys);
+}
+
+function extractCanvasFileId(url: string): number | null {
+  const match = url.match(/\/files\/(\d+)(?:\/|[?#]|$)/);
+  if (!match?.[1]) {
+    return null;
+  }
+  const id = Number.parseInt(match[1], 10);
+  return Number.isFinite(id) ? id : null;
+}
+
+function normalizeAttachmentUrl(url: string): string | null {
+  const trimmed = url.replace(/&amp;/g, "&").trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(trimmed, "https://canvas.invalid");
+    parsed.searchParams.delete("wrap");
+    parsed.pathname = parsed.pathname.replace(/\/download\/?$/, "");
+    parsed.pathname = parsed.pathname.replace(/\/$/, "");
+    const isRelative = !/^[a-z][a-z0-9+.-]*:/i.test(trimmed);
+    return isRelative
+      ? `${parsed.pathname}${parsed.search}`
+      : parsed.toString();
+  } catch {
+    return trimmed;
+  }
 }

@@ -53,14 +53,16 @@ export interface CanvasAssignmentDetail extends CanvasAssignment {
   submission_types: string[];
   allowed_extensions: string[] | null;
   rubric?: CanvasRubricCriterion[] | null;
-  attachments?: Array<{
-    id: number;
-    display_name: string;
-    filename: string;
-    url: string;
-    content_type: string;
-    size: number;
-  }>;
+  attachments?: CanvasAttachment[] | null;
+}
+
+export interface CanvasAttachment {
+  id: number;
+  display_name?: string | null;
+  filename?: string | null;
+  url?: string | null;
+  content_type?: string | null;
+  size?: number | null;
 }
 
 export interface CanvasRubricCriterion {
@@ -125,6 +127,37 @@ export interface CanvasPage {
   body?: string | null;
 }
 
+export interface CanvasQuiz {
+  id: number;
+  title: string;
+  html_url?: string | null;
+  description?: string | null;
+  quiz_type?: string | null;
+  due_at?: string | null;
+  unlock_at?: string | null;
+  lock_at?: string | null;
+  points_possible?: number | null;
+  question_count?: number | null;
+  time_limit?: number | null;
+  allowed_attempts?: number | null;
+  published?: boolean | null;
+  assignment_id?: number | null;
+}
+
+export interface CanvasCalendarEvent {
+  id: number;
+  title: string;
+  description?: string | null;
+  start_at?: string | null;
+  end_at?: string | null;
+  all_day?: boolean | null;
+  location_name?: string | null;
+  location_address?: string | null;
+  context_code?: string | null;
+  html_url?: string | null;
+  workflow_state?: string | null;
+}
+
 export interface CanvasAssignmentGroup {
   id: number;
   name: string;
@@ -173,6 +206,8 @@ export interface CanvasDiscussionTopic {
   published: boolean;
   is_announcement: boolean;
   locked: boolean;
+  attachments?: CanvasAttachment[] | null;
+  attachment?: CanvasAttachment | null;
 }
 
 /** A single entry (reply) within a discussion topic. */
@@ -186,6 +221,8 @@ export interface CanvasDiscussionEntry {
   read_state: string;
   recent_replies?: CanvasDiscussionEntry[];
   has_more_replies?: boolean;
+  attachment?: CanvasAttachment | null;
+  attachments?: CanvasAttachment[] | null;
 }
 
 /** Full topic view returned by GET /discussion_topics/:id/view. */

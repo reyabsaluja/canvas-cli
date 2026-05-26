@@ -32,6 +32,11 @@ Decision ladder:
 7. If prior tool memory already names candidate sources from a relevant search, do not search again first. Reuse that breadcrumb and read one of those sources before answering or launching a new search.
 8. If a read or search just failed, do not repeat the same tool call with the same target. Change tactics: reuse a different breadcrumb, use list_files to see what is actually available, or try a more specific search.
 
+Tool-result checkpoint:
+- Grounded evidence (read_file, download_course_file, list_assignments, read_thread): answer from it, unless a comparison question still needs another source.
+- Discovery breadcrumbs (search_workspace, search_course): use the section labels and excerpts to choose the best source, then read that source before answering about requirements, dates, files, points, quotes, or detailed explanations.
+- Dead ends (not_found, missing_text, failed download): do not repeat the same target. Try a different breadcrumb, list_files, or one sharper search; if that still fails, say exactly what could not be verified.
+
 Use tools ONLY when:
 - The question asks about something not covered in the workup
 - You need to read a specific document in detail
@@ -49,13 +54,13 @@ IMPORTANT tool usage rules:
 Rules:
 - When the user asks for detail or "in depth", give thorough answers with specific requirements, addresses, values, and steps from the documents.
 - If the workup already contains the answer, respond immediately (no tool calls needed).
-- Cite sources when relevant.
+- Cite sources when relevant. When a source label includes a section, cite that section rather than only the document title.
 - Do NOT solve the assignment — help the student understand it.
 - For simple questions, keep it brief. For "explain" or "in depth" questions, be thorough and specific.
 
 IMPORTANT: Before calling any tool, ALWAYS write a brief sentence explaining what you're about to do. For example, write "Let me read the lab document..." before calling read_file, or "Searching for that..." before calling search_workspace. This sentence must come BEFORE the tool call, not after. The student needs to see your thought process in real-time.
 
-Course-level tools (when available): use list_assignments to orient across the course's other work, open_lecture to launch lecture content by number or topic, list_announcements for announcements and discussions, and read_thread to pull a full discussion thread. These are the same capabilities the course assistant has — stay assignment-focused but reach for them when the student's question points outside this assignment.
+Course-level tools (when available): use list_assignments to orient across the course's other work, open_lecture to launch lecture content by number or topic, list_announcements for announcements and discussions, and read_thread to pull a full discussion thread. list_assignments and read_thread return grounded evidence; after using them, answer from what they returned unless a specific missing detail requires another source. These are the same capabilities the course assistant has — stay assignment-focused but reach for them when the student's question points outside this assignment.
 
 When you have enough information, respond with your answer directly (no tool calls).`);
 
@@ -214,7 +219,14 @@ export function buildEvidenceBackedQuestion(
     sections.push(`- Tool: ${observation.tool}`);
     sections.push(`  Summary: ${observation.summary}`);
     for (const artifact of observation.artifacts) {
-      sections.push(`  Source: [${artifact.kind}] ${artifact.title}`);
+      const sourceLabel = artifact.sectionLabel
+        ? `${artifact.title} — ${artifact.sectionLabel}`
+        : artifact.title;
+      sections.push(`  Source: [${artifact.kind}] ${sourceLabel}`);
+      const excerpt = artifact.excerpt?.replace(/\s+/g, " ").trim();
+      if (excerpt) {
+        sections.push(`  Excerpt: ${excerpt}`);
+      }
     }
     if (observation.content) {
       sections.push(observation.content);

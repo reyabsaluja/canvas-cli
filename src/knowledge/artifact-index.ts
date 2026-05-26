@@ -7,10 +7,12 @@ import {
   getExtractedAssignmentPath,
   getExtractedAnnouncementPath,
   getExtractedAttachmentPath,
+  getExtractedCalendarEventPath,
   getExtractedDiscussionPath,
   getExtractedExternalLinkPath,
   getExtractedFrontPagePath,
   getExtractedPagePath,
+  getExtractedQuizPath,
   getExtractedSyllabusPath,
 } from "../enrich/course-documents.js";
 
@@ -21,6 +23,8 @@ export type ArtifactKind =
   | "module"
   | "file"
   | "page"
+  | "quiz"
+  | "calendar_event"
   | "announcement"
   | "discussion"
   | "external_link"
@@ -92,6 +96,73 @@ export interface RankedArtifactSection {
 }
 
 const artifactIndexCache = new Map<string, Promise<ArtifactIndexInternal>>();
+const SEARCH_QUERY_STOP_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "about",
+  "assignment",
+  "assignments",
+  "class",
+  "course",
+  "does",
+  "do",
+  "for",
+  "from",
+  "give",
+  "have",
+  "help",
+  "how",
+  "i",
+  "in",
+  "is",
+  "it",
+  "me",
+  "my",
+  "need",
+  "of",
+  "on",
+  "or",
+  "please",
+  "say",
+  "says",
+  "should",
+  "show",
+  "tell",
+  "that",
+  "the",
+  "this",
+  "to",
+  "want",
+  "we",
+  "what",
+  "when",
+  "where",
+  "which",
+  "with",
+  "you",
+]);
+const SNIPPET_QUERY_STOP_WORDS = new Set([
+  "about",
+  "assignment",
+  "course",
+  "does",
+  "explain",
+  "from",
+  "have",
+  "need",
+  "should",
+  "that",
+  "the",
+  "this",
+  "what",
+  "when",
+  "where",
+  "which",
+  "with",
+]);
 
 export function formatArtifactLabel(
   artifact: Pick<ArtifactRecord, "kind" | "title">
@@ -113,6 +184,12 @@ export async function getCourseArtifactSetKey(
     ),
     ...cache.pages.map((page) =>
       getFileSignature(getExtractedPagePath(cache.coursePath, page.pageId))
+    ),
+    ...(cache.quizzes ?? []).map((quiz) =>
+      getFileSignature(getExtractedQuizPath(cache.coursePath, quiz.id))
+    ),
+    ...(cache.calendarEvents ?? []).map((event) =>
+      getFileSignature(getExtractedCalendarEventPath(cache.coursePath, event.id))
     ),
     ...(cache.announcements ?? []).map((announcement) =>
       getFileSignature(
@@ -188,6 +265,36 @@ export async function getCourseArtifactSetKey(
         title: page.title,
         updatedAt: page.updatedAt,
         hasBody: page.hasBody,
+      })),
+      quizzes: (cache.quizzes ?? []).map((quiz) => ({
+        id: quiz.id,
+        title: quiz.title,
+        quizType: quiz.quizType,
+        dueAt: quiz.dueAt,
+        unlockAt: quiz.unlockAt,
+        lockAt: quiz.lockAt,
+        pointsPossible: quiz.pointsPossible,
+        questionCount: quiz.questionCount,
+        timeLimit: quiz.timeLimit,
+        allowedAttempts: quiz.allowedAttempts,
+        published: quiz.published,
+        htmlUrl: quiz.htmlUrl,
+        assignmentId: quiz.assignmentId,
+        hasDescription: quiz.hasDescription,
+        descriptionLinkCount: quiz.descriptionLinkCount,
+      })),
+      calendarEvents: (cache.calendarEvents ?? []).map((event) => ({
+        id: event.id,
+        title: event.title,
+        startAt: event.startAt,
+        endAt: event.endAt,
+        allDay: event.allDay,
+        locationName: event.locationName,
+        locationAddress: event.locationAddress,
+        htmlUrl: event.htmlUrl,
+        workflowState: event.workflowState,
+        hasDescription: event.hasDescription,
+        descriptionLinkCount: event.descriptionLinkCount,
       })),
       announcements: (cache.announcements ?? []).map((announcement) => ({
         id: announcement.id,
@@ -329,6 +436,14 @@ export async function readArtifactContent(
   return content;
 }
 
+function buildSearchQueryTokens(normalizedQuery: string): string[] {
+  const tokens = tokenize(normalizedQuery);
+  const meaningfulTokens = tokens.filter(
+    (token) => !SEARCH_QUERY_STOP_WORDS.has(token)
+  );
+  return meaningfulTokens.length > 0 ? meaningfulTokens : tokens;
+}
+
 export function searchArtifacts(
   index: ArtifactIndex,
   query: string,
@@ -339,7 +454,7 @@ export function searchArtifacts(
   }
 ): RankedArtifact[] {
   const normalizedQuery = normalizeText(query);
-  const queryTokens = tokenize(normalizedQuery);
+  const queryTokens = buildSearchQueryTokens(normalizedQuery);
   if (queryTokens.length === 0) return [];
 
   const allowedKinds = options?.kinds ? new Set(options.kinds) : null;
@@ -401,7 +516,7 @@ export function searchArtifactSections(
   }
 ): RankedArtifactSection[] {
   const normalizedQuery = normalizeText(query);
-  const queryTokens = tokenize(normalizedQuery);
+  const queryTokens = buildSearchQueryTokens(normalizedQuery);
   if (queryTokens.length === 0) return [];
 
   const allowedKinds = options?.kinds ? new Set(options.kinds) : null;
@@ -499,6 +614,88 @@ export function searchArtifactSections(
   });
 
   return scored.slice(0, options?.limit ?? scored.length);
+}
+
+export function buildQueryMatchedExcerpt(
+  text: string,
+  query: string,
+  options?: { maxLength?: number }
+): string {
+  const maxLength = options?.maxLength ?? 500;
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= maxLength) {
+    return cleaned;
+  }
+
+  const matchIndex = findQueryMatchIndex(cleaned, query);
+  if (matchIndex === null) {
+    return `${cleaned.slice(0, maxLength - 3).trimEnd()}...`;
+  }
+
+  const halfWindow = Math.floor(maxLength / 2);
+  let start = Math.max(0, matchIndex - halfWindow);
+  let end = Math.min(cleaned.length, start + maxLength);
+  if (end === cleaned.length) {
+    start = Math.max(0, end - maxLength);
+  }
+
+  start = adjustSnippetStart(cleaned, start);
+  end = adjustSnippetEnd(cleaned, end);
+
+  const prefix = start > 0 ? "... " : "";
+  const suffix = end < cleaned.length ? " ..." : "";
+  return `${prefix}${cleaned.slice(start, end).trim()}${suffix}`;
+}
+
+function findQueryMatchIndex(text: string, query: string): number | null {
+  const normalizedText = normalizeText(text);
+  const normalizedQuery = normalizeText(query);
+  if (!normalizedQuery) {
+    return null;
+  }
+
+  const phraseIndex = normalizedText.indexOf(normalizedQuery);
+  if (phraseIndex >= 0) {
+    return phraseIndex;
+  }
+
+  const queryTokens = [...new Set(tokenize(normalizedQuery))]
+    .filter((token) => token.length >= 3 && !SNIPPET_QUERY_STOP_WORDS.has(token))
+    .sort((left, right) => right.length - left.length);
+  for (const token of queryTokens) {
+    const match = normalizedText.match(new RegExp(`\\b${escapeRegExp(token)}\\b`));
+    if (match?.index !== undefined) {
+      return match.index;
+    }
+  }
+
+  return null;
+}
+
+function adjustSnippetStart(text: string, start: number): number {
+  if (start <= 0) {
+    return 0;
+  }
+  const nextWhitespace = text.slice(start).search(/\s/);
+  if (nextWhitespace < 0 || nextWhitespace > 80) {
+    return start;
+  }
+  return start + nextWhitespace + 1;
+}
+
+function adjustSnippetEnd(text: string, end: number): number {
+  if (end >= text.length) {
+    return text.length;
+  }
+  const previousWhitespace = text.slice(0, end).search(/\s\S*$/);
+  if (previousWhitespace < 0 || end - previousWhitespace > 80) {
+    return end;
+  }
+  return previousWhitespace;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function buildArtifactIndexInternal(
@@ -717,6 +914,89 @@ async function addCourseArtifacts(
         contentPath: pagePath,
         scoreBoost: 1,
         metadata: { pageId: page.pageId },
+      },
+      registerArtifact,
+      registerSection,
+      contentCache,
+      loaders
+    );
+  }
+
+  for (const quiz of cache.quizzes ?? []) {
+    const quizPath = getExtractedQuizPath(cache.coursePath, quiz.id);
+    const fallbackText = [
+      quiz.title,
+      quiz.dueAt ?? "no due date",
+      quiz.pointsPossible !== null
+        ? `${quiz.pointsPossible} points`
+        : "points not specified",
+      quiz.questionCount !== null
+        ? `${quiz.questionCount} questions`
+        : "question count not specified",
+      quiz.timeLimit !== null
+        ? `${quiz.timeLimit} minutes`
+        : "time limit not specified",
+      quiz.quizType ?? "",
+    ].join(" ");
+    await registerCourseTextArtifact(
+      {
+        id: `course:quiz:${quiz.id}`,
+        kind: "quiz",
+        title: quiz.title,
+        source: quiz.title,
+        location: "quiz",
+        fallbackText,
+        contentPath: quizPath,
+        scoreBoost: 1.04,
+        metadata: {
+          quizId: quiz.id,
+          quizType: quiz.quizType,
+          dueAt: quiz.dueAt,
+          unlockAt: quiz.unlockAt,
+          lockAt: quiz.lockAt,
+          pointsPossible: quiz.pointsPossible,
+          questionCount: quiz.questionCount,
+          timeLimit: quiz.timeLimit,
+          allowedAttempts: quiz.allowedAttempts,
+          assignmentId: quiz.assignmentId,
+        },
+      },
+      registerArtifact,
+      registerSection,
+      contentCache,
+      loaders
+    );
+  }
+
+  for (const event of cache.calendarEvents ?? []) {
+    const eventPath = getExtractedCalendarEventPath(cache.coursePath, event.id);
+    const fallbackText = [
+      event.title,
+      event.startAt ?? "no start time",
+      event.endAt ?? "",
+      event.locationName ?? "",
+      event.locationAddress ?? "",
+      event.workflowState ?? "",
+    ].join(" ");
+    await registerCourseTextArtifact(
+      {
+        id: `course:calendar_event:${event.id}`,
+        kind: "calendar_event",
+        title: event.title,
+        source: event.title,
+        location: "calendar_event",
+        fallbackText,
+        contentPath: eventPath,
+        scoreBoost: 1.03,
+        metadata: {
+          calendarEventId: event.id,
+          startAt: event.startAt,
+          endAt: event.endAt,
+          allDay: event.allDay,
+          locationName: event.locationName,
+          locationAddress: event.locationAddress,
+          workflowState: event.workflowState,
+        },
       },
       registerArtifact,
       registerSection,

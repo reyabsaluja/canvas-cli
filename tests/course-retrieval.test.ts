@@ -370,3 +370,186 @@ test("course search rendering uses structured search results from the shared art
     assert.match(rendered, /\[attachment\] lab4-spec\.pdf/);
   });
 });
+
+test("course search renders the matching section instead of the document opening", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "attachments"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "attachments", "lab4-spec.pdf.txt"),
+      [
+        "# Lab 4 Specification",
+        "",
+        "This overview introduces the lab and repeats general setup reminders.",
+        "",
+        "## Signal Checklist",
+        "",
+        "Deliverables include a waveform screenshot and a short analysis.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache = makeCourseCache(coursePath);
+    const search = await searchCourseKnowledge(cache, "waveform screenshot");
+    assert.equal(search.status, "ok");
+    if (search.status === "ok") {
+      assert.equal(search.matches[0]?.artifact.title, "lab4-spec.pdf");
+      assert.equal(search.matches[0]?.section?.section, "Signal Checklist");
+    }
+
+    const rendered = renderCourseArtifactSearchResult(
+      search,
+      "waveform screenshot"
+    );
+    assert.match(rendered, /\[attachment\] lab4-spec\.pdf — Signal Checklist/);
+    assert.match(rendered, /waveform screenshot/);
+    assert.doesNotMatch(rendered, /general setup reminders/);
+  });
+});
+
+test("course search renders a query-centered excerpt within long sections", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "attachments"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "attachments", "lab4-spec.pdf.txt"),
+      [
+        "# Lab 4 Specification",
+        "",
+        "## Details",
+        "",
+        Array.from(
+          { length: 160 },
+          (_, index) => `boilerplate setup reminder ${index}`
+        ).join(" "),
+        "The calibration threshold is 0.42 volts before the demo.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache = makeCourseCache(coursePath);
+    const search = await searchCourseKnowledge(cache, "calibration threshold");
+    assert.equal(search.status, "ok");
+
+    const rendered = renderCourseArtifactSearchResult(
+      search,
+      "calibration threshold"
+    );
+    assert.match(rendered, /calibration threshold is 0\.42/i);
+    assert.doesNotMatch(rendered, /boilerplate setup reminder 0/);
+  });
+});
+
+test("course search ignores generic question scaffolding when ranking sections", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "assignments"), {
+      recursive: true,
+    });
+    await fs.mkdir(path.join(coursePath, "extracted", "attachments"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "assignments", "42.txt"),
+      [
+        "# Lab 4",
+        "",
+        "## Assignment Overview",
+        "",
+        Array.from(
+          { length: 80 },
+          () =>
+            "What does the assignment say about the course assignment overview?"
+        ).join(" "),
+      ].join("\n"),
+      "utf-8"
+    );
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "attachments", "lab4-spec.pdf.txt"),
+      [
+        "# Lab 4 Specification",
+        "",
+        "## Calibration",
+        "",
+        "The calibration threshold is 0.42 volts before the demo.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache = makeCourseCache(coursePath);
+    const search = await searchCourseKnowledge(
+      cache,
+      "what does the assignment say about the calibration threshold"
+    );
+    assert.equal(search.status, "ok");
+    if (search.status === "ok") {
+      assert.equal(search.matches[0]?.artifact.title, "lab4-spec.pdf");
+      assert.equal(search.matches[0]?.section?.section, "Calibration");
+    }
+
+    const rendered = renderCourseArtifactSearchResult(
+      search,
+      "what does the assignment say about the calibration threshold"
+    );
+    assert.match(rendered, /\[attachment\] lab4-spec\.pdf — Calibration/);
+    assert.match(rendered, /calibration threshold is 0\.42/i);
+    assert.doesNotMatch(rendered, /course assignment overview/);
+  });
+});
+
+test("course search keeps strongly relevant sibling sections together", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "assignments"), {
+      recursive: true,
+    });
+    await fs.mkdir(path.join(coursePath, "extracted", "attachments"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "assignments", "42.txt"),
+      [
+        "# Lab 4",
+        "",
+        "## Due date",
+        "",
+        "Due date: April 18 at 11:59 PM.",
+        "",
+        "## Submission format",
+        "",
+        "Submission format: upload report.pdf to Canvas.",
+      ].join("\n"),
+      "utf-8"
+    );
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "attachments", "lab4-spec.pdf.txt"),
+      "This course reminder mentions submission logistics in passing.\n",
+      "utf-8"
+    );
+
+    const cache = makeCourseCache(coursePath);
+    const search = await searchCourseKnowledge(
+      cache,
+      "due date submission format report pdf",
+      { limit: 2 }
+    );
+
+    assert.equal(search.status, "ok");
+    if (search.status === "ok") {
+      assert.equal(search.matches.length, 2);
+      assert.deepEqual(
+        search.matches.map((match) => match.section?.section).sort(),
+        ["Due date", "Submission format"]
+      );
+      assert.ok(search.matches.every((match) => match.artifact.title === "Lab 4"));
+    }
+  });
+});

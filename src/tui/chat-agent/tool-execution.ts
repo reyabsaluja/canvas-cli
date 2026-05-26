@@ -228,7 +228,7 @@ async function searchWorkspace(
         artifactId: match.artifact.id,
         title: match.artifact.title,
         kind: match.artifact.kind,
-        excerpt: match.section.excerpt,
+        excerpt: buildArtifactExcerpt(match.preview),
         sectionIds: [match.section.id],
         sectionLabel: normalizeSourceSectionLabel(match.section.section),
       })),
@@ -273,11 +273,13 @@ async function searchCourse(
       tool: "search_course",
       status: "ok",
       summary: `Found ${filteredResult.matches.length} course matches for "${query}".`,
-      artifacts: filteredResult.matches.map(({ artifact }) => ({
-        artifactId: artifact.id,
-        title: artifact.title,
-        kind: artifact.kind,
-        excerpt: artifact.excerpt,
+      artifacts: filteredResult.matches.map((match) => ({
+        artifactId: match.artifact.id,
+        title: match.artifact.title,
+        kind: match.artifact.kind,
+        excerpt: match.excerpt,
+        sectionIds: match.section ? [match.section.id] : undefined,
+        sectionLabel: normalizeSourceSectionLabel(match.section?.section),
       })),
     },
     modelText: `${uiText}\n${buildCourseSearchGuidance(filteredResult.matches, Boolean(ctx.client))}`,
@@ -726,7 +728,15 @@ async function listAssignments(
       tool: "list_assignments",
       status: "ok",
       summary: `Listed ${assignments.length} assignment${assignments.length === 1 ? "" : "s"} for this course.`,
-      artifacts: [],
+      artifacts: [
+        createVirtualEvidenceArtifact(
+          `course:assignments:${ctx.courseId ?? ctx.loaded.courseId ?? "unknown"}`,
+          "Course assignments",
+          "assignment",
+          rendered
+        ),
+      ],
+      content: rendered,
     },
     modelText: rendered,
     uiText: rendered,
@@ -765,7 +775,15 @@ async function listAnnouncements(
       tool: "list_announcements",
       status: "ok",
       summary: `Listed ${items.length} announcement${items.length === 1 ? "" : "s"}${query ? ` matching "${query}"` : ""}.`,
-      artifacts: [],
+      artifacts: [
+        createVirtualEvidenceArtifact(
+          `course:radar:${ctx.courseId}:${filter}:${normalizeToolInput(query || "all")}`,
+          formatRadarEvidenceTitle(filter, query),
+          filter === "discussions" ? "discussion" : "announcement",
+          rendered
+        ),
+      ],
+      content: rendered,
     },
     modelText: rendered,
     uiText: rendered,
@@ -796,14 +814,27 @@ async function readThread(
     [{ id: ctx.courseId, name: courseName }],
     topic
   );
+  const title = resolved.found
+    ? extractThreadTitle(resolved.content, topic)
+    : topic;
   return {
     observation: {
       tool: "read_thread",
       status: resolved.found ? "ok" : "not_found",
       summary: resolved.found
-        ? `Read discussion thread for "${topic}".`
+        ? `Read discussion thread "${title}".`
         : resolved.content,
-      artifacts: [],
+      artifacts: resolved.found
+        ? [
+            createVirtualEvidenceArtifact(
+              `course:thread:${ctx.courseId}:${normalizeToolInput(title)}`,
+              title,
+              "discussion",
+              resolved.content
+            ),
+          ]
+        : [],
+      content: resolved.found ? resolved.content : undefined,
     },
     modelText: resolved.content,
     uiText: resolved.content,
@@ -841,6 +872,42 @@ function normalizeSourceSectionLabel(value: string | null | undefined): string |
     return null;
   }
   return normalized;
+}
+
+function createVirtualEvidenceArtifact(
+  artifactId: string,
+  title: string,
+  kind: string,
+  content: string
+): ArtifactRef {
+  return {
+    artifactId,
+    title,
+    kind,
+    excerpt: buildArtifactExcerpt(content),
+  };
+}
+
+function formatRadarEvidenceTitle(filter: RadarFilter, query: string): string {
+  const base =
+    filter === "announcements"
+      ? "Course announcements"
+      : filter === "discussions"
+        ? "Course discussions"
+        : "Course announcements and discussions";
+  const trimmedQuery = query.trim();
+  return trimmedQuery ? `${base}: ${trimmedQuery}` : base;
+}
+
+function extractThreadTitle(content: string, fallback: string): string {
+  const firstLine = content.split("\n").find((line) => line.trim().length > 0);
+  if (!firstLine) {
+    return fallback;
+  }
+
+  const titleMatch = firstLine.match(/^\*\*(.*?)\*\*/);
+  const title = titleMatch?.[1]?.trim();
+  return title && title.length > 0 ? title : fallback;
 }
 
 function toArtifactRef(artifact: {
@@ -1202,8 +1269,11 @@ function isReadableCourseArtifactKind(kind: string): boolean {
   return (
     kind === "assignment" ||
     kind === "page" ||
+    kind === "quiz" ||
+    kind === "calendar_event" ||
     kind === "announcement" ||
     kind === "discussion" ||
+    kind === "external_link" ||
     kind === "attachment" ||
     kind === "syllabus" ||
     kind === "front_page"

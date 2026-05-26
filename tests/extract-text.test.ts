@@ -1,0 +1,165 @@
+import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { extractFileText } from "../src/extract/extract-text.js";
+import { buildZipBuffer } from "./helpers/build-zip.js";
+
+async function withTempDir(
+  fn: (tempDir: string) => Promise<void>
+): Promise<void> {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "canvas-cli-extract-"));
+  try {
+    await fn(tempDir);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+test("extractFileText extracts searchable text from PowerPoint slides and notes", async () => {
+  await withTempDir(async (tempDir) => {
+    const pptxPath = path.join(tempDir, "lecture4.pptx");
+    await fs.writeFile(
+      pptxPath,
+      buildZipBuffer([
+        {
+          name: "ppt/slides/slide1.xml",
+          content:
+            '<p:sld><p:cSld><p:spTree><a:p><a:r><a:t>Polling and Timers</a:t></a:r></a:p><a:p><a:r><a:t>Use timer interrupts for periodic sampling.</a:t></a:r></a:p></p:spTree></p:cSld></p:sld>',
+        },
+        {
+          name: "ppt/notesSlides/notesSlide1.xml",
+          content:
+            '<p:notes><a:p><a:r><a:t>Mention debouncing as a common pitfall.</a:t></a:r></a:p></p:notes>',
+        },
+        {
+          name: "ppt/slides/slide2.xml",
+          content:
+            '<p:sld><a:p><a:r><a:t>Demo checklist</a:t></a:r></a:p><a:p><a:r><a:t>Show the waveform capture.</a:t></a:r></a:p></p:sld>',
+        },
+      ])
+    );
+
+    const text = await extractFileText(pptxPath, "lecture4.pptx");
+
+    assert.match(text, /^# lecture4\.pptx/m);
+    assert.match(text, /## Slide 1/);
+    assert.match(text, /Polling and Timers/);
+    assert.match(text, /Use timer interrupts for periodic sampling\./);
+    assert.match(text, /## Speaker Notes 1/);
+    assert.match(text, /Mention debouncing as a common pitfall\./);
+    assert.match(text, /## Slide 2/);
+    assert.match(text, /Show the waveform capture\./);
+    assert.doesNotMatch(text, /Binary file/);
+  });
+});
+
+test("extractFileText extracts Word paragraphs and spreadsheet shared strings", async () => {
+  await withTempDir(async (tempDir) => {
+    const docxPath = path.join(tempDir, "rubric.docx");
+    await fs.writeFile(
+      docxPath,
+      buildZipBuffer([
+        {
+          name: "word/document.xml",
+          content:
+            '<w:document><w:body><w:p><w:r><w:t>Rubric overview</w:t></w:r></w:p><w:p><w:r><w:t>Correctness is worth 10 points.</w:t></w:r></w:p></w:body></w:document>',
+        },
+        {
+          name: "word/comments.xml",
+          content:
+            '<w:comments><w:comment><w:p><w:r><w:t>Instructor note: include edge cases.</w:t></w:r></w:p></w:comment></w:comments>',
+        },
+      ])
+    );
+
+    const docText = await extractFileText(docxPath, "rubric.docx");
+
+    assert.match(docText, /## Body/);
+    assert.match(docText, /Rubric overview/);
+    assert.match(docText, /Correctness is worth 10 points\./);
+    assert.match(docText, /Instructor note: include edge cases\./);
+
+    const xlsxPath = path.join(tempDir, "schedule.xlsx");
+    await fs.writeFile(
+      xlsxPath,
+      buildZipBuffer([
+        {
+          name: "xl/workbook.xml",
+          content:
+            '<workbook><sheets><sheet name="Schedule" sheetId="1" r:id="rId1"/></sheets></workbook>',
+        },
+        {
+          name: "xl/_rels/workbook.xml.rels",
+          content:
+            '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>',
+        },
+        {
+          name: "xl/sharedStrings.xml",
+          content:
+            "<sst><si><t>Due date</t></si><si><t>April 10</t></si><si><t>Points</t></si></sst>",
+        },
+        {
+          name: "xl/worksheets/sheet1.xml",
+          content:
+            '<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row><row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>25</v></c></row></sheetData></worksheet>',
+        },
+      ])
+    );
+
+    const sheetText = await extractFileText(xlsxPath, "schedule.xlsx");
+
+    assert.match(sheetText, /## Schedule/);
+    assert.match(sheetText, /A1: Due date \| B1: April 10/);
+    assert.match(sheetText, /A2: Points \| B2: 25/);
+    assert.doesNotMatch(sheetText, /Binary file/);
+  });
+});
+
+test("extractFileText preserves Word document hyperlinks from relationships", async () => {
+  await withTempDir(async (tempDir) => {
+    const docxPath = path.join(tempDir, "brief.docx");
+    await fs.writeFile(
+      docxPath,
+      buildZipBuffer([
+        {
+          name: "word/document.xml",
+          content: [
+            "<w:document><w:body><w:p>",
+            "<w:r><w:t>Read the </w:t></w:r>",
+            '<w:hyperlink r:id="rIdSpec">',
+            "<w:r><w:t>reference spec</w:t></w:r>",
+            "</w:hyperlink>",
+            "<w:r><w:t> before starting.</w:t></w:r>",
+            "</w:p><w:p>",
+            '<w:fldSimple w:instr="HYPERLINK &quot;https://docs.example/rubric&quot;">',
+            "<w:r><w:t>Rubric link</w:t></w:r>",
+            "</w:fldSimple>",
+            "</w:p></w:body></w:document>",
+          ].join(""),
+        },
+        {
+          name: "word/_rels/document.xml.rels",
+          content: [
+            "<Relationships>",
+            '<Relationship Id="rIdSpec"',
+            ' Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"',
+            ' Target="https://docs.example/spec?week=4&amp;view=student"',
+            ' TargetMode="External"/>',
+            "</Relationships>",
+          ].join(""),
+        },
+      ])
+    );
+
+    const text = await extractFileText(docxPath, "brief.docx");
+
+    assert.match(
+      text,
+      /Read the reference spec \(https:\/\/docs\.example\/spec\?week=4&view=student\) before starting\./
+    );
+    assert.match(text, /Rubric link \(https:\/\/docs\.example\/rubric\)/);
+    assert.doesNotMatch(text, /rIdSpec/);
+  });
+});

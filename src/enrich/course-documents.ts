@@ -33,6 +33,30 @@ export function getExtractedAssignmentPath(
   );
 }
 
+export function getExtractedQuizPath(
+  coursePath: string,
+  quizId: number
+): string {
+  return path.join(
+    coursePath,
+    "extracted",
+    "quizzes",
+    `${sanitizeDocumentSegment(String(quizId))}.txt`
+  );
+}
+
+export function getExtractedCalendarEventPath(
+  coursePath: string,
+  eventId: number
+): string {
+  return path.join(
+    coursePath,
+    "extracted",
+    "calendar-events",
+    `${sanitizeDocumentSegment(String(eventId))}.txt`
+  );
+}
+
 export function getExtractedAnnouncementPath(
   coursePath: string,
   announcementId: number
@@ -89,4 +113,3 @@ export function getUnpackedZipDir(
 ): string {
   return path.join(coursePath, `${zipLocalPath}.unpacked`);
 }
-

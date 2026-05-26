@@ -283,6 +283,7 @@ test("buildToolPromptMessages prefers viable breadcrumbs over already-failed art
               artifactId: "artifact-3",
               title: "docs/notes.txt",
               kind: "extracted",
+              sectionLabel: "Branch hazard notes",
               excerpt: "The notes summarize the branch hazard walkthrough.",
             },
           ],
@@ -308,9 +309,57 @@ test("buildToolPromptMessages prefers viable breadcrumbs over already-failed art
   const latestMessage = promptMessages.at(-1)?.content ?? "";
   assert.match(latestMessage, /docs\/reference\.txt/);
   assert.match(latestMessage, /docs\/notes\.txt/);
+  assert.match(latestMessage, /docs\/notes\.txt — Branch hazard notes/);
   assert.match(
     latestMessage,
     /search_workspace \[ok\][^\n]*Sources: docs\/notes\.txt/i
+  );
+});
+
+test("buildToolPromptMessages recovers instead of rereading an already-failed breadcrumb", () => {
+  const promptMessages = buildToolPromptMessages(
+    [],
+    "Explain the branch hazard walkthrough in detail.",
+    {
+      observations: [
+        {
+          tool: "search_workspace",
+          status: "ok",
+          summary: 'Found 1 relevant workspace match for "branch hazard walkthrough".',
+          artifacts: [
+            {
+              artifactId: "artifact-1",
+              title: "docs/walkthrough.txt",
+              kind: "extracted",
+              excerpt: "The walkthrough explains each branch hazard stall step-by-step.",
+            },
+          ],
+        },
+        {
+          tool: "read_file",
+          status: "missing_text",
+          summary: "Matched docs/walkthrough.txt, but readable text is missing.",
+          artifacts: [
+            {
+              artifactId: "artifact-1",
+              title: "docs/walkthrough.txt",
+              kind: "extracted",
+            },
+          ],
+        },
+      ],
+      readArtifactIds: [],
+      stepCount: 2,
+    }
+  );
+
+  const latestMessage = promptMessages.at(-1)?.content ?? "";
+  assert.match(latestMessage, /Unresolved next step:/i);
+  assert.match(latestMessage, /last read failed/i);
+  assert.match(latestMessage, /change tactics/i);
+  assert.doesNotMatch(
+    latestMessage,
+    /call read_file on "docs\/walkthrough\.txt"/i
   );
 });
 

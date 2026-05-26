@@ -7,6 +7,8 @@ import type {
   ModuleIndexEntry,
   FileIndexEntry,
   PageIndexEntry,
+  QuizIndexEntry,
+  CalendarEventIndexEntry,
   AnnouncementIndexEntry,
   DiscussionIndexEntry,
   ExternalLinkIndexEntry,
@@ -26,6 +28,8 @@ export interface CourseCache {
   modules: ModuleIndexEntry[];
   files: FileIndexEntry[];
   pages: PageIndexEntry[];
+  quizzes?: QuizIndexEntry[];
+  calendarEvents?: CalendarEventIndexEntry[];
   announcements?: AnnouncementIndexEntry[];
   discussions?: DiscussionIndexEntry[];
   externalLinks?: ExternalLinkIndexEntry[];
@@ -60,6 +64,8 @@ export async function loadCourseCache(
       modules,
       files,
       pages,
+      quizzes,
+      calendarEvents,
       announcements,
       discussions,
       externalLinks,
@@ -73,6 +79,8 @@ export async function loadCourseCache(
         readJsonSafe<ModuleIndexEntry[]>(path.join(coursePath, "modules.json"), []),
         readJsonSafe<FileIndexEntry[]>(path.join(coursePath, "files.json"), []),
         readJsonSafe<PageIndexEntry[]>(path.join(coursePath, "pages.json"), []),
+        readJsonSafe<QuizIndexEntry[]>(path.join(coursePath, "quizzes.json"), []),
+        readJsonSafe<CalendarEventIndexEntry[]>(path.join(coursePath, "calendar-events.json"), []),
         readJsonSafe<AnnouncementIndexEntry[]>(path.join(coursePath, "announcements.json"), []),
         readJsonSafe<DiscussionIndexEntry[]>(path.join(coursePath, "discussions.json"), []),
         readJsonSafe<ExternalLinkIndexEntry[]>(path.join(coursePath, "external-links.json"), []),
@@ -89,6 +97,8 @@ export async function loadCourseCache(
       modules,
       files,
       pages,
+      quizzes,
+      calendarEvents,
       announcements,
       discussions,
       externalLinks,

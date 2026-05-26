@@ -37,3 +37,23 @@ test("htmlToText preserves structure from lists, tables, figures, and embeds", (
     /Embedded content: ALU walkthrough \(https:\/\/canvas\.example\/media\/demo\)/
   );
 });
+
+test("htmlToText preserves Canvas-style key-value tables", () => {
+  const html = [
+    "<h2>Assignment details</h2>",
+    "<table>",
+    "<caption>Lab 4 summary</caption>",
+    '<tr><th scope="row">Due date</th><td>April 30, 2026 at 11:59 PM</td></tr>',
+    '<tr><th scope="row">Points</th><td>25</td></tr>',
+    '<tr><th scope="row">Submission</th><td>PDF report</td><td>starter.zip</td></tr>',
+    "</table>",
+  ].join("");
+
+  const text = htmlToText(html);
+
+  assert.match(text, /Table: Lab 4 summary/);
+  assert.match(text, /- Due date: April 30, 2026 at 11:59 PM/);
+  assert.match(text, /- Points: 25/);
+  assert.match(text, /- Submission: PDF report \| starter\.zip/);
+  assert.doesNotMatch(text, /Due date: Points/);
+});

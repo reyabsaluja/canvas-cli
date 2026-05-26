@@ -98,28 +98,60 @@ function renderTable(
   tableHtml: string,
   options?: { baseUrl?: string | null }
 ): string {
+  const captionMatch = tableHtml.match(/<caption\b[^>]*>([\s\S]*?)<\/caption>/i);
+  const caption = captionMatch
+    ? htmlFragmentToSingleLineText(captionMatch[1] ?? "", options)
+    : "";
+  const tableWithoutCaption = tableHtml.replace(
+    /<caption\b[^>]*>[\s\S]*?<\/caption>/gi,
+    ""
+  );
   const rowMatches = [...tableHtml.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)];
   if (rowMatches.length === 0) {
-    return htmlFragmentToText(tableHtml, options);
+    const fallback = htmlFragmentToText(tableWithoutCaption, options);
+    if (!fallback) {
+      return caption ? `Table: ${caption}` : "";
+    }
+    return [caption ? `Table: ${caption}` : "Table:", fallback].join("\n");
   }
 
   const rows = rowMatches.map((match) => {
     const rowHtml = match[1] ?? "";
-    const cells = [...rowHtml.matchAll(/<(td|th)\b[^>]*>([\s\S]*?)<\/\1>/gi)].map(
-      (cellMatch) => ({
-        isHeader: (cellMatch[1] ?? "").toLowerCase() === "th",
-        text: htmlFragmentToSingleLineText(cellMatch[2] ?? "", options),
-      })
+    const cells = [...rowHtml.matchAll(/<(td|th)\b([^>]*)>([\s\S]*?)<\/\1>/gi)].map(
+      (cellMatch) => {
+        const attrs = cellMatch[2] ?? "";
+        return {
+          isHeader: (cellMatch[1] ?? "").toLowerCase() === "th",
+          scope: extractAttr(attrs, "scope")?.toLowerCase() ?? null,
+          text: htmlFragmentToSingleLineText(cellMatch[3] ?? "", options),
+        };
+      }
     );
     return cells;
   });
+
+  const lines = [caption ? `Table: ${caption}` : "Table:"];
+  const nonEmptyRows = rows.filter((row) => row.some((cell) => cell.text.length > 0));
+  const hasColumnHeaderRow = nonEmptyRows.some(
+    (row) => row.length > 1 && row.every((cell) => cell.isHeader)
+  );
+  const keyValueRows = rows
+    .map((row) => renderKeyValueTableRow(row))
+    .filter((line): line is string => line !== null);
+  if (
+    keyValueRows.length > 0 &&
+    keyValueRows.length === nonEmptyRows.length &&
+    !hasColumnHeaderRow
+  ) {
+    lines.push(...keyValueRows);
+    return lines.length > 1 ? lines.join("\n") : "";
+  }
 
   const headerRow =
     rows.find((row) => row.some((cell) => cell.isHeader))?.map((cell) => cell.text) ??
     null;
   const dataRows = headerRow ? rows.slice(1) : rows;
 
-  const lines = ["Table:"];
   if (headerRow && dataRows.length > 0) {
     for (const row of dataRows) {
       const parts = row.map((cell, index) => {
@@ -138,6 +170,32 @@ function renderTable(
   }
 
   return lines.length > 1 ? lines.join("\n") : "";
+}
+
+function renderKeyValueTableRow(
+  row: Array<{ isHeader: boolean; scope: string | null; text: string }>
+): string | null {
+  if (row.length < 2) {
+    return null;
+  }
+
+  const [labelCell, ...valueCells] = row;
+  if (!labelCell?.isHeader) {
+    return null;
+  }
+  if (labelCell.scope && labelCell.scope !== "row") {
+    return null;
+  }
+
+  const label = labelCell.text.trim();
+  const values = valueCells
+    .map((cell) => cell.text.trim())
+    .filter((value) => value.length > 0);
+  if (!label || values.length === 0) {
+    return null;
+  }
+
+  return `- ${label}: ${values.join(" | ")}`;
 }
 
 function replaceLists(

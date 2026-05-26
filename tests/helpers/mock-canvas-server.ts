@@ -71,12 +71,45 @@ export interface MockFile {
   folder_id: number | null;
 }
 
+export interface MockQuiz {
+  id: number;
+  title: string;
+  html_url?: string | null;
+  description?: string | null;
+  quiz_type?: string | null;
+  due_at?: string | null;
+  unlock_at?: string | null;
+  lock_at?: string | null;
+  points_possible?: number | null;
+  question_count?: number | null;
+  time_limit?: number | null;
+  allowed_attempts?: number | null;
+  published?: boolean | null;
+  assignment_id?: number | null;
+}
+
+export interface MockCalendarEvent {
+  id: number;
+  title: string;
+  description?: string | null;
+  start_at?: string | null;
+  end_at?: string | null;
+  all_day?: boolean | null;
+  location_name?: string | null;
+  location_address?: string | null;
+  context_code?: string | null;
+  html_url?: string | null;
+  workflow_state?: string | null;
+}
+
 export interface MockServerData {
   courses: MockCourse[];
   assignments: Map<number, MockAssignment[]>;
   modules: Map<number, MockModule[]>;
   pages: Map<number, MockPage[]>;
   files: Map<number, MockFile[]>;
+  quizzes?: Map<number, MockQuiz[]>;
+  calendarEvents?: Map<number, MockCalendarEvent[]>;
   courseDetails: Map<number, { syllabus_body: string | null }>;
   pagePerPage?: number;
 }
@@ -271,6 +304,40 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
       return;
     }
 
+    // GET /courses/:id/quizzes
+    const quizzesMatch = path.match(/^\/courses\/(\d+)\/quizzes$/);
+    if (quizzesMatch && req.method === "GET") {
+      const courseId = parseInt(quizzesMatch[1], 10);
+      const quizzes = data.quizzes?.get(courseId) ?? [];
+      const { body, headers } = paginatedResponse(
+        quizzes,
+        page,
+        effectivePerPage,
+        baseApiUrl,
+        `/courses/${courseId}/quizzes`
+      );
+      res.writeHead(200, headers);
+      res.end(body);
+      return;
+    }
+
+    // GET /courses/:id/quizzes/:qid
+    const quizDetailMatch = path.match(/^\/courses\/(\d+)\/quizzes\/(\d+)$/);
+    if (quizDetailMatch && req.method === "GET") {
+      const courseId = parseInt(quizDetailMatch[1], 10);
+      const quizId = parseInt(quizDetailMatch[2], 10);
+      const quizzes = data.quizzes?.get(courseId) ?? [];
+      const quiz = quizzes.find((q) => q.id === quizId);
+      if (!quiz) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ errors: [{ message: "The specified resource does not exist" }] }));
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(quiz));
+      return;
+    }
+
     // GET /courses/:id/pages/:slug
     const pageSlugMatch = path.match(/^\/courses\/(\d+)\/pages\/([^/]+)$/);
     if (pageSlugMatch && req.method === "GET") {
@@ -333,6 +400,27 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
     if (path === "/announcements" && req.method === "GET") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify([]));
+      return;
+    }
+
+    // GET /calendar_events
+    if (path === "/calendar_events" && req.method === "GET") {
+      const contextCodes = url.searchParams.getAll("context_codes[]");
+      const events = contextCodes.flatMap((contextCode) => {
+        const match = contextCode.match(/^course_(\d+)$/);
+        if (!match?.[1]) return [];
+        const courseId = parseInt(match[1], 10);
+        return data.calendarEvents?.get(courseId) ?? [];
+      });
+      const { body, headers } = paginatedResponse(
+        events,
+        page,
+        effectivePerPage,
+        baseApiUrl,
+        "/calendar_events"
+      );
+      res.writeHead(200, headers);
+      res.end(body);
       return;
     }
 

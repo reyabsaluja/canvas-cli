@@ -95,7 +95,7 @@ const OPEN_RESOURCE_TOOL: ToolDefinition = {
 const LIST_ASSIGNMENTS_TOOL: ToolDefinition = {
   name: "list_assignments",
   description:
-    "List this course's assignments with due dates and submission status. Use when the student asks about upcoming work, what's due, or to orient across assignments beyond the current one.",
+    "List this course's assignments with due dates and submission status. Use when the student asks about upcoming work, what's due, or to orient across assignments beyond the current one. The result is grounded course evidence; answer from it directly unless the student needs a specific assignment's full instructions.",
   parameters: {
     type: "object",
     properties: {},
@@ -123,7 +123,7 @@ const OPEN_LECTURE_TOOL: ToolDefinition = {
 const LIST_ANNOUNCEMENTS_TOOL: ToolDefinition = {
   name: "list_announcements",
   description:
-    "List announcements and discussion topics for this course. Optionally filter by type and search by keyword. Use when the student asks about announcements, discussions, posts, or what's new in the course.",
+    "List announcements and discussion topics for this course. Optionally filter by type and search by keyword. Use when the student asks about announcements, discussions, posts, or what's new in the course. Use read_thread on a listed item when the student needs the full post or replies.",
   parameters: {
     type: "object",
     properties: {
@@ -144,7 +144,7 @@ const LIST_ANNOUNCEMENTS_TOOL: ToolDefinition = {
 const READ_THREAD_TOOL: ToolDefinition = {
   name: "read_thread",
   description:
-    "Read a full discussion or announcement thread including all replies. Identify the thread by numeric topic ID or partial title. Use after list_announcements surfaces a candidate, or when the student references a specific post or announcement.",
+    "Read a full discussion or announcement thread including all replies. This is a grounding tool for posts, instructor clarifications, and reply details; after reading, answer from the thread content instead of searching again. Identify the thread by numeric topic ID or partial title. Use after list_announcements surfaces a candidate, or when the student references a specific post or announcement.",
   parameters: {
     type: "object",
     properties: {

@@ -32,6 +32,10 @@ export function verifyWorkspaceAnswer(
     input.question,
     input.observations
   );
+  const specificClaimEvidence = buildSpecificClaimEvidenceText(input);
+  const unsupportedSpecificDetails = specificClaimEvidence
+    ? collectUnsupportedSpecificDetails(trimmedAnswer, specificClaimEvidence)
+    : [];
   const sources = collectSources(
     input.question,
     input.observations,
@@ -56,6 +60,9 @@ export function verifyWorkspaceAnswer(
   if (hasCitationCapableObservation && sources.length === 0) {
     missing.push("source");
   }
+  if (unsupportedSpecificDetails.length > 0) {
+    missing.push("support");
+  }
 
   const hasDirectReadInEvidence = relevantGroundedObservations.length > 0;
   const workupSupportsQuestion = !input.usedWorkup
@@ -68,14 +75,18 @@ export function verifyWorkspaceAnswer(
         ? "low"
         : "medium"
       : "low";
-  const confidence = applyComparisonEvidenceConfidenceCap(baseConfidence, {
-    expectsComparisonEvidence,
-    hasEnoughComparisonSources,
-    hasDirectReadInEvidence,
-  });
+  const confidence =
+    unsupportedSpecificDetails.length > 0
+      ? "low"
+      : applyComparisonEvidenceConfidenceCap(baseConfidence, {
+          expectsComparisonEvidence,
+          hasEnoughComparisonSources,
+          hasDirectReadInEvidence,
+        });
   const note = buildVerificationNote({
     missing,
     sources,
+    unsupportedSpecificDetails,
     usedWorkup: input.usedWorkup,
     workupSupportsQuestion,
     hasDirectReadInEvidence,
@@ -96,6 +107,7 @@ export function verifyWorkspaceAnswer(
 function buildVerificationNote(input: {
   missing: string[];
   sources: AnswerSource[];
+  unsupportedSpecificDetails: string[];
   usedWorkup: boolean;
   workupSupportsQuestion: boolean;
   hasDirectReadInEvidence: boolean;
@@ -105,6 +117,10 @@ function buildVerificationNote(input: {
 }): string | null {
   if (input.missing.includes("source")) {
     return "This answer is tentative because I do not have a reliable, citable source for it yet.";
+  }
+
+  if (input.unsupportedSpecificDetails.length > 0) {
+    return `This answer may include specific details I could not verify in the cited evidence: ${formatUnsupportedSpecificDetails(input.unsupportedSpecificDetails)}.`;
   }
 
   if (input.expectsComparisonEvidence && !input.hasEnoughComparisonSources) {
@@ -182,12 +198,19 @@ function collectSources(
   }
 
   if (resolved.length === 0 && usedWorkup && loaded.workupJson) {
-    const overview = (loaded.workupJson.overview as string | undefined) ?? null;
-    resolved.push({
-      title: "workup.json",
-      kind: "workup",
-      excerpt: overview ?? "Pre-loaded assignment workup context.",
-    });
+    const traceSources = collectWorkupTraceSources(loaded.workupJson);
+    if (traceSources.length > 0) {
+      for (const traceSource of traceSources) {
+        resolved.push(traceSource);
+      }
+    } else {
+      const overview = (loaded.workupJson.overview as string | undefined) ?? null;
+      resolved.push({
+        title: "workup.json",
+        kind: "workup",
+        excerpt: overview ?? "Pre-loaded assignment workup context.",
+      });
+    }
   }
 
   return resolved;
@@ -259,3 +282,267 @@ function normalizeSourceSection(value: string | null | undefined): string | null
   }
   return normalized;
 }
+
+function collectWorkupTraceSources(
+  workupJson: Record<string, unknown>
+): AnswerSource[] {
+  const trace = (workupJson.sourceTrace ?? workupJson.source_trace) as
+    | Array<{ conclusion?: string; source?: string }>
+    | undefined;
+  if (!trace || !Array.isArray(trace) || trace.length === 0) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const sources: AnswerSource[] = [];
+  for (const entry of trace) {
+    const source = (typeof entry.source === "string" ? entry.source : "").trim();
+    if (!source || seen.has(source.toLowerCase())) {
+      continue;
+    }
+    seen.add(source.toLowerCase());
+    const conclusion = (typeof entry.conclusion === "string" ? entry.conclusion : "").trim();
+    sources.push({
+      title: source,
+      kind: inferSourceKind(source),
+      excerpt: conclusion || null,
+    });
+  }
+  return sources.slice(0, 4);
+}
+
+function inferSourceKind(source: string): string {
+  const lower = source.toLowerCase();
+  if (/\.pdf\b/.test(lower)) return "attachment";
+  if (/syllabus/i.test(lower)) return "syllabus";
+  if (/assignment\s*description/i.test(lower)) return "assignment";
+  if (/announcement/i.test(lower)) return "announcement";
+  if (/discussion/i.test(lower)) return "discussion";
+  if (/\bpage\b/i.test(lower) || /\bmodule\b/i.test(lower)) return "page";
+  return "document";
+}
+
+function buildSpecificClaimEvidenceText(input: VerifyWorkspaceAnswerInput): string {
+  const parts: string[] = [];
+  for (const observation of selectCitationObservations(
+    input.question,
+    input.observations
+  )) {
+    if (observation.status !== "ok") {
+      continue;
+    }
+    parts.push(observation.summary);
+    if (observation.content) {
+      parts.push(observation.content);
+    }
+    for (const artifact of observation.artifacts) {
+      parts.push(artifact.title);
+      if (artifact.sectionLabel) {
+        parts.push(artifact.sectionLabel);
+      }
+      if (artifact.excerpt) {
+        parts.push(artifact.excerpt);
+      }
+    }
+  }
+
+  if (input.usedWorkup && input.loaded.workupJson) {
+    parts.push(JSON.stringify(input.loaded.workupJson));
+  }
+
+  return parts.join("\n").trim();
+}
+
+function collectUnsupportedSpecificDetails(
+  answer: string,
+  evidenceText: string
+): string[] {
+  if (!answer.trim() || !evidenceText.trim()) {
+    return [];
+  }
+
+  const normalizedEvidence = normalizeSpecificDetailText(evidenceText);
+  const details = collectSpecificDetails(answer);
+  return details.filter(
+    (detail) =>
+      !specificDetailAppearsInEvidence(detail, normalizedEvidence)
+  );
+}
+
+function collectSpecificDetails(answer: string): string[] {
+  const patterns = [
+    /\b\d{4}-\d{1,2}-\d{1,2}\b/g,
+    /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t\.?|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,\s*\d{4})?\b/gi,
+    /\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g,
+    /\b\d{1,2}:\d{2}\s*(?:a\.?m\.?|p\.?m\.?)?\b/gi,
+    /\b\d+(?:\.\d+)?\s*(?:%|points?|pts?|marks?|hours?|hrs?|minutes?|mins?|seconds?|secs?|pages?|words?|files?|attempts?|submissions?|days?|weeks?|ohms?|k(?:ilo)?ohms?|kb|mb|gb)\b/gi,
+    /\b0x[0-9a-f]+\b/gi,
+    /\b[\w.-]+\.(?:pdf|docx?|pptx?|xlsx?|zip|txt|md|html?|py|java|c|cpp|js|ts|json|csv)\b/gi,
+  ];
+  const details: string[] = [];
+  const seen = new Set<string>();
+  for (const pattern of patterns) {
+    for (const match of answer.matchAll(pattern)) {
+      const detail = match[0].trim();
+      const key = normalizeSpecificDetailText(detail);
+      if (!key || seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      details.push(detail);
+    }
+  }
+  return details;
+}
+
+function specificDetailAppearsInEvidence(
+  detail: string,
+  normalizedEvidence: string
+): boolean {
+  const normalizedDetail = normalizeSpecificDetailText(detail);
+  if (!normalizedDetail) {
+    return true;
+  }
+  if (normalizedEvidence.includes(normalizedDetail)) {
+    return true;
+  }
+
+  const parsedDate =
+    parseMonthDaySpecificDetail(detail) ??
+    parseIsoSpecificDetail(detail) ??
+    parseSlashDateSpecificDetail(detail);
+  if (!parsedDate) {
+    return false;
+  }
+
+  return dateAppearsInEvidence(parsedDate, normalizedEvidence);
+}
+
+function normalizeSpecificDetailText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\b(\d+)(?:st|nd|rd|th)\b/g, "$1")
+    .replace(/\ba\.?m\.?\b/g, "am")
+    .replace(/\bp\.?m\.?\b/g, "pm")
+    .replace(/[^a-z0-9%]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseMonthDaySpecificDetail(
+  value: string
+): { month: number; day: number; year?: number } | null {
+  const match = value.match(
+    /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t\.?|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,\s*(\d{4}))?\b/i
+  );
+  if (!match) {
+    return null;
+  }
+  const month = MONTHS.get(normalizeMonthName(match[1]!));
+  const day = Number.parseInt(match[2]!, 10);
+  const year = match[3] ? Number.parseInt(match[3], 10) : undefined;
+  return month && isValidMonthDay(month, day) ? { month, day, year } : null;
+}
+
+function parseIsoSpecificDetail(
+  value: string
+): { month: number; day: number; year?: number } | null {
+  const match = value.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+  if (!match) {
+    return null;
+  }
+  const year = Number.parseInt(match[1]!, 10);
+  const month = Number.parseInt(match[2]!, 10);
+  const day = Number.parseInt(match[3]!, 10);
+  return isValidMonthDay(month, day) ? { month, day, year } : null;
+}
+
+function parseSlashDateSpecificDetail(
+  value: string
+): { month: number; day: number; year?: number } | null {
+  const match = value.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+  if (!match) {
+    return null;
+  }
+  const month = Number.parseInt(match[1]!, 10);
+  const day = Number.parseInt(match[2]!, 10);
+  const year = match[3] ? Number.parseInt(match[3], 10) : undefined;
+  return isValidMonthDay(month, day) ? { month, day, year } : null;
+}
+
+function dateAppearsInEvidence(
+  date: { month: number; day: number; year?: number },
+  normalizedEvidence: string
+): boolean {
+  const month = String(date.month);
+  const day = String(date.day);
+  const dayPadded = day.padStart(2, "0");
+  const yearPrefix = date.year ? `${date.year}\\s+` : "(?:\\d{4}\\s+)?";
+  const numericDatePattern = new RegExp(
+    `\\b${yearPrefix}0?${month}\\s+0?${day}\\b`
+  );
+  if (numericDatePattern.test(normalizedEvidence)) {
+    return true;
+  }
+
+  if (date.year) {
+    return monthNamesFor(date.month).some(
+      (monthName) =>
+        normalizedEvidence.includes(`${monthName} ${day} ${date.year}`) ||
+        normalizedEvidence.includes(`${monthName} ${dayPadded} ${date.year}`)
+    );
+  }
+
+  return monthNamesFor(date.month).some((monthName) =>
+    normalizedEvidence.includes(`${monthName} ${day}`) ||
+    normalizedEvidence.includes(`${monthName} ${dayPadded}`)
+  );
+}
+
+function isValidMonthDay(month: number, day: number): boolean {
+  return month >= 1 && month <= 12 && day >= 1 && day <= 31;
+}
+
+function normalizeMonthName(value: string): string {
+  return value.toLowerCase().replace(/\./g, "");
+}
+
+function monthNamesFor(month: number): string[] {
+  return [...MONTHS.entries()]
+    .filter(([, value]) => value === month)
+    .map(([name]) => name);
+}
+
+function formatUnsupportedSpecificDetails(details: string[]): string {
+  const shown = details.slice(0, 3).map((detail) => `"${detail}"`);
+  const suffix =
+    details.length > shown.length ? `, and ${details.length - shown.length} more` : "";
+  return `${shown.join(", ")}${suffix}`;
+}
+
+const MONTHS = new Map<string, number>([
+  ["jan", 1],
+  ["january", 1],
+  ["feb", 2],
+  ["february", 2],
+  ["mar", 3],
+  ["march", 3],
+  ["apr", 4],
+  ["april", 4],
+  ["may", 5],
+  ["jun", 6],
+  ["june", 6],
+  ["jul", 7],
+  ["july", 7],
+  ["aug", 8],
+  ["august", 8],
+  ["sep", 9],
+  ["sept", 9],
+  ["september", 9],
+  ["oct", 10],
+  ["october", 10],
+  ["nov", 11],
+  ["november", 11],
+  ["dec", 12],
+  ["december", 12],
+]);

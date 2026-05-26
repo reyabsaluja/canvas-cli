@@ -14,6 +14,7 @@ import type {
   CanvasAssignment,
   CanvasAssignmentDetail,
   CanvasAssignmentGroup,
+  CanvasCalendarEvent,
   CanvasCourse,
   CanvasCourseDetail,
   CanvasDiscussionTopic,
@@ -23,6 +24,7 @@ import type {
   CanvasModule,
   CanvasModuleItem,
   CanvasPage,
+  CanvasQuiz,
 } from "./types.js";
 
 export class CanvasClient {
@@ -230,6 +232,42 @@ export class CanvasClient {
   async getPagesSafe(courseId: number, signal?: AbortSignal | null): Promise<CanvasPage[]> {
     const url = `${this.baseUrl}/courses/${courseId}/pages?per_page=50`;
     return this.fetchPaginatedSafe<CanvasPage>(url, signal);
+  }
+
+  /** Get full detail for a single classic Canvas quiz. */
+  async getQuizDetail(
+    courseId: number,
+    quizId: number,
+    signal?: AbortSignal | null
+  ): Promise<CanvasQuiz> {
+    const url = `${this.baseUrl}/courses/${courseId}/quizzes/${quizId}`;
+    return this.fetchOne<CanvasQuiz>(url, signal);
+  }
+
+  /**
+   * Get classic Canvas quizzes for a course. Returns empty array when quizzes
+   * are disabled or inaccessible.
+   */
+  async getQuizzesSafe(courseId: number, signal?: AbortSignal | null): Promise<CanvasQuiz[]> {
+    const url = `${this.baseUrl}/courses/${courseId}/quizzes?per_page=50`;
+    return this.fetchPaginatedSafe<CanvasQuiz>(url, signal);
+  }
+
+  /**
+   * Get course calendar events. Returns empty array when the calendar endpoint
+   * is disabled or inaccessible.
+   */
+  async getCalendarEventsSafe(
+    courseId: number,
+    signal?: AbortSignal | null
+  ): Promise<CanvasCalendarEvent[]> {
+    const params = new URLSearchParams();
+    params.set("type", "event");
+    params.set("all_events", "true");
+    params.set("per_page", "50");
+    params.append("context_codes[]", `course_${courseId}`);
+    const url = `${this.baseUrl}/calendar_events?${params.toString()}`;
+    return this.fetchPaginatedSafe<CanvasCalendarEvent>(url, signal);
   }
 
   /**

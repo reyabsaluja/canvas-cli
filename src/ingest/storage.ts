@@ -5,21 +5,29 @@ import { extractAttachmentContents } from "./attachment-extraction.js";
 import {
   getExtractedAssignmentPath,
   getExtractedAnnouncementPath,
+  getExtractedCalendarEventPath,
   getExtractedDiscussionPath,
   getExtractedExternalLinkPath,
   getExtractedPagePath,
+  getExtractedQuizPath,
 } from "../enrich/course-documents.js";
 import type {
   RawAssignmentRecord,
   RawDiscussionThread,
 } from "./fetch-course-content.js";
-import type { CanvasRubricCriterion } from "../canvas/types.js";
+import type {
+  CanvasCalendarEvent,
+  CanvasQuiz,
+  CanvasRubricCriterion,
+} from "../canvas/types.js";
 import type {
   CourseMetadata,
   AssignmentIndexEntry,
   ModuleIndexEntry,
   FileIndexEntry,
   PageIndexEntry,
+  QuizIndexEntry,
+  CalendarEventIndexEntry,
   AnnouncementIndexEntry,
   DiscussionIndexEntry,
   ExternalLinkIndexEntry,
@@ -42,6 +50,8 @@ export async function writeIngestionArtifacts(
   modules: ModuleIndexEntry[],
   files: FileIndexEntry[],
   pages: PageIndexEntry[],
+  quizzes: QuizIndexEntry[],
+  calendarEvents: CalendarEventIndexEntry[],
   announcements: AnnouncementIndexEntry[],
   discussions: DiscussionIndexEntry[],
   externalLinks: ExternalLinkIndexEntry[],
@@ -50,6 +60,8 @@ export async function writeIngestionArtifacts(
   lectures: LectureIndexEntry[],
   ingestion: IngestionMeta,
   rawAssignments?: RawAssignmentRecord[],
+  rawQuizzes?: CanvasQuiz[],
+  rawCalendarEvents?: CanvasCalendarEvent[],
   frontPageBody?: string | null,
   fetchedPages?: Array<{ slug: string; title: string; body: string }>,
   rawAnnouncements?: Array<{
@@ -78,6 +90,8 @@ export async function writeIngestionArtifacts(
     ["modules.json", modules],
     ["files.json", files],
     ["pages.json", pages],
+    ["quizzes.json", quizzes],
+    ["calendar-events.json", calendarEvents],
     ["announcements.json", announcements],
     ["discussions.json", discussions],
     ["external-links.json", externalLinks],
@@ -119,6 +133,40 @@ export async function writeIngestionArtifacts(
       await writeAtomic(
         getExtractedAssignmentPath(coursePath, assignment.id),
         assignmentText
+      );
+    }
+  }
+
+  const rawQuizzesById = new Map(
+    (rawQuizzes ?? []).map((quiz) => [quiz.id, quiz])
+  );
+  if (quizzes.length > 0) {
+    await fs.mkdir(path.join(coursePath, "extracted", "quizzes"), {
+      recursive: true,
+    });
+    for (const quiz of quizzes) {
+      await writeAtomic(
+        getExtractedQuizPath(coursePath, quiz.id),
+        formatQuizText(quiz, rawQuizzesById.get(quiz.id), courseMeta.htmlUrl)
+      );
+    }
+  }
+
+  const rawCalendarEventsById = new Map(
+    (rawCalendarEvents ?? []).map((event) => [event.id, event])
+  );
+  if (calendarEvents.length > 0) {
+    await fs.mkdir(path.join(coursePath, "extracted", "calendar-events"), {
+      recursive: true,
+    });
+    for (const event of calendarEvents) {
+      await writeAtomic(
+        getExtractedCalendarEventPath(coursePath, event.id),
+        formatCalendarEventText(
+          event,
+          rawCalendarEventsById.get(event.id),
+          courseMeta.htmlUrl
+        )
       );
     }
   }
@@ -269,6 +317,112 @@ function formatAssignmentText(
   return lines.join("\n") + "\n";
 }
 
+function formatQuizText(
+  quiz: QuizIndexEntry,
+  rawQuiz: CanvasQuiz | undefined,
+  courseHtmlUrl: string | null
+): string {
+  const lines = [`# ${quiz.title}`, ""];
+
+  lines.push(`Due: ${quiz.dueAt ?? "No due date"}`);
+  if (quiz.unlockAt) {
+    lines.push(`Unlocks: ${quiz.unlockAt}`);
+  }
+  if (quiz.lockAt) {
+    lines.push(`Locks: ${quiz.lockAt}`);
+  }
+  lines.push(
+    `Points: ${
+      quiz.pointsPossible !== null ? String(quiz.pointsPossible) : "Not specified"
+    }`
+  );
+  lines.push(
+    `Questions: ${
+      quiz.questionCount !== null ? String(quiz.questionCount) : "Not specified"
+    }`
+  );
+  lines.push(
+    `Time limit: ${
+      quiz.timeLimit !== null ? `${quiz.timeLimit} minutes` : "Not specified"
+    }`
+  );
+  lines.push(
+    `Allowed attempts: ${
+      quiz.allowedAttempts !== null
+        ? formatAllowedAttempts(quiz.allowedAttempts)
+        : "Not specified"
+    }`
+  );
+  if (quiz.quizType) {
+    lines.push(`Quiz type: ${quiz.quizType}`);
+  }
+  if (quiz.published !== null) {
+    lines.push(`Published: ${quiz.published ? "yes" : "no"}`);
+  }
+  if (quiz.assignmentId !== null) {
+    lines.push(`Assignment ID: ${quiz.assignmentId}`);
+  }
+  if (quiz.htmlUrl) {
+    lines.push(`Canvas URL: ${quiz.htmlUrl}`);
+  }
+  lines.push("");
+  lines.push("## Instructions");
+  lines.push("");
+
+  const description =
+    typeof rawQuiz?.description === "string" ? rawQuiz.description : null;
+  if (description && description.trim().length > 0) {
+    const baseUrl = quiz.htmlUrl ?? rawQuiz?.html_url ?? courseHtmlUrl;
+    lines.push(renderRichText(description, baseUrl) || "No quiz instructions provided.");
+  } else {
+    lines.push("No quiz instructions provided.");
+  }
+
+  return lines.join("\n") + "\n";
+}
+
+function formatCalendarEventText(
+  event: CalendarEventIndexEntry,
+  rawEvent: CanvasCalendarEvent | undefined,
+  courseHtmlUrl: string | null
+): string {
+  const lines = [`# ${event.title}`, ""];
+
+  lines.push(`Starts: ${event.startAt ?? "No start time"}`);
+  if (event.endAt) {
+    lines.push(`Ends: ${event.endAt}`);
+  }
+  if (event.allDay !== null) {
+    lines.push(`All day: ${event.allDay ? "yes" : "no"}`);
+  }
+  if (event.locationName) {
+    lines.push(`Location: ${event.locationName}`);
+  }
+  if (event.locationAddress) {
+    lines.push(`Address: ${event.locationAddress}`);
+  }
+  if (event.workflowState) {
+    lines.push(`Status: ${event.workflowState}`);
+  }
+  if (event.htmlUrl) {
+    lines.push(`Canvas URL: ${event.htmlUrl}`);
+  }
+  lines.push("");
+  lines.push("## Description");
+  lines.push("");
+
+  const description =
+    typeof rawEvent?.description === "string" ? rawEvent.description : null;
+  if (description && description.trim().length > 0) {
+    const baseUrl = event.htmlUrl ?? rawEvent?.html_url ?? courseHtmlUrl;
+    lines.push(renderRichText(description, baseUrl) || "No event description provided.");
+  } else {
+    lines.push("No event description provided.");
+  }
+
+  return lines.join("\n") + "\n";
+}
+
 function formatRubricText(
   rubric: CanvasRubricCriterion[],
   baseUrl: string | null
@@ -338,6 +492,13 @@ function formatPointLabel(points: number | null | undefined): string | null {
   }
 
   return `${points} ${points === 1 ? "point" : "points"}`;
+}
+
+function formatAllowedAttempts(allowedAttempts: number): string {
+  if (allowedAttempts < 0) {
+    return "unlimited";
+  }
+  return String(allowedAttempts);
 }
 
 function formatDiscussionThreadText(thread: RawDiscussionThread): string {

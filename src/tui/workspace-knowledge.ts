@@ -3,6 +3,7 @@ import path from "node:path";
 import type { LoadedWorkspace } from "../ask/types.js";
 import type { CourseCache } from "../enrich/cache-loader.js";
 import {
+  buildQueryMatchedExcerpt,
   clearArtifactIndexCache,
   formatArtifactLabel,
   loadArtifactIndex,
@@ -58,6 +59,8 @@ interface ArtifactLookupCandidate {
 const WORKSPACE_SEARCH_LOOKAHEAD_MULTIPLIER = 4;
 const MIN_WORKSPACE_SEARCH_CANDIDATES = 12;
 const WORKSPACE_SCOPE_TIE_BREAK_DELTA = 0.2;
+const SAME_ARTIFACT_SECTION_RATIO = 1.35;
+const MAX_HIGH_VALUE_SECTIONS_PER_ARTIFACT = 2;
 
 const WORKSPACE_READABLE_KINDS: ArtifactKind[] = [
   "assignment",
@@ -70,6 +73,8 @@ const WORKSPACE_READABLE_KINDS: ArtifactKind[] = [
 const COURSE_READABLE_KINDS: ArtifactKind[] = [
   "assignment",
   "page",
+  "quiz",
+  "calendar_event",
   "announcement",
   "discussion",
   "external_link",
@@ -110,7 +115,9 @@ export async function searchWorkspaceKnowledge(
         section,
         score,
         header: buildSearchHeader(artifact, section),
-        preview: section.text.slice(0, 2000),
+        preview: buildQueryMatchedExcerpt(section.text, trimmed, {
+          maxLength: 900,
+        }),
       };
     })
     .filter((match): match is WorkspaceChatSearchMatch => Boolean(match))
@@ -397,17 +404,32 @@ function selectDiverseSearchMatches(
   const selected: WorkspaceChatSearchMatch[] = [];
   const selectedSectionIds = new Set<string>();
   const selectedArtifactIds = new Set<string>();
+  const selectedCountsByArtifactId = new Map<string, number>();
 
   for (const match of matches) {
     if (selected.length >= limit) {
       return selected;
     }
-    if (selectedArtifactIds.has(match.artifact.id)) {
+    const selectedArtifactCount =
+      selectedCountsByArtifactId.get(match.artifact.id) ?? 0;
+    if (
+      selectedArtifactCount > 0 &&
+      !shouldSelectAdditionalSection(
+        match,
+        matches,
+        selectedArtifactIds,
+        selectedArtifactCount
+      )
+    ) {
       continue;
     }
     selected.push(match);
     selectedArtifactIds.add(match.artifact.id);
     selectedSectionIds.add(match.section.id);
+    selectedCountsByArtifactId.set(
+      match.artifact.id,
+      selectedArtifactCount + 1
+    );
   }
 
   for (const match of matches) {
@@ -422,6 +444,25 @@ function selectDiverseSearchMatches(
   }
 
   return selected;
+}
+
+function shouldSelectAdditionalSection(
+  match: WorkspaceChatSearchMatch,
+  matches: WorkspaceChatSearchMatch[],
+  selectedArtifactIds: Set<string>,
+  selectedArtifactCount: number
+): boolean {
+  if (selectedArtifactCount >= MAX_HIGH_VALUE_SECTIONS_PER_ARTIFACT) {
+    return false;
+  }
+
+  const bestUnselectedArtifactScore =
+    matches.find((candidate) => !selectedArtifactIds.has(candidate.artifact.id))
+      ?.score ?? 0;
+  return (
+    bestUnselectedArtifactScore === 0 ||
+    match.score >= bestUnselectedArtifactScore * SAME_ARTIFACT_SECTION_RATIO
+  );
 }
 
 function createFileEntry(artifact: ArtifactRecord): WorkspaceChatFileEntry {

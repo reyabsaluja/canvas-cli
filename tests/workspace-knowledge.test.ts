@@ -399,6 +399,109 @@ test("searchWorkspaceKnowledge prefers exact section headings over noisy longer 
   });
 });
 
+test("searchWorkspaceKnowledge keeps strongly relevant sibling sections together", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const workspace = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "assignments"), {
+      recursive: true,
+    });
+    await fs.mkdir(path.join(coursePath, "extracted", "attachments"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "assignments", "42.txt"),
+      [
+        "# Lab 4",
+        "",
+        "## Due date",
+        "",
+        "Due date: April 18 at 11:59 PM.",
+        "",
+        "## Submission format",
+        "",
+        "Submission format: upload report.pdf to Canvas.",
+      ].join("\n"),
+      "utf-8"
+    );
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "attachments", "lab4-spec.pdf.txt"),
+      "This course reminder mentions submission logistics in passing.\n",
+      "utf-8"
+    );
+
+    const cache = createCourseCache(coursePath);
+    cache.assignments = [
+      {
+        id: 42,
+        name: "Lab 4",
+        dueAt: "2026-04-18T23:59:00.000Z",
+        unlockAt: null,
+        lockAt: null,
+        pointsPossible: 100,
+        gradingType: "points",
+        submissionTypes: ["online_upload"],
+        htmlUrl: "https://canvas.example/courses/17/assignments/42",
+        hasDescription: true,
+        descriptionLinkCount: 0,
+      },
+    ];
+
+    const matches = await searchWorkspaceKnowledge(
+      workspace,
+      cache,
+      "due date submission format report pdf",
+      2
+    );
+
+    assert.equal(matches.length, 2);
+    assert.deepEqual(
+      matches.map((match) => match.section.section).sort(),
+      ["Due date", "Submission format"]
+    );
+    assert.ok(matches.every((match) => match.artifact.title === "Lab 4"));
+  });
+});
+
+test("searchWorkspaceKnowledge centers previews on the matching passage", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const workspace = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "attachments"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "attachments", "lab4-spec.pdf.txt"),
+      [
+        "# Lab 4 Specification",
+        "",
+        "## Details",
+        "",
+        Array.from(
+          { length: 180 },
+          (_, index) => `boilerplate setup reminder ${index}`
+        ).join(" "),
+        "The calibration threshold is 0.42 volts before the demo.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache = createCourseCache(coursePath);
+    const matches = await searchWorkspaceKnowledge(
+      workspace,
+      cache,
+      "calibration threshold",
+      3
+    );
+
+    assert.equal(matches[0]?.artifact.title, "lab4-spec.pdf");
+    assert.match(matches[0]?.preview ?? "", /calibration threshold is 0\.42/i);
+    assert.doesNotMatch(matches[0]?.preview ?? "", /boilerplate setup reminder 0/);
+  });
+});
+
 test("registerDownloadedCourseAttachment makes new downloads visible to workspace chat", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();

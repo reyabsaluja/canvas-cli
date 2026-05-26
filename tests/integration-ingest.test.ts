@@ -172,6 +172,12 @@ test("integration: ingest pipeline with partially unavailable API", async (t) =>
         return;
       }
 
+      if (path === "/courses/101/quizzes") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify([]));
+        return;
+      }
+
       // Files and Pages return 403 (blocked by institution)
       if (path === "/courses/101/files" || path === "/courses/101/pages") {
         res.writeHead(403, { "Content-Type": "application/json" });

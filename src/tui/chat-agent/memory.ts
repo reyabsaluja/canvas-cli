@@ -141,7 +141,7 @@ function buildToolRuntimeMemory(
     const sourceTitles = [
       ...new Set(
         observation.artifacts
-          .map((artifact) => artifact.title.trim())
+          .map(formatToolMemorySourceLabel)
           .filter((title) => title.length > 0)
       ),
     ].slice(0, 2);
@@ -226,20 +226,14 @@ function buildNextToolStep(
       .flatMap((observation) => observation.artifacts)
       .map((artifact) => artifact.artifactId)
   );
-  const candidateTitles = [
-    ...new Set(
-      observations
-        .filter(
-          (observation) =>
-            observation.status === "ok" &&
-            (observation.tool === "search_workspace" ||
-              observation.tool === "search_course")
-        )
-        .flatMap((observation) => observation.artifacts)
-        .map((artifact) => artifact.title.trim())
-        .filter((title) => title.length > 0)
-    ),
-  ].slice(0, MAX_NEXT_STEP_SOURCES);
+  const unavailableArtifactIds = new Set([
+    ...groundedArtifactIds,
+    ...collectFailedReadArtifactIds(observations),
+  ]);
+  const candidateTitles = collectViableSearchCandidateTitles(
+    observations,
+    unavailableArtifactIds
+  );
 
   const needsMultipleSources = questionNeedsMultipleSources(question);
   if (groundedArtifactIds.size > 0) {
@@ -278,6 +272,34 @@ function buildNextToolStep(
           .join(", ");
 
   return `Unresolved next step: you already found candidate sources but do not have grounded text yet. Reuse those breadcrumbs and call read_file on ${candidates} before running another search or answering from snippets.`;
+}
+
+function collectViableSearchCandidateTitles(
+  observations: Observation[],
+  unavailableArtifactIds: Set<string>
+): string[] {
+  const titlesByArtifactId = new Map<string, string>();
+  for (const observation of observations) {
+    if (
+      observation.status !== "ok" ||
+      (observation.tool !== "search_workspace" &&
+        observation.tool !== "search_course")
+    ) {
+      continue;
+    }
+
+    for (const artifact of observation.artifacts) {
+      if (unavailableArtifactIds.has(artifact.artifactId)) {
+        continue;
+      }
+      const title = artifact.title.trim();
+      if (title.length > 0 && !titlesByArtifactId.has(artifact.artifactId)) {
+        titlesByArtifactId.set(artifact.artifactId, title);
+      }
+    }
+  }
+
+  return [...titlesByArtifactId.values()].slice(0, MAX_NEXT_STEP_SOURCES);
 }
 
 function buildFailureRecoveryNextStep(
@@ -342,4 +364,15 @@ function summarizeObservationDetail(
     return detail;
   }
   return `${detail.slice(0, MAX_TOOL_MEMORY_DETAIL_CHARS - 3).trimEnd()}...`;
+}
+
+function formatToolMemorySourceLabel(
+  artifact: Observation["artifacts"][number]
+): string {
+  const title = artifact.title.trim();
+  if (!title) {
+    return "";
+  }
+  const section = artifact.sectionLabel?.trim();
+  return section ? `${title} — ${section}` : title;
 }

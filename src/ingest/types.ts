@@ -63,6 +63,38 @@ export interface PageIndexEntry {
   hasBody: boolean;
 }
 
+export interface QuizIndexEntry {
+  id: number;
+  title: string;
+  quizType: string | null;
+  dueAt: string | null;
+  unlockAt: string | null;
+  lockAt: string | null;
+  pointsPossible: number | null;
+  questionCount: number | null;
+  timeLimit: number | null;
+  allowedAttempts: number | null;
+  published: boolean | null;
+  htmlUrl: string | null;
+  assignmentId: number | null;
+  hasDescription: boolean;
+  descriptionLinkCount: number;
+}
+
+export interface CalendarEventIndexEntry {
+  id: number;
+  title: string;
+  startAt: string | null;
+  endAt: string | null;
+  allDay: boolean | null;
+  locationName: string | null;
+  locationAddress: string | null;
+  htmlUrl: string | null;
+  workflowState: string | null;
+  hasDescription: boolean;
+  descriptionLinkCount: number;
+}
+
 export interface AnnouncementIndexEntry {
   id: number;
   title: string;
@@ -123,7 +155,12 @@ export interface SyllabusCandidate {
 export type AttachmentSourceType =
   | "syllabus_file"
   | "important_file"
+  | "assignment_attachment"
+  | "announcement_attachment"
+  | "discussion_attachment"
   | "assignment_linked"
+  | "quiz_linked"
+  | "calendar_event_linked"
   | "module_linked"
   | "page_linked";
 
@@ -190,6 +227,8 @@ export interface IngestionResult {
   modules: ModuleIndexEntry[];
   files: FileIndexEntry[];
   pages: PageIndexEntry[];
+  quizzes?: QuizIndexEntry[];
+  calendarEvents?: CalendarEventIndexEntry[];
   announcements?: AnnouncementIndexEntry[];
   discussions?: DiscussionIndexEntry[];
   externalLinks?: ExternalLinkIndexEntry[];

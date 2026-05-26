@@ -760,6 +760,12 @@ export function getRenderedMessageLines(
             ? `${source.title} — ${source.section}`
             : source.title;
           lines.push(`  ${C.dimmer(`[${source.kind}]`)} ${C.dim(label)}`);
+          const excerpt = source.excerpt?.replace(/\s+/g, " ").trim();
+          if (excerpt) {
+            wrapLines(excerpt, Math.max(12, maxWidth - 4)).forEach((line) => {
+              lines.push(`    ${C.dim(line)}`);
+            });
+          }
         }
       }
       break;

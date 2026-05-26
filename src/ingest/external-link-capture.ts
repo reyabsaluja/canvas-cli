@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import type { Config } from "../config/env.js";
+import type { CanvasCalendarEvent, CanvasQuiz } from "../canvas/types.js";
+import { extractFileBufferText } from "../extract/extract-text.js";
 import { decodeEntities, htmlToText } from "../format/html-to-text.js";
 import { mapWithConcurrency } from "./concurrency.js";
 import type { RawAssignmentRecord, RawDiscussionThread } from "./fetch-course-content.js";
@@ -38,6 +40,13 @@ interface ExternalLinkFetchResult {
   note: string | null;
 }
 
+interface GoogleWorkspaceExportRequest {
+  url: string;
+  filename: string;
+  label: string;
+  kind: "text" | "binary";
+}
+
 export interface CapturedExternalLink {
   entry: ExternalLinkIndexEntry;
   text: string;
@@ -48,6 +57,8 @@ export async function captureExternalCourseLinks(options: {
   courseHtmlUrl: string | null;
   modules: ModuleIndexEntry[];
   assignments: RawAssignmentRecord[];
+  quizzes: CanvasQuiz[];
+  calendarEvents: CanvasCalendarEvent[];
   frontPageBody: string | null;
   fetchedPages: Array<{ slug: string; title: string; body: string }>;
   syllabusBody: string | null;
@@ -135,6 +146,30 @@ export async function captureExternalCourseLinks(options: {
       description,
       `assignment "${assignment.name}" description`,
       assignment.html_url
+    );
+  }
+
+  for (const quiz of options.quizzes) {
+    const description = quiz.description;
+    if (typeof description !== "string" || description.trim().length === 0) {
+      continue;
+    }
+    addHtmlCandidates(
+      description,
+      `quiz "${quiz.title}" description`,
+      quiz.html_url ?? options.courseHtmlUrl
+    );
+  }
+
+  for (const event of options.calendarEvents) {
+    const description = event.description;
+    if (typeof description !== "string" || description.trim().length === 0) {
+      continue;
+    }
+    addHtmlCandidates(
+      description,
+      `calendar event "${event.title}" description`,
+      event.html_url ?? options.courseHtmlUrl
     );
   }
 
@@ -287,15 +322,15 @@ async function fetchExternalLink(
     };
   }
 
-  const googleDocExport = await fetchGoogleDocumentExport(finalUrl);
-  if (googleDocExport) {
+  const googleWorkspaceExport = await fetchGoogleWorkspaceExport(finalUrl);
+  if (googleWorkspaceExport) {
     return {
-      status: googleDocExport.text.length > 0 ? "captured" : "metadata_only",
+      status: googleWorkspaceExport.text.length > 0 ? "captured" : "metadata_only",
       resolvedUrl: finalUrl,
-      contentType: googleDocExport.contentType ?? contentType,
-      pageTitle: googleDocExport.pageTitle,
-      text: googleDocExport.text,
-      note: googleDocExport.note,
+      contentType: googleWorkspaceExport.contentType ?? contentType,
+      pageTitle: googleWorkspaceExport.pageTitle,
+      text: googleWorkspaceExport.text,
+      note: googleWorkspaceExport.note,
     };
   }
 
@@ -378,7 +413,7 @@ async function fetchExternalLink(
   };
 }
 
-async function fetchGoogleDocumentExport(
+async function fetchGoogleWorkspaceExport(
   url: string
 ): Promise<{
   contentType: string | null;
@@ -386,20 +421,30 @@ async function fetchGoogleDocumentExport(
   text: string;
   note: string | null;
 } | null> {
-  const exportUrl = buildGoogleDocumentExportUrl(url);
-  if (!exportUrl) {
+  const exportRequest = buildGoogleWorkspaceExportRequest(url);
+  if (!exportRequest) {
     return null;
   }
 
   try {
-    const response = await fetch(exportUrl, {
+    const response = await fetch(exportRequest.url, {
       redirect: "follow",
     });
     if (!response.ok) {
       return null;
     }
 
-    const text = (await response.text()).trim().slice(0, MAX_CAPTURED_TEXT);
+    const text =
+      exportRequest.kind === "text"
+        ? (await response.text()).trim().slice(0, MAX_CAPTURED_TEXT)
+        : (
+            await extractFileBufferText(
+              Buffer.from(await response.arrayBuffer()),
+              exportRequest.filename
+            )
+          )
+            .trim()
+            .slice(0, MAX_CAPTURED_TEXT);
     return {
       contentType: response.headers.get("content-type"),
       pageTitle: null,
@@ -407,14 +452,16 @@ async function fetchGoogleDocumentExport(
       note:
         text.length > 0
           ? null
-          : "The Google Doc export was reachable, but it did not include readable text.",
+          : `The ${exportRequest.label} export was reachable, but it did not include readable text.`,
     };
   } catch {
     return null;
   }
 }
 
-function buildGoogleDocumentExportUrl(url: string): string | null {
+function buildGoogleWorkspaceExportRequest(
+  url: string
+): GoogleWorkspaceExportRequest | null {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -426,14 +473,43 @@ function buildGoogleDocumentExportUrl(url: string): string | null {
     return null;
   }
 
-  const match = parsed.pathname.match(
+  const documentMatch = parsed.pathname.match(
     /^\/document\/(?:u\/\d+\/)?d\/([^/]+)(?:\/|$)/i
   );
-  if (!match?.[1]) {
-    return null;
+  if (documentMatch?.[1]) {
+    return {
+      url: `https://docs.google.com/document/d/${documentMatch[1]}/export?format=txt`,
+      filename: "google-doc.txt",
+      label: "Google Doc",
+      kind: "text",
+    };
   }
 
-  return `https://docs.google.com/document/d/${match[1]}/export?format=txt`;
+  const presentationMatch = parsed.pathname.match(
+    /^\/presentation\/(?:u\/\d+\/)?d\/([^/]+)(?:\/|$)/i
+  );
+  if (presentationMatch?.[1]) {
+    return {
+      url: `https://docs.google.com/presentation/d/${presentationMatch[1]}/export/pptx`,
+      filename: "google-slides.pptx",
+      label: "Google Slides",
+      kind: "binary",
+    };
+  }
+
+  const spreadsheetMatch = parsed.pathname.match(
+    /^\/spreadsheets\/(?:u\/\d+\/)?d\/([^/]+)(?:\/|$)/i
+  );
+  if (spreadsheetMatch?.[1]) {
+    return {
+      url: `https://docs.google.com/spreadsheets/d/${spreadsheetMatch[1]}/export?format=csv`,
+      filename: "google-sheet.csv",
+      label: "Google Sheet",
+      kind: "text",
+    };
+  }
+
+  return null;
 }
 
 async function fetchWithControlledRedirects(

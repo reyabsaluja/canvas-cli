@@ -8,6 +8,7 @@ import type { CourseCache } from "../src/enrich/cache-loader.js";
 import type { Observation, ToolExecutionResult } from "../src/agent/observation.js";
 import { clearArtifactIndexCache } from "../src/knowledge/artifact-index.js";
 import { decideWorkspaceRetrieval } from "../src/agent/retrieval-gate.js";
+import { isGroundedContentObservation } from "../src/agent/observation-relevance.js";
 import { appendObservation, createEmptyRunState } from "../src/agent/run-state.js";
 import { verifyWorkspaceAnswer } from "../src/agent/verify.js";
 import {
@@ -231,6 +232,120 @@ test("workspace chat only exposes Canvas downloads when a client is available", 
       "download_course_file",
       "open_resource",
     ]);
+  });
+});
+
+test("course-native tools record grounded evidence for loop memory", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+    const radarItem = {
+      kind: "announcement" as const,
+      topicId: 88,
+      courseId: 17,
+      courseName: "ECE243",
+      title: "Lab 4 Clarification",
+      authorName: "Prof. Ada",
+      postedAt: new Date("2026-04-04T09:00:00.000Z"),
+      lastReplyAt: new Date("2026-04-04T10:00:00.000Z"),
+      unreadCount: 0,
+      htmlUrl: "https://canvas.example/courses/17/discussion_topics/88",
+      locked: false,
+    };
+    const radar = {
+      getRadarItems: async () => [radarItem],
+      getThread: async () => ({
+        topic: radarItem,
+        body: "Instructor clarification: use signed overflow detection in the ALU explanation.",
+        entries: [
+          {
+            entryId: 1,
+            authorName: "Prof. Ada",
+            message: "Also include the waveform evidence in your report.",
+            createdAt: new Date("2026-04-04T10:00:00.000Z"),
+            depth: 0,
+          },
+        ],
+        participantCount: 2,
+        totalEntries: 1,
+      }),
+      resolveTopicByPartialTitle: async () => null,
+    };
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      {
+        cache,
+        client: null,
+        config: null,
+        courseId: 17,
+        assignments: [
+          {
+            id: 42,
+            name: "Lab 4",
+            courseId: 17,
+            courseName: "ECE243",
+            dueAt: new Date("2026-04-10T23:59:00.000Z"),
+            submitted: false,
+            status: "upcoming",
+            htmlUrl: "https://canvas.example/courses/17/assignments/42",
+          },
+        ],
+        radar: radar as any,
+      }
+    );
+
+    const assignmentList = await executeToolCallForTurn(
+      new Map(),
+      "list_assignments",
+      {},
+      ctx
+    );
+    assert.equal(assignmentList.result.observation.status, "ok");
+    assert.equal(
+      isGroundedContentObservation(assignmentList.result.observation),
+      true
+    );
+    assert.match(assignmentList.result.observation.content ?? "", /Lab 4/);
+    assert.equal(
+      assignmentList.result.observation.artifacts[0]?.title,
+      "Course assignments"
+    );
+
+    const announcementList = await executeToolCallForTurn(
+      new Map(),
+      "list_announcements",
+      { filter: "announcements", query: "Lab 4" },
+      ctx
+    );
+    assert.equal(announcementList.result.observation.status, "ok");
+    assert.equal(
+      isGroundedContentObservation(announcementList.result.observation),
+      true
+    );
+    assert.match(
+      announcementList.result.observation.content ?? "",
+      /Lab 4 Clarification/
+    );
+
+    const threadRead = await executeToolCallForTurn(
+      new Map(),
+      "read_thread",
+      { topic: "88" },
+      ctx
+    );
+    assert.equal(threadRead.result.observation.status, "ok");
+    assert.equal(isGroundedContentObservation(threadRead.result.observation), true);
+    assert.equal(
+      threadRead.result.observation.artifacts[0]?.title,
+      "Lab 4 Clarification"
+    );
+    assert.match(
+      threadRead.result.observation.content ?? "",
+      /signed overflow detection/
+    );
+    assert.match(threadRead.result.observation.content ?? "", /waveform evidence/);
   });
 });
 
@@ -1280,6 +1395,47 @@ test("workspace answer verification derives sources and confidence deterministic
       },
     ]);
 
+    const verifiedFromIsoWorkupDate = verifyWorkspaceAnswer({
+      question: "When is the assignment due?",
+      answer: "The assignment is due on April 10.",
+      observations: [],
+      usedWorkup: true,
+      loaded,
+    });
+    assert.equal(verifiedFromIsoWorkupDate.confidence, "medium");
+    assert.deepEqual(verifiedFromIsoWorkupDate.missing, []);
+
+    const verifiedFromUnsupportedSpecificDetail = verifyWorkspaceAnswer({
+      question: "When is the report due?",
+      answer: "The report is due on April 11 at 11:59 PM.",
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read assignment.md.",
+          artifacts: [
+            {
+              artifactId: "artifact-due",
+              title: "assignment.md",
+              kind: "assignment",
+              excerpt: "The report is due on April 10 at 11:59 PM.",
+              sectionLabel: "Due date",
+            },
+          ],
+          content: "The report is due on April 10 at 11:59 PM.",
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedFromUnsupportedSpecificDetail.ok, false);
+    assert.equal(verifiedFromUnsupportedSpecificDetail.confidence, "low");
+    assert.deepEqual(verifiedFromUnsupportedSpecificDetail.missing, ["support"]);
+    assert.match(
+      verifiedFromUnsupportedSpecificDetail.note ?? "",
+      /could not verify.*April 11/i
+    );
+
     const verifiedFromMixedEvidence = verifyWorkspaceAnswer({
       question: "Explain the branch hazard requirement in detail.",
       answer: "You need to show the stall cycles around the branch hazard.",
@@ -1727,6 +1883,28 @@ test("memory prompts prefer relevant search evidence over irrelevant grounded re
   assert.match(prompt, /branch hazard/i);
   assert.doesNotMatch(prompt, /docs\/resistor-table\.txt/);
   assert.doesNotMatch(prompt, /220 ohm/i);
+});
+
+test("memory prompts preserve source sections and excerpts for final-answer grounding", () => {
+  const prompt = buildEvidenceBackedQuestion("What does the submission section require?", [
+    {
+      tool: "search_workspace",
+      status: "ok",
+      summary: "Found a workspace match for submission requirements.",
+      artifacts: [
+        {
+          artifactId: "artifact-submission",
+          title: "assignment.md",
+          kind: "assignment",
+          sectionLabel: "Submission format",
+          excerpt: "Submit a single PDF report through Canvas.",
+        },
+      ],
+    },
+  ]);
+
+  assert.match(prompt, /Source: \[assignment\] assignment\.md — Submission format/);
+  assert.match(prompt, /Excerpt: Submit a single PDF report through Canvas\./);
 });
 
 test("tool-turn verification falls back to prior grounded evidence when no new tools run", () => {
@@ -2441,6 +2619,15 @@ test("chat agent prompt and tool definitions teach search-then-read behavior", a
     assert.match(
       prompt,
       /If a read or search just failed, do not repeat the same tool call with the same target/i
+    );
+    assert.match(prompt, /Tool-result checkpoint/i);
+    assert.match(
+      prompt,
+      /Discovery breadcrumbs \(search_workspace, search_course\).*section labels and excerpts/i
+    );
+    assert.match(
+      prompt,
+      /Dead ends \(not_found, missing_text, failed download\).*do not repeat the same target/i
     );
 
     const tools = buildChatTools({ cache, client: null });

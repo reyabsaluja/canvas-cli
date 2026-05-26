@@ -3,10 +3,12 @@ import type {
   CanvasCourseDetail,
   CanvasAssignment,
   CanvasAssignmentDetail,
+  CanvasCalendarEvent,
   CanvasModule,
   CanvasModuleItem,
   CanvasFile,
   CanvasPage,
+  CanvasQuiz,
   CanvasDiscussionEntry,
   CanvasDiscussionTopic,
   CanvasDiscussionTopicView,
@@ -28,6 +30,8 @@ export interface RawCourseContent {
   modules: Array<CanvasModule & { items: CanvasModuleItem[] }>;
   files: CanvasFile[];
   pages: CanvasPage[];
+  quizzes: CanvasQuiz[];
+  calendarEvents: CanvasCalendarEvent[];
   announcements: CanvasDiscussionTopic[];
   discussions: CanvasDiscussionTopic[];
   discussionThreads: RawDiscussionThread[];
@@ -42,6 +46,7 @@ const MODULE_ITEMS_CONCURRENCY = 4;
 const PAGE_BODY_CONCURRENCY = 4;
 const DISCUSSION_VIEW_CONCURRENCY = 4;
 const ASSIGNMENT_DETAIL_CONCURRENCY = 4;
+const QUIZ_DETAIL_CONCURRENCY = 4;
 
 /**
  * Fetch all available course content from Canvas.
@@ -80,6 +85,22 @@ export async function fetchCourseContent(
   const discussionFetcher = (client as CanvasClient & {
     getDiscussionTopicsSafe?: (courseId: number, signal?: AbortSignal | null) => Promise<CanvasDiscussionTopic[]>;
   }).getDiscussionTopicsSafe;
+  const quizFetcher = (client as CanvasClient & {
+    getQuizzesSafe?: (courseId: number, signal?: AbortSignal | null) => Promise<CanvasQuiz[]>;
+  }).getQuizzesSafe;
+  const quizzesPromise = quizFetcher
+    ? quizFetcher
+        .call(client, courseId, signal)
+        .then((quizSummaries) =>
+          enrichQuizzesWithDetails(client, courseId, quizSummaries, signal)
+        )
+    : Promise.resolve({ quizzes: [] as CanvasQuiz[], warning: null });
+  const calendarEventFetcher = (client as CanvasClient & {
+    getCalendarEventsSafe?: (
+      courseId: number,
+      signal?: AbortSignal | null
+    ) => Promise<CanvasCalendarEvent[]>;
+  }).getCalendarEventsSafe;
   const discussionViewFetcher = (client as CanvasClient & {
     getDiscussionTopicViewSafe?: (
       courseId: number,
@@ -91,6 +112,8 @@ export async function fetchCourseContent(
     rawModules,
     files,
     pages,
+    quizDetailResult,
+    calendarEvents,
     announcements,
     discussions,
     frontPage,
@@ -100,6 +123,10 @@ export async function fetchCourseContent(
       client.getModulesSafe(courseId, signal),
       client.getFilesSafe(courseId, signal),
       client.getPagesSafe(courseId, signal),
+      quizzesPromise,
+      calendarEventFetcher
+        ? calendarEventFetcher.call(client, courseId, signal)
+        : Promise.resolve([]),
       announcementFetcher
         ? announcementFetcher.call(client, courseId, undefined, signal)
         : Promise.resolve([]),
@@ -112,6 +139,10 @@ export async function fetchCourseContent(
   const assignments = assignmentDetailResult.assignments;
   if (assignmentDetailResult.warning) {
     warnings.push(assignmentDetailResult.warning);
+  }
+  const quizzes = quizDetailResult.quizzes;
+  if (quizDetailResult.warning) {
+    warnings.push(quizDetailResult.warning);
   }
 
   const modules = await mapWithConcurrency(
@@ -208,7 +239,8 @@ export async function fetchCourseContent(
   // Seed the crawl from every page listed in the Pages index, explicit module
   // pages, then expand through every HTML surface we can already access. This
   // recovers unlinked course pages in addition to page hubs linked from
-  // assignments, the syllabus, announcements, and other pages.
+  // assignments, quizzes, calendar events, the syllabus, announcements, and
+  // other pages.
   for (const page of pages) {
     rememberFetchedPage(page.url, page.title, page.body ?? null);
     enqueueSlug(page.url);
@@ -227,6 +259,12 @@ export async function fetchCourseContent(
     if (typeof description === "string") {
       enqueueLinkedPageSlugs(description);
     }
+  }
+  for (const quiz of quizzes) {
+    enqueueLinkedPageSlugs(quiz.description);
+  }
+  for (const event of calendarEvents) {
+    enqueueLinkedPageSlugs(event.description);
   }
   for (const announcement of announcements) {
     enqueueLinkedPageSlugs(announcement.message);
@@ -268,6 +306,8 @@ export async function fetchCourseContent(
     modules,
     files,
     pages,
+    quizzes,
+    calendarEvents,
     announcements,
     discussions,
     discussionThreads,
@@ -318,6 +358,51 @@ async function enrichAssignmentsWithDetails(
         ? `Assignment detail unavailable for ${failedDetails} assignment${
             failedDetails === 1 ? "" : "s"
           } — descriptions and rubrics may be incomplete`
+        : null,
+  };
+}
+
+async function enrichQuizzesWithDetails(
+  client: CanvasClient,
+  courseId: number,
+  quizzes: CanvasQuiz[],
+  signal?: AbortSignal | null
+): Promise<{ quizzes: CanvasQuiz[]; warning: string | null }> {
+  const detailFetcher = (client as CanvasClient & {
+    getQuizDetail?: (
+      courseId: number,
+      quizId: number,
+      signal?: AbortSignal | null
+    ) => Promise<CanvasQuiz>;
+  }).getQuizDetail;
+
+  if (!detailFetcher || quizzes.length === 0) {
+    return { quizzes, warning: null };
+  }
+
+  let failedDetails = 0;
+  const enrichedQuizzes = await mapWithConcurrency(
+    quizzes,
+    QUIZ_DETAIL_CONCURRENCY,
+    async (quiz) => {
+      try {
+        const detail = await detailFetcher.call(client, courseId, quiz.id, signal);
+        return { ...quiz, ...detail };
+      } catch {
+        failedDetails += 1;
+        return quiz;
+      }
+    },
+    signal
+  );
+
+  return {
+    quizzes: enrichedQuizzes,
+    warning:
+      failedDetails > 0
+        ? `Quiz detail unavailable for ${failedDetails} quiz${
+            failedDetails === 1 ? "" : "zes"
+          } — instructions and quiz metadata may be incomplete`
         : null,
   };
 }

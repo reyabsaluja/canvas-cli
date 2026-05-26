@@ -5,6 +5,8 @@ import type {
   ModuleIndexEntry,
   FileIndexEntry,
   PageIndexEntry,
+  QuizIndexEntry,
+  CalendarEventIndexEntry,
   AnnouncementIndexEntry,
   DiscussionIndexEntry,
 } from "./types.js";
@@ -19,6 +21,8 @@ export function normalizeCourseContent(raw: RawCourseContent): {
   modules: ModuleIndexEntry[];
   files: FileIndexEntry[];
   pages: PageIndexEntry[];
+  quizzes: QuizIndexEntry[];
+  calendarEvents: CalendarEventIndexEntry[];
   announcements: AnnouncementIndexEntry[];
   discussions: DiscussionIndexEntry[];
 } {
@@ -112,6 +116,52 @@ export function normalizeCourseContent(raw: RawCourseContent): {
 
   const pages = Array.from(pagesById.values());
 
+  const quizzes: QuizIndexEntry[] = raw.quizzes.map((quiz) => {
+    const description =
+      typeof quiz.description === "string" ? quiz.description : null;
+    return {
+      id: quiz.id,
+      title: quiz.title,
+      quizType: quiz.quiz_type ?? null,
+      dueAt: quiz.due_at ?? null,
+      unlockAt: quiz.unlock_at ?? null,
+      lockAt: quiz.lock_at ?? null,
+      pointsPossible: quiz.points_possible ?? null,
+      questionCount: quiz.question_count ?? null,
+      timeLimit: quiz.time_limit ?? null,
+      allowedAttempts: quiz.allowed_attempts ?? null,
+      published: quiz.published ?? null,
+      htmlUrl: quiz.html_url ?? null,
+      assignmentId: quiz.assignment_id ?? null,
+      hasDescription: !!description,
+      descriptionLinkCount: description
+        ? extractLinkedFiles(description).length
+        : 0,
+    };
+  });
+
+  const calendarEvents: CalendarEventIndexEntry[] = raw.calendarEvents.map(
+    (event) => {
+      const description =
+        typeof event.description === "string" ? event.description : null;
+      return {
+        id: event.id,
+        title: event.title,
+        startAt: event.start_at ?? null,
+        endAt: event.end_at ?? null,
+        allDay: event.all_day ?? null,
+        locationName: event.location_name ?? null,
+        locationAddress: event.location_address ?? null,
+        htmlUrl: event.html_url ?? null,
+        workflowState: event.workflow_state ?? null,
+        hasDescription: !!description,
+        descriptionLinkCount: description
+          ? extractLinkedFiles(description).length
+          : 0,
+      };
+    }
+  );
+
   const announcements: AnnouncementIndexEntry[] = raw.announcements.map(
     (announcement) => ({
       id: announcement.id,
@@ -165,6 +215,8 @@ export function normalizeCourseContent(raw: RawCourseContent): {
     modules,
     files,
     pages,
+    quizzes,
+    calendarEvents,
     announcements,
     discussions,
   };

@@ -26,6 +26,10 @@ export function formatMessageForCopy(
             ? `${source.title} — ${source.section}`
             : source.title;
           parts.push(`- [${source.kind}] ${label}`);
+          const excerpt = source.excerpt?.replace(/\s+/g, " ").trim();
+          if (excerpt) {
+            parts.push(`  ${excerpt}`);
+          }
         }
       }
       return parts.join("\n").trim();
