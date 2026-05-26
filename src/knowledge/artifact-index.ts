@@ -726,49 +726,148 @@ export function buildQueryMatchedExcerpt(
     return cleaned;
   }
 
-  const matchIndex = findQueryMatchIndex(cleaned, query);
-  if (matchIndex === null) {
+  const matchIndices = findAllQueryMatchIndices(cleaned, query);
+  if (matchIndices.length === 0) {
     return `${cleaned.slice(0, maxLength - 3).trimEnd()}...`;
   }
 
+  if (matchIndices.length === 1 || cleaned.length < maxLength * 1.5) {
+    return buildSingleWindowExcerpt(cleaned, matchIndices[0]!, maxLength);
+  }
+
+  return buildMultiWindowExcerpt(cleaned, matchIndices, maxLength);
+}
+
+function buildSingleWindowExcerpt(
+  text: string,
+  matchIndex: number,
+  maxLength: number
+): string {
   const halfWindow = Math.floor(maxLength / 2);
   let start = Math.max(0, matchIndex - halfWindow);
-  let end = Math.min(cleaned.length, start + maxLength);
-  if (end === cleaned.length) {
+  let end = Math.min(text.length, start + maxLength);
+  if (end === text.length) {
     start = Math.max(0, end - maxLength);
   }
 
-  start = adjustSnippetStart(cleaned, start);
-  end = adjustSnippetEnd(cleaned, end);
+  start = adjustSnippetStart(text, start);
+  end = adjustSnippetEnd(text, end);
 
   const prefix = start > 0 ? "... " : "";
-  const suffix = end < cleaned.length ? " ..." : "";
-  return `${prefix}${cleaned.slice(start, end).trim()}${suffix}`;
+  const suffix = end < text.length ? " ..." : "";
+  return `${prefix}${text.slice(start, end).trim()}${suffix}`;
 }
 
-function findQueryMatchIndex(text: string, query: string): number | null {
+function buildMultiWindowExcerpt(
+  text: string,
+  matchIndices: number[],
+  maxLength: number
+): string {
+  const separatorCost = 5;
+  const maxWindows = Math.min(matchIndices.length, 3);
+  const windowBudget = Math.floor(
+    (maxLength - separatorCost * (maxWindows - 1)) / maxWindows
+  );
+
+  const windows: Array<{ start: number; end: number }> = [];
+  for (const matchIndex of matchIndices) {
+    if (windows.length >= maxWindows) break;
+
+    const halfWindow = Math.floor(windowBudget / 2);
+    let start = Math.max(0, matchIndex - halfWindow);
+    let end = Math.min(text.length, start + windowBudget);
+    if (end === text.length) {
+      start = Math.max(0, end - windowBudget);
+    }
+    start = adjustSnippetStart(text, start);
+    end = adjustSnippetEnd(text, end);
+
+    const overlaps = windows.some(
+      (existing) => start < existing.end && end > existing.start
+    );
+    if (overlaps) continue;
+
+    windows.push({ start, end });
+  }
+
+  if (windows.length <= 1) {
+    return buildSingleWindowExcerpt(text, matchIndices[0]!, maxLength);
+  }
+
+  windows.sort((a, b) => a.start - b.start);
+
+  const parts: string[] = [];
+  for (let i = 0; i < windows.length; i++) {
+    const window = windows[i]!;
+    const prefix = i === 0 && window.start > 0 ? "... " : "";
+    const suffix = i === windows.length - 1 && window.end < text.length ? " ..." : "";
+    parts.push(`${prefix}${text.slice(window.start, window.end).trim()}${suffix}`);
+  }
+
+  return parts.join(" ... ");
+}
+
+function findAllQueryMatchIndices(text: string, query: string): number[] {
   const normalizedText = normalizeText(text);
   const normalizedQuery = normalizeText(query);
   if (!normalizedQuery) {
-    return null;
+    return [];
   }
 
   const phraseIndex = normalizedText.indexOf(normalizedQuery);
   if (phraseIndex >= 0) {
-    return phraseIndex;
+    return collectDistinctMatchIndices(normalizedText, normalizedQuery);
   }
 
   const queryTokens = buildSearchQueryTerms(normalizedQuery).allTokens
     .filter((token) => token.length >= 3 && !getSnippetQueryStopWords().has(token))
     .sort((left, right) => right.length - left.length);
+
+  const indices: number[] = [];
+  const minSeparation = 200;
+
   for (const token of queryTokens) {
-    const match = normalizedText.match(new RegExp(`\\b${escapeRegExp(token)}\\b`));
-    if (match?.index !== undefined) {
-      return match.index;
+    const regex = new RegExp(`\\b${escapeRegExp(token)}\\b`, "g");
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(normalizedText)) !== null) {
+      const index = match.index;
+      if (indices.every((existing) => Math.abs(existing - index) >= minSeparation)) {
+        indices.push(index);
+      }
     }
   }
 
-  return null;
+  if (indices.length === 0) {
+    return [];
+  }
+
+  indices.sort((a, b) => a - b);
+  return indices;
+}
+
+function collectDistinctMatchIndices(
+  normalizedText: string,
+  normalizedQuery: string
+): number[] {
+  const indices: number[] = [];
+  const minSeparation = 200;
+  let searchFrom = 0;
+
+  while (searchFrom < normalizedText.length) {
+    const index = normalizedText.indexOf(normalizedQuery, searchFrom);
+    if (index < 0) break;
+    if (indices.every((existing) => Math.abs(existing - index) >= minSeparation)) {
+      indices.push(index);
+    }
+    searchFrom = index + normalizedQuery.length;
+  }
+
+  return indices.length > 0 ? indices : [];
+}
+
+function findQueryMatchIndex(text: string, query: string): number | null {
+  const indices = findAllQueryMatchIndices(text, query);
+  return indices.length > 0 ? indices[0]! : null;
 }
 
 function adjustSnippetStart(text: string, start: number): number {

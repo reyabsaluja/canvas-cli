@@ -6,6 +6,7 @@ import test from "node:test";
 import type { LoadedWorkspace } from "../src/ask/types.js";
 import type { CourseCache } from "../src/enrich/cache-loader.js";
 import {
+  buildQueryMatchedExcerpt,
   clearArtifactIndexCache,
   loadArtifactIndex,
   readArtifactContent,
@@ -627,4 +628,40 @@ test("section search matches morphological variants through stemming", async () 
     );
     assert.equal(requireResults[0]!.section.source, "Homework 2");
   });
+});
+
+test("buildQueryMatchedExcerpt returns full text when within budget", () => {
+  const short = "This is a short text about grading.";
+  assert.equal(buildQueryMatchedExcerpt(short, "grading", { maxLength: 500 }), short);
+});
+
+test("buildQueryMatchedExcerpt surfaces multiple windows for scattered matches", () => {
+  const padding = "Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor. ".repeat(6);
+  const text = `The grading policy requires 80% for an A. ${padding}The grading rubric uses holistic assessment for essays. ${padding}Final grading decisions are made by the instructor.`;
+
+  const excerpt = buildQueryMatchedExcerpt(text, "grading", { maxLength: 500 });
+
+  const segments = excerpt.split(" ... ");
+  assert.ok(
+    segments.length >= 2,
+    `expected multiple windows but got ${segments.length} segment(s) in text of length ${text.length}: ${excerpt.slice(0, 120)}...`
+  );
+  const matchCount = (excerpt.match(/grading/gi) ?? []).length;
+  assert.ok(
+    matchCount >= 2,
+    `expected at least 2 'grading' mentions in excerpt but got ${matchCount}`
+  );
+});
+
+test("buildQueryMatchedExcerpt falls back to single window for short text", () => {
+  const text = "The deadline is Friday. Submit by 11:59 PM. Late penalty applies after the deadline.";
+  const excerpt = buildQueryMatchedExcerpt(text, "deadline", { maxLength: 500 });
+  assert.equal(excerpt, text);
+});
+
+test("buildQueryMatchedExcerpt falls back to prefix when no match found", () => {
+  const text = "A".repeat(600);
+  const excerpt = buildQueryMatchedExcerpt(text, "xyz", { maxLength: 100 });
+  assert.ok(excerpt.endsWith("..."));
+  assert.ok(excerpt.length <= 100);
 });
