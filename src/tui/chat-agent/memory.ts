@@ -132,7 +132,7 @@ function buildToolRuntimeMemory(
 
   const lines = [
     "Previously gathered tool memory (reuse this before calling tools again):",
-    "Coverage checkpoint: compare this memory to every requested detail in the student's question before acting. If it fully answers the question, answer directly. If one detail is missing, make one targeted follow-up search/read for that missing detail or state exactly what could not be verified.",
+    "Coverage checkpoint: compare this memory to every requested detail in the student's question before acting. If any detail is missing, uncertain, or only partially covered, make a targeted follow-up search/read to fill the gap before answering.",
   ];
 
   for (const observation of selected) {
@@ -163,7 +163,7 @@ function buildToolRuntimeMemory(
     lines.push(nextStep);
   }
 
-  lines.push("Only call a tool if you still need new evidence beyond this memory.");
+  lines.push("When in doubt, read the source rather than guessing from snippets.");
 
   const rendered = lines.join("\n");
   if (rendered.length <= MAX_TOOL_MEMORY_CHARS) {
@@ -297,8 +297,8 @@ function buildEvidenceSufficientDirective(
 
   const parts = [
     `Evidence checkpoint: you have grounded text from ${sourceCount} source${sourceCount > 1 ? "s" : ""}${coverageSummary}`,
-    "Compare this evidence against the student's question: does it address every specific detail they asked about?",
-    "If yes, answer directly — do not call another tool.",
+    "Compare this evidence against the student's question — does it address every specific detail with exact facts (dates, points, names, steps)?",
+    "If any detail is vague, partially covered, or could be more specific, do a follow-up read to strengthen your answer.",
   ];
 
   if (remainingCandidateTitles.length > 0) {
@@ -307,11 +307,11 @@ function buildEvidenceSufficientDirective(
       .map((title) => `"${title}"`)
       .join(", ");
     parts.push(
-      `If one specific detail is still missing, make one targeted follow-up: read_file on ${candidates}, or a focused search for the missing detail.`
+      `Likely next read: ${candidates}. Read before answering if the evidence above doesn't fully nail every detail.`
     );
   } else {
     parts.push(
-      "If one specific detail is missing and you cannot find it in the evidence, state exactly what you found and what could not be verified."
+      "If a specific detail is missing and no further sources are available, state exactly what you found and what could not be verified."
     );
   }
 

@@ -1207,8 +1207,8 @@ function buildWorkspaceSearchGuidance(
   )].slice(0, 3);
 
   const guidance = [
-    "These search results are discovery breadcrumbs only; the snippets may be incomplete.",
-    "If the student wants exact wording, requirements, quotes, or an in-depth explanation, call read_file on the best matching source before answering.",
+    "These search results are discovery breadcrumbs only — snippets, not full evidence.",
+    "Read the best matching source before answering. Do not answer from snippets alone.",
   ];
 
   if (readableTitles.length === 1) {
@@ -1240,8 +1240,8 @@ function buildCourseSearchGuidance(
   )].slice(0, 2);
 
   const guidance = [
-    "These course results are discovery breadcrumbs only; they are not the full source text.",
-    "For exact wording, requirements, quotes, or in-depth explanations, do not answer from these snippets alone.",
+    "These course results are discovery breadcrumbs only — not the full source text.",
+    "Read the best matching source before answering. Do not answer from snippets alone.",
   ];
 
   if (readableTitles.length === 1) {

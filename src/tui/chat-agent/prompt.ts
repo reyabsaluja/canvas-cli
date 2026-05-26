@@ -28,19 +28,20 @@ Decision ladder:
 3. If you need to locate the right source, use search_workspace or search_course.
 4. Treat search_workspace and search_course as discovery tools only: they return snippets and candidate sources, not full evidence. For exact wording, requirements, quotes, section-level detail, or in-depth explanations, follow a search with read_file on the best matching source before answering.
 5. For compare, changed, agree/disagree, or conflict questions, do not stop after one source if a second relevant source exists. Read the complementary source before answering.
-6. Stop calling tools as soon as you have enough grounded evidence. Do not chain extra searches after you already read the right document.
+6. Prefer reading over guessing. If a search surfaces a relevant source, read it — even if your existing evidence seems close. Do not chain extra searches after you already read the right document.
 7. If prior tool memory already names candidate sources from a relevant search, do not search again first. Reuse that breadcrumb and read one of those sources before answering or launching a new search.
 8. If a read or search just failed, do not repeat the same tool call with the same target. Change tactics: reuse a different breadcrumb, use list_files to see what is actually available, or try a more specific search.
 
 Tool-result checkpoint:
-- Grounded evidence (read_file, download_course_file, list_assignments, read_thread): first compare the evidence against every requested detail in the student's question. If it covers the question, answer from it. If one requested detail is missing, make one targeted follow-up search/read for that missing detail or state exactly what could not be verified.
-- Discovery breadcrumbs (search_workspace, search_course): use the section labels and excerpts to choose the best source, then read that source before answering about requirements, dates, files, points, quotes, or detailed explanations.
+- Grounded evidence (read_file, download_course_file, list_assignments, read_thread): compare the evidence against every requested detail in the student's question. If any detail is missing, vague, or only partially covered, make a follow-up search/read to fill the gap. Only answer once you can cite specific facts for each detail the student asked about.
+- Discovery breadcrumbs (search_workspace, search_course): these are not evidence — they are pointers. Always read the best matching source before answering about requirements, dates, files, points, quotes, or detailed explanations. Never answer from snippets alone.
 - Dead ends (not_found, missing_text, failed download): do not repeat the same target. Try a different breadcrumb, list_files, or one sharper search; if that still fails, say exactly what could not be verified.
 
-Use tools ONLY when:
+Use tools when:
 - The question asks about something not covered in the workup
-- You need to read a specific document in detail
-- You need to find information not already summarized
+- You need to read a specific document for exact details, even if the workup summarizes the topic
+- You want to verify or strengthen a claim before stating it as fact
+- A search result points to a relevant source you haven't read yet
 
 IMPORTANT tool usage rules:
 - If you already read a file earlier in this conversation, DO NOT read it again. Use the content from the earlier read.
@@ -64,7 +65,7 @@ IMPORTANT: Before calling any tool, ALWAYS write a brief sentence explaining wha
 
 Course-level tools (when available): use list_assignments to orient across the course's other work, open_lecture to launch lecture content by number or topic, list_announcements for announcements and discussions, and read_thread to pull a full discussion thread. list_assignments and read_thread return grounded evidence; after using them, answer from what they returned unless a specific missing detail requires another source. list_announcements returns a list of candidates, so read_thread before answering about the content of one post. These are the same capabilities the course assistant has — stay assignment-focused but reach for them when the student's question points outside this assignment.
 
-When you have enough information, respond with your answer directly (no tool calls).`);
+When your evidence is strong enough to cite specific facts for every detail the student asked, respond with your answer.`);
 
   if (ctx.loaded.workupJson) {
     const workup = ctx.loaded.workupJson;

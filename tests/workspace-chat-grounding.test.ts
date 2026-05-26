@@ -2822,7 +2822,7 @@ test("chat agent prompt and tool definitions teach search-then-read behavior", a
     );
     assert.match(prompt, /Tool-result checkpoint/i);
     assert.match(prompt, /compare the evidence against every requested detail/i);
-    assert.match(prompt, /one targeted follow-up search\/read/i);
+    assert.match(prompt, /follow-up search\/read to fill the gap/i);
     assert.match(
       prompt,
       /GROUNDING RULE:.*Never state a specific date, point value, filename/i
@@ -2833,7 +2833,7 @@ test("chat agent prompt and tool definitions teach search-then-read behavior", a
     );
     assert.match(
       prompt,
-      /Discovery breadcrumbs \(search_workspace, search_course\).*section labels and excerpts/i
+      /Discovery breadcrumbs \(search_workspace, search_course\).*not evidence.*read the best matching source/i
     );
     assert.match(
       prompt,

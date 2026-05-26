@@ -68,7 +68,7 @@ test("buildToolPromptMessages carries forward compact tool memory for the next t
   assert.match(latestMessage, /missing\.pdf/);
   assert.match(latestMessage, /Coverage checkpoint/i);
   assert.match(latestMessage, /every requested detail/i);
-  assert.match(latestMessage, /Only call a tool if you still need new evidence/i);
+  assert.match(latestMessage, /When in doubt, read the source/i);
 });
 
 test("buildToolPromptMessages prefers question-relevant memory over newer unrelated reads", () => {
