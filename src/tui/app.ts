@@ -30,7 +30,7 @@ import { showAnnouncementsView } from "./announcements-view.js";
 import { isConfigured, getActiveProfile } from "../config/env.js";
 import { loginCommand } from "../commands/login.js";
 import { modelCommand } from "../commands/model.js";
-import { getAIConfig } from "../ai/provider.js";
+import { getAIConfig, formatModelName } from "../ai/provider.js";
 import { loadStoredCredentialsToEnv } from "../config/load-credentials-to-env.js";
 import { clearCredentialCache } from "../config/credentials.js";
 import { CanvasCliError, classifyError } from "../errors.js";
@@ -78,7 +78,7 @@ export async function launchApp(): Promise<void> {
         session: shellContext.session,
         runtime: shellContext.runtime,
         commands: COMMANDS,
-        modelLabel: services.aiConfig?.model ?? "no model",
+        modelLabel: services.aiConfig ? formatModelName(services.aiConfig.model, services.aiConfig.effort) : "no model",
         bannerRenderer: shellContext.bannerRenderer,
         extraHelpCommands: shellContext.extraHelpCommands,
         getPinOptions: shellContext.getPinOptions,

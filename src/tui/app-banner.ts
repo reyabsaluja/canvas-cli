@@ -9,6 +9,7 @@ import {
   getDisplayCourseAvailability,
   type AppServices,
 } from "./services.js";
+import { formatModelName } from "../ai/provider.js";
 
 type MenuLineBuffer = { push(line: string): void };
 
@@ -66,7 +67,7 @@ function renderInfoBox(
     school = schoolUrl.replace(/https?:\/\//, "").replace(/\/api\/v1.*/, "");
   }
 
-  const aiModelText = services.aiConfig ? services.aiConfig.model : "not configured";
+  const aiModelText = services.aiConfig ? formatModelName(services.aiConfig.model, services.aiConfig.effort) : "not configured";
   const availability = getDisplayCourseAvailability(services);
   const displayCourses = availability.available;
   const courseCount =

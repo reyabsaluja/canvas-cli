@@ -625,12 +625,12 @@ function buildQuizTask(
   const userContext = buildUserContext(api);
   const courseName = workspace?.courseName ?? null;
 
-  const needsRelevanceCheck = !workspace && !parsed.topic;
-  if (needsRelevanceCheck && !userContext.trim()) {
+  if (!workspace && !parsed.topic && !userContext.trim()) {
     void api.addMessage({ role: "system", content: "Start a conversation or specify a topic first so the quiz is relevant. Try /quiz <topic> or ask about something first." });
     return;
   }
 
+  const needsRelevanceCheck = !workspace && !parsed.topic;
   const topicLabel = parsed.topic ?? courseName ?? "course material";
 
   return {
@@ -640,7 +640,7 @@ function buildQuizTask(
       if (needsRelevanceCheck) {
         const relevant = await checkConversationRelevance(services.aiConfig!, userContext, signal);
         if (!relevant) {
-          await api.addMessage({ role: "system", content: "The conversation doesn't reference specific course content yet. Ask about a topic or specify one with /quiz <topic>." });
+          await api.addMessage({ role: "system", content: "Not enough to quiz on yet. Ask about a topic or specify one with /quiz <topic>." });
           return;
         }
       }

@@ -247,11 +247,11 @@ export async function checkConversationRelevance(
 ): Promise<boolean> {
   const response = await callModel(
     config,
-    `Does this conversation reference specific academic or course content (e.g. assignments, topics, concepts, lectures, problems)? Reply ONLY "yes" or "no".`,
+    `You decide if a student's conversation has ANY topic that could be used to generate quiz questions. Answer "yes" unless the conversation is ONLY greetings, pleasantries, or completely empty of substance (e.g. just "hello", "hi", "hey there"). If there is ANY mention of a subject, concept, assignment, problem, question, or topic — even briefly — answer "yes". Reply ONLY "yes" or "no".`,
     conversationContext,
-    { maxTokens: 5, abortSignal: signal }
+    { maxTokens: 3, abortSignal: signal }
   );
-  return response.trim().toLowerCase().startsWith("yes");
+  return !response.trim().toLowerCase().startsWith("no");
 }
 
 function extractTopicFromContext(context: string | undefined): string | null {
