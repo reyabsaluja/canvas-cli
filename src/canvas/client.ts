@@ -25,6 +25,7 @@ import type {
   CanvasModuleItem,
   CanvasPage,
   CanvasQuiz,
+  CanvasQuizQuestion,
 } from "./types.js";
 
 export class CanvasClient {
@@ -251,6 +252,19 @@ export class CanvasClient {
   async getQuizzesSafe(courseId: number, signal?: AbortSignal | null): Promise<CanvasQuiz[]> {
     const url = `${this.baseUrl}/courses/${courseId}/quizzes?per_page=50`;
     return this.fetchPaginatedSafe<CanvasQuiz>(url, signal);
+  }
+
+  /**
+   * Get questions for a classic Canvas quiz. Returns empty array when the
+   * questions endpoint is disabled or the quiz has no student-visible questions.
+   */
+  async getQuizQuestionsSafe(
+    courseId: number,
+    quizId: number,
+    signal?: AbortSignal | null
+  ): Promise<CanvasQuizQuestion[]> {
+    const url = `${this.baseUrl}/courses/${courseId}/quizzes/${quizId}/questions?per_page=50`;
+    return this.fetchPaginatedSafe<CanvasQuizQuestion>(url, signal);
   }
 
   /**

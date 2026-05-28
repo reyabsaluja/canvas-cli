@@ -34,6 +34,7 @@ export function isGroundedContentObservation(
 ): boolean {
   return (
     observation.status === "ok" &&
+    observation.tool !== "list_announcements" &&
     observation.artifacts.length > 0 &&
     typeof observation.content === "string" &&
     observation.content.trim().length > 0

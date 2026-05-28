@@ -10,6 +10,21 @@ export interface LinkedFile {
   downloadUrl: string;
 }
 
+export function extractLinkedFileFromUrl(
+  rawUrl: string,
+  title?: string | null
+): LinkedFile | null {
+  const cleanUrl = decodeEntities(rawUrl).trim();
+  if (!cleanUrl || !isCanvasFileUrl(cleanUrl)) {
+    return null;
+  }
+
+  const downloadUrl = toDownloadUrl(cleanUrl);
+  const filename =
+    title?.trim() || filenameFromUrl(cleanUrl) || "canvas-file";
+  return { title: filename, url: cleanUrl, downloadUrl };
+}
+
 /**
  * Extract Canvas file links from rich Canvas HTML.
  * Canvas often marks file links with the "instructure_file_link" class and a
@@ -19,6 +34,26 @@ export interface LinkedFile {
 export function extractLinkedFiles(descriptionHtml: string): LinkedFile[] {
   const files: LinkedFile[] = [];
   const seen = new Set<string>();
+
+  const addLinkedFile = (
+    rawUrl: string | null,
+    title: string | null | undefined
+  ): void => {
+    if (!rawUrl || !isCanvasFileUrl(rawUrl)) {
+      return;
+    }
+    const linkedFile = extractLinkedFileFromUrl(rawUrl, title);
+    if (!linkedFile) {
+      return;
+    }
+
+    const dedupKey = getLinkedFileDedupKey(linkedFile.downloadUrl);
+    if (seen.has(dedupKey)) {
+      return;
+    }
+    seen.add(dedupKey);
+    files.push(linkedFile);
+  };
 
   const linkRegex = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
   let match;
@@ -33,19 +68,22 @@ export function extractLinkedFiles(descriptionHtml: string): LinkedFile[] {
       continue;
     }
 
-    const cleanUrl = href;
-    const downloadUrl = toDownloadUrl(cleanUrl);
-    const dedupKey = getLinkedFileDedupKey(downloadUrl);
-    if (seen.has(dedupKey)) {
-      continue;
-    }
-    seen.add(dedupKey);
-
     const title = extractAttr(attrs, "title");
     const label = extractLinkLabel(innerHtml);
-    const filename =
-      title || label || filenameFromUrl(cleanUrl) || `file-${files.length}`;
-    files.push({ title: filename, url: cleanUrl, downloadUrl });
+    addLinkedFile(href, title || label);
+  }
+
+  const embeddedTagRegex = /<([a-z][a-z0-9:-]*)\b([^>]*)>/gi;
+  let embeddedMatch: RegExpExecArray | null;
+  while ((embeddedMatch = embeddedTagRegex.exec(descriptionHtml)) !== null) {
+    const attrs = embeddedMatch[2] ?? "";
+    const title =
+      extractAttr(attrs, "title") ||
+      extractAttr(attrs, "aria-label") ||
+      extractAttr(attrs, "alt");
+    for (const attr of ["href", "src", "data", "data-src", "data-download-url"]) {
+      addLinkedFile(extractAttr(attrs, attr), title);
+    }
   }
 
   return files;
@@ -67,7 +105,9 @@ function toDownloadUrl(url: string): string {
         .join("&")
     : "";
 
-  const normalizedPath = pathPart.replace(/\/$/, "");
+  const normalizedPath = pathPart
+    .replace(/\/(?:preview|download)\/?$/i, "")
+    .replace(/\/$/, "");
   const downloadPath = normalizedPath.endsWith("/download")
     ? normalizedPath
     : normalizedPath + "/download";
@@ -90,7 +130,7 @@ function isInstructureFileLink(className: string): boolean {
 }
 
 function isCanvasFileUrl(url: string): boolean {
-  return /\/courses\/\d+\/files\/\d+(?:\/|[?#]|$)/i.test(url);
+  return /(?:\/courses\/\d+)?\/files\/\d+(?:\/|[?#]|$)/i.test(url);
 }
 
 function extractLinkLabel(innerHtml: string): string | null {

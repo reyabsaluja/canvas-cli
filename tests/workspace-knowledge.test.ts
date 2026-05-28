@@ -246,6 +246,29 @@ test("searchWorkspaceKnowledge can surface ingested course documents when they b
   });
 });
 
+test("searchWorkspaceKnowledge matches spaced lab numbers to compact Canvas filenames", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const workspace = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "attachments"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "attachments", "lab4-spec.pdf.txt"),
+      "Register map details for the course hardware.",
+      "utf-8"
+    );
+
+    const cache = createCourseCache(coursePath);
+    const matches = await searchWorkspaceKnowledge(workspace, cache, "lab 4", 3);
+
+    assert.equal(matches[0]?.artifact.scope, "course");
+    assert.equal(matches[0]?.artifact.kind, "attachment");
+    assert.equal(matches[0]?.artifact.title, "lab4-spec.pdf");
+  });
+});
+
 test("searchWorkspaceKnowledge keeps workspace evidence ahead of near-tie course matches", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
@@ -570,6 +593,87 @@ test("searchWorkspaceKnowledge keeps strongly relevant sibling sections together
       ["Due date", "Submission format"]
     );
     assert.ok(matches.every((match) => match.artifact.title === "Lab 4"));
+  });
+});
+
+test("searchWorkspaceKnowledge suppresses one-term noise for detailed queries", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const workspace = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "assignments"), {
+      recursive: true,
+    });
+    await fs.mkdir(path.join(coursePath, "extracted", "attachments"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "assignments", "42.txt"),
+      [
+        "# Lab 4",
+        "",
+        "## Submission package",
+        "",
+        "Upload report.pdf and starter.zip together in Canvas.",
+      ].join("\n"),
+      "utf-8"
+    );
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "attachments", "general-notes.txt.txt"),
+      [
+        "# Lab 4 notes",
+        "",
+        "## Background",
+        "",
+        Array.from({ length: 60 }, () => "report").join(" "),
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache = createCourseCache(coursePath);
+    cache.attachments = [
+      {
+        sourceType: "assignment_linked",
+        canvasFileId: 99,
+        originalFilename: "general-notes.txt",
+        localPath: "attachments/general-notes.txt",
+        contentType: "text/plain",
+        size: 1024,
+        downloadUrl: "https://canvas.example/files/99/download",
+        reason: "linked from assignment",
+        status: "downloaded",
+      },
+    ];
+    cache.assignments = [
+      {
+        id: 42,
+        name: "Lab 4",
+        dueAt: "2026-04-18T23:59:00.000Z",
+        unlockAt: null,
+        lockAt: null,
+        pointsPossible: 100,
+        gradingType: "points",
+        submissionTypes: ["online_upload"],
+        htmlUrl: "https://canvas.example/courses/17/assignments/42",
+        hasDescription: true,
+        descriptionLinkCount: 0,
+      },
+    ];
+
+    const matches = await searchWorkspaceKnowledge(
+      workspace,
+      cache,
+      "upload report pdf starter zip",
+      3
+    );
+
+    assert.equal(matches[0]?.artifact.title, "Lab 4");
+    assert.equal(matches[0]?.section.section, "Submission package");
+    assert.match(matches[0]?.preview ?? "", /report\.pdf and starter\.zip/);
+    assert.ok(
+      matches.every((match) => match.artifact.title !== "general-notes.txt"),
+      "one-term repeated 'report' noise should not be returned"
+    );
   });
 });
 

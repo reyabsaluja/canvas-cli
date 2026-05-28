@@ -321,7 +321,7 @@ async function extractDocx(filePath: string, filename: string): Promise<string> 
 
 async function extractPptx(filePath: string, filename: string): Promise<string> {
   const entries = await readZipTextEntries(filePath, (name) =>
-    /^ppt\/(?:slides|notesSlides)\/(?:slide|notesSlide)\d+\.xml$/i.test(name)
+    isPowerPointTextOrRelationshipEntry(name)
   );
   return renderPptxEntries(filename, entries).slice(0, MAX_TEXT);
 }
@@ -343,9 +343,7 @@ async function extractOfficeOpenXmlBuffer(
       return isWordTextOrRelationshipEntry(name);
     }
     if (ext === ".pptx") {
-      return /^ppt\/(?:slides|notesSlides)\/(?:slide|notesSlide)\d+\.xml$/i.test(
-        name
-      );
+      return isPowerPointTextOrRelationshipEntry(name);
     }
     if (ext === ".xlsx") {
       return isWorkbookTextEntry(name);
@@ -413,6 +411,11 @@ function renderDocxEntries(
       extractOfficeParagraphs(stripOfficeTables(body), relationshipTargets)
     );
     appendSection(lines, "Tables", extractOfficeTables(body, relationshipTargets));
+    appendSection(
+      lines,
+      "Media",
+      extractOfficeMediaDescriptions(body, relationshipTargets)
+    );
   }
 
   const supplementalEntries = [...entries.entries()]
@@ -432,6 +435,11 @@ function renderDocxEntries(
       lines,
       `${heading} Tables`,
       extractOfficeTables(xml, relationshipTargets)
+    );
+    appendSection(
+      lines,
+      `${heading} Media`,
+      extractOfficeMediaDescriptions(xml, relationshipTargets)
     );
   }
 
@@ -456,13 +464,30 @@ function renderPptxEntries(
     const [name, xml] = slides[index]!;
     const slideNumber = extractTrailingNumber(name) ?? index + 1;
     appendSection(lines, `Slide ${slideNumber}`, extractOfficeParagraphs(xml));
+    appendSection(
+      lines,
+      `Slide ${slideNumber} Media`,
+      extractOfficeMediaDescriptions(
+        xml,
+        relationshipTargetsForPart(entries, name)
+      )
+    );
 
     const noteXml = notes.get(`ppt/notesSlides/notesSlide${slideNumber}.xml`);
     if (noteXml) {
+      const noteName = `ppt/notesSlides/notesSlide${slideNumber}.xml`;
       appendSection(
         lines,
         `Speaker Notes ${slideNumber}`,
         extractOfficeParagraphs(noteXml)
+      );
+      appendSection(
+        lines,
+        `Speaker Notes ${slideNumber} Media`,
+        extractOfficeMediaDescriptions(
+          noteXml,
+          relationshipTargetsForPart(entries, noteName)
+        )
       );
     }
   }
@@ -476,6 +501,16 @@ function renderPptxEntries(
       lines,
       noteNumber ? `Speaker Notes ${noteNumber}` : formatOfficeEntryHeading(name),
       extractOfficeParagraphs(xml)
+    );
+    appendSection(
+      lines,
+      noteNumber
+        ? `Speaker Notes ${noteNumber} Media`
+        : `${formatOfficeEntryHeading(name)} Media`,
+      extractOfficeMediaDescriptions(
+        xml,
+        relationshipTargetsForPart(entries, name)
+      )
     );
   }
 
@@ -551,6 +586,93 @@ function extractOfficeTables(
   }
 
   return rendered;
+}
+
+function extractOfficeMediaDescriptions(
+  xml: string,
+  relationshipTargets: Map<string, string> = new Map()
+): string[] {
+  const rendered: string[] = [];
+  const seen = new Set<string>();
+
+  for (const match of xml.matchAll(
+    /<(?:[a-z]+:)?(?:docPr|cNvPr)\b([^>]*?)\/?>/gi
+  )) {
+    const attrs = match[1] ?? "";
+    const description = extractXmlAttr(attrs, "descr");
+    const title = extractXmlAttr(attrs, "title");
+    const name = extractXmlAttr(attrs, "name");
+    const usefulName = name && !isGenericOfficeMediaName(name) ? name : null;
+    const label = description || title || usefulName;
+    const target = extractNearbyOfficeMediaTarget(
+      xml,
+      match.index ?? 0,
+      relationshipTargets
+    );
+
+    if (!label && !target) {
+      continue;
+    }
+
+    const kind = inferOfficeMediaKind(target ?? usefulName ?? label ?? "");
+    const details: string[] = [];
+    if (label) details.push(label);
+    if (title && title !== label) details.push(`title: ${title}`);
+    if (usefulName && usefulName !== label && usefulName !== title) {
+      details.push(`name: ${usefulName}`);
+    }
+    if (target) details.push(`target: ${target}`);
+
+    const line = `- ${kind}: ${details.join(" | ")}`;
+    if (!seen.has(line)) {
+      seen.add(line);
+      rendered.push(line);
+    }
+  }
+
+  return rendered;
+}
+
+function extractNearbyOfficeMediaTarget(
+  xml: string,
+  fromIndex: number,
+  relationshipTargets: Map<string, string>
+): string | null {
+  const window = xml.slice(fromIndex, fromIndex + 3000);
+  const blipMatch = window.match(/<(?:[a-z]+:)?blip\b([^>]*?)\/?>/i);
+  const attrs = blipMatch?.[1] ?? "";
+  const relId =
+    extractXmlAttr(attrs, "r:embed") ??
+    extractXmlAttr(attrs, "embed") ??
+    extractXmlAttr(attrs, "r:link") ??
+    extractXmlAttr(attrs, "link");
+  if (!relId) {
+    return null;
+  }
+  return relationshipTargets.get(relId) ?? relId;
+}
+
+function inferOfficeMediaKind(value: string): string {
+  const normalized = value.toLowerCase();
+  if (/\.(png|jpe?g|gif|webp|tiff?|bmp|svg)(?:$|[?#])/i.test(normalized)) {
+    return "Image";
+  }
+  if (/\.(mp4|mov|webm|m4v|avi|wmv)(?:$|[?#])/i.test(normalized)) {
+    return "Video";
+  }
+  if (/\.(mp3|m4a|wav|aac|ogg)(?:$|[?#])/i.test(normalized)) {
+    return "Audio";
+  }
+  if (/\b(chart|graph|plot)\b/i.test(normalized)) {
+    return "Chart";
+  }
+  return "Media";
+}
+
+function isGenericOfficeMediaName(value: string): boolean {
+  return /^(?:picture|image|graphic|media|object|ole object|diagram|chart|shape)\s*\d*$/i.test(
+    value.trim()
+  );
 }
 
 function extractOfficeTableRows(
@@ -944,6 +1066,15 @@ function isWordTextOrRelationshipEntry(name: string): boolean {
       name
     ) ||
     /^word\/_rels\/(?:document|footnotes|endnotes|comments|header\d+|footer\d+)\.xml\.rels$/i.test(
+      name
+    )
+  );
+}
+
+function isPowerPointTextOrRelationshipEntry(name: string): boolean {
+  return (
+    /^ppt\/(?:slides|notesSlides)\/(?:slide|notesSlide)\d+\.xml$/i.test(name) ||
+    /^ppt\/(?:slides|notesSlides)\/_rels\/(?:slide|notesSlide)\d+\.xml\.rels$/i.test(
       name
     )
   );

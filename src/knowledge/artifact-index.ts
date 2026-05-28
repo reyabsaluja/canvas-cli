@@ -60,6 +60,7 @@ export interface ArtifactSection {
   kind: ArtifactKind;
   source: string;
   section: string;
+  searchContext?: string;
   text: string;
   excerpt: string;
   tokens: string[];
@@ -205,6 +206,12 @@ export function formatArtifactLabel(
   return `[${artifact.kind}] ${artifact.title}`;
 }
 
+export function formatArtifactSectionLabel(
+  section: Pick<ArtifactSection, "section" | "searchContext"> | undefined
+): string {
+  return (section?.searchContext ?? section?.section ?? "").trim();
+}
+
 export async function getCourseArtifactSetKey(
   cache: CourseCache | null
 ): Promise<string | null> {
@@ -212,6 +219,9 @@ export async function getCourseArtifactSetKey(
   const extractedPathSignatures = await Promise.all([
     getFileSignature(getExtractedSyllabusPath(cache.coursePath)),
     getFileSignature(getExtractedFrontPagePath(cache.coursePath)),
+    getFileSignature(
+      path.join(cache.coursePath, "extracted", "grading-breakdown.txt")
+    ),
     ...cache.assignments.map((assignment) =>
       getFileSignature(
         getExtractedAssignmentPath(cache.coursePath, assignment.id)
@@ -473,7 +483,7 @@ export async function readArtifactContent(
 
 function buildSearchQueryTerms(normalizedQuery: string): SearchQueryTerms {
   const stopWords = getSearchQueryStopWords();
-  const tokens = tokenize(normalizedQuery);
+  const tokens = tokenizeBase(normalizedQuery);
   const meaningfulTokens = tokens.filter(
     (token) => !stopWords.has(token)
   );
@@ -493,6 +503,7 @@ function expandSearchToken(token: string): string[] {
   const aliases = SEARCH_TOKEN_ALIASES[token] ?? [];
   return unique([
     token,
+    ...splitAlphaNumericToken(token),
     ...aliases.flatMap((alias) => tokenize(alias)),
   ]);
 }
@@ -623,14 +634,16 @@ export function searchArtifactSections(
   const scored = sections
     .map((section) => {
       const tokenSet = new Set(section.tokens);
-      const sectionLabel = normalizeText(section.section);
-      const sectionLabelTokens = tokenize(section.section);
+      const sectionSearchLabel = formatArtifactSectionLabel(section);
+      const sectionLabel = normalizeText(sectionSearchLabel);
+      const sectionLabelTokens = tokenize(sectionSearchLabel);
       const sourceLabel = normalizeText(section.source);
       const sourceLabelTokens = tokenize(section.source);
-      const hasSpecificSectionLabel = isSpecificSectionLabel(section.section);
+      const hasSpecificSectionLabel = isSpecificSectionLabel(sectionSearchLabel);
       let score = 0;
       let matchedSectionLabelConcepts = 0;
       let matchedSourceLabelConcepts = 0;
+      let matchedConcepts = 0;
 
       if (hasSpecificSectionLabel && sectionLabel.includes(normalizedQuery)) {
         score += 14;
@@ -642,6 +655,7 @@ export function searchArtifactSections(
       for (const concept of queryTerms.concepts) {
         let sectionLabelConceptMatched = false;
         let sourceLabelConceptMatched = false;
+        let conceptMatched = false;
 
         for (const token of concept.tokens) {
           const isExactToken = token === concept.original;
@@ -649,32 +663,38 @@ export function searchArtifactSections(
           if (hasSpecificSectionLabel && sectionLabelTokens.includes(token)) {
             score += 4 * aliasWeight;
             sectionLabelConceptMatched = true;
+            conceptMatched = true;
           }
           if (sourceLabelTokens.includes(token)) {
             score += 2 * aliasWeight;
             sourceLabelConceptMatched = true;
+            conceptMatched = true;
           }
-          if (!tokenSet.has(token)) continue;
-
-          const termFrequency = section.tokens.filter(
-            (candidate) => candidate === token
-          ).length;
-          const documentFrequency = df.get(token) ?? 1;
-          const inverseDocumentFrequency = Math.log(
-            (docCount + 1) / (documentFrequency + 0.5)
-          );
-          const normalization =
-            1 - 0.75 + 0.75 * (section.text.length / averageLength);
-          score +=
-            aliasWeight *
-            inverseDocumentFrequency *
-            ((termFrequency * 2.5) / (termFrequency + 1.5 * normalization));
+          if (tokenSet.has(token)) {
+            conceptMatched = true;
+            const termFrequency = section.tokens.filter(
+              (candidate) => candidate === token
+            ).length;
+            const documentFrequency = df.get(token) ?? 1;
+            const inverseDocumentFrequency = Math.log(
+              (docCount + 1) / (documentFrequency + 0.5)
+            );
+            const normalization =
+              1 - 0.75 + 0.75 * (section.text.length / averageLength);
+            score +=
+              aliasWeight *
+              inverseDocumentFrequency *
+              ((termFrequency * 2.5) / (termFrequency + 1.5 * normalization));
+          }
         }
         if (sectionLabelConceptMatched) {
           matchedSectionLabelConcepts += 1;
         }
         if (sourceLabelConceptMatched) {
           matchedSourceLabelConcepts += 1;
+        }
+        if (conceptMatched) {
+          matchedConcepts += 1;
         }
       }
 
@@ -687,6 +707,19 @@ export function searchArtifactSections(
       if (matchedSourceLabelConcepts === queryTerms.concepts.length) {
         score += 4;
       }
+      if (
+        queryTerms.concepts.length >= 3 &&
+        matchedConcepts === queryTerms.concepts.length
+      ) {
+        score += 10;
+      } else if (
+        queryTerms.concepts.length >= 4 &&
+        matchedConcepts >= queryTerms.concepts.length - 1
+      ) {
+        score += 5;
+      } else if (queryTerms.concepts.length >= 4 && matchedConcepts === 1) {
+        score *= 0.35;
+      }
 
       score *= section.scoreBoost;
 
@@ -697,11 +730,22 @@ export function searchArtifactSections(
         }
       }
 
-      return { section, score };
+      return { section, score, matchedConcepts };
     })
     .filter((entry) => entry.score > 0);
 
-  scored.sort((a, b) => {
+  const minMatchedConcepts = getMinimumMatchedConceptsForResults(
+    queryTerms.concepts.length,
+    scored.reduce(
+      (max, entry) => Math.max(max, entry.matchedConcepts),
+      0
+    )
+  );
+  const filtered = scored.filter(
+    (entry) => entry.matchedConcepts >= minMatchedConcepts
+  );
+
+  filtered.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
     if (a.section.text.length !== b.section.text.length) {
       return a.section.text.length - b.section.text.length;
@@ -712,7 +756,19 @@ export function searchArtifactSections(
     return a.section.section.localeCompare(b.section.section);
   });
 
-  return scored.slice(0, options?.limit ?? scored.length);
+  return filtered
+    .slice(0, options?.limit ?? filtered.length)
+    .map(({ section, score }) => ({ section, score }));
+}
+
+function getMinimumMatchedConceptsForResults(
+  conceptCount: number,
+  maxMatchedConcepts: number
+): number {
+  if (conceptCount >= 4 && maxMatchedConcepts >= 3) {
+    return 2;
+  }
+  return 1;
 }
 
 export function buildQueryMatchedExcerpt(
@@ -1741,18 +1797,29 @@ function createSectionFromText(
   artifact: ArtifactRecord,
   section: string,
   text: string,
-  scoreBoost: number
+  scoreBoost: number,
+  searchContext?: string
 ): ArtifactSection {
+  const normalizedSearchContext =
+    searchContext && normalizeText(searchContext) !== normalizeText(section)
+      ? searchContext
+      : undefined;
+  const searchableSectionLabel = normalizedSearchContext ?? section;
+
   return {
-    id: `${artifact.id}#${hashKey("section", `${section}:${text.slice(0, 160)}`)}`,
+    id: `${artifact.id}#${hashKey(
+      "section",
+      `${normalizedSearchContext ?? ""}:${section}:${text.slice(0, 160)}`
+    )}`,
     artifactId: artifact.id,
     scope: artifact.scope,
     kind: artifact.kind,
     source: artifact.source,
     section,
+    searchContext: normalizedSearchContext,
     text,
     excerpt: buildExcerpt(text),
-    tokens: tokenize(`${artifact.title} ${section} ${text}`),
+    tokens: tokenize(`${artifact.title} ${searchableSectionLabel} ${text}`),
     scoreBoost,
   };
 }
@@ -1765,13 +1832,21 @@ function splitMarkdownIntoSections(
   const sections: ArtifactSection[] = [];
   const lines = markdown.split("\n");
   let currentSection = "Top";
+  let currentSearchContext: string | undefined;
   let currentText: string[] = [];
+  let headingStack: Array<{ level: number; text: string }> = [];
 
   const flush = () => {
     const text = currentText.join("\n").trim();
     if (text.length > 10) {
       sections.push(
-        createSectionFromText(artifact, currentSection, text, scoreBoost)
+        createSectionFromText(
+          artifact,
+          currentSection,
+          text,
+          scoreBoost,
+          currentSearchContext
+        )
       );
     }
   };
@@ -1780,7 +1855,12 @@ function splitMarkdownIntoSections(
     const headingMatch = line.match(/^#{1,6}\s+(.+)/);
     if (headingMatch) {
       flush();
-      currentSection = headingMatch[1] ?? "Top";
+      const level = line.match(/^#{1,6}/)?.[0].length ?? 1;
+      const headingText = headingMatch[1]?.trim() || "Top";
+      headingStack = headingStack.filter((heading) => heading.level < level);
+      headingStack.push({ level, text: headingText });
+      currentSection = headingText;
+      currentSearchContext = buildMarkdownHeadingSearchContext(headingStack);
       currentText = [];
       continue;
     }
@@ -1789,6 +1869,19 @@ function splitMarkdownIntoSections(
 
   flush();
   return sections;
+}
+
+function buildMarkdownHeadingSearchContext(
+  headingStack: Array<{ level: number; text: string }>
+): string | undefined {
+  const context = headingStack
+    .filter((heading) => heading.level > 1)
+    .map((heading) => heading.text.trim())
+    .filter((heading) => heading.length > 0);
+  if (context.length <= 1) {
+    return undefined;
+  }
+  return context.join(" > ");
 }
 
 function buildCourseTextSections(
@@ -1888,7 +1981,10 @@ function expandLongSections(
           },
           `${section.section} (Part ${index + 1})`,
           parts[index] ?? "",
-          scoreBoost
+          scoreBoost,
+          section.searchContext
+            ? `${section.searchContext} (Part ${index + 1})`
+            : undefined
         )
       );
     }
@@ -1968,10 +2064,30 @@ function isSpecificSectionLabel(value: string): boolean {
 }
 
 function tokenize(value: string): string[] {
+  return tokenizeBase(value).flatMap((token) => [
+    token,
+    ...splitAlphaNumericToken(token),
+  ]);
+}
+
+function tokenizeBase(value: string): string[] {
   return normalizeText(value)
     .split(/[^a-z0-9]+/)
     .filter((token) => token.length >= 2 || /^\d+$/.test(token))
     .map(stemToken);
+}
+
+function splitAlphaNumericToken(token: string): string[] {
+  const match = token.match(/^([a-z]+)(\d+)$/i);
+  if (!match) {
+    return [];
+  }
+
+  const word = stemToken(match[1]!.toLowerCase());
+  const number = match[2]!;
+  return [word.length >= 2 ? word : null, number].filter(
+    (part): part is string => typeof part === "string" && part.length > 0
+  );
 }
 
 function stemToken(token: string): string {

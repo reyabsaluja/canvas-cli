@@ -13,19 +13,24 @@ import { appendObservation, createEmptyRunState } from "../src/agent/run-state.j
 import { verifyWorkspaceAnswer } from "../src/agent/verify.js";
 import {
   buildEvidenceBackedQuestion,
+  buildToolPromptMessages,
   executeToolCallForTurn,
   getAvailableChatToolNames,
   resolveToolTurnVerificationObservations,
   seedTurnToolCacheEntry,
   selectArtifactSupportObservations,
+  selectComplementaryRecoveryReadArtifactId,
   selectRecoveryReadArtifactId,
+  selectThreadRecoveryTopic,
   shouldContinueToolLoopAfterGateRead,
   shouldGroundUnverifiedAnswer,
+  shouldRegenerateAnswerAfterRecoveryRead,
   shouldRecoverFromToolLoop,
 } from "../src/tui/chat-agent.js";
 import { buildSystemPrompt } from "../src/tui/chat-agent/prompt.js";
 import { buildChatTools } from "../src/tui/chat-agent/tool-defs.js";
 import { createChatContext, hydrateConversationHistory } from "../src/tui/services.js";
+import { finalizeAnswerText } from "../src/tui/chat-agent/verification.js";
 import {
   readWorkspaceKnowledgeArtifactById,
   searchWorkspaceKnowledge,
@@ -236,7 +241,7 @@ test("workspace chat only exposes Canvas downloads when a client is available", 
   });
 });
 
-test("course-native tools record grounded evidence for loop memory", async () => {
+test("course-native tools distinguish listings from grounded thread evidence", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
     const loaded = await createWorkspace(tempDir);
@@ -323,7 +328,7 @@ test("course-native tools record grounded evidence for loop memory", async () =>
     assert.equal(announcementList.result.observation.status, "ok");
     assert.equal(
       isGroundedContentObservation(announcementList.result.observation),
-      true
+      false
     );
     assert.match(
       announcementList.result.observation.content ?? "",
@@ -1379,6 +1384,83 @@ test("workspace answer verification derives sources and confidence deterministic
       "This answer is based on matched search evidence, not a full document read. Use the cited source for exact wording."
     );
 
+    const verifiedFromNoisySearch = verifyWorkspaceAnswer({
+      question: "What does the branch hazard section require?",
+      answer: "It requires showing stall cycles around the branch hazard.",
+      observations: [
+        {
+          tool: "search_workspace",
+          status: "ok",
+          summary: "Found workspace matches for branch hazard.",
+          artifacts: [
+            {
+              artifactId: "artifact-branch",
+              title: "docs/reference.txt",
+              kind: "extracted",
+              excerpt: "The waveform must show stall cycles around the branch hazard.",
+              sectionLabel: "Branch hazard walkthrough",
+            },
+            {
+              artifactId: "artifact-resistor",
+              title: "docs/resistor-table.txt",
+              kind: "extracted",
+              excerpt: "Use 220 ohm and 1k ohm resistors in the LED test harness.",
+              sectionLabel: "Parts list",
+            },
+          ],
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.deepEqual(verifiedFromNoisySearch.sources, [
+      {
+        title: "docs/reference.txt",
+        kind: "extracted",
+        section: "Branch hazard walkthrough",
+        excerpt: "The waveform must show stall cycles around the branch hazard.",
+      },
+    ]);
+
+    const verifiedComparisonFromNoisySearch = verifyWorkspaceAnswer({
+      question: "Compare the branch hazard walkthrough to the reference.",
+      answer: "The reference says the waveform must show stall cycles.",
+      observations: [
+        {
+          tool: "search_workspace",
+          status: "ok",
+          summary: "Found workspace matches for branch hazard.",
+          artifacts: [
+            {
+              artifactId: "artifact-reference",
+              title: "docs/reference.txt",
+              kind: "extracted",
+              excerpt: "The waveform must show stall cycles around the branch hazard.",
+              sectionLabel: "Reference",
+            },
+            {
+              artifactId: "artifact-resistor",
+              title: "docs/resistor-table.txt",
+              kind: "extracted",
+              excerpt: "Use 220 ohm and 1k ohm resistors in the LED test harness.",
+              sectionLabel: "Parts list",
+            },
+          ],
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedComparisonFromNoisySearch.confidence, "low");
+    assert.deepEqual(verifiedComparisonFromNoisySearch.sources, [
+      {
+        title: "docs/reference.txt",
+        kind: "extracted",
+        section: "Reference",
+        excerpt: "The waveform must show stall cycles around the branch hazard.",
+      },
+    ]);
+
     const verifiedFromMultipleSections = verifyWorkspaceAnswer({
       question: "What do the assignment sections say about submission and due date?",
       answer: "Submit a PDF, and the report is due on April 10.",
@@ -1778,6 +1860,10 @@ test("workspace answer verification derives sources and confidence deterministic
       verifiedWithInferredSection.sources[0]?.section,
       "Late Submission Policy"
     );
+    assert.equal(
+      verifiedWithInferredSection.sources[0]?.excerpt,
+      "Late assignments receive a 10% deduction per day, up to 5 days."
+    );
 
     const verifiedWithNestedBodyInferredSection = verifyWorkspaceAnswer({
       question: "What should I do before measuring setup time?",
@@ -1814,6 +1900,10 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.equal(
       verifiedWithNestedBodyInferredSection.sources[0]?.section,
       "Threshold voltage"
+    );
+    assert.equal(
+      verifiedWithNestedBodyInferredSection.sources[0]?.excerpt,
+      "Use 1.2V before measuring setup time."
     );
 
     const verifiedNoHeadingsInContent = verifyWorkspaceAnswer({
@@ -1888,7 +1978,57 @@ test("workspace answer verification derives sources and confidence deterministic
       sectionLabels.includes("Grading Breakdown"),
       `expected 'Grading Breakdown' in sources but got: ${JSON.stringify(sectionLabels)}`
     );
+    assert.match(
+      verifiedMultiSectionAnswer.sources.find(
+        (source) => source.section === "Late Submission Policy"
+      )?.excerpt ?? "",
+      /10% deduction per day/
+    );
+    assert.match(
+      verifiedMultiSectionAnswer.sources.find(
+        (source) => source.section === "Grading Breakdown"
+      )?.excerpt ?? "",
+      /Assignments: 40%, Labs: 30%, Final: 30%/
+    );
   });
+});
+
+test("final answers surface verifier caveats in the answer text", () => {
+  assert.equal(
+    finalizeAnswerText("The report is due on April 11.", {
+      missing: ["support"],
+    }),
+    [
+      "The report is due on April 11.",
+      "",
+      "I couldn't verify every specific detail above from the cited evidence, so treat those specifics as tentative.",
+    ].join("\n")
+  );
+
+  assert.equal(
+    finalizeAnswerText("The spec probably says to include a waveform.", {
+      missing: ["source"],
+    }),
+    [
+      "The spec probably says to include a waveform.",
+      "",
+      "I couldn't verify this against a reliable, citable source, so treat it as tentative.",
+    ].join("\n")
+  );
+
+  assert.equal(
+    finalizeAnswerText("I don't see that due date in the materials I have.", {
+      missing: ["support"],
+    }),
+    "I don't see that due date in the materials I have."
+  );
+
+  assert.equal(
+    finalizeAnswerText("", {
+      missing: ["answer"],
+    }),
+    "I wasn't able to find a clear answer."
+  );
 });
 
 test("memory prompts prefer grounded reads over later search echoes", () => {
@@ -2558,6 +2698,111 @@ test("tool-loop recovery prefers reading a discovered artifact and skips prior f
   );
 });
 
+test("tool-loop recovery selects a complementary source for comparison questions", () => {
+  const referenceRead: Observation = {
+    tool: "read_file",
+    status: "ok",
+    summary: "Read docs/reference.txt.",
+    artifacts: [
+      {
+        artifactId: "artifact-reference",
+        title: "docs/reference.txt",
+        kind: "extracted",
+        excerpt:
+          "The reference says the waveform must show stall cycles around the branch hazard.",
+      },
+    ],
+    content:
+      "The reference says the waveform must show stall cycles around the branch hazard.",
+  };
+  const comparisonBreadcrumb: Observation = {
+    tool: "search_workspace",
+    status: "ok",
+    summary:
+      'Found 2 relevant workspace matches for "branch hazard walkthrough reference".',
+    artifacts: [
+      {
+        artifactId: "artifact-reference",
+        title: "docs/reference.txt",
+        kind: "extracted",
+        excerpt:
+          "The reference says the waveform must show stall cycles around the branch hazard.",
+      },
+      {
+        artifactId: "artifact-walkthrough",
+        title: "docs/walkthrough.txt",
+        kind: "extracted",
+        excerpt:
+          "The walkthrough explains each branch hazard stall step by step.",
+      },
+    ],
+  };
+  const walkthroughRead: Observation = {
+    tool: "read_file",
+    status: "ok",
+    summary: "Read docs/walkthrough.txt.",
+    artifacts: [
+      {
+        artifactId: "artifact-walkthrough",
+        title: "docs/walkthrough.txt",
+        kind: "extracted",
+        excerpt:
+          "The walkthrough explains each branch hazard stall step by step.",
+      },
+    ],
+    content:
+      "The walkthrough explains each branch hazard stall step by step.",
+  };
+
+  assert.equal(
+    selectComplementaryRecoveryReadArtifactId(
+      "Compare the branch hazard walkthrough to the reference.",
+      [referenceRead, comparisonBreadcrumb]
+    ),
+    "artifact-walkthrough"
+  );
+
+  assert.equal(
+    selectComplementaryRecoveryReadArtifactId(
+      "Explain the branch hazard reference.",
+      [referenceRead, comparisonBreadcrumb]
+    ),
+    null
+  );
+
+  assert.equal(
+    selectComplementaryRecoveryReadArtifactId(
+      "Compare the branch hazard walkthrough to the reference.",
+      [referenceRead, comparisonBreadcrumb, walkthroughRead]
+    ),
+    null
+  );
+
+  assert.equal(
+    selectComplementaryRecoveryReadArtifactId(
+      "Compare the branch hazard walkthrough to the reference.",
+      [referenceRead, comparisonBreadcrumb],
+      [
+        referenceRead,
+        comparisonBreadcrumb,
+        {
+          tool: "read_file",
+          status: "missing_text",
+          summary: "Matched docs/walkthrough.txt, but readable text is missing.",
+          artifacts: [
+            {
+              artifactId: "artifact-walkthrough",
+              title: "docs/walkthrough.txt",
+              kind: "extracted",
+            },
+          ],
+        },
+      ]
+    ),
+    null
+  );
+});
+
 test("failed gate reads fall back to the normal tool loop, and comparison questions keep going until a second source is grounded", () => {
   assert.equal(
     shouldContinueToolLoopAfterGateRead(
@@ -2694,6 +2939,103 @@ test("memory evidence selection prefers grounded reads over later search echoes 
   assert.equal(selected.length, 1);
   assert.equal(selected[0]?.tool, "read_file");
   assert.match(selected[0]?.content ?? "", /Grounded detail/);
+});
+
+test("tool memory treats announcement listings as thread-read breadcrumbs", () => {
+  const messages = buildToolPromptMessages(
+    [],
+    "What did the Lab 4 clarification announcement say about branch hazards?",
+    {
+      observations: [
+        {
+          tool: "list_announcements",
+          status: "ok",
+          summary: 'Listed 1 announcement matching "Lab 4".',
+          artifacts: [
+            {
+              artifactId: "course:radar:17:announcements:lab-4",
+              title: "Course announcements",
+              kind: "announcement",
+              excerpt: "Lab 4 Clarification",
+            },
+          ],
+          content: [
+            "**Announcements** (1 item)",
+            "",
+            "[A] Lab 4 Clarification — Prof. Ada — ECE243 — 1d ago",
+          ].join("\n"),
+        },
+      ],
+      readArtifactIds: [],
+      stepCount: 1,
+    }
+  );
+
+  const prompt = messages.at(-1)?.content ?? "";
+  assert.match(prompt, /list_announcements only lists candidate topics/i);
+  assert.match(prompt, /Call read_thread with "Lab 4 Clarification"/i);
+  assert.doesNotMatch(prompt, /Evidence checkpoint: you have grounded text/i);
+});
+
+test("tool-loop recovery selects a thread read after announcement discovery", () => {
+  const listObservation: Observation = {
+    tool: "list_announcements",
+    status: "ok",
+    summary: 'Listed 2 announcements matching "Lab 4".',
+    artifacts: [
+      {
+        artifactId: "course:radar:17:announcements:lab-4",
+        title: "Course announcements",
+        kind: "announcement",
+        excerpt: "Lab 4 Clarification",
+      },
+    ],
+    content: [
+      "**Announcements** (2 items)",
+      "",
+      "[A] General Lab Update — Prof. Ada — ECE243 — 2d ago",
+      "[A] Lab 4 Clarification — Prof. Ada — ECE243 — 1d ago",
+    ].join("\n"),
+  };
+
+  assert.equal(
+    selectThreadRecoveryTopic(
+      "What did the Lab 4 clarification announcement say about branch hazards?",
+      [listObservation]
+    ),
+    "Lab 4 Clarification"
+  );
+
+  assert.equal(
+    selectThreadRecoveryTopic("Are there any Lab 4 announcements?", [
+      listObservation,
+    ]),
+    null
+  );
+
+  assert.equal(
+    selectThreadRecoveryTopic(
+      "What did the Lab 4 clarification announcement say about branch hazards?",
+      [
+        listObservation,
+        {
+          tool: "read_thread",
+          status: "ok",
+          summary: 'Read discussion thread "Lab 4 Clarification".',
+          artifacts: [
+            {
+              artifactId: "course:thread:17:lab-4-clarification",
+              title: "Lab 4 Clarification",
+              kind: "discussion",
+              excerpt: "Use signed overflow detection.",
+            },
+          ],
+          content: "Use signed overflow detection.",
+        },
+      ]
+    ),
+    null
+  );
 });
 
 test("workspace chat dedupes repeated tool calls within a single turn", async () => {
@@ -2867,9 +3209,15 @@ test("chat agent prompt and tool definitions teach search-then-read behavior", a
       prompt,
       /If a read or search just failed, do not repeat the same tool call with the same target/i
     );
+    assert.match(
+      prompt,
+      /Use download_course_file only when search_course identifies an undownloaded Canvas File/i
+    );
     assert.match(prompt, /Tool-result checkpoint/i);
     assert.match(prompt, /compare the evidence against every requested detail/i);
     assert.match(prompt, /follow-up search\/read to fill the gap/i);
+    assert.match(prompt, /Multi-source questions: keep a quick source ledger/i);
+    assert.match(prompt, /read the complementary source before answering/i);
     assert.match(
       prompt,
       /GROUNDING RULE:.*Never state a specific date, point value, filename/i
@@ -2913,6 +3261,12 @@ test("chat agent prompt and tool definitions teach search-then-read behavior", a
     assert.match(workspaceSearch?.description ?? "", /QUERY TIPS/);
     assert.match(workspaceSearch?.description ?? "", /not full questions/i);
     assert.match(courseSearch?.description ?? "", /QUERY TIPS/);
+    const downloadCourseFile = buildChatTools({
+      cache,
+      client: {} as any,
+    }).find((tool) => tool.name === "download_course_file");
+    assert.match(downloadCourseFile?.description ?? "", /undownloaded Canvas File/i);
+    assert.match(downloadCourseFile?.description ?? "", /cached course text/i);
     assert.match(readFile?.description ?? "", /grounding tool/i);
     assert.match(readFile?.description ?? "", /read each relevant source/i);
     assert.match(listFiles?.description ?? "", /failed or ambiguous read\/open/i);
@@ -3219,6 +3573,53 @@ test("workspace chat reuses downloaded attachment content across tools within a 
       /Reused lab4-brief\.txt from an earlier tool call in this turn/i
     );
     assert.equal(reread.result.modelText, downloaded.result.modelText);
+  });
+});
+
+test("download_course_file reuses cached readable course content before download", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "pages"), {
+      recursive: true,
+    });
+
+    const cache = createCourseCache(coursePath);
+    cache.pages = [
+      {
+        pageId: "lab4-brief",
+        title: "Lab 4 Brief",
+        htmlUrl: null,
+        updatedAt: null,
+        hasBody: true,
+      },
+    ];
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "pages", "lab4-brief.txt"),
+      "The cached page explains signed overflow detection for Lab 4.\n",
+      "utf-8"
+    );
+
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      { cache, client: null, config: null, courseId: 17 }
+    );
+
+    const result = await executeToolCallForTurn(
+      new Map(),
+      "download_course_file",
+      { title: "Lab 4 Brief" },
+      ctx
+    );
+
+    assert.equal(result.deduped, false);
+    assert.equal(result.result.observation.status, "ok");
+    assert.match(result.result.observation.summary, /no download needed/i);
+    assert.equal(result.result.observation.artifacts[0]?.title, "Lab 4 Brief");
+    assert.equal(result.result.observation.artifacts[0]?.kind, "page");
+    assert.match(result.result.modelText, /signed overflow detection/i);
   });
 });
 
@@ -3973,6 +4374,61 @@ test("shouldGroundUnverifiedAnswer triggers when model answered from search snip
       "What does the branch hazard requirement say?"
     ),
     true
+  );
+});
+
+test("shouldRegenerateAnswerAfterRecoveryRead revises snippet answers once grounded", () => {
+  const beforeRecovery = [
+    {
+      tool: "search_workspace",
+      status: "ok" as const,
+      summary: 'Found a workspace match for "branch hazard".',
+      artifacts: [
+        {
+          artifactId: "workspace:extracted:docs/reference.txt",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          excerpt: "The waveform must show stall cycles around the branch hazard.",
+        },
+      ],
+    },
+  ];
+  const afterRecovery = [
+    ...beforeRecovery,
+    {
+      tool: "read_file",
+      status: "ok" as const,
+      summary: "Read docs/reference.txt.",
+      artifacts: [
+        {
+          artifactId: "workspace:extracted:docs/reference.txt",
+          title: "docs/reference.txt",
+          kind: "extracted",
+          sectionLabel: "Branch hazard waveform",
+        },
+      ],
+      content: "The waveform must show stall cycles around the branch hazard.",
+    },
+  ];
+
+  assert.equal(
+    shouldRegenerateAnswerAfterRecoveryRead({
+      answer: "The branch hazard requires stall cycles.",
+      question: "What does the branch hazard requirement say?",
+      beforeRecoveryObservations: beforeRecovery,
+      afterRecoveryObservations: afterRecovery,
+    }),
+    true
+  );
+
+  assert.equal(
+    shouldRegenerateAnswerAfterRecoveryRead({
+      answer: "The branch hazard requires stall cycles.",
+      question: "What does the branch hazard requirement say?",
+      beforeRecoveryObservations: beforeRecovery,
+      afterRecoveryObservations: beforeRecovery,
+    }),
+    false
   );
 });
 

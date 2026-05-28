@@ -3,8 +3,14 @@ import path from "node:path";
 import type { LoadedWorkspace } from "../../ask/types.js";
 import type { ToolExecutionResult, ArtifactRef } from "../../agent/observation.js";
 import { isGroundedContentObservation } from "../../agent/observation-relevance.js";
-import type { ArtifactRecord } from "../../knowledge/artifact-index.js";
-import { clearArtifactIndexCache } from "../../knowledge/artifact-index.js";
+import type {
+  ArtifactRecord,
+  ArtifactSection,
+} from "../../knowledge/artifact-index.js";
+import {
+  clearArtifactIndexCache,
+  formatArtifactSectionLabel,
+} from "../../knowledge/artifact-index.js";
 import { extractSingleAttachment } from "../../ingest/attachment-extraction.js";
 import type { DownloadedAttachmentEntry } from "../../ingest/types.js";
 import { getExtractedAttachmentPath } from "../../enrich/course-documents.js";
@@ -230,7 +236,7 @@ async function searchWorkspace(
         kind: match.artifact.kind,
         excerpt: buildArtifactExcerpt(match.preview),
         sectionIds: [match.section.id],
-        sectionLabel: normalizeSourceSectionLabel(match.section.section),
+        sectionLabel: normalizeSearchMatchSectionLabel(match.section),
       })),
     },
     modelText: `${rendered}\n${buildWorkspaceSearchGuidance(relevant)}`,
@@ -279,7 +285,7 @@ async function searchCourse(
         kind: match.artifact.kind,
         excerpt: match.excerpt,
         sectionIds: match.section ? [match.section.id] : undefined,
-        sectionLabel: normalizeSourceSectionLabel(match.section?.section),
+        sectionLabel: normalizeSearchMatchSectionLabel(match.section),
       })),
     },
     modelText: `${uiText}\n${buildCourseSearchGuidance(filteredResult.matches, Boolean(ctx.client))}`,
@@ -447,6 +453,28 @@ async function downloadCourseFile(
   title: string,
   ctx: ChatAgentContext
 ): Promise<ToolExecutionResult> {
+  const trimmedTitle = title.trim();
+  if (!trimmedTitle) {
+    return {
+      observation: {
+        tool: "download_course_file",
+        status: "not_found",
+        summary: "Provide a course file title to download.",
+        artifacts: [],
+      },
+      modelText: "Provide a course file title to download.",
+      uiText: "Provide a course file title to download.",
+    };
+  }
+
+  const reusedObservation = findReusableCourseReadObservation(
+    trimmedTitle,
+    ctx.runState.observations
+  );
+  if (reusedObservation) {
+    return reuseGroundedObservationForDownload(reusedObservation, trimmedTitle);
+  }
+
   if (!ctx.cache) {
     return {
       observation: {
@@ -459,6 +487,15 @@ async function downloadCourseFile(
       uiText: "Cannot download files — no course cache available.",
     };
   }
+
+  const cachedReadable = await readCachedCourseArtifactForDownload(
+    trimmedTitle,
+    ctx
+  );
+  if (cachedReadable) {
+    return cachedReadable;
+  }
+
   let foundItem = null;
   let bestMatchScore = 0;
   for (const mod of ctx.cache.modules) {
@@ -466,7 +503,7 @@ async function downloadCourseFile(
       if (item.type !== "File") {
         continue;
       }
-      const matchScore = scoreFileLookupMatch(title, item.title);
+      const matchScore = scoreFileLookupMatch(trimmedTitle, item.title);
       if (matchScore > bestMatchScore) {
         bestMatchScore = matchScore;
         foundItem = item;
@@ -484,11 +521,11 @@ async function downloadCourseFile(
       observation: {
         tool: "download_course_file",
         status: "not_found",
-        summary: `No downloadable file matching "${title}" found.`,
+        summary: `No downloadable file matching "${trimmedTitle}" found.`,
         artifacts: [],
       },
-      modelText: `No downloadable file matching "${title}" found.`,
-      uiText: `No downloadable file matching "${title}" found.`,
+      modelText: `No downloadable file matching "${trimmedTitle}" found.`,
+      uiText: `No downloadable file matching "${trimmedTitle}" found.`,
     };
   }
 
@@ -534,11 +571,11 @@ async function downloadCourseFile(
       observation: {
         tool: "download_course_file",
         status: "error",
-        summary: `Could not access file "${title}" from Canvas.`,
+        summary: `Could not access file "${trimmedTitle}" from Canvas.`,
         artifacts: [],
       },
-      modelText: `Could not access file "${title}" from Canvas.`,
-      uiText: `Could not access file "${title}" from Canvas.`,
+      modelText: `Could not access file "${trimmedTitle}" from Canvas.`,
+      uiText: `Could not access file "${trimmedTitle}" from Canvas.`,
     };
   }
   const buffer = await ctx.client.downloadFile(fileMeta.url);
@@ -874,6 +911,12 @@ function normalizeSourceSectionLabel(value: string | null | undefined): string |
   return normalized;
 }
 
+function normalizeSearchMatchSectionLabel(
+  section: ArtifactSection | undefined
+): string | null {
+  return normalizeSourceSectionLabel(formatArtifactSectionLabel(section));
+}
+
 function createVirtualEvidenceArtifact(
   artifactId: string,
   title: string,
@@ -1171,6 +1214,83 @@ function findReusableReadObservation(
   return null;
 }
 
+function findReusableCourseReadObservation(
+  title: string,
+  observations: ChatAgentContext["runState"]["observations"]
+): ChatAgentContext["runState"]["observations"][number] | null {
+  for (let index = observations.length - 1; index >= 0; index -= 1) {
+    const observation = observations[index]!;
+    if (!isGroundedContentObservation(observation)) {
+      continue;
+    }
+
+    const matches = observation.artifacts.some(
+      (artifact) =>
+        isCourseArtifactRef(artifact) &&
+        scoreFileLookupMatch(title, artifact.title) > 0
+    );
+
+    if (matches) {
+      return observation;
+    }
+  }
+
+  return null;
+}
+
+function isCourseArtifactRef(artifact: ArtifactRef): boolean {
+  return artifact.artifactId.startsWith("course:");
+}
+
+function reuseGroundedObservationForDownload(
+  observation: ChatAgentContext["runState"]["observations"][number],
+  fallbackTitle: string
+): ToolExecutionResult {
+  const title =
+    observation.artifacts.find(isCourseArtifactRef)?.title ??
+    observation.artifacts[0]?.title ??
+    fallbackTitle;
+  const content = observation.content ?? "";
+  return {
+    observation: {
+      tool: "download_course_file",
+      status: "ok",
+      summary: `Reused cached course text for ${title}; no download needed.`,
+      artifacts: observation.artifacts,
+      content,
+    },
+    modelText: content,
+    uiText: content,
+  };
+}
+
+async function readCachedCourseArtifactForDownload(
+  title: string,
+  ctx: ChatAgentContext
+): Promise<ToolExecutionResult | null> {
+  const artifact = await readWorkspaceKnowledgeArtifact(
+    ctx.loaded,
+    ctx.cache,
+    title,
+    MAX_DOC_TEXT
+  );
+  if (artifact.status !== "ok" || artifact.artifact.scope !== "course") {
+    return null;
+  }
+
+  return {
+    observation: {
+      tool: "download_course_file",
+      status: "ok",
+      summary: `Reused cached course text for ${artifact.artifact.title}; no download needed.`,
+      artifacts: [toArtifactRef(artifact.artifact)],
+      content: artifact.content,
+    },
+    modelText: artifact.content,
+    uiText: artifact.content,
+  };
+}
+
 function buildSemanticTurnToolAliasKeys(
   name: string,
   input: Record<string, unknown>
@@ -1275,6 +1395,7 @@ function isReadableCourseArtifactKind(kind: string): boolean {
     kind === "discussion" ||
     kind === "external_link" ||
     kind === "attachment" ||
+    kind === "grading" ||
     kind === "syllabus" ||
     kind === "front_page"
   );

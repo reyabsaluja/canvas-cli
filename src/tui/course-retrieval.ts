@@ -2,6 +2,7 @@ import type { CourseCache } from "../enrich/cache-loader.js";
 import {
   buildQueryMatchedExcerpt,
   formatArtifactLabel,
+  formatArtifactSectionLabel,
   loadArtifactIndex,
   readArtifactContent,
   searchArtifacts,
@@ -320,7 +321,7 @@ function shouldSelectAdditionalSection(
 }
 
 function formatCourseSectionLabel(section: ArtifactSection | undefined): string {
-  const label = section?.section.trim() ?? "";
+  const label = formatArtifactSectionLabel(section);
   if (
     label.length === 0 ||
     label === "Full text" ||
@@ -344,6 +345,7 @@ const COURSE_ARTIFACT_KINDS: ArtifactKind[] = [
   "discussion",
   "external_link",
   "attachment",
+  "grading",
   "syllabus",
   "front_page",
 ];
@@ -357,6 +359,7 @@ const COURSE_READABLE_KINDS: ArtifactKind[] = [
   "discussion",
   "external_link",
   "attachment",
+  "grading",
   "syllabus",
   "front_page",
 ];

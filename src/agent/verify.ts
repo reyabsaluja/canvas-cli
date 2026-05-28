@@ -1,6 +1,6 @@
 import type { AnswerSource } from "../ask/types.js";
 import type { LoadedWorkspace } from "../ask/types.js";
-import type { Observation } from "./observation.js";
+import type { ArtifactRef, Observation } from "./observation.js";
 import { questionExplicitlyComparesSources } from "./question-intent.js";
 import { workupExplicitlySupportsQuestion } from "./workup-coverage.js";
 import {
@@ -186,7 +186,11 @@ function collectSources(
     if (observation.status !== "ok") {
       continue;
     }
-    for (const artifact of observation.artifacts) {
+    for (const artifact of selectCitationArtifacts(
+      observation.artifacts,
+      question,
+      answer
+    )) {
       const explicitSection = normalizeSourceSection(artifact.sectionLabel);
       const inferredSections =
         !explicitSection && isGroundedContentObservation(observation)
@@ -209,7 +213,13 @@ function collectSources(
           title: artifact.title,
           kind: artifact.kind,
           ...(section ? { section } : {}),
-          excerpt: artifact.excerpt ?? buildExcerpt(observation.content ?? observation.summary),
+          excerpt: buildSourceExcerpt({
+            artifact,
+            observation,
+            question,
+            answer,
+            section,
+          }),
         });
       }
     }
@@ -232,6 +242,202 @@ function collectSources(
   }
 
   return resolved;
+}
+
+function selectCitationArtifacts(
+  artifacts: ArtifactRef[],
+  question: string,
+  answer: string
+): ArtifactRef[] {
+  if (artifacts.length <= 1) {
+    return artifacts;
+  }
+
+  const queryTokens = tokenizeForMatch(`${question}\n${answer}`);
+  if (queryTokens.length === 0) {
+    return artifacts;
+  }
+
+  const ranked = artifacts
+    .map((artifact, index) => ({
+      artifact,
+      index,
+      score: scoreArtifactCitationRelevance(artifact, queryTokens),
+    }))
+    .filter((entry) => entry.score >= minimumArtifactCitationScore(queryTokens));
+
+  if (ranked.length === 0) {
+    return artifacts;
+  }
+
+  const selectedIndexes = new Set(ranked.map((entry) => entry.index));
+  return artifacts.filter((_, index) => selectedIndexes.has(index));
+}
+
+function scoreArtifactCitationRelevance(
+  artifact: ArtifactRef,
+  queryTokens: string[]
+): number {
+  const titleTokens = new Set(tokenizeForMatch(artifact.title));
+  const sectionTokens = new Set(tokenizeForMatch(artifact.sectionLabel ?? ""));
+  const excerptTokens = new Set(tokenizeForMatch(artifact.excerpt ?? ""));
+  let score = 0;
+
+  for (const token of queryTokens) {
+    if (sectionTokens.has(token)) {
+      score += 5;
+    }
+    if (titleTokens.has(token)) {
+      score += 4;
+    }
+    if (excerptTokens.has(token)) {
+      score += 3;
+    }
+  }
+
+  return score;
+}
+
+function minimumArtifactCitationScore(queryTokens: string[]): number {
+  return queryTokens.length <= 2 ? 3 : 6;
+}
+
+function buildSourceExcerpt(input: {
+  artifact: ArtifactRef;
+  observation: Observation;
+  question: string;
+  answer: string;
+  section: string | null;
+}): string | null {
+  const artifactExcerpt = buildExcerpt(input.artifact.excerpt ?? undefined);
+  const contentExcerpt =
+    isGroundedContentObservation(input.observation) && input.observation.content
+      ? buildRelevantContentExcerpt(
+          input.observation.content,
+          input.question,
+          input.answer,
+          input.section
+        )
+      : null;
+
+  if (!contentExcerpt) {
+    return (
+      artifactExcerpt ??
+      buildExcerpt(input.observation.content ?? input.observation.summary)
+    );
+  }
+  if (!artifactExcerpt) {
+    return contentExcerpt;
+  }
+
+  const queryTokens = tokenizeForMatch(
+    `${input.question}\n${input.answer}\n${input.section ?? ""}`
+  );
+  return scoreTextRelevance(contentExcerpt, queryTokens) >=
+    scoreTextRelevance(artifactExcerpt, queryTokens)
+    ? contentExcerpt
+    : artifactExcerpt;
+}
+
+function buildRelevantContentExcerpt(
+  content: string,
+  question: string,
+  answer: string,
+  section: string | null
+): string | null {
+  const sectionBody = section ? findSectionBody(content, section) : null;
+  const sourceText = sectionBody ?? content;
+  const queryTokens = tokenizeForMatch(
+    `${question}\n${answer}\n${section ?? ""}`
+  );
+  if (queryTokens.length === 0) {
+    return buildExcerpt(sourceText);
+  }
+
+  const chunks = splitEvidenceChunks(sourceText);
+  if (chunks.length === 0) {
+    return buildExcerpt(sourceText);
+  }
+
+  const ranked = chunks
+    .map((chunk, index) => ({
+      chunk,
+      index,
+      score: scoreTextRelevance(chunk, queryTokens),
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score;
+      return left.index - right.index;
+    });
+
+  return buildExcerpt(ranked[0]?.chunk ?? sourceText);
+}
+
+function findSectionBody(content: string, title: string): string | null {
+  const normalizedTitle = normalizeSourceSection(title)?.toLowerCase();
+  if (!normalizedTitle) {
+    return null;
+  }
+
+  const section = extractContentSections(content).find(
+    (entry) =>
+      normalizeSourceSection(entry.title)?.toLowerCase() === normalizedTitle
+  );
+  return section?.body.trim() || null;
+}
+
+function splitEvidenceChunks(text: string): string[] {
+  const chunks: string[] = [];
+  const blocks = text
+    .replace(/\r\n/g, "\n")
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  for (const block of blocks) {
+    const lines = block
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line && !/^#{1,6}\s+/.test(line));
+    const candidates = lines.length > 1 ? lines : splitSentences(lines[0] ?? block);
+    for (const candidate of candidates) {
+      const cleaned = candidate.replace(/\s+/g, " ").trim();
+      if (cleaned) {
+        chunks.push(cleaned);
+      }
+    }
+  }
+
+  return chunks;
+}
+
+function splitSentences(text: string): string[] {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= 260) {
+    return normalized ? [normalized] : [];
+  }
+
+  const sentences = normalized
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+  return sentences.length > 0 ? sentences : [normalized];
+}
+
+function scoreTextRelevance(text: string, queryTokens: string[]): number {
+  if (queryTokens.length === 0) {
+    return 0;
+  }
+
+  const textTokens = new Set(tokenizeForMatch(text));
+  let score = 0;
+  for (const token of queryTokens) {
+    if (textTokens.has(token)) {
+      score += 1;
+    }
+  }
+  return score;
 }
 
 function inferSectionsFromContent(

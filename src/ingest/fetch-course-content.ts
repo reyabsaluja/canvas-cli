@@ -10,11 +10,14 @@ import type {
   CanvasFile,
   CanvasPage,
   CanvasQuiz,
+  CanvasQuizQuestion,
   CanvasDiscussionEntry,
   CanvasDiscussionTopic,
   CanvasDiscussionTopicView,
 } from "../canvas/types.js";
+import { decodeEntities } from "../format/html-to-text.js";
 import { mapWithConcurrency } from "./concurrency.js";
+import { collectAssignmentRubricHtmlSources } from "./rich-text-sources.js";
 
 export interface RawDiscussionThread {
   topic: CanvasDiscussionTopic;
@@ -32,6 +35,7 @@ export interface RawCourseContent {
   files: CanvasFile[];
   pages: CanvasPage[];
   quizzes: CanvasQuiz[];
+  quizQuestions: Map<number, CanvasQuizQuestion[]>;
   calendarEvents: CanvasCalendarEvent[];
   announcements: CanvasDiscussionTopic[];
   discussions: CanvasDiscussionTopic[];
@@ -50,6 +54,7 @@ const PAGE_BODY_CONCURRENCY = 4;
 const DISCUSSION_VIEW_CONCURRENCY = 4;
 const ASSIGNMENT_DETAIL_CONCURRENCY = 4;
 const QUIZ_DETAIL_CONCURRENCY = 4;
+const QUIZ_QUESTIONS_CONCURRENCY = 4;
 
 /**
  * Fetch all available course content from Canvas.
@@ -233,8 +238,40 @@ export async function fetchCourseContent(
         participantCount: 0,
       }));
 
+  // Fetch quiz question bodies — these often contain links to reading materials
+  const quizQuestionsFetcher = (client as CanvasClient & {
+    getQuizQuestionsSafe?: (
+      courseId: number,
+      quizId: number,
+      signal?: AbortSignal | null
+    ) => Promise<CanvasQuizQuestion[]>;
+  }).getQuizQuestionsSafe;
+  const quizQuestions = new Map<number, CanvasQuizQuestion[]>();
+  if (quizQuestionsFetcher && quizzes.length > 0) {
+    const questionResults = await mapWithConcurrency(
+      quizzes,
+      QUIZ_QUESTIONS_CONCURRENCY,
+      async (quiz) => {
+        const questions = await quizQuestionsFetcher.call(
+          client,
+          courseId,
+          quiz.id,
+          signal
+        );
+        return { quizId: quiz.id, questions };
+      },
+      signal
+    );
+    for (const result of questionResults) {
+      if (result.questions.length > 0) {
+        quizQuestions.set(result.quizId, result.questions);
+      }
+    }
+  }
+
   const seenSlugs = new Set<string>();
   const pendingSlugs: string[] = [];
+  const courseHtmlUrl = courseDetail.html_url ?? null;
   const fetchedPagesBySlug = new Map<
     string,
     { slug: string; title: string; body: string }
@@ -249,7 +286,8 @@ export async function fetchCourseContent(
   const rememberFetchedPage = (
     slug: string | null | undefined,
     title: string | null | undefined,
-    body: string | null | undefined
+    body: string | null | undefined,
+    baseUrl?: string | null
   ): void => {
     if (!slug || !body || fetchedPagesBySlug.has(slug)) {
       return;
@@ -259,12 +297,15 @@ export async function fetchCourseContent(
       title: title ?? slug,
       body,
     });
-    enqueueLinkedPageSlugs(body);
+    enqueueLinkedPageSlugs(body, baseUrl ?? buildCanvasPageUrl(courseHtmlUrl, slug));
   };
 
-  const enqueueLinkedPageSlugs = (html: string | null | undefined): void => {
+  const enqueueLinkedPageSlugs = (
+    html: string | null | undefined,
+    baseUrl?: string | null
+  ): void => {
     if (!html) return;
-    for (const slug of extractCanvasPageSlugs(html, courseId)) {
+    for (const slug of extractCanvasPageSlugs(html, courseId, baseUrl)) {
       enqueueSlug(slug);
     }
   };
@@ -275,7 +316,7 @@ export async function fetchCourseContent(
   // assignments, quizzes, calendar events, the syllabus, announcements, and
   // other pages.
   for (const page of pages) {
-    rememberFetchedPage(page.url, page.title, page.body ?? null);
+    rememberFetchedPage(page.url, page.title, page.body ?? null, page.html_url);
     enqueueSlug(page.url);
   }
   for (const mod of modules) {
@@ -285,30 +326,42 @@ export async function fetchCourseContent(
       }
     }
   }
-  enqueueLinkedPageSlugs(frontPageBody);
-  enqueueLinkedPageSlugs(courseDetail.syllabus_body);
+  enqueueLinkedPageSlugs(frontPageBody, courseHtmlUrl);
+  enqueueLinkedPageSlugs(courseDetail.syllabus_body, courseHtmlUrl);
   for (const assignment of assignments) {
     const description = (assignment as { description?: unknown }).description;
     if (typeof description === "string") {
-      enqueueLinkedPageSlugs(description);
+      enqueueLinkedPageSlugs(description, assignment.html_url);
+    }
+    for (const source of collectAssignmentRubricHtmlSources(assignment)) {
+      enqueueLinkedPageSlugs(source.html, assignment.html_url);
     }
   }
   for (const quiz of quizzes) {
-    enqueueLinkedPageSlugs(quiz.description);
+    enqueueLinkedPageSlugs(quiz.description, quiz.html_url ?? courseHtmlUrl);
+  }
+  for (const questions of quizQuestions.values()) {
+    for (const question of questions) {
+      const quiz = quizzes.find((entry) => entry.id === question.quiz_id);
+      enqueueLinkedPageSlugs(
+        question.question_text,
+        quiz?.html_url ?? courseHtmlUrl
+      );
+    }
   }
   for (const event of calendarEvents) {
-    enqueueLinkedPageSlugs(event.description);
+    enqueueLinkedPageSlugs(event.description, event.html_url ?? courseHtmlUrl);
   }
   for (const thread of announcementThreads) {
-    enqueueLinkedPageSlugs(thread.topic.message);
+    enqueueLinkedPageSlugs(thread.topic.message, thread.topic.html_url);
     for (const entry of thread.entries) {
-      enqueueLinkedPageSlugs(entry.message);
+      enqueueLinkedPageSlugs(entry.message, thread.topic.html_url);
     }
   }
   for (const thread of discussionThreads) {
-    enqueueLinkedPageSlugs(thread.topic.message);
+    enqueueLinkedPageSlugs(thread.topic.message, thread.topic.html_url);
     for (const entry of thread.entries) {
-      enqueueLinkedPageSlugs(entry.message);
+      enqueueLinkedPageSlugs(entry.message, thread.topic.html_url);
     }
   }
 
@@ -332,7 +385,12 @@ export async function fetchCourseContent(
 
     for (const page of batchResults) {
       if (!page) continue;
-      rememberFetchedPage(page.slug, page.title, page.body);
+      rememberFetchedPage(
+        page.slug,
+        page.title,
+        page.body,
+        buildCanvasPageUrl(courseHtmlUrl, page.slug)
+      );
     }
   }
 
@@ -343,6 +401,7 @@ export async function fetchCourseContent(
     files,
     pages,
     quizzes,
+    quizQuestions,
     calendarEvents,
     announcements,
     discussions,
@@ -445,19 +504,52 @@ async function enrichQuizzesWithDetails(
   };
 }
 
-const CANVAS_PAGE_LINK_RE =
-  /href=(["'])[^"'#?]*\/courses\/(\d+)\/pages\/([^"'?#]+)[^"']*\1/gi;
+const CANVAS_LINK_ATTR_RE =
+  /\b(?:href|src|data)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi;
 
-function extractCanvasPageSlugs(html: string, courseId: number): string[] {
+function extractCanvasPageSlugs(
+  html: string,
+  courseId: number,
+  baseUrl?: string | null
+): string[] {
   const slugs: string[] = [];
-  let match;
-  while ((match = CANVAS_PAGE_LINK_RE.exec(html)) !== null) {
-    if (parseInt(match[2]!, 10) === courseId) {
-      slugs.push(decodeURIComponent(match[3]!));
+  const seen = new Set<string>();
+  let match: RegExpExecArray | null;
+  while ((match = CANVAS_LINK_ATTR_RE.exec(html)) !== null) {
+    const href = decodeEntities(match[1] ?? match[2] ?? match[3] ?? "").trim();
+    if (!href) {
+      continue;
+    }
+    const parsed = parseUrl(href, baseUrl);
+    if (!parsed) {
+      continue;
+    }
+    const pageMatch = parsed.pathname.match(/^\/courses\/(\d+)\/pages\/([^/?#]+)/);
+    if (!pageMatch || parseInt(pageMatch[1]!, 10) !== courseId) {
+      continue;
+    }
+    const slug = decodeURIComponent(pageMatch[2]!);
+    if (!seen.has(slug)) {
+      seen.add(slug);
+      slugs.push(slug);
     }
   }
-  CANVAS_PAGE_LINK_RE.lastIndex = 0;
   return slugs;
+}
+
+function parseUrl(href: string, baseUrl?: string | null): URL | null {
+  try {
+    return new URL(href, baseUrl ?? "https://canvas.invalid");
+  } catch {
+    return null;
+  }
+}
+
+function buildCanvasPageUrl(courseHtmlUrl: string | null, slug: string): string | null {
+  if (!courseHtmlUrl) {
+    return null;
+  }
+  return `${courseHtmlUrl.replace(/\/$/, "")}/pages/${encodeURIComponent(slug)}`;
 }
 
 function flattenDiscussionEntries(

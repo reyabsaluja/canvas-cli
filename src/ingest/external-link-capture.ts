@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import type { Config } from "../config/env.js";
-import type { CanvasCalendarEvent, CanvasQuiz } from "../canvas/types.js";
+import type { CanvasCalendarEvent, CanvasQuiz, CanvasQuizQuestion } from "../canvas/types.js";
 import { extractFileBufferText } from "../extract/extract-text.js";
 import { decodeEntities, htmlToText } from "../format/html-to-text.js";
 import { mapWithConcurrency } from "./concurrency.js";
 import type { RawAssignmentRecord, RawDiscussionThread } from "./fetch-course-content.js";
+import { collectAssignmentRubricHtmlSources } from "./rich-text-sources.js";
 import type {
   ExternalLinkContentStatus,
   ExternalLinkIndexEntry,
@@ -58,6 +59,7 @@ export async function captureExternalCourseLinks(options: {
   modules: ModuleIndexEntry[];
   assignments: RawAssignmentRecord[];
   quizzes: CanvasQuiz[];
+  quizQuestions?: Map<number, CanvasQuizQuestion[]>;
   calendarEvents: CanvasCalendarEvent[];
   frontPageBody: string | null;
   fetchedPages: Array<{ slug: string; title: string; body: string }>;
@@ -135,14 +137,21 @@ export async function captureExternalCourseLinks(options: {
 
   for (const assignment of options.assignments) {
     const description = assignment.description;
-    if (typeof description !== "string" || description.trim().length === 0) {
-      continue;
+    if (typeof description === "string" && description.trim().length > 0) {
+      addHtmlCandidates(
+        description,
+        `assignment "${assignment.name}" description`,
+        assignment.html_url
+      );
     }
-    addHtmlCandidates(
-      description,
-      `assignment "${assignment.name}" description`,
-      assignment.html_url
-    );
+
+    for (const source of collectAssignmentRubricHtmlSources(assignment)) {
+      addHtmlCandidates(
+        source.html,
+        `assignment "${assignment.name}" ${source.label}`,
+        assignment.html_url
+      );
+    }
   }
 
   for (const quiz of options.quizzes) {
@@ -155,6 +164,24 @@ export async function captureExternalCourseLinks(options: {
       `quiz "${quiz.title}" description`,
       quiz.html_url ?? options.courseHtmlUrl
     );
+  }
+
+  if (options.quizQuestions) {
+    for (const [quizId, questions] of options.quizQuestions) {
+      const quiz = options.quizzes.find((q) => q.id === quizId);
+      const quizTitle = quiz?.title ?? `Quiz ${quizId}`;
+      const baseUrl = quiz?.html_url ?? options.courseHtmlUrl;
+      for (const question of questions) {
+        if (!question.question_text || question.question_text.trim().length === 0) {
+          continue;
+        }
+        addHtmlCandidates(
+          question.question_text,
+          `quiz "${quizTitle}" question "${question.question_name}"`,
+          baseUrl
+        );
+      }
+    }
   }
 
   for (const event of options.calendarEvents) {

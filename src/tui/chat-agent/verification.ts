@@ -1,4 +1,5 @@
 import type { Observation } from "../../agent/observation.js";
+import type { VerificationResult } from "../../agent/verify.js";
 import { questionNeedsMultipleSources } from "../../agent/question-intent.js";
 import {
   isGroundedContentObservation,
@@ -143,6 +144,122 @@ export function selectRecoveryReadArtifactId(
   return null;
 }
 
+export function selectComplementaryRecoveryReadArtifactId(
+  question: string,
+  currentTurnObservations: Observation[],
+  allObservations: Observation[] = currentTurnObservations
+): string | null {
+  if (!questionNeedsMultipleSources(question)) {
+    return null;
+  }
+
+  const groundedCurrentTurn = currentTurnObservations.filter((observation) =>
+    isGroundedContentObservation(observation)
+  );
+  const relevantGrounded = selectRelevantObservations(
+    groundedCurrentTurn,
+    question,
+    3
+  );
+  if (relevantGrounded.length === 0) {
+    return null;
+  }
+
+  const relevantGroundedArtifactIds = collectObservationArtifactIds(
+    relevantGrounded
+  );
+  if (relevantGroundedArtifactIds.size >= 2) {
+    return null;
+  }
+
+  const groundedArtifactIds = collectObservationArtifactIds(groundedCurrentTurn);
+  const failedArtifactIds = collectFailedReadArtifactIds(allObservations);
+  const breadcrumbs = selectRelevantSearchBreadcrumbObservations(
+    question,
+    currentTurnObservations,
+    {
+      coveredArtifactIds: groundedArtifactIds,
+      failedArtifactIds,
+    }
+  );
+
+  for (const observation of breadcrumbs) {
+    for (const artifact of observation.artifacts) {
+      if (
+        groundedArtifactIds.has(artifact.artifactId) ||
+        failedArtifactIds.has(artifact.artifactId)
+      ) {
+        continue;
+      }
+      return artifact.artifactId;
+    }
+  }
+
+  return null;
+}
+
+export function selectThreadRecoveryTopic(
+  question: string,
+  currentTurnObservations: Observation[],
+  allObservations: Observation[] = currentTurnObservations
+): string | null {
+  if (!questionNeedsThreadContent(question)) {
+    return null;
+  }
+
+  const relevantThreadRead = selectRelevantObservations(
+    allObservations.filter(
+      (observation) =>
+        observation.tool === "read_thread" &&
+        isGroundedContentObservation(observation)
+    ),
+    question,
+    1
+  );
+  if (relevantThreadRead.length > 0) {
+    return null;
+  }
+
+  const listObservation = [...currentTurnObservations]
+    .reverse()
+    .find(isSuccessfulThreadListObservation);
+  if (!listObservation) {
+    return null;
+  }
+
+  const readTitles = new Set(
+    allObservations
+      .filter((observation) => observation.tool === "read_thread")
+      .flatMap((observation) => observation.artifacts.map((artifact) => artifact.title))
+      .map(normalizeThreadLookupText)
+      .filter((title) => title.length > 0)
+  );
+  const titles = extractListedThreadTitles(listObservation.content ?? "").filter(
+    (title) => !readTitles.has(normalizeThreadLookupText(title))
+  );
+  if (titles.length === 0) {
+    return null;
+  }
+
+  return rankListedThreadTitles(question, titles)[0] ?? null;
+}
+
+export function questionNeedsThreadContent(question: string): boolean {
+  const asksAboutCoursePost =
+    /\b(announcements?|discussions?|threads?|posts?|repl(?:y|ies))\b/i.test(
+      question
+    );
+  const asksForPostDetail =
+    /\b(clarif(?:y|ied|ication)|instructor|prof(?:essor)?|said|says?|mention(?:ed)?|posted|details?|content|repl(?:y|ies)|response)\b/i.test(
+      question
+    ) || /\bwhat\s+(?:did|does)\b/i.test(question);
+
+  return (
+    asksForPostDetail &&
+    (asksAboutCoursePost || /\bprof(?:essor)?\b/i.test(question))
+  );
+}
+
 export function collectFailedReadArtifactIds(
   observations: Observation[]
 ): Set<string> {
@@ -275,6 +392,32 @@ export function shouldGroundUnverifiedAnswer(
   return hasRecoverableTarget !== null;
 }
 
+export function shouldRegenerateAnswerAfterRecoveryRead(input: {
+  answer: string;
+  question: string;
+  beforeRecoveryObservations: Observation[];
+  afterRecoveryObservations: Observation[];
+}): boolean {
+  if (
+    !shouldGroundUnverifiedAnswer(
+      input.answer,
+      input.beforeRecoveryObservations,
+      input.question
+    )
+  ) {
+    return false;
+  }
+
+  const relevantGroundedAfterRecovery = selectRelevantObservations(
+    input.afterRecoveryObservations.filter((observation) =>
+      isGroundedContentObservation(observation)
+    ),
+    input.question,
+    1
+  );
+  return relevantGroundedAfterRecovery.length > 0;
+}
+
 export function shouldContinueToolLoopAfterGateRead(
   question: string,
   observation: Observation,
@@ -313,12 +456,34 @@ export function selectArtifactSupportObservations(
   return selected;
 }
 
-export function finalizeAnswerText(answer: string, missing: string[]): string {
+export function finalizeAnswerText(
+  answer: string,
+  verification: Pick<VerificationResult, "missing">
+): string {
   const trimmed = answer.trim();
   if (!trimmed) {
     return "I wasn't able to find a clear answer.";
   }
+
+  if (answerAlreadySignalsUncertainty(trimmed)) {
+    return trimmed;
+  }
+
+  if (verification.missing.includes("support")) {
+    return `${trimmed}\n\nI couldn't verify every specific detail above from the cited evidence, so treat those specifics as tentative.`;
+  }
+
+  if (verification.missing.includes("source")) {
+    return `${trimmed}\n\nI couldn't verify this against a reliable, citable source, so treat it as tentative.`;
+  }
+
   return trimmed;
+}
+
+function answerAlreadySignalsUncertainty(answer: string): boolean {
+  return /\b(?:i\s+(?:do\s+not|don't|can't|cannot)\s+(?:see|find|verify|confirm)|could\s+not\s+verify|couldn't\s+verify|cannot\s+verify|can't\s+verify|not\s+enough\s+evidence|unclear|not\s+clear)\b/i.test(
+    answer
+  );
 }
 
 function canObservationSupportAnswerRecovery(
@@ -349,6 +514,75 @@ function isSuccessfulSearchBreadcrumbObservation(
     (observation.tool === "search_workspace" ||
       observation.tool === "search_course")
   );
+}
+
+function isSuccessfulThreadListObservation(observation: Observation): boolean {
+  return (
+    observation.tool === "list_announcements" &&
+    observation.status === "ok" &&
+    typeof observation.content === "string" &&
+    observation.content.trim().length > 0
+  );
+}
+
+function extractListedThreadTitles(content: string): string[] {
+  const titles: string[] = [];
+  const seen = new Set<string>();
+
+  for (const line of content.split("\n")) {
+    const match = line.match(/^\s*\[[AD]\]\s+(.+?)(?:\s+—\s+|$)/);
+    const title = match?.[1]?.trim();
+    if (!title) {
+      continue;
+    }
+
+    const key = normalizeThreadLookupText(title);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    titles.push(title);
+  }
+
+  return titles;
+}
+
+function rankListedThreadTitles(question: string, titles: string[]): string[] {
+  const questionText = normalizeThreadLookupText(question);
+  const questionTokens = new Set(tokenizeThreadLookupText(questionText));
+  return titles
+    .map((title, index) => {
+      const titleText = normalizeThreadLookupText(title);
+      const titleTokens = tokenizeThreadLookupText(titleText);
+      let score = questionText.includes(titleText) ? 12 : 0;
+      for (const token of titleTokens) {
+        if (questionTokens.has(token)) {
+          score += 3;
+        }
+      }
+      return { title, index, score };
+    })
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+      return left.index - right.index;
+    })
+    .map((entry) => entry.title);
+}
+
+function normalizeThreadLookupText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenizeThreadLookupText(value: string): string[] {
+  return value
+    .split(/\s+/)
+    .filter((token) => token.length > 2);
 }
 
 function findBestObservationForArtifact(

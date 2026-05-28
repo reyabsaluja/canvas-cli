@@ -9,84 +9,89 @@ export function htmlToText(
   options?: { baseUrl?: string | null }
 ): string {
   const savedPreBlocks: string[] = [];
+  const previousPreBlocks = preBlocks;
   preBlocks = savedPreBlocks;
 
-  let text = html.replace(/\r\n/g, "\n");
+  try {
+    let text = html.replace(/\r\n/g, "\n");
 
-  text = stripCommentsScriptsAndStyles(text);
-  text = replaceFigures(text, options);
-  text = replaceTables(text, options);
-  text = replaceDefinitionLists(text, options);
-  text = replaceLists(text, options);
-  text = replaceDetails(text, options);
-  text = replaceMedia(text, options);
-  text = replacePreformatted(text, options);
+    text = stripCommentsScriptsAndStyles(text);
+    text = replaceFigures(text, options);
+    text = replaceTables(text, options);
+    text = replaceDefinitionLists(text, options);
+    text = replaceLists(text, options);
+    text = replaceDetails(text, options);
+    text = replaceMedia(text, options);
+    text = replacePreformatted(text, options);
 
-  text = text.replace(/<br\s*\/?>/gi, "\n");
-  text = text.replace(/<hr\s*\/?>/gi, "\n---\n");
+    text = text.replace(/<br\s*\/?>/gi, "\n");
+    text = text.replace(/<hr\s*\/?>/gi, "\n---\n");
 
-  text = text.replace(
-    /<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi,
-    (_match, level, content) => {
-      const depth = Number.parseInt(level, 10);
-      const heading = htmlFragmentToSingleLineText(content, options);
-      if (!heading) return "\n";
-      const prefix = "#".repeat(Number.isNaN(depth) ? 2 : Math.min(depth + 1, 6));
-      return `\n${prefix} ${heading}\n`;
-    }
-  );
-
-  text = text.replace(
-    /<(a)\b([^>]*)>([\s\S]*?)<\/a>/gi,
-    (_match, _tag, attrs, content) => {
-      const href = extractAttr(attrs, "href");
-      const label = htmlFragmentToSingleLineText(content, options);
-      if (!href || href.startsWith("javascript:")) {
-        return label;
+    text = text.replace(
+      /<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi,
+      (_match, level, content) => {
+        const depth = Number.parseInt(level, 10);
+        const heading = htmlFragmentToSingleLineText(content, options);
+        if (!heading) return "\n";
+        const prefix = "#".repeat(Number.isNaN(depth) ? 2 : Math.min(depth + 1, 6));
+        return `\n${prefix} ${heading}\n`;
       }
-      const resolvedHref = resolveHref(href, options?.baseUrl ?? null);
-      if (!label) return resolvedHref;
-      if (label === resolvedHref) return resolvedHref;
-      return `${label} (${resolvedHref})`;
+    );
+
+    text = text.replace(
+      /<(a)\b([^>]*)>([\s\S]*?)<\/a>/gi,
+      (_match, _tag, attrs, content) => {
+        const href = extractAttr(attrs, "href");
+        const label = htmlFragmentToSingleLineText(content, options);
+        if (!href || href.startsWith("javascript:")) {
+          return label;
+        }
+        const resolvedHref = resolveHref(href, options?.baseUrl ?? null);
+        if (!label) return resolvedHref;
+        if (label === resolvedHref) return resolvedHref;
+        return `${label} (${resolvedHref})`;
+      }
+    );
+
+    text = text.replace(/<(strong|b)\b[^>]*>([\s\S]*?)<\/\1>/gi, (_m, _tag, inner) => {
+      const content = htmlFragmentToSingleLineText(inner, options);
+      return content ? `**${content}**` : "";
+    });
+
+    text = text.replace(/<(em|i)\b[^>]*>([\s\S]*?)<\/\1>/gi, (_m, _tag, inner) => {
+      const content = htmlFragmentToSingleLineText(inner, options);
+      return content ? `_${content}_` : "";
+    });
+
+    text = text.replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_m, inner) => {
+      const content = htmlFragmentToSingleLineText(inner, options);
+      return content ? `\`${content}\`` : "";
+    });
+
+    text = text.replace(
+      /<\/(p|div|section|article|header|footer|aside|nav|blockquote|main)>/gi,
+      "\n\n"
+    );
+    text = text.replace(
+      /<(p|div|section|article|header|footer|aside|nav|blockquote|main)\b[^>]*>/gi,
+      ""
+    );
+
+    text = text.replace(/<\/li>/gi, "\n");
+    text = text.replace(/<\/t[dh]>/gi, "\t");
+    text = text.replace(/<\/tr>/gi, "\n");
+
+    text = stripTags(text);
+    text = decodeEntities(text);
+
+    text = normalizeOutput(text);
+    if (savedPreBlocks.length > 0) {
+      text = restorePreBlocks(text, savedPreBlocks);
     }
-  );
-
-  text = text.replace(/<(strong|b)\b[^>]*>([\s\S]*?)<\/\1>/gi, (_m, _tag, inner) => {
-    const content = htmlFragmentToSingleLineText(inner, options);
-    return content ? `**${content}**` : "";
-  });
-
-  text = text.replace(/<(em|i)\b[^>]*>([\s\S]*?)<\/\1>/gi, (_m, _tag, inner) => {
-    const content = htmlFragmentToSingleLineText(inner, options);
-    return content ? `_${content}_` : "";
-  });
-
-  text = text.replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_m, inner) => {
-    const content = htmlFragmentToSingleLineText(inner, options);
-    return content ? `\`${content}\`` : "";
-  });
-
-  text = text.replace(
-    /<\/(p|div|section|article|header|footer|aside|nav|blockquote|main)>/gi,
-    "\n\n"
-  );
-  text = text.replace(
-    /<(p|div|section|article|header|footer|aside|nav|blockquote|main)\b[^>]*>/gi,
-    ""
-  );
-
-  text = text.replace(/<\/li>/gi, "\n");
-  text = text.replace(/<\/t[dh]>/gi, "\t");
-  text = text.replace(/<\/tr>/gi, "\n");
-
-  text = stripTags(text);
-  text = decodeEntities(text);
-
-  text = normalizeOutput(text);
-  if (savedPreBlocks.length > 0) {
-    text = restorePreBlocks(text, savedPreBlocks);
+    return text;
+  } finally {
+    preBlocks = previousPreBlocks;
   }
-  return text;
 }
 
 function stripCommentsScriptsAndStyles(html: string): string {

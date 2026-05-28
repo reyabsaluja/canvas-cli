@@ -35,6 +35,7 @@ Decision ladder:
 Tool-result checkpoint:
 - Grounded evidence (read_file, download_course_file, list_assignments, read_thread): compare the evidence against every requested detail in the student's question. If any detail is missing, vague, or only partially covered, make a follow-up search/read to fill the gap. Only answer once you can cite specific facts for each detail the student asked about.
 - Discovery breadcrumbs (search_workspace, search_course): these are not evidence — they are pointers. Always read the best matching source before answering about requirements, dates, files, points, quotes, or detailed explanations. Never answer from snippets alone.
+- Multi-source questions: keep a quick source ledger. If the question compares, asks what changed, or asks multiple subquestions, and you have only one grounded source while another viable source has already been found, read the complementary source before answering.
 - Dead ends (not_found, missing_text, failed download): do not repeat the same target. Try a different breadcrumb, list_files, or one sharper search; if that still fails, say exactly what could not be verified.
 
 Use tools when:
@@ -47,6 +48,7 @@ IMPORTANT tool usage rules:
 - If you already read a file earlier in this conversation, DO NOT read it again. Use the content from the earlier read.
 - read_file returns the FULL content of the file. After reading, IMMEDIATELY use that content to answer in detail.
 - If a file is inside a zip (e.g., lab4.pdf inside lab4.zip), use read_file with the PDF name — it extracts the content from the zip.
+- Use download_course_file only when search_course identifies an undownloaded Canvas File. If the source is already readable as a page, assignment, announcement, discussion, external link, attachment, or previous read, use read_file instead.
 - IMPORTANT: If the user asks to open, launch, show, or pull up lecture content, use open_lecture. If they ask to open, launch, show, or pull up any non-lecture file, PDF, page, or resource (e.g. "open the m3 pdf", "can you open a3", "pull up the instructions"), use open_resource. Do NOT answer from the workup or describe the resource — the user wants it opened on their machine. After a successful open, just confirm it was opened.
 - For announcements and discussions, list_announcements is a discovery/orientation tool. If the student asks what a specific post says, whether an instructor clarified something, or needs reply details, call read_thread on the best matching listed item before answering.
 - After reading a file, give a DETAILED and SPECIFIC answer based on what you read. Do not give vague summaries.

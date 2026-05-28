@@ -6,6 +6,7 @@ import {
   buildQueryMatchedExcerpt,
   clearArtifactIndexCache,
   formatArtifactLabel,
+  formatArtifactSectionLabel,
   loadArtifactIndex,
   readArtifactContent,
   searchArtifacts,
@@ -367,10 +368,13 @@ function buildSearchHeader(
   artifact: ArtifactRecord,
   section: ArtifactSection
 ): string {
+  const sectionLabelText = formatArtifactSectionLabel(section);
   const sectionLabel =
-    !section.section || section.section === "Full text" || section.section === "Top"
+    !sectionLabelText ||
+    sectionLabelText === "Full text" ||
+    sectionLabelText === "Top"
       ? formatArtifactLabel(artifact)
-      : `${formatArtifactLabel(artifact)} — ${section.section}`;
+      : `${formatArtifactLabel(artifact)} — ${sectionLabelText}`;
   return `--- ${sectionLabel} ---`;
 }
 

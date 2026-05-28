@@ -35,10 +35,13 @@ import {
   finalizeAnswerText,
   resolveToolTurnVerificationObservations,
   selectArtifactSupportObservations,
+  selectComplementaryRecoveryReadArtifactId,
   selectRecoveryReadArtifactId,
+  selectThreadRecoveryTopic,
   shouldContinueToolLoopAfterGateRead,
   shouldRecoverFromToolLoop,
   shouldGroundUnverifiedAnswer,
+  shouldRegenerateAnswerAfterRecoveryRead,
 } from "./chat-agent/verification.js";
 
 const MAX_RECOVERY_READ_ATTEMPTS = 2;
@@ -167,7 +170,7 @@ export async function runChatAgent(
     usedWorkup,
     loaded: ctx.loaded,
   });
-  const finalAnswer = finalizeAnswerText(fullText, verification.missing);
+  const finalAnswer = finalizeAnswerText(fullText, verification);
 
   ctx.conversationHistory.push({ role: "user", content: question });
   ctx.conversationHistory.push({ role: "assistant", content: finalAnswer });
@@ -253,11 +256,77 @@ async function runToolLoopTurn(
     observationStart,
     question
   );
+  const observationsBeforeRecovery = supportingObservations;
+  const attemptedRecoveryArtifactIds = new Set<string>();
+  let recoveredComplementaryGrounding = false;
+  let recoveredThreadGrounding = false;
+  const readRecoveryArtifact = async (
+    artifactId: string
+  ): Promise<ToolExecutionResult> => {
+    attemptedRecoveryArtifactIds.add(artifactId);
+    const recoveryResult = await readArtifactForGate(artifactId, ctx);
+    appendObservation(ctx.runState, recoveryResult.observation);
+    const recoveryFilename =
+      recoveryResult.observation.artifacts[0]?.title ?? artifactId;
+    const { action, target } = mapToolCall("read_file", {
+      filename: recoveryFilename,
+    });
+    onToolCall({
+      action,
+      target,
+      result: recoveryResult.uiText,
+      color: recoveryResult.observation.status === "ok" ? "green" : "red",
+      observation: recoveryResult.observation,
+    });
+    supportingObservations = ctx.runState.observations.slice(observationStart);
+    verificationObservations = resolveToolTurnVerificationObservations(
+      ctx.runState.observations,
+      observationStart,
+      question
+    );
+    return recoveryResult;
+  };
+
+  const threadRecoveryTopic = selectThreadRecoveryTopic(
+    question,
+    supportingObservations,
+    ctx.runState.observations
+  );
+  if (threadRecoveryTopic) {
+    const execution = await executeToolCallForTurn(
+      turnToolCache,
+      "read_thread",
+      { topic: threadRecoveryTopic },
+      ctx
+    );
+    if (!execution.deduped) {
+      appendObservation(ctx.runState, execution.result.observation);
+    }
+    const { action, target, color } = mapToolCall("read_thread", {
+      topic: threadRecoveryTopic,
+    });
+    onToolCall({
+      action,
+      target,
+      result: execution.result.uiText,
+      color: execution.result.observation.status === "ok" ? color : "red",
+      observation: execution.result.observation,
+    });
+    supportingObservations = ctx.runState.observations.slice(observationStart);
+    verificationObservations = resolveToolTurnVerificationObservations(
+      ctx.runState.observations,
+      observationStart,
+      question
+    );
+    recoveredThreadGrounding =
+      execution.result.observation.status === "ok" &&
+      Boolean(execution.result.observation.content);
+  }
+
   const needsRecoveryRead =
     fullText.trim().length === 0 ||
     shouldGroundUnverifiedAnswer(fullText, supportingObservations, question);
   if (needsRecoveryRead) {
-    const attemptedRecoveryArtifactIds = new Set<string>();
     while (attemptedRecoveryArtifactIds.size < MAX_RECOVERY_READ_ATTEMPTS) {
       const recoveryArtifactId = selectRecoveryReadArtifactId(
         question,
@@ -270,34 +339,52 @@ async function runToolLoopTurn(
       ) {
         break;
       }
-      attemptedRecoveryArtifactIds.add(recoveryArtifactId);
 
-      const recoveryResult = await readArtifactForGate(recoveryArtifactId, ctx);
-      appendObservation(ctx.runState, recoveryResult.observation);
-      const recoveryFilename =
-        recoveryResult.observation.artifacts[0]?.title ?? recoveryArtifactId;
-      const { action, target } = mapToolCall("read_file", {
-        filename: recoveryFilename,
-      });
-      onToolCall({
-        action,
-        target,
-        result: recoveryResult.uiText,
-        color: recoveryResult.observation.status === "ok" ? "green" : "red",
-        observation: recoveryResult.observation,
-      });
-      supportingObservations = ctx.runState.observations.slice(observationStart);
-      verificationObservations = resolveToolTurnVerificationObservations(
-        ctx.runState.observations,
-        observationStart,
-        question
-      );
+      const recoveryResult = await readRecoveryArtifact(recoveryArtifactId);
       if (recoveryResult.observation.status === "ok" && recoveryResult.observation.content) {
         break;
       }
     }
   }
-  if (shouldRecoverFromToolLoop(fullText, verificationObservations)) {
+
+  while (attemptedRecoveryArtifactIds.size < MAX_RECOVERY_READ_ATTEMPTS) {
+    const complementaryArtifactId = selectComplementaryRecoveryReadArtifactId(
+      question,
+      supportingObservations,
+      ctx.runState.observations
+    );
+    if (
+      !complementaryArtifactId ||
+      attemptedRecoveryArtifactIds.has(complementaryArtifactId)
+    ) {
+      break;
+    }
+
+    const recoveryResult = await readRecoveryArtifact(complementaryArtifactId);
+    if (recoveryResult.observation.status === "ok" && recoveryResult.observation.content) {
+      recoveredComplementaryGrounding = true;
+    }
+  }
+
+  if (
+    recoveredThreadGrounding ||
+    recoveredComplementaryGrounding ||
+    shouldRegenerateAnswerAfterRecoveryRead({
+      answer: fullText,
+      question,
+      beforeRecoveryObservations: observationsBeforeRecovery,
+      afterRecoveryObservations: verificationObservations,
+    })
+  ) {
+    fullText = await answerWithoutTools(
+      ctx,
+      systemPrompt,
+      question,
+      verificationObservations,
+      onTextDelta,
+      abortSignal
+    );
+  } else if (shouldRecoverFromToolLoop(fullText, verificationObservations)) {
     fullText = await answerWithoutTools(
       ctx,
       systemPrompt,
@@ -330,9 +417,12 @@ export {
   resolveToolTurnVerificationObservations,
   seedTurnToolCacheEntry,
   selectArtifactSupportObservations,
+  selectComplementaryRecoveryReadArtifactId,
   selectRecoveryReadArtifactId,
+  selectThreadRecoveryTopic,
   shouldContinueToolLoopAfterGateRead,
   shouldGroundUnverifiedAnswer,
+  shouldRegenerateAnswerAfterRecoveryRead,
   shouldRecoverFromToolLoop,
 };
 

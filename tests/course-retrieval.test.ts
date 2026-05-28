@@ -346,6 +346,60 @@ test("course retrieval surfaces captured external course resources", async () =>
   });
 });
 
+test("course retrieval surfaces extracted grading breakdowns", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "grading-breakdown.txt"),
+      [
+        "# Grading Breakdown",
+        "",
+        "Grading scheme: weighted (total 100%)",
+        "",
+        "## Labs (30%)",
+        "",
+        "Assignments in this category: 4",
+        "- Lab 4",
+        "",
+        "## Final Exam (40%)",
+        "",
+        "Assignments in this category: 1",
+        "- Final exam",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache = makeCourseCache(coursePath);
+    const search = await searchCourseKnowledge(
+      cache,
+      "grading scheme weighted"
+    );
+    assert.equal(search.status, "ok");
+    if (search.status === "ok") {
+      assert.equal(search.matches[0]?.artifact.kind, "grading");
+      assert.equal(search.matches[0]?.artifact.title, "Grading breakdown");
+    }
+
+    const rendered = renderCourseArtifactSearchResult(
+      search,
+      "grading scheme weighted"
+    );
+    assert.match(rendered, /\[grading\] Grading breakdown/);
+    assert.match(rendered, /weighted \(total 100%\)/);
+
+    const document = await readCourseDocument(cache, "grading breakdown");
+    assert.equal(document.status, "ok");
+    if (document.status === "ok") {
+      assert.equal(document.document.artifact.kind, "grading");
+      assert.match(document.document.content, /Final Exam \(40%\)/);
+    }
+  });
+});
+
 test("course search rendering uses structured search results from the shared artifact index", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
@@ -407,6 +461,63 @@ test("course search renders the matching section instead of the document opening
     assert.match(rendered, /\[attachment\] lab4-spec\.pdf — Signal Checklist/);
     assert.match(rendered, /waveform screenshot/);
     assert.doesNotMatch(rendered, /general setup reminders/);
+  });
+});
+
+test("course search uses parent headings when ranking nested rubric sections", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "assignments"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "assignments", "42.txt"),
+      [
+        "# Lab 4",
+        "",
+        "Due: 2026-04-18T23:59:00.000Z",
+        "Points: 100",
+        "",
+        "## Description",
+        "",
+        "General Lab 4 instructions mention the datapath deliverables.",
+        "",
+        "## Rubric",
+        "",
+        "### Correctness (10 points)",
+        "",
+        "#### Rating: Excellent (10 points)",
+        "",
+        "Complete and accurate implementation.",
+        "",
+        "#### Rating: Needs work (5 points)",
+        "",
+        "Missing edge cases.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache = makeCourseCache(coursePath);
+    cache.modules = [];
+    cache.files = [];
+    cache.pages = [];
+    cache.discussions = [];
+    cache.attachments = [];
+
+    const search = await searchCourseKnowledge(cache, "lab 4 rubric", {
+      limit: 2,
+    });
+    assert.equal(search.status, "ok");
+    if (search.status === "ok") {
+      assert.equal(search.matches[0]?.artifact.kind, "assignment");
+      assert.equal(search.matches[0]?.artifact.title, "Lab 4");
+      assert.match(search.matches[0]?.section?.searchContext ?? "", /Rubric/);
+    }
+
+    const rendered = renderCourseArtifactSearchResult(search, "lab 4 rubric");
+    assert.match(rendered, /\[assignment\] Lab 4 — Rubric > Correctness/);
+    assert.doesNotMatch(rendered, /General Lab 4 instructions/);
   });
 });
 

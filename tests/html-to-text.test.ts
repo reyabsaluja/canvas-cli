@@ -66,6 +66,26 @@ test("htmlToText preserves multiple pre blocks independently", () => {
   assert.match(text, /middle/);
 });
 
+test("htmlToText preserves preformatted blocks after structured HTML", () => {
+  const html = [
+    "<table>",
+    "<tr><th scope=\"row\">Step</th><td>Assemble</td></tr>",
+    "</table>",
+    "<details>",
+    "<summary>Starter code</summary>",
+    "<p>Use this skeleton.</p>",
+    "</details>",
+    "<pre>  MOV R0, #1\n  STR R0, [R1]</pre>",
+  ].join("");
+
+  const text = htmlToText(html);
+
+  assert.match(text, /- Step: Assemble/);
+  assert.match(text, /Details: Starter code/);
+  assert.match(text, /```\n {2}MOV R0, #1\n {2}STR R0, \[R1\]\n```/);
+  assert.doesNotMatch(text, /\x00PRE:0\x00/);
+});
+
 test("htmlToText preserves Canvas-style key-value tables", () => {
   const html = [
     "<h2>Assignment details</h2>",

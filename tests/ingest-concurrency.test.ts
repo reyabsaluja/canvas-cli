@@ -476,6 +476,132 @@ test("ingestCourse stores assignment descriptions as rich extracted documents", 
   });
 });
 
+test("ingestCourse downloads Canvas files embedded in page iframes", async () => {
+  await withTempCwd(async () => {
+    const course: Course = {
+      id: 17,
+      name: "ECE243",
+      courseCode: "ECE243H1",
+      termName: "Winter 2026",
+      isCurrent: true,
+    };
+
+    const downloadUrls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const headers =
+        init?.headers instanceof Headers
+          ? init.headers
+          : new Headers((init?.headers as Record<string, string> | undefined) ?? {});
+      downloadUrls.push(url);
+      assert.equal(headers.get("Authorization"), "Bearer token");
+      return new Response("Embedded lab spec details from iframe.\n", {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      });
+    };
+
+    try {
+      const client = {
+        async getCourseDetail() {
+          return {
+            id: course.id,
+            name: course.name,
+            course_code: course.courseCode,
+            syllabus_body: null,
+            start_at: null,
+            end_at: null,
+            term: null,
+            html_url: "https://canvas.example/courses/17",
+          };
+        },
+        async getAssignments() {
+          return [];
+        },
+        async getModulesSafe() {
+          return [];
+        },
+        async getModuleItemsSafe() {
+          return [];
+        },
+        async getFilesSafe() {
+          return [];
+        },
+        async getPagesSafe() {
+          return [
+            {
+              page_id: 10,
+              url: "lab-resources",
+              title: "Lab Resources",
+              html_url: "https://canvas.example/courses/17/pages/lab-resources",
+              updated_at: null,
+            },
+          ];
+        },
+        async getAnnouncementsSafe() {
+          return [];
+        },
+        async getDiscussionTopicsSafe() {
+          return [];
+        },
+        async getFrontPageSafe() {
+          return null;
+        },
+        async getPageBySlugSafe(_courseId: number, slug: string) {
+          if (slug !== "lab-resources") {
+            return null;
+          }
+          return {
+            title: "Lab Resources",
+            body:
+              '<p>Embedded spec:</p><iframe title="embedded-lab-spec.txt" src="https://canvas.example/courses/17/files/333/preview?wrap=1&amp;verifier=embed"></iframe>',
+            url: slug,
+          };
+        },
+        skippedEndpoints: [] as string[],
+        resetSkippedEndpoints() {},
+      } as any;
+
+      const result = await ingestCourse(
+        course,
+        client,
+        {
+          baseUrl: "https://canvas.example/api/v1",
+          accessToken: "token",
+        },
+        { refresh: false }
+      );
+
+      assert.deepEqual(downloadUrls, [
+        "https://canvas.example/courses/17/files/333/download?verifier=embed",
+      ]);
+      assert.equal(result.attachments.length, 1);
+      assert.equal(result.attachments[0]?.sourceType, "page_linked");
+      assert.equal(result.attachments[0]?.originalFilename, "embedded-lab-spec.txt");
+      assert.equal(result.attachments[0]?.status, "downloaded");
+      assert.match(
+        result.attachments[0]?.reason ?? "",
+        /linked in "Lab Resources"/
+      );
+
+      const embeddedText = await fs.readFile(
+        path.join(
+          result.coursePath,
+          "extracted",
+          "attachments",
+          "pages",
+          "embedded-lab-spec.txt.txt"
+        ),
+        "utf-8"
+      );
+      assert.match(embeddedText, /Embedded lab spec details from iframe/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
 test("ingestCourse enriches assignment extracts with rubric criteria from assignment detail", async () => {
   await withTempCwd(async () => {
     const course: Course = {
@@ -538,12 +664,14 @@ test("ingestCourse enriches assignment extracts with rubric criteria from assign
               ratings: [
                 {
                   description: "Excellent",
-                  long_description: "Complete and accurate.",
+                  long_description:
+                    "<p>Complete and accurate.</p><ul><li>Handles overflow cases</li><li>Includes waveform evidence</li></ul>",
                   points: 10,
                 },
                 {
                   description: "Needs work",
-                  long_description: "Missing edge cases.",
+                  long_description:
+                    "<table><tr><th>Issue</th><th>Impact</th></tr><tr><td>Missing edge cases</td><td>Deduction</td></tr></table>",
                   points: 5,
                 },
               ],
@@ -601,14 +729,210 @@ test("ingestCourse enriches assignment extracts with rubric criteria from assign
       assignmentExtract,
       /style guide \(https:\/\/canvas\.example\/courses\/17\/pages\/lab-4-style-guide\)/
     );
+    assert.match(assignmentExtract, /#### Rating: Excellent \(10 points\)/);
+    assert.match(assignmentExtract, /Complete and accurate\./);
+    assert.match(assignmentExtract, /- Handles overflow cases/);
+    assert.match(assignmentExtract, /- Includes waveform evidence/);
+    assert.match(assignmentExtract, /#### Rating: Needs work \(5 points\)/);
+    assert.match(assignmentExtract, /Table:/);
     assert.match(
       assignmentExtract,
-      /- Excellent \(10 points\): Complete and accurate\./
+      /Issue: Missing edge cases \| Impact: Deduction/
     );
-    assert.match(
-      assignmentExtract,
-      /- Needs work \(5 points\): Missing edge cases\./
-    );
+  });
+});
+
+test("ingestCourse follows links embedded in assignment rubrics", async () => {
+  await withTempCwd(async () => {
+    const course: Course = {
+      id: 17,
+      name: "ECE243",
+      courseCode: "ECE243H1",
+      termName: "Winter 2026",
+      isCurrent: true,
+    };
+
+    const downloadUrls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: string | URL | Request) => {
+      const url = String(input);
+      downloadUrls.push(url);
+      if (url === "https://canvas.example/courses/17/files/93/download?verifier=rubric") {
+        return new Response("Rubric exemplar content.\n", {
+          status: 200,
+          headers: { "content-type": "text/plain" },
+        });
+      }
+      if (url === "https://example.edu/style-guide") {
+        return new Response(
+          "<html><head><title>External Style Guide</title></head><body><p>Use concise waveform captions.</p></body></html>",
+          {
+            status: 200,
+            headers: { "content-type": "text/html" },
+          }
+        );
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    try {
+      const client = {
+        async getCourseDetail() {
+          return {
+            id: course.id,
+            name: course.name,
+            course_code: course.courseCode,
+            syllabus_body: null,
+            start_at: null,
+            end_at: null,
+            term: null,
+            html_url: "https://canvas.example/courses/17",
+          };
+        },
+        async getAssignments() {
+          return [
+            {
+              id: 42,
+              name: "Lab 4",
+              due_at: "2026-04-30T23:59:00.000Z",
+              html_url: "https://canvas.example/courses/17/assignments/42",
+              course_id: course.id,
+              has_submitted_submissions: false,
+            },
+          ];
+        },
+        async getAssignmentDetail() {
+          return {
+            id: 42,
+            name: "Lab 4",
+            due_at: "2026-04-30T23:59:00.000Z",
+            html_url: "https://canvas.example/courses/17/assignments/42",
+            course_id: course.id,
+            has_submitted_submissions: false,
+            description: null,
+            unlock_at: null,
+            lock_at: null,
+            points_possible: 25,
+            grading_type: "points",
+            submission_types: ["online_upload"],
+            allowed_extensions: [".pdf"],
+            rubric: [
+              {
+                id: "correctness",
+                description: "Correctness",
+                long_description: [
+                  '<p>Read the <a href="../pages/rubric-guide">rubric guide</a>.</p>',
+                  '<p><a class="instructure_file_link" title="rubric-example.txt" href="https://canvas.example/courses/17/files/93?verifier=rubric">Rubric example</a></p>',
+                  '<p><a href="https://example.edu/style-guide">external style guide</a></p>',
+                ].join(""),
+                points: 10,
+                ratings: [],
+              },
+            ],
+          };
+        },
+        async getModulesSafe() {
+          return [];
+        },
+        async getModuleItemsSafe() {
+          return [];
+        },
+        async getFilesSafe() {
+          return [];
+        },
+        async getPagesSafe() {
+          return [];
+        },
+        async getAnnouncementsSafe() {
+          return [];
+        },
+        async getDiscussionTopicsSafe() {
+          return [];
+        },
+        async getFrontPageSafe() {
+          return null;
+        },
+        async getPageBySlugSafe(_courseId: number, slug: string) {
+          if (slug !== "rubric-guide") {
+            return null;
+          }
+          return {
+            title: "Rubric Guide",
+            body: "<p>Rubric guide says document every edge case.</p>",
+            url: slug,
+          };
+        },
+        skippedEndpoints: [] as string[],
+        resetSkippedEndpoints() {},
+      } as any;
+
+      const result = await ingestCourse(
+        course,
+        client,
+        {
+          baseUrl: "https://canvas.example/api/v1",
+          accessToken: "token",
+        },
+        { refresh: false }
+      );
+
+      assert.ok(
+        result.pages.some((page) => page.pageId === "rubric-guide"),
+        "expected rubric-linked Canvas page to be fetched"
+      );
+      assert.ok(
+        result.attachments.some(
+          (attachment) =>
+            attachment.originalFilename === "rubric-example.txt" &&
+            attachment.sourceType === "assignment_linked" &&
+            attachment.status === "downloaded"
+        ),
+        "expected rubric-linked Canvas file to be downloaded"
+      );
+      assert.ok(
+        result.externalLinks?.some((link) =>
+          link.sources.some((source) =>
+            source.includes('assignment "Lab 4" rubric criterion "Correctness" details')
+          )
+        ),
+        "expected rubric external link to be captured with rubric provenance"
+      );
+      assert.deepEqual(downloadUrls.sort(), [
+        "https://canvas.example/courses/17/files/93/download?verifier=rubric",
+        "https://example.edu/style-guide",
+      ]);
+
+      const pageExtract = await fs.readFile(
+        path.join(result.coursePath, "extracted", "pages", "rubric-guide.txt"),
+        "utf-8"
+      );
+      assert.match(pageExtract, /document every edge case/);
+
+      const attachmentText = await fs.readFile(
+        path.join(
+          result.coursePath,
+          "extracted",
+          "attachments",
+          "assignments",
+          "rubric-example.txt.txt"
+        ),
+        "utf-8"
+      );
+      assert.match(attachmentText, /Rubric exemplar content/);
+
+      const externalLinkText = await fs.readFile(
+        path.join(
+          result.coursePath,
+          "extracted",
+          "external-links",
+          `${result.externalLinks?.[0]?.id}.txt`
+        ),
+        "utf-8"
+      );
+      assert.match(externalLinkText, /Use concise waveform captions/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 
@@ -889,6 +1213,147 @@ test("ingestCourse captures plain Canvas file links mixed with rich file links",
         "utf-8"
       );
       assert.match(plainNotesText, /downloaded .*files\/88\/download/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+test("ingestCourse downloads Canvas file URLs used as module URL items", async () => {
+  await withTempCwd(async () => {
+    const course: Course = {
+      id: 17,
+      name: "ECE243",
+      courseCode: "ECE243H1",
+      termName: "Winter 2026",
+      isCurrent: true,
+    };
+
+    const downloadUrls: string[] = [];
+    const metadataRequests: number[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const headers =
+        init?.headers instanceof Headers
+          ? init.headers
+          : new Headers((init?.headers as Record<string, string> | undefined) ?? {});
+
+      downloadUrls.push(url);
+      assert.equal(headers.get("Authorization"), "Bearer token");
+      return new Response("Timing worksheet content.\n", {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      });
+    };
+
+    try {
+      const client = {
+        async getCourseDetail() {
+          return {
+            id: course.id,
+            name: course.name,
+            course_code: course.courseCode,
+            syllabus_body: null,
+            start_at: null,
+            end_at: null,
+            term: null,
+            html_url: "https://canvas.example/courses/17",
+          };
+        },
+        async getAssignments() {
+          return [];
+        },
+        async getModulesSafe() {
+          return [
+            {
+              id: 9,
+              name: "Week 6",
+              position: 1,
+              items_count: 1,
+              items_url: "",
+            },
+          ];
+        },
+        async getModuleItemsSafe() {
+          return [
+            {
+              id: 91,
+              title: "Timing Worksheet",
+              type: "ExternalUrl",
+              position: 1,
+              external_url:
+                "https://canvas.example/courses/17/files/202?wrap=1&verifier=module",
+            },
+          ];
+        },
+        async getFilesSafe() {
+          return [];
+        },
+        async getFileSafe(fileId: number) {
+          metadataRequests.push(fileId);
+          return {
+            id: fileId,
+            display_name: "timing-worksheet.txt",
+            filename: "timing-worksheet.txt",
+            content_type: "text/plain",
+            size: 26,
+            url: `https://canvas.example/files/${fileId}/download`,
+            updated_at: null,
+            folder_id: null,
+          };
+        },
+        async getPagesSafe() {
+          return [];
+        },
+        async getAnnouncementsSafe() {
+          return [];
+        },
+        async getDiscussionTopicsSafe() {
+          return [];
+        },
+        async getFrontPageSafe() {
+          return null;
+        },
+        async getPageBySlugSafe() {
+          return null;
+        },
+        skippedEndpoints: [] as string[],
+        resetSkippedEndpoints() {},
+      } as any;
+
+      const result = await ingestCourse(
+        course,
+        client,
+        {
+          baseUrl: "https://canvas.example/api/v1",
+          accessToken: "token",
+        },
+        { refresh: false }
+      );
+
+      assert.deepEqual(metadataRequests, [202]);
+      assert.deepEqual(downloadUrls, ["https://canvas.example/files/202/download"]);
+      assert.equal(result.attachments.length, 1);
+      assert.equal(result.attachments[0]?.sourceType, "module_linked");
+      assert.equal(result.attachments[0]?.canvasFileId, 202);
+      assert.equal(result.attachments[0]?.originalFilename, "timing-worksheet.txt");
+      assert.match(
+        result.attachments[0]?.reason ?? "",
+        /Canvas file URL in module "Week 6" item "Timing Worksheet"/
+      );
+
+      const worksheetText = await fs.readFile(
+        path.join(
+          result.coursePath,
+          "extracted",
+          "attachments",
+          "modules",
+          "timing-worksheet.txt.txt"
+        ),
+        "utf-8"
+      );
+      assert.match(worksheetText, /Timing worksheet content/);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -2568,6 +3033,171 @@ test("ingestCourse captures assignment group grading breakdown", async () => {
       const jsonPath = path.join(coursePath, "grading-groups.json");
       const jsonContent = JSON.parse(await fs.readFile(jsonPath, "utf-8"));
       assert.equal(jsonContent.length, 2);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+test("ingestCourse captures quiz question bodies and their linked resources", async () => {
+  await withTempCwd(async () => {
+    const course: Course = {
+      id: 17,
+      name: "ECE243",
+      courseCode: "ECE243H1",
+      termName: "Winter 2026",
+      isCurrent: true,
+    };
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: string | URL | Request) => {
+      const url = String(input);
+
+      if (url === "https://public.example/reference-chart") {
+        return new Response(
+          "<html><body><h1>ARM Reference Chart</h1><p>MOV, LDR, STR instructions.</p></body></html>",
+          {
+            status: 200,
+            headers: { "content-type": "text/html; charset=utf-8" },
+          }
+        );
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    };
+
+    try {
+      const client = {
+        async getCourseDetail() {
+          return {
+            id: course.id,
+            name: course.name,
+            course_code: course.courseCode,
+            syllabus_body: null,
+            start_at: null,
+            end_at: null,
+            term: null,
+            html_url: "https://canvas.example/courses/17",
+          };
+        },
+        async getAssignments() {
+          return [];
+        },
+        async getModulesSafe() {
+          return [];
+        },
+        async getModuleItemsSafe() {
+          return [];
+        },
+        async getFilesSafe() {
+          return [];
+        },
+        async getPagesSafe() {
+          return [];
+        },
+        async getQuizzesSafe() {
+          return [
+            {
+              id: 9,
+              title: "Midterm Practice",
+              html_url: "https://canvas.example/courses/17/quizzes/9",
+              description: "<p>Practice questions for the midterm.</p>",
+              quiz_type: "practice_quiz",
+              due_at: null,
+              unlock_at: null,
+              lock_at: null,
+              points_possible: 0,
+              question_count: 3,
+              time_limit: null,
+              allowed_attempts: -1,
+              published: true,
+              assignment_id: null,
+            },
+          ];
+        },
+        async getQuizQuestionsSafe(_courseId: number, quizId: number) {
+          if (quizId !== 9) return [];
+          return [
+            {
+              id: 101,
+              quiz_id: 9,
+              question_name: "Question 1",
+              question_type: "multiple_choice_question",
+              question_text:
+                '<p>Given the <a href="https://public.example/reference-chart">ARM reference chart</a>, which instruction stores a register to memory?</p>',
+              points_possible: 1,
+              position: 1,
+            },
+            {
+              id: 102,
+              quiz_id: 9,
+              question_name: "Question 2",
+              question_type: "short_answer_question",
+              question_text:
+                "<p>Explain the difference between LDR and MOV.</p>",
+              points_possible: 2,
+              position: 2,
+            },
+          ];
+        },
+        async getAnnouncementsSafe() {
+          return [];
+        },
+        async getDiscussionTopicsSafe() {
+          return [];
+        },
+        async getFrontPageSafe() {
+          return null;
+        },
+        async getPageBySlugSafe() {
+          return null;
+        },
+        skippedEndpoints: [] as string[],
+        resetSkippedEndpoints() {},
+      } as any;
+
+      const result = await ingestCourse(
+        course,
+        client,
+        {
+          baseUrl: "https://canvas.example/api/v1",
+          accessToken: "token",
+        },
+        { refresh: false }
+      );
+
+      // Quiz question text should be in the extracted quiz file
+      const quizExtract = await fs.readFile(
+        path.join(result.coursePath, "extracted", "quizzes", "9.txt"),
+        "utf-8"
+      );
+      assert.match(quizExtract, /## Questions/);
+      assert.match(quizExtract, /### Question 1 \(1 pts\)/);
+      assert.match(quizExtract, /ARM reference chart/);
+      assert.match(quizExtract, /### Question 2 \(2 pts\)/);
+      assert.match(quizExtract, /difference between LDR and MOV/);
+
+      // External link from quiz question should be captured
+      assert.equal(result.externalLinks?.length, 1);
+      assert.match(result.externalLinks?.[0]?.title, /ARM [Rr]eference [Cc]hart/);
+      assert.equal(result.externalLinks?.[0]?.contentStatus, "captured");
+      assert.ok(
+        result.externalLinks?.[0]?.sources?.some((source: string) =>
+          source.includes("question")
+        )
+      );
+
+      // Verify external link content was captured
+      const externalExtract = await fs.readFile(
+        path.join(
+          result.coursePath,
+          "extracted",
+          "external-links",
+          `${result.externalLinks?.[0]?.id}.txt`
+        ),
+        "utf-8"
+      );
+      assert.match(externalExtract, /MOV, LDR, STR instructions/);
     } finally {
       globalThis.fetch = originalFetch;
     }

@@ -144,6 +144,16 @@ export interface CanvasQuiz {
   assignment_id?: number | null;
 }
 
+export interface CanvasQuizQuestion {
+  id: number;
+  quiz_id: number;
+  question_name: string;
+  question_type: string;
+  question_text: string;
+  points_possible: number;
+  position: number;
+}
+
 export interface CanvasCalendarEvent {
   id: number;
   title: string;

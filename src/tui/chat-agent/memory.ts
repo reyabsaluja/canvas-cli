@@ -221,6 +221,11 @@ function buildNextToolStep(
   question: string,
   observations: Observation[]
 ): string | null {
+  const threadReadStep = buildThreadReadNextStep(question, observations);
+  if (threadReadStep) {
+    return threadReadStep;
+  }
+
   const groundedObservations = observations.filter(
     (observation) => observation.status === "ok" && observation.content?.trim()
   );
@@ -278,6 +283,77 @@ function buildNextToolStep(
           .join(", ");
 
   return `Unresolved next step: you already found candidate sources but do not have grounded text yet. Reuse those breadcrumbs and call read_file on ${candidates} before running another search or answering from snippets.`;
+}
+
+function buildThreadReadNextStep(
+  question: string,
+  observations: Observation[]
+): string | null {
+  if (!questionNeedsThreadContent(question)) {
+    return null;
+  }
+
+  const hasThreadRead = observations.some(
+    (observation) =>
+      observation.tool === "read_thread" &&
+      observation.status === "ok" &&
+      observation.content?.trim()
+  );
+  if (hasThreadRead) {
+    return null;
+  }
+
+  const listObservation = [...observations]
+    .reverse()
+    .find(
+      (observation) =>
+        observation.tool === "list_announcements" &&
+        observation.status === "ok" &&
+        observation.content?.trim()
+    );
+  if (!listObservation) {
+    return null;
+  }
+
+  const titles = extractListedThreadTitles(listObservation.content ?? "");
+  const target =
+    titles.length === 0
+      ? "the best matching listed topic"
+      : titles.length === 1
+        ? `"${titles[0]}"`
+        : `one of ${titles.slice(0, 2).map((title) => `"${title}"`).join(" or ")}`;
+
+  return `Unresolved next step: list_announcements only lists candidate topics, not the full post or replies. Call read_thread with ${target} before answering what it says, whether an instructor clarified something, or what replies contain.`;
+}
+
+function questionNeedsThreadContent(question: string): boolean {
+  const asksAboutCoursePost =
+    /\b(announcements?|discussions?|threads?|posts?|repl(?:y|ies))\b/i.test(
+      question
+    );
+  const asksForPostDetail =
+    /\b(clarif(?:y|ied|ication)|instructor|prof(?:essor)?|said|says?|mention(?:ed)?|posted|details?|content|repl(?:y|ies)|response)\b/i.test(
+      question
+    ) || /\bwhat\s+(?:did|does)\b/i.test(question);
+
+  return asksForPostDetail && (asksAboutCoursePost || /\bprof(?:essor)?\b/i.test(question));
+}
+
+function extractListedThreadTitles(content: string): string[] {
+  const titles: string[] = [];
+  const seen = new Set<string>();
+
+  for (const line of content.split("\n")) {
+    const match = line.match(/^\s*\[[AD]\]\s+(.+?)(?:\s+—\s+|$)/);
+    const title = match?.[1]?.trim();
+    if (!title || seen.has(title)) {
+      continue;
+    }
+    seen.add(title);
+    titles.push(title);
+  }
+
+  return titles;
 }
 
 function buildEvidenceSufficientDirective(

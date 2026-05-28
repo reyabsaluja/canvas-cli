@@ -10,12 +10,16 @@ import type {
 } from "./types.js";
 import type { SelectedAttachment } from "./attachment-selection.js";
 import type {
-  CanvasAssignment,
   CanvasAttachment,
   CanvasCalendarEvent,
   CanvasQuiz,
+  CanvasQuizQuestion,
 } from "../canvas/types.js";
-import { extractLinkedFiles } from "../workspace/attachments.js";
+import {
+  extractLinkedFileFromUrl,
+  extractLinkedFiles,
+  type LinkedFile,
+} from "../workspace/attachments.js";
 import { makeCourseSlug, getCoursePath } from "./slug.js";
 import {
   fetchCourseContent,
@@ -30,6 +34,7 @@ import { downloadSelectedAttachments } from "./attachment-download.js";
 import { discoverLectures } from "./lecture-discovery.js";
 import { captureExternalCourseLinks } from "./external-link-capture.js";
 import { writeIngestionArtifacts } from "./storage.js";
+import { collectAssignmentRubricHtmlSources } from "./rich-text-sources.js";
 import path from "node:path";
 
 const MODULE_FILE_METADATA_CONCURRENCY = 4;
@@ -135,7 +140,7 @@ export async function ingestCourse(
   );
 
   // Step 5e: Download files linked in fetched Canvas pages, front page,
-  // syllabus, quizzes, calendar events, announcements, and discussion threads.
+  // syllabus, quizzes, quiz questions, calendar events, announcements, and discussion threads.
   const htmlLinkedAttachments = selectHtmlLinkedFiles(
     raw.fetchedPages,
     raw.frontPageBody,
@@ -150,7 +155,8 @@ export async function ingestCourse(
       ...assignmentAttachments,
       ...descriptionAttachments,
       ...discussionAttachments,
-    ]
+    ],
+    raw.quizQuestions
   );
 
   const capturedExternalLinks = await captureExternalCourseLinks({
@@ -159,6 +165,7 @@ export async function ingestCourse(
     modules,
     assignments: raw.assignments,
     quizzes: raw.quizzes,
+    quizQuestions: raw.quizQuestions,
     calendarEvents: raw.calendarEvents,
     frontPageBody: raw.frontPageBody,
     fetchedPages: raw.fetchedPages,
@@ -252,7 +259,8 @@ export async function ingestCourse(
     raw.fetchedPages,
     raw.announcementThreads,
     raw.discussionThreads,
-    capturedExternalLinks
+    capturedExternalLinks,
+    raw.quizQuestions
   );
 
   return {
@@ -278,6 +286,7 @@ export async function ingestCourse(
 /**
  * Select all module-linked files for download.
  * For each module item of type "File", find or fetch its download URL.
+ * Also captures URL/tool module items that are actually Canvas file links.
  * Skips files already selected by heuristic attachment selection.
  */
 async function selectModuleFiles(
@@ -288,6 +297,7 @@ async function selectModuleFiles(
   signal?: AbortSignal | null
 ): Promise<SelectedAttachment[]> {
   const selected: SelectedAttachment[] = [];
+  const tryMarkSelected = createAttachmentDeduper(alreadySelected);
   const alreadySelectedIds = new Set(
     alreadySelected.filter((a) => a.fileId != null).map((a) => a.fileId)
   );
@@ -301,21 +311,69 @@ async function selectModuleFiles(
   const candidates: Array<{
     modName: string;
     itemTitle: string;
-    contentId: number;
+    contentId: number | null;
+    linkedFile: LinkedFile | null;
     file: FileIndexEntry | null;
+    reason: string;
   }> = [];
+  const queuedCandidateKeys = new Set<string>();
+
+  const addCandidate = (candidate: {
+    modName: string;
+    itemTitle: string;
+    contentId: number | null;
+    linkedFile: LinkedFile | null;
+    reason: string;
+  }): void => {
+    const fileId =
+      candidate.contentId ??
+      (candidate.linkedFile
+        ? extractCanvasFileId(candidate.linkedFile.downloadUrl)
+        : null);
+
+    if (fileId !== null && alreadySelectedIds.has(fileId)) {
+      return;
+    }
+
+    const urlKey = candidate.linkedFile
+      ? normalizeAttachmentUrl(candidate.linkedFile.downloadUrl)
+      : null;
+    const key = fileId !== null ? `file:${fileId}` : `url:${urlKey}`;
+    if (queuedCandidateKeys.has(key)) {
+      return;
+    }
+    queuedCandidateKeys.add(key);
+
+    candidates.push({
+      ...candidate,
+      contentId: fileId,
+      file: fileId !== null ? fileById.get(fileId) ?? null : null,
+    });
+  };
 
   for (const mod of modules) {
     for (const item of mod.items) {
-      if (item.type !== "File") continue;
-      if (item.contentId === null) continue;
-      if (alreadySelectedIds.has(item.contentId)) continue;
-      candidates.push({
-        modName: mod.name,
-        itemTitle: item.title,
-        contentId: item.contentId,
-        file: fileById.get(item.contentId) ?? null,
-      });
+      if (item.type === "File") {
+        if (item.contentId === null) continue;
+        addCandidate({
+          modName: mod.name,
+          itemTitle: item.title,
+          contentId: item.contentId,
+          linkedFile: null,
+          reason: `module file in "${mod.name}"`,
+        });
+        continue;
+      }
+
+      for (const linkedFile of extractModuleItemCanvasFileLinks(item)) {
+        addCandidate({
+          modName: mod.name,
+          itemTitle: item.title,
+          contentId: null,
+          linkedFile,
+          reason: `Canvas file URL in module "${mod.name}" item "${item.title}"`,
+        });
+      }
     }
   }
 
@@ -328,12 +386,39 @@ async function selectModuleFiles(
           file: candidate.file,
           modName: candidate.modName,
           itemTitle: candidate.itemTitle,
+          contentId: candidate.contentId,
+          linkedFile: candidate.linkedFile,
+          reason: candidate.reason,
         };
       }
 
+      if (candidate.contentId === null) {
+        return candidate.linkedFile
+          ? {
+              file: null,
+              modName: candidate.modName,
+              itemTitle: candidate.itemTitle,
+              contentId: null,
+              linkedFile: candidate.linkedFile,
+              reason: candidate.reason,
+            }
+          : null;
+      }
+
       const fetched = await client.getFileSafe(candidate.contentId, signal);
-      if (!fetched) {
+      if (!fetched && !candidate.linkedFile) {
         return null;
+      }
+
+      if (!fetched) {
+        return {
+          file: null,
+          modName: candidate.modName,
+          itemTitle: candidate.itemTitle,
+          contentId: candidate.contentId,
+          linkedFile: candidate.linkedFile,
+          reason: candidate.reason,
+        };
       }
 
       return {
@@ -349,6 +434,9 @@ async function selectModuleFiles(
         },
         modName: candidate.modName,
         itemTitle: candidate.itemTitle,
+        contentId: candidate.contentId,
+        linkedFile: candidate.linkedFile,
+        reason: candidate.reason,
       };
     },
     signal
@@ -356,21 +444,48 @@ async function selectModuleFiles(
 
   for (const entry of resolved) {
     if (!entry) continue;
-    if (alreadySelectedIds.has(entry.file.id)) continue;
-    alreadySelectedIds.add(entry.file.id);
+    const fileId = entry.file?.id ?? entry.contentId;
+    const downloadUrl = entry.file?.url ?? entry.linkedFile?.downloadUrl;
+    if (!downloadUrl) continue;
+    if (!tryMarkSelected({ fileId, downloadUrl })) continue;
+    if (fileId !== null) {
+      alreadySelectedIds.add(fileId);
+    }
     selected.push({
       sourceType: "module_linked",
-      fileId: entry.file.id,
-      filename: entry.file.displayName || entry.itemTitle,
-      downloadUrl: entry.file.url,
-      reason: `module file in "${entry.modName}"`,
-      contentType: entry.file.contentType,
-      size: entry.file.size,
+      fileId,
+      filename:
+        entry.file?.displayName || entry.linkedFile?.title || entry.itemTitle,
+      downloadUrl,
+      reason: entry.reason,
+      contentType: entry.file?.contentType ?? null,
+      size: entry.file?.size ?? null,
       subfolder: "modules",
     });
   }
 
   return selected;
+}
+
+function extractModuleItemCanvasFileLinks(
+  item: ModuleIndexEntry["items"][number]
+): LinkedFile[] {
+  const links: LinkedFile[] = [];
+  const seen = new Set<string>();
+
+  for (const rawUrl of [item.externalUrl, item.htmlUrl]) {
+    if (!rawUrl) continue;
+    const linkedFile = extractLinkedFileFromUrl(rawUrl, item.title);
+    if (!linkedFile) continue;
+
+    const key =
+      normalizeAttachmentUrl(linkedFile.downloadUrl) ?? linkedFile.downloadUrl;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    links.push(linkedFile);
+  }
+
+  return links;
 }
 
 /**
@@ -422,7 +537,7 @@ function selectAssignmentAttachedFiles(
  * in the assignment body with download-ready URLs.
  */
 function selectDescriptionLinkedFiles(
-  assignments: CanvasAssignment[],
+  assignments: RawAssignmentRecord[],
   alreadySelected: SelectedAttachment[]
 ): SelectedAttachment[] {
   const selected: SelectedAttachment[] = [];
@@ -430,24 +545,44 @@ function selectDescriptionLinkedFiles(
 
   for (const assignment of assignments) {
     const desc = (assignment as any).description;
-    if (!desc || typeof desc !== "string") continue;
+    if (typeof desc === "string" && desc.trim().length > 0) {
+      const linked = extractLinkedFiles(desc);
+      for (const file of linked) {
+        if (!tryMarkSelected({ fileId: null, downloadUrl: file.downloadUrl })) {
+          continue;
+        }
 
-    const linked = extractLinkedFiles(desc);
-    for (const file of linked) {
-      if (!tryMarkSelected({ fileId: null, downloadUrl: file.downloadUrl })) {
-        continue;
+        selected.push({
+          sourceType: "assignment_linked",
+          fileId: null,
+          filename: file.title,
+          downloadUrl: file.downloadUrl,
+          reason: `linked in "${assignment.name}" description`,
+          contentType: null,
+          size: null,
+          subfolder: "assignments",
+        });
       }
+    }
 
-      selected.push({
-        sourceType: "assignment_linked",
-        fileId: null,
-        filename: file.title,
-        downloadUrl: file.downloadUrl,
-        reason: `linked in "${assignment.name}" description`,
-        contentType: null,
-        size: null,
-        subfolder: "assignments",
-      });
+    for (const source of collectAssignmentRubricHtmlSources(assignment)) {
+      const linked = extractLinkedFiles(source.html);
+      for (const file of linked) {
+        if (!tryMarkSelected({ fileId: null, downloadUrl: file.downloadUrl })) {
+          continue;
+        }
+
+        selected.push({
+          sourceType: "assignment_linked",
+          fileId: null,
+          filename: file.title,
+          downloadUrl: file.downloadUrl,
+          reason: `linked in "${assignment.name}" ${source.label}`,
+          contentType: null,
+          size: null,
+          subfolder: "assignments",
+        });
+      }
     }
   }
 
@@ -581,7 +716,8 @@ function selectHtmlLinkedFiles(
   calendarEvents: CanvasCalendarEvent[],
   announcementThreads: RawDiscussionThread[],
   discussionThreads: RawDiscussionThread[],
-  alreadySelected: SelectedAttachment[]
+  alreadySelected: SelectedAttachment[],
+  quizQuestions?: Map<number, CanvasQuizQuestion[]>
 ): SelectedAttachment[] {
   const selected: SelectedAttachment[] = [];
   const tryMarkSelected = createAttachmentDeduper(alreadySelected);
@@ -621,6 +757,21 @@ function selectHtmlLinkedFiles(
       sourceType: "quiz_linked",
       subfolder: "quizzes",
     });
+  }
+  if (quizQuestions) {
+    for (const [quizId, questions] of quizQuestions) {
+      const quiz = quizzes.find((q) => q.id === quizId);
+      const quizTitle = quiz?.title ?? `Quiz ${quizId}`;
+      for (const question of questions) {
+        if (!question.question_text) continue;
+        htmlSources.push({
+          title: `Quiz "${quizTitle}" question "${question.question_name}"`,
+          body: question.question_text,
+          sourceType: "quiz_linked",
+          subfolder: "quizzes",
+        });
+      }
+    }
   }
   for (const event of calendarEvents) {
     if (!event.description) continue;

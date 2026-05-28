@@ -45,7 +45,7 @@ const LIST_FILES_TOOL: ToolDefinition = {
 const SEARCH_COURSE_TOOL: ToolDefinition = {
   name: "search_course",
   description:
-    "Discovery-only keyword search of the course cache — modules, pages, assignments, announcements, discussions, attachments, and file index entries. Returns candidate matches, not full document text. After finding the right item, use read_file for readable artifacts or download_course_file for undownloaded course files. For compare, changed, or conflict questions, identify the best two course sources before concluding. QUERY TIPS: Use 2–4 specific keywords, not full questions. Good: 'late penalty submission'. Bad: 'what is the policy on late submissions'. The engine matches individual words and stems (grade matches grading), so pick distinctive terms.",
+    "Discovery-only keyword search of the course cache — modules, pages, assignments, grading breakdowns, announcements, discussions, attachments, and file index entries. Returns candidate matches, not full document text. After finding the right item, use read_file for readable artifacts or download_course_file for undownloaded course files. For compare, changed, or conflict questions, identify the best two course sources before concluding. QUERY TIPS: Use 2–4 specific keywords, not full questions. Good: 'late penalty submission'. Bad: 'what is the policy on late submissions'. The engine matches individual words and stems (grade matches grading), so pick distinctive terms.",
   parameters: {
     type: "object",
     properties: {
@@ -62,7 +62,7 @@ const SEARCH_COURSE_TOOL: ToolDefinition = {
 const DOWNLOAD_COURSE_FILE_TOOL: ToolDefinition = {
   name: "download_course_file",
   description:
-    "Download a file from the Canvas course by module item title. Use when you find a file via search_course that hasn't been downloaded yet.",
+    "Download a file from the Canvas course by module item title. Use only when search_course identifies an undownloaded Canvas File. If the result is already readable as a page, assignment, grading breakdown, announcement, discussion, external link, attachment, or previous read, use read_file instead. This tool reuses cached course text before attempting a Canvas download.",
   parameters: {
     type: "object",
     properties: {

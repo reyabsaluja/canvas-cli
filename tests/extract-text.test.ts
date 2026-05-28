@@ -227,3 +227,89 @@ test("extractFileText preserves Word document hyperlinks from relationships", as
     assert.doesNotMatch(text, /rIdSpec/);
   });
 });
+
+test("extractFileText preserves Office media descriptions and targets", async () => {
+  await withTempDir(async (tempDir) => {
+    const docxPath = path.join(tempDir, "figures.docx");
+    await fs.writeFile(
+      docxPath,
+      buildZipBuffer([
+        {
+          name: "word/document.xml",
+          content: [
+            "<w:document><w:body>",
+            "<w:p><w:r><w:t>Study the figure below.</w:t></w:r></w:p>",
+            "<w:p><w:r><w:drawing><wp:inline>",
+            '<wp:docPr id="1" name="datapath.png" title="Datapath sketch" descr="Pipeline datapath with forwarding arrows"/>',
+            "<a:graphic><a:graphicData><pic:pic><pic:blipFill>",
+            '<a:blip r:embed="rIdImage1"/>',
+            "</pic:blipFill></pic:pic></a:graphicData></a:graphic>",
+            "</wp:inline></w:drawing></w:r></w:p>",
+            "</w:body></w:document>",
+          ].join(""),
+        },
+        {
+          name: "word/_rels/document.xml.rels",
+          content: [
+            "<Relationships>",
+            '<Relationship Id="rIdImage1"',
+            ' Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"',
+            ' Target="media/datapath.png"/>',
+            "</Relationships>",
+          ].join(""),
+        },
+      ])
+    );
+
+    const docText = await extractFileText(docxPath, "figures.docx");
+
+    assert.match(docText, /## Body/);
+    assert.match(docText, /Study the figure below\./);
+    assert.match(docText, /## Media/);
+    assert.match(
+      docText,
+      /- Image: Pipeline datapath with forwarding arrows \| title: Datapath sketch \| name: datapath\.png \| target: word\/media\/datapath\.png/
+    );
+
+    const pptxPath = path.join(tempDir, "lecture-diagrams.pptx");
+    await fs.writeFile(
+      pptxPath,
+      buildZipBuffer([
+        {
+          name: "ppt/slides/slide1.xml",
+          content: [
+            "<p:sld><p:cSld><p:spTree>",
+            "<a:p><a:r><a:t>Pipeline timing</a:t></a:r></a:p>",
+            "<p:pic><p:nvPicPr>",
+            '<p:cNvPr id="4" name="Timing diagram" descr="Waveform showing enable pulses"/>',
+            "</p:nvPicPr><p:blipFill>",
+            '<a:blip r:embed="rId2"/>',
+            "</p:blipFill></p:pic>",
+            "</p:spTree></p:cSld></p:sld>",
+          ].join(""),
+        },
+        {
+          name: "ppt/slides/_rels/slide1.xml.rels",
+          content: [
+            "<Relationships>",
+            '<Relationship Id="rId2"',
+            ' Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"',
+            ' Target="../media/image2.png"/>',
+            "</Relationships>",
+          ].join(""),
+        },
+      ])
+    );
+
+    const deckText = await extractFileText(pptxPath, "lecture-diagrams.pptx");
+
+    assert.match(deckText, /## Slide 1/);
+    assert.match(deckText, /Pipeline timing/);
+    assert.match(deckText, /## Slide 1 Media/);
+    assert.match(
+      deckText,
+      /- Image: Waveform showing enable pulses \| name: Timing diagram \| target: ppt\/media\/image2\.png/
+    );
+    assert.doesNotMatch(deckText, /rId2/);
+  });
+});

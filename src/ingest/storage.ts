@@ -18,6 +18,7 @@ import type {
 import type {
   CanvasCalendarEvent,
   CanvasQuiz,
+  CanvasQuizQuestion,
   CanvasRubricCriterion,
 } from "../canvas/types.js";
 import type {
@@ -68,7 +69,8 @@ export async function writeIngestionArtifacts(
   fetchedPages?: Array<{ slug: string; title: string; body: string }>,
   rawAnnouncementThreads?: RawDiscussionThread[],
   rawDiscussionThreads?: RawDiscussionThread[],
-  capturedExternalLinks?: CapturedExternalLink[]
+  capturedExternalLinks?: CapturedExternalLink[],
+  quizQuestions?: Map<number, CanvasQuizQuestion[]>
 ): Promise<void> {
   debugFs("write", coursePath, "writing ingestion artifacts");
   // Ensure directory structure
@@ -151,7 +153,12 @@ export async function writeIngestionArtifacts(
     for (const quiz of quizzes) {
       await writeAtomic(
         getExtractedQuizPath(coursePath, quiz.id),
-        formatQuizText(quiz, rawQuizzesById.get(quiz.id), courseMeta.htmlUrl)
+        formatQuizText(
+          quiz,
+          rawQuizzesById.get(quiz.id),
+          courseMeta.htmlUrl,
+          quizQuestions?.get(quiz.id)
+        )
       );
     }
   }
@@ -390,7 +397,8 @@ function formatAssignmentText(
 function formatQuizText(
   quiz: QuizIndexEntry,
   rawQuiz: CanvasQuiz | undefined,
-  courseHtmlUrl: string | null
+  courseHtmlUrl: string | null,
+  questions?: CanvasQuizQuestion[]
 ): string {
   const lines = [`# ${quiz.title}`, ""];
 
@@ -446,6 +454,26 @@ function formatQuizText(
     lines.push(renderRichText(description, baseUrl) || "No quiz instructions provided.");
   } else {
     lines.push("No quiz instructions provided.");
+  }
+
+  if (questions && questions.length > 0) {
+    lines.push("");
+    lines.push("## Questions");
+    lines.push("");
+    const baseUrl = quiz.htmlUrl ?? rawQuiz?.html_url ?? courseHtmlUrl;
+    for (const question of questions) {
+      const pointsLabel =
+        question.points_possible !== null && question.points_possible !== undefined
+          ? ` (${question.points_possible} pts)`
+          : "";
+      lines.push(`### ${question.question_name}${pointsLabel}`);
+      lines.push("");
+      const text = renderRichText(question.question_text, baseUrl);
+      if (text) {
+        lines.push(text);
+      }
+      lines.push("");
+    }
   }
 
   return lines.join("\n") + "\n";
@@ -520,15 +548,16 @@ function formatRubricText(
       for (const rating of ratings) {
         const ratingLabel = toSingleLineText(rating.description, baseUrl) || "Rating";
         const ratingPoints = formatPointLabel(rating.points);
-        const ratingDetail = toSingleLineText(rating.long_description, baseUrl);
-        let line = `- ${ratingLabel}`;
-        if (ratingPoints) {
-          line += ` (${ratingPoints})`;
-        }
+        const ratingDetail = renderRichText(rating.long_description, baseUrl);
+        const ratingHeading = `#### Rating: ${ratingLabel}${
+          ratingPoints ? ` (${ratingPoints})` : ""
+        }`;
+        sections.push("");
+        sections.push(ratingHeading);
         if (ratingDetail && ratingDetail !== ratingLabel) {
-          line += `: ${ratingDetail}`;
+          sections.push("");
+          sections.push(ratingDetail);
         }
-        sections.push(line);
       }
     }
 
