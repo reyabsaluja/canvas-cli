@@ -1,4 +1,8 @@
-import type { CanvasRubricCriterion } from "../canvas/types.js";
+import type {
+  CanvasRubricAssessment,
+  CanvasRubricCriterion,
+  CanvasSubmissionComment,
+} from "../canvas/types.js";
 
 export interface AssignmentRubricHtmlSource {
   label: string;
@@ -37,6 +41,62 @@ export function collectAssignmentRubricHtmlSources(assignment: {
         rating.long_description
       );
     }
+  }
+
+  return sources;
+}
+
+export function collectAssignmentSubmissionCommentHtmlSources(assignment: {
+  submission?: {
+    submission_comments?: CanvasSubmissionComment[] | null;
+  } | null;
+}): AssignmentRubricHtmlSource[] {
+  const sources: AssignmentRubricHtmlSource[] = [];
+  const comments = assignment.submission?.submission_comments ?? [];
+
+  for (const comment of comments) {
+    const author = normalizeRubricLabel(comment.author_name, "someone");
+    const label = `submission feedback by ${author}`;
+    addRubricHtmlSource(sources, label, comment.html_comment);
+    if (comment.html_comment !== comment.comment) {
+      addRubricHtmlSource(sources, label, comment.comment);
+    }
+  }
+
+  return sources;
+}
+
+export function collectAssignmentSubmissionRubricAssessmentHtmlSources(assignment: {
+  rubric?: CanvasRubricCriterion[] | null;
+  submission?: {
+    rubric_assessment?: CanvasRubricAssessment | null;
+  } | null;
+}): AssignmentRubricHtmlSource[] {
+  const sources: AssignmentRubricHtmlSource[] = [];
+  const assessment = assignment.submission?.rubric_assessment;
+  if (!assessment || typeof assessment !== "object") {
+    return sources;
+  }
+
+  const criterionLabelById = new Map<string, string>();
+  for (const criterion of assignment.rubric ?? []) {
+    criterionLabelById.set(
+      String(criterion.id),
+      normalizeRubricLabel(criterion.description, `criterion ${criterion.id}`)
+    );
+  }
+
+  for (const [criterionId, row] of Object.entries(assessment)) {
+    if (!row || typeof row !== "object") {
+      continue;
+    }
+    const criterionLabel =
+      criterionLabelById.get(criterionId) ?? `criterion ${criterionId}`;
+    addRubricHtmlSource(
+      sources,
+      `rubric assessment comment for "${criterionLabel}"`,
+      row.comments
+    );
   }
 
   return sources;

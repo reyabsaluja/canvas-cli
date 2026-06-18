@@ -29,6 +29,8 @@ test("integration: ingest pipeline end-to-end with mock API", async (t) => {
     assert.equal(raw.modules.length, 2);
     assert.equal(raw.files.length, 2);
     assert.equal(raw.pages.length, 2);
+    assert.equal(raw.tabs.length, 1);
+    assert.equal(raw.tabs[0].label, "Course Zoom");
   });
 
   await t.test("fetchCourseContent resolves module items", async () => {
@@ -40,6 +42,15 @@ test("integration: ingest pipeline end-to-end with mock API", async (t) => {
     assert.equal(week1.items.length, 2);
     assert.equal(week1.items[0].title, "Welcome Page");
     assert.equal(week1.items[1].title, "Syllabus PDF");
+
+    const week2 = raw.modules.find((m) => m.name === "Week 2: Variables");
+    assert.ok(week2);
+    assert.deepEqual(week2.prerequisite_module_ids, [10]);
+    assert.equal(week2.require_sequential_progress, true);
+    assert.equal(
+      week2.items[0].completion_requirement?.type,
+      "must_mark_done"
+    );
   });
 
   await t.test("normalizeCourseContent produces structured indices", async () => {
@@ -54,12 +65,20 @@ test("integration: ingest pipeline end-to-end with mock API", async (t) => {
     assert.equal(normalized.modules.length, 2);
     assert.equal(normalized.modules[0].name, "Week 1: Getting Started");
     assert.equal(normalized.modules[0].items.length, 2);
+    assert.deepEqual(normalized.modules[1].prerequisiteModuleIds, [10]);
+    assert.equal(normalized.modules[1].requiresSequentialProgress, true);
+    assert.equal(
+      normalized.modules[1].items[0].completionRequirement?.type,
+      "must_mark_done"
+    );
 
     assert.equal(normalized.files.length, 2);
     assert.equal(normalized.files[0].displayName, "syllabus.pdf");
 
     assert.equal(normalized.pages.length, 2);
     assert.equal(normalized.pages[0].title, "Welcome to CS101");
+    assert.equal(normalized.tabs.length, 1);
+    assert.equal(normalized.tabs[0].fullUrl, "https://zoom.example/cs101");
   });
 
   await t.test("fetchCourseContent handles course with no modules/files/pages", async () => {
@@ -70,6 +89,7 @@ test("integration: ingest pipeline end-to-end with mock API", async (t) => {
     assert.equal(raw.modules.length, 0);
     assert.equal(raw.files.length, 0);
     assert.equal(raw.pages.length, 0);
+    assert.equal(raw.tabs.length, 0);
     assert.equal(raw.courseDetail.name, "Data Structures and Algorithms");
   });
 
@@ -81,6 +101,61 @@ test("integration: ingest pipeline end-to-end with mock API", async (t) => {
     assert.ok(lab1);
     assert.ok(lab1.description?.includes("Hello World"));
     assert.equal(lab1.points_possible, 10);
+  });
+
+  await t.test("ingest fetches assignment date overrides and peer review dates", async () => {
+    const client = new CanvasClient(config, { maxRetries: 0 });
+    const raw = await fetchCourseContent(client, 101);
+
+    const lab2 = raw.assignments.find(
+      (a) => a.name === "Lab 2: Variables and Types"
+    );
+    assert.ok(lab2);
+    assert.equal(
+      lab2.date_details?.overrides?.[0]?.title,
+      "Section B extension"
+    );
+    assert.equal(
+      lab2.date_details?.peer_review_sub_assignment?.due_at,
+      "2026-06-12T23:59:00Z"
+    );
+
+    const normalized = normalizeCourseContent(raw);
+    const normalizedLab2 = normalized.assignments.find(
+      (a) => a.name === "Lab 2: Variables and Types"
+    );
+    assert.equal(normalizedLab2?.dateDetails?.overrideCount, 1);
+    assert.equal(
+      normalizedLab2?.dateDetails?.overrides[0]?.courseSectionId,
+      42
+    );
+    assert.equal(
+      normalizedLab2?.dateDetails?.peerReviewSubAssignment?.overrides[0]
+        ?.dueAt,
+      "2026-06-14T23:59:00Z"
+    );
+  });
+
+  await t.test("ingest fetches current-user submission feedback", async () => {
+    const client = new CanvasClient(config, { maxRetries: 0 });
+    const raw = await fetchCourseContent(client, 101);
+
+    assert.equal(raw.submissions.length, 1);
+    const midterm = raw.assignments.find((a) => a.name === "Midterm Exam");
+    assert.ok(midterm);
+    assert.equal(midterm.submission?.assignment_id, 1003);
+    assert.match(
+      midterm.submission?.submission_comments?.[0]?.html_comment ?? "",
+      /loop invariant feedback/
+    );
+    assert.equal(
+      midterm.submission?.rubric_assessment?.["crit-analysis"]?.points,
+      7
+    );
+    assert.match(
+      midterm.submission?.rubric_assessment?.["crit-analysis"]?.comments ?? "",
+      /explain initialization/
+    );
   });
 
   await t.test("ingest handles pages that link to other Canvas pages", async () => {

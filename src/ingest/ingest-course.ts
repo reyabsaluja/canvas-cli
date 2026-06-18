@@ -14,6 +14,7 @@ import type {
   CanvasCalendarEvent,
   CanvasQuiz,
   CanvasQuizQuestion,
+  CanvasSubmissionComment,
 } from "../canvas/types.js";
 import {
   extractLinkedFileFromUrl,
@@ -34,7 +35,11 @@ import { downloadSelectedAttachments } from "./attachment-download.js";
 import { discoverLectures } from "./lecture-discovery.js";
 import { captureExternalCourseLinks } from "./external-link-capture.js";
 import { writeIngestionArtifacts } from "./storage.js";
-import { collectAssignmentRubricHtmlSources } from "./rich-text-sources.js";
+import {
+  collectAssignmentRubricHtmlSources,
+  collectAssignmentSubmissionCommentHtmlSources,
+  collectAssignmentSubmissionRubricAssessmentHtmlSources,
+} from "./rich-text-sources.js";
 import path from "node:path";
 
 const MODULE_FILE_METADATA_CONCURRENCY = 4;
@@ -81,6 +86,7 @@ export async function ingestCourse(
     modules,
     files,
     pages,
+    tabs,
     quizzes,
     calendarEvents,
     announcements,
@@ -139,7 +145,19 @@ export async function ingestCourse(
     ]
   );
 
-  // Step 5e: Download files linked in fetched Canvas pages, front page,
+  // Step 5e: Download files attached to, or linked from, visible submission feedback.
+  const submissionCommentAttachments = selectSubmissionCommentFiles(
+    raw.assignments,
+    [
+      ...heuristicAttachments,
+      ...moduleAttachments,
+      ...assignmentAttachments,
+      ...descriptionAttachments,
+      ...discussionAttachments,
+    ]
+  );
+
+  // Step 5f: Download files linked in fetched Canvas pages, front page,
   // syllabus, quizzes, quiz questions, calendar events, announcements, and discussion threads.
   const htmlLinkedAttachments = selectHtmlLinkedFiles(
     raw.fetchedPages,
@@ -155,6 +173,7 @@ export async function ingestCourse(
       ...assignmentAttachments,
       ...descriptionAttachments,
       ...discussionAttachments,
+      ...submissionCommentAttachments,
     ],
     raw.quizQuestions
   );
@@ -164,6 +183,7 @@ export async function ingestCourse(
     courseHtmlUrl: courseMeta.htmlUrl,
     modules,
     assignments: raw.assignments,
+    tabs,
     quizzes: raw.quizzes,
     quizQuestions: raw.quizQuestions,
     calendarEvents: raw.calendarEvents,
@@ -182,6 +202,7 @@ export async function ingestCourse(
     ...assignmentAttachments,
     ...descriptionAttachments,
     ...discussionAttachments,
+    ...submissionCommentAttachments,
     ...htmlLinkedAttachments,
   ];
 
@@ -225,6 +246,7 @@ export async function ingestCourse(
       moduleItems: totalModuleItems,
       files: files.length,
       pages: pages.length,
+      tabs: tabs.length,
       syllabusCandidates: syllabusCandidates.length,
       lectures: lectures.length,
       attachmentsDownloaded: downloaded.length,
@@ -242,6 +264,7 @@ export async function ingestCourse(
     modules,
     files,
     pages,
+    tabs,
     quizzes,
     calendarEvents,
     announcements,
@@ -269,6 +292,7 @@ export async function ingestCourse(
     modules,
     files,
     pages,
+    tabs,
     quizzes,
     calendarEvents,
     announcements,
@@ -700,6 +724,129 @@ function getCanvasAttachments(value: {
     attachments.push(...value.attachments);
   }
   return attachments;
+}
+
+/**
+ * Extract files attached to, or linked from, visible feedback on the current
+ * user's assignment submissions. These commonly include annotated rubrics,
+ * marked-up PDFs, or "please revise using this file" resources.
+ */
+function selectSubmissionCommentFiles(
+  assignments: RawAssignmentRecord[],
+  alreadySelected: SelectedAttachment[]
+): SelectedAttachment[] {
+  const selected: SelectedAttachment[] = [];
+  const tryMarkSelected = createAttachmentDeduper(alreadySelected);
+
+  const addSelectedFeedbackFile = (
+    file: {
+      fileId: number | null;
+      filename: string;
+      downloadUrl: string;
+      contentType: string | null;
+      size: number | null;
+    },
+    reason: string
+  ): void => {
+    if (!tryMarkSelected({ fileId: file.fileId, downloadUrl: file.downloadUrl })) {
+      return;
+    }
+
+    selected.push({
+      sourceType: "submission_comment_attachment",
+      fileId: file.fileId,
+      filename: file.filename,
+      downloadUrl: file.downloadUrl,
+      reason,
+      contentType: file.contentType,
+      size: file.size,
+      subfolder: "submission-comments",
+    });
+  };
+
+  const addFile = (
+    assignment: RawAssignmentRecord,
+    comment: CanvasSubmissionComment,
+    file: {
+      fileId: number | null;
+      filename: string;
+      downloadUrl: string;
+      contentType: string | null;
+      size: number | null;
+    },
+    reasonPrefix: string
+  ): void => {
+    const author = comment.author_name?.trim()
+      ? ` by ${comment.author_name.trim()}`
+      : "";
+    addSelectedFeedbackFile(
+      file,
+      `${reasonPrefix} on submission feedback for "${assignment.name}"${author}`
+    );
+  };
+
+  for (const assignment of assignments) {
+    const comments = assignment.submission?.submission_comments ?? [];
+    for (const comment of comments) {
+      for (const attachment of getCanvasAttachments(comment)) {
+        if (!attachment.url) continue;
+        const fileId = Number.isFinite(attachment.id) ? attachment.id : null;
+        addFile(
+          assignment,
+          comment,
+          {
+            fileId,
+            filename:
+              attachment.display_name ||
+              attachment.filename ||
+              `submission-feedback-${assignment.id}-${comment.id}-${fileId ?? selected.length + 1}`,
+            downloadUrl: attachment.url,
+            contentType: attachment.content_type ?? null,
+            size: attachment.size ?? null,
+          },
+          "attached"
+        );
+      }
+
+      for (const source of collectAssignmentSubmissionCommentHtmlSources({
+        submission: { submission_comments: [comment] },
+      })) {
+        const linked = extractLinkedFiles(source.html);
+        for (const file of linked) {
+          addFile(
+            assignment,
+            comment,
+            {
+              fileId: null,
+              filename: file.title,
+              downloadUrl: file.downloadUrl,
+              contentType: null,
+              size: null,
+            },
+            "linked"
+          );
+        }
+      }
+    }
+
+    for (const source of collectAssignmentSubmissionRubricAssessmentHtmlSources(assignment)) {
+      const linked = extractLinkedFiles(source.html);
+      for (const file of linked) {
+        addSelectedFeedbackFile(
+          {
+            fileId: null,
+            filename: file.title,
+            downloadUrl: file.downloadUrl,
+            contentType: null,
+            size: null,
+          },
+          `linked in ${source.label} for "${assignment.name}"`
+        );
+      }
+    }
+  }
+
+  return selected;
 }
 
 /**

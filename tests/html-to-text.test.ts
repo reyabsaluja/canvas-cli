@@ -24,9 +24,9 @@ test("htmlToText preserves structure from lists, tables, figures, and embeds", (
   assert.match(text, /### Lab Instructions/);
   assert.match(
     text,
-    /3\. Read the shared spec \(https:\/\/canvas\.example\/courses\/17\/pages\/shared-spec\)/
+    /3\. Step 3: Read the shared spec \(https:\/\/canvas\.example\/courses\/17\/pages\/shared-spec\)/
   );
-  assert.match(text, /4\. Submit your waveform/);
+  assert.match(text, /4\. Step 4: Submit your waveform/);
   assert.match(text, /Table:\n- Item: Lab 4 \| Weight: 10%/);
   assert.match(
     text,
@@ -36,6 +36,24 @@ test("htmlToText preserves structure from lists, tables, figures, and embeds", (
     text,
     /Embedded content: ALU walkthrough \(https:\/\/canvas\.example\/media\/demo\)/
   );
+});
+
+test("htmlToText labels ordered list items so step numbers are searchable", () => {
+  const html = [
+    "<h2>Procedure</h2>",
+    "<ol>",
+    "<li>Open the starter project.</li>",
+    "<li>Step 2: Run the baseline tests.</li>",
+    "<li>Capture the waveform before writing the analysis.</li>",
+    "</ol>",
+  ].join("");
+
+  const text = htmlToText(html);
+
+  assert.match(text, /1\. Step 1: Open the starter project\./);
+  assert.match(text, /2\. Step 2: Run the baseline tests\./);
+  assert.match(text, /3\. Step 3: Capture the waveform before writing the analysis\./);
+  assert.doesNotMatch(text, /2\. Step 2: Step 2:/);
 });
 
 test("htmlToText preserves preformatted block indentation", () => {

@@ -6,8 +6,13 @@ import { extractFileBufferText } from "../extract/extract-text.js";
 import { decodeEntities, htmlToText } from "../format/html-to-text.js";
 import { mapWithConcurrency } from "./concurrency.js";
 import type { RawAssignmentRecord, RawDiscussionThread } from "./fetch-course-content.js";
-import { collectAssignmentRubricHtmlSources } from "./rich-text-sources.js";
+import {
+  collectAssignmentRubricHtmlSources,
+  collectAssignmentSubmissionCommentHtmlSources,
+  collectAssignmentSubmissionRubricAssessmentHtmlSources,
+} from "./rich-text-sources.js";
 import type {
+  CourseTabIndexEntry,
   ExternalLinkContentStatus,
   ExternalLinkIndexEntry,
   ModuleIndexEntry,
@@ -58,6 +63,7 @@ export async function captureExternalCourseLinks(options: {
   courseHtmlUrl: string | null;
   modules: ModuleIndexEntry[];
   assignments: RawAssignmentRecord[];
+  tabs?: CourseTabIndexEntry[];
   quizzes: CanvasQuiz[];
   quizQuestions?: Map<number, CanvasQuizQuestion[]>;
   calendarEvents: CanvasCalendarEvent[];
@@ -90,6 +96,38 @@ export async function captureExternalCourseLinks(options: {
       sources: [candidate.source],
     });
   };
+
+  for (const tab of options.tabs ?? []) {
+    const resolvedTabUrls = [
+      tab.fullUrl,
+      tab.externalUrl,
+    ].filter((url): url is string => Boolean(url));
+    const tabUrls =
+      resolvedTabUrls.length > 0
+        ? resolvedTabUrls
+        : [tab.url, tab.htmlUrl].filter((url): url is string => Boolean(url));
+    const seenTabUrls = new Set<string>();
+    for (const url of tabUrls) {
+      const normalizedUrl = normalizeExternalUrl(url);
+      if (!normalizedUrl || seenTabUrls.has(normalizedUrl)) {
+        continue;
+      }
+      seenTabUrls.add(normalizedUrl);
+      if (
+        !isCapturableExternalUrl(normalizedUrl, {
+          courseId: options.courseId,
+          canvasOrigin,
+        })
+      ) {
+        continue;
+      }
+      addCandidate({
+        url: normalizedUrl,
+        title: tab.label,
+        source: `course navigation tab "${tab.label}"`,
+      });
+    }
+  }
 
   for (const module of options.modules) {
     for (const item of module.items) {
@@ -146,6 +184,22 @@ export async function captureExternalCourseLinks(options: {
     }
 
     for (const source of collectAssignmentRubricHtmlSources(assignment)) {
+      addHtmlCandidates(
+        source.html,
+        `assignment "${assignment.name}" ${source.label}`,
+        assignment.html_url
+      );
+    }
+
+    for (const source of collectAssignmentSubmissionCommentHtmlSources(assignment)) {
+      addHtmlCandidates(
+        source.html,
+        `assignment "${assignment.name}" ${source.label}`,
+        assignment.html_url
+      );
+    }
+
+    for (const source of collectAssignmentSubmissionRubricAssessmentHtmlSources(assignment)) {
       addHtmlCandidates(
         source.html,
         `assignment "${assignment.name}" ${source.label}`,

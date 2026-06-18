@@ -425,6 +425,89 @@ test("course search rendering uses structured search results from the shared art
   });
 });
 
+test("course search maps submission-format questions to deliverable wording", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "attachments"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "attachments", "lab4-spec.pdf.txt"),
+      [
+        "# Lab 4 Specification",
+        "",
+        "## Deliverables",
+        "",
+        "Deliverable: PDF report",
+        "Include code archive.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache = makeCourseCache(coursePath);
+    const search = await searchCourseKnowledge(
+      cache,
+      "what format should I submit in"
+    );
+
+    assert.equal(search.status, "ok");
+    if (search.status === "ok") {
+      assert.equal(search.matches[0]?.artifact.kind, "attachment");
+      assert.equal(search.matches[0]?.artifact.title, "lab4-spec.pdf");
+      assert.match(search.matches[0]?.excerpt ?? "", /PDF report/i);
+    }
+
+    const rendered = renderCourseArtifactSearchResult(
+      search,
+      "what format should I submit in"
+    );
+    assert.match(rendered, /\[attachment\] lab4-spec\.pdf — Deliverables/);
+    assert.match(rendered, /PDF report/i);
+  });
+});
+
+test("course search maps template questions to starter archive wording", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "attachments"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "attachments", "starter.zip.txt"),
+      [
+        "ZIP: starter.zip (2 files)",
+        "",
+        "Contents:",
+        "  src/main.c (2KB)",
+        "  README.md (1KB)",
+        "",
+        "--- README.md ---",
+        "Use the provided skeleton and starter files for Lab 4.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache = makeCourseCache(coursePath);
+    const search = await searchCourseKnowledge(
+      cache,
+      "where is the template",
+      { limit: 1 }
+    );
+
+    assert.equal(search.status, "ok");
+    if (search.status === "ok") {
+      assert.equal(search.matches[0]?.artifact.kind, "attachment");
+      assert.equal(search.matches[0]?.artifact.title, "starter.zip");
+      assert.match(
+        search.matches[0]?.excerpt ?? "",
+        /provided skeleton and starter files/i
+      );
+    }
+  });
+});
+
 test("course search renders the matching section instead of the document opening", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
@@ -612,6 +695,206 @@ test("course search ignores generic question scaffolding when ranking sections",
     assert.match(rendered, /\[attachment\] lab4-spec\.pdf — Calibration/);
     assert.match(rendered, /calibration threshold is 0\.42/i);
     assert.doesNotMatch(rendered, /course assignment overview/);
+  });
+});
+
+test("course search maps extension questions to late-submission announcements", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "announcements"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "announcements", "77.txt"),
+      [
+        "# Lab 4 update",
+        "",
+        "Posted: 2026-04-10T12:00:00.000Z",
+        "Author: Prof. Ada",
+        "",
+        "Late submissions for Lab 4 will be accepted until Monday at noon without penalty.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache = makeCourseCache(coursePath);
+    cache.announcements = [
+      {
+        id: 77,
+        title: "Lab 4 update",
+        postedAt: "2026-04-10T12:00:00.000Z",
+        htmlUrl: "https://canvas.example/courses/17/discussion_topics/77",
+        userName: "Prof. Ada",
+        hasMessage: true,
+        messageFileLinkCount: 0,
+        threadEntryCount: 0,
+        participantCount: 1,
+        replyFileLinkCount: 0,
+      },
+    ];
+
+    const search = await searchCourseKnowledge(
+      cache,
+      "what did the prof say about extensions"
+    );
+
+    assert.equal(search.status, "ok");
+    if (search.status === "ok") {
+      assert.equal(search.matches[0]?.artifact.kind, "announcement");
+      assert.equal(search.matches[0]?.artifact.title, "Lab 4 update");
+      assert.match(
+        search.matches[0]?.excerpt ?? "",
+        /Late submissions for Lab 4 will be accepted until Monday at noon/i
+      );
+    }
+  });
+});
+
+test("course search maps late turn-in wording to extension request announcements", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "assignments"), {
+      recursive: true,
+    });
+    await fs.mkdir(path.join(coursePath, "extracted", "announcements"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "assignments", "42.txt"),
+      [
+        "# Lab 4",
+        "",
+        "## Key facts",
+        "",
+        "Due date: 2026-04-18T23:59:00.000Z",
+        "Points: 100 points",
+        "",
+        "## Description",
+        "",
+        "Submit report.pdf to Canvas.",
+      ].join("\n"),
+      "utf-8"
+    );
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "announcements", "77.txt"),
+      [
+        "# Extension request policy",
+        "",
+        "Posted: 2026-04-10T12:00:00.000Z",
+        "Author: Prof. Ada",
+        "",
+        "Approved extension requests move the Lab 4 deadline to Monday at noon.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache = makeCourseCache(coursePath);
+    cache.assignments = [
+      {
+        id: 42,
+        name: "Lab 4",
+        dueAt: "2026-04-18T23:59:00.000Z",
+        unlockAt: null,
+        lockAt: null,
+        pointsPossible: 100,
+        gradingType: "points",
+        submissionTypes: ["online_upload"],
+        htmlUrl: "https://canvas.example/courses/17/assignments/42",
+        hasDescription: true,
+        descriptionLinkCount: 0,
+      },
+    ];
+    cache.announcements = [
+      {
+        id: 77,
+        title: "Extension request policy",
+        postedAt: "2026-04-10T12:00:00.000Z",
+        htmlUrl: "https://canvas.example/courses/17/discussion_topics/77",
+        userName: "Prof. Ada",
+        hasMessage: true,
+        messageFileLinkCount: 0,
+        threadEntryCount: 0,
+        participantCount: 1,
+        replyFileLinkCount: 0,
+      },
+    ];
+
+    const search = await searchCourseKnowledge(
+      cache,
+      "can I turn lab 4 in late",
+      { limit: 1 }
+    );
+
+    assert.equal(search.status, "ok");
+    if (search.status === "ok") {
+      assert.equal(search.matches[0]?.artifact.kind, "announcement");
+      assert.equal(search.matches[0]?.artifact.title, "Extension request policy");
+      assert.match(
+        search.matches[0]?.excerpt ?? "",
+        /Approved extension requests move the Lab 4 deadline to Monday at noon/i
+      );
+    }
+  });
+});
+
+test("course search maps turn-in questions to upload submission sections", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "assignments"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "assignments", "42.txt"),
+      [
+        "# Lab 4",
+        "",
+        "## Overview",
+        "",
+        "Lab 4 studies branch hazards and timing diagrams.",
+        "",
+        "## Submission package",
+        "",
+        "Upload report.pdf and starter.zip together in Canvas.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache = makeCourseCache(coursePath);
+    cache.assignments = [
+      {
+        id: 42,
+        name: "Lab 4",
+        dueAt: "2026-04-18T23:59:00.000Z",
+        unlockAt: null,
+        lockAt: null,
+        pointsPossible: 100,
+        gradingType: "points",
+        submissionTypes: ["online_upload"],
+        htmlUrl: "https://canvas.example/courses/17/assignments/42",
+        hasDescription: true,
+        descriptionLinkCount: 0,
+      },
+    ];
+
+    const search = await searchCourseKnowledge(
+      cache,
+      "where do I turn in lab 4",
+      { limit: 1 }
+    );
+
+    assert.equal(search.status, "ok");
+    if (search.status === "ok") {
+      assert.equal(search.matches[0]?.artifact.kind, "assignment");
+      assert.equal(search.matches[0]?.artifact.title, "Lab 4");
+      assert.equal(search.matches[0]?.section?.section, "Submission package");
+      assert.match(
+        search.matches[0]?.excerpt ?? "",
+        /Upload report\.pdf and starter\.zip together in Canvas/i
+      );
+    }
   });
 });
 

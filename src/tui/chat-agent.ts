@@ -1,5 +1,6 @@
 import type { WorkspaceAnswer } from "../ask/types.js";
 import type { Observation, ToolExecutionResult } from "../agent/observation.js";
+import { isGroundedContentObservation } from "../agent/observation-relevance.js";
 import { appendObservation } from "../agent/run-state.js";
 import { decideWorkspaceRetrieval } from "../agent/retrieval-gate.js";
 import { verifyWorkspaceAnswer } from "../agent/verify.js";
@@ -36,11 +37,15 @@ import {
   resolveToolTurnVerificationObservations,
   selectArtifactSupportObservations,
   selectComplementaryRecoveryReadArtifactId,
+  selectComplementarySearchToolCalls,
+  selectNoInfoRecoveryToolCalls,
   selectRecoveryReadArtifactId,
   selectThreadRecoveryTopic,
+  selectUngroundedSearchRecoveryReadArtifactId,
   shouldContinueToolLoopAfterGateRead,
-  shouldRecoverFromToolLoop,
   shouldGroundUnverifiedAnswer,
+  shouldRecoverFromNoInfoAnswer,
+  shouldRecoverFromToolLoop,
   shouldRegenerateAnswerAfterRecoveryRead,
 } from "./chat-agent/verification.js";
 
@@ -259,7 +264,38 @@ async function runToolLoopTurn(
   const observationsBeforeRecovery = supportingObservations;
   const attemptedRecoveryArtifactIds = new Set<string>();
   let recoveredComplementaryGrounding = false;
+  let recoveredNoInfoGrounding = false;
+  let recoveredRecoveryReadGrounding = false;
   let recoveredThreadGrounding = false;
+  const executeRecoveryToolCall = async (
+    name: string,
+    input: Record<string, unknown>
+  ): Promise<ToolExecutionResult> => {
+    const execution = await executeToolCallForTurn(
+      turnToolCache,
+      name,
+      input,
+      ctx
+    );
+    if (!execution.deduped) {
+      appendObservation(ctx.runState, execution.result.observation);
+    }
+    const { action, target, color } = mapToolCall(name, input);
+    onToolCall({
+      action,
+      target,
+      result: execution.result.uiText,
+      color: execution.result.observation.status === "ok" ? color : "red",
+      observation: execution.result.observation,
+    });
+    supportingObservations = ctx.runState.observations.slice(observationStart);
+    verificationObservations = resolveToolTurnVerificationObservations(
+      ctx.runState.observations,
+      observationStart,
+      question
+    );
+    return execution.result;
+  };
   const readRecoveryArtifact = async (
     artifactId: string
   ): Promise<ToolExecutionResult> => {
@@ -284,8 +320,31 @@ async function runToolLoopTurn(
       observationStart,
       question
     );
+    recoveredRecoveryReadGrounding =
+      recoveredRecoveryReadGrounding ||
+      isGroundedContentObservation(recoveryResult.observation);
     return recoveryResult;
   };
+
+  if (shouldRecoverFromNoInfoAnswer(fullText, supportingObservations)) {
+    const recoveryCalls = selectNoInfoRecoveryToolCalls(
+      question,
+      toolDefs.map((tool) => tool.name),
+      supportingObservations
+    );
+    for (const recoveryCall of recoveryCalls) {
+      const recoveryResult = await executeRecoveryToolCall(
+        recoveryCall.name,
+        recoveryCall.input
+      );
+      recoveredNoInfoGrounding =
+        recoveredNoInfoGrounding ||
+        isGroundedContentObservation(recoveryResult.observation);
+      if (isUsefulNoInfoRecoveryResult(recoveryResult.observation)) {
+        break;
+      }
+    }
+  }
 
   const threadRecoveryTopic = selectThreadRecoveryTopic(
     question,
@@ -293,46 +352,39 @@ async function runToolLoopTurn(
     ctx.runState.observations
   );
   if (threadRecoveryTopic) {
-    const execution = await executeToolCallForTurn(
-      turnToolCache,
-      "read_thread",
-      { topic: threadRecoveryTopic },
-      ctx
-    );
-    if (!execution.deduped) {
-      appendObservation(ctx.runState, execution.result.observation);
-    }
-    const { action, target, color } = mapToolCall("read_thread", {
+    const execution = await executeRecoveryToolCall("read_thread", {
       topic: threadRecoveryTopic,
     });
-    onToolCall({
-      action,
-      target,
-      result: execution.result.uiText,
-      color: execution.result.observation.status === "ok" ? color : "red",
-      observation: execution.result.observation,
-    });
-    supportingObservations = ctx.runState.observations.slice(observationStart);
-    verificationObservations = resolveToolTurnVerificationObservations(
-      ctx.runState.observations,
-      observationStart,
-      question
-    );
     recoveredThreadGrounding =
-      execution.result.observation.status === "ok" &&
-      Boolean(execution.result.observation.content);
+      execution.observation.status === "ok" &&
+      Boolean(execution.observation.content);
   }
 
+  const shouldRecoverUngroundedSearchAnswer = shouldGroundUnverifiedAnswer(
+    fullText,
+    supportingObservations,
+    question
+  );
   const needsRecoveryRead =
-    fullText.trim().length === 0 ||
-    shouldGroundUnverifiedAnswer(fullText, supportingObservations, question);
-  if (needsRecoveryRead) {
-    while (attemptedRecoveryArtifactIds.size < MAX_RECOVERY_READ_ATTEMPTS) {
-      const recoveryArtifactId = selectRecoveryReadArtifactId(
+    fullText.trim().length === 0 || shouldRecoverUngroundedSearchAnswer;
+  const ungroundedSearchRecoveryArtifactId = shouldRecoverUngroundedSearchAnswer
+    ? selectUngroundedSearchRecoveryReadArtifactId(
         question,
         supportingObservations,
         ctx.runState.observations
-      );
+      )
+    : null;
+  if (needsRecoveryRead) {
+    while (attemptedRecoveryArtifactIds.size < MAX_RECOVERY_READ_ATTEMPTS) {
+      const recoveryArtifactId =
+        ungroundedSearchRecoveryArtifactId &&
+        !attemptedRecoveryArtifactIds.has(ungroundedSearchRecoveryArtifactId)
+          ? ungroundedSearchRecoveryArtifactId
+          : selectRecoveryReadArtifactId(
+              question,
+              supportingObservations,
+              ctx.runState.observations
+            );
       if (
         !recoveryArtifactId ||
         attemptedRecoveryArtifactIds.has(recoveryArtifactId)
@@ -344,6 +396,24 @@ async function runToolLoopTurn(
       if (recoveryResult.observation.status === "ok" && recoveryResult.observation.content) {
         break;
       }
+    }
+  }
+
+  const complementarySearchCalls = selectComplementarySearchToolCalls(
+    question,
+    toolDefs.map((tool) => tool.name),
+    supportingObservations,
+    ctx.runState.observations
+  );
+  for (const searchCall of complementarySearchCalls) {
+    await executeRecoveryToolCall(searchCall.name, searchCall.input);
+    const complementaryArtifactId = selectComplementaryRecoveryReadArtifactId(
+      question,
+      supportingObservations,
+      ctx.runState.observations
+    );
+    if (complementaryArtifactId) {
+      break;
     }
   }
 
@@ -367,6 +437,8 @@ async function runToolLoopTurn(
   }
 
   if (
+    recoveredNoInfoGrounding ||
+    recoveredRecoveryReadGrounding ||
     recoveredThreadGrounding ||
     recoveredComplementaryGrounding ||
     shouldRegenerateAnswerAfterRecoveryRead({
@@ -408,6 +480,31 @@ function trimConversationHistory(ctx: ChatAgentContext): void {
   ctx.conversationHistory = trimConversationEntries(ctx.conversationHistory);
 }
 
+function isUsefulNoInfoRecoveryResult(observation: Observation): boolean {
+  if (isGroundedContentObservation(observation)) {
+    return true;
+  }
+
+  if (
+    observation.tool === "search_workspace" ||
+    observation.tool === "search_course"
+  ) {
+    return observation.status === "ok" && observation.artifacts.length > 0;
+  }
+
+  if (observation.tool === "list_announcements") {
+    return observation.status === "ok" && /^\s*\[[AD]\]\s+/m.test(
+      observation.content ?? ""
+    );
+  }
+
+  return (
+    observation.status === "ok" &&
+    (observation.artifacts.length > 0 ||
+      Boolean(observation.content?.trim()))
+  );
+}
+
 export {
   buildEvidenceBackedQuestion,
   buildToolPromptMessages,
@@ -418,10 +515,14 @@ export {
   seedTurnToolCacheEntry,
   selectArtifactSupportObservations,
   selectComplementaryRecoveryReadArtifactId,
+  selectComplementarySearchToolCalls,
+  selectNoInfoRecoveryToolCalls,
   selectRecoveryReadArtifactId,
   selectThreadRecoveryTopic,
+  selectUngroundedSearchRecoveryReadArtifactId,
   shouldContinueToolLoopAfterGateRead,
   shouldGroundUnverifiedAnswer,
+  shouldRecoverFromNoInfoAnswer,
   shouldRegenerateAnswerAfterRecoveryRead,
   shouldRecoverFromToolLoop,
 };

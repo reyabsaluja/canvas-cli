@@ -1389,6 +1389,7 @@ function isReadableCourseArtifactKind(kind: string): boolean {
   return (
     kind === "assignment" ||
     kind === "page" ||
+    kind === "course_tab" ||
     kind === "quiz" ||
     kind === "calendar_event" ||
     kind === "announcement" ||

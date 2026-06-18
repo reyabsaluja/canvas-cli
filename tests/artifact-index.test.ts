@@ -51,6 +51,9 @@ test("artifact index builds a shared course and workspace graph", async () => {
     await fs.mkdir(path.join(coursePath, "extracted", "attachments"), {
       recursive: true,
     });
+    await fs.mkdir(path.join(coursePath, "extracted", "modules"), {
+      recursive: true,
+    });
     await fs.mkdir(path.join(workspacePath, "extracted", "docs"), {
       recursive: true,
     });
@@ -78,6 +81,24 @@ test("artifact index builds a shared course and workspace graph", async () => {
     await fs.writeFile(
       path.join(coursePath, "extracted", "attachments", "lab4-spec.pdf.txt"),
       "Deliverables include a waveform screenshot and a short analysis.\n",
+      "utf-8"
+    );
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "modules", "8.txt"),
+      [
+        "# Lab 4 Module",
+        "",
+        "Requires sequential progress: yes",
+        "",
+        "## Prerequisites",
+        "- Safety Setup (module 7)",
+        "",
+        "## Items",
+        "",
+        "1. Prelab checklist — type: Page",
+        "   Completion requirement: must mark done",
+        "",
+      ].join("\n"),
       "utf-8"
     );
 
@@ -128,6 +149,44 @@ test("artifact index builds a shared course and workspace graph", async () => {
           htmlUrl: "https://canvas.example/lab-4",
           hasDescription: true,
           descriptionLinkCount: 1,
+          peerReviews: true,
+          automaticPeerReviews: true,
+          anonymousPeerReviews: false,
+          intraGroupPeerReviews: false,
+          peerReviewCount: 2,
+          peerReviewsAssignAt: "2026-04-20T16:00:00.000Z",
+          dateDetails: {
+            dueAt: "2026-04-18T23:59:00.000Z",
+            unlockAt: null,
+            lockAt: null,
+            onlyVisibleToOverrides: false,
+            overrideCount: 1,
+            overrides: [
+              {
+                id: 9001,
+                title: "Section B extension",
+                dueAt: "2026-04-21T23:59:00.000Z",
+                unlockAt: null,
+                lockAt: null,
+                allDay: null,
+                allDayDate: null,
+                setType: "CourseSection",
+                studentCount: null,
+                groupId: null,
+                courseSectionId: 22,
+              },
+            ],
+            peerReviewSubAssignment: {
+              id: 9002,
+              title: "Lab 4 Peer Review",
+              dueAt: "2026-04-23T23:59:00.000Z",
+              unlockAt: null,
+              lockAt: null,
+              onlyVisibleToOverrides: null,
+              overrideCount: 0,
+              overrides: [],
+            },
+          },
         },
       ],
       modules: [
@@ -136,6 +195,8 @@ test("artifact index builds a shared course and workspace graph", async () => {
           name: "Lab 4 Module",
           position: 1,
           itemCount: 1,
+          requiresSequentialProgress: true,
+          prerequisiteModuleIds: [7],
           items: [
             {
               id: 10,
@@ -146,6 +207,11 @@ test("artifact index builds a shared course and workspace graph", async () => {
               pageUrl: "lab-brief",
               htmlUrl: null,
               externalUrl: null,
+              completionRequirement: {
+                type: "must_mark_done",
+                minScore: null,
+                completed: false,
+              },
             },
           ],
         },
@@ -278,6 +344,58 @@ test("artifact index builds a shared course and workspace graph", async () => {
       limit: 1,
     });
     assert.equal(discussionResult[0]?.artifact.title, "Lab 4 Q&A");
+
+    const moduleResult = searchArtifactSections(index, "prelab checklist mark done", {
+      scope: "course",
+      kinds: ["module"],
+      limit: 1,
+    });
+    assert.equal(moduleResult[0]?.section.source, "Lab 4 Module");
+
+    const peerReviewResult = searchArtifactSections(
+      index,
+      "how many peer reviews are required for lab 4",
+      {
+        scope: "course",
+        kinds: ["assignment"],
+        limit: 1,
+      }
+    );
+    assert.equal(peerReviewResult[0]?.section.source, "Lab 4");
+    assert.match(
+      peerReviewResult[0]?.section.text ?? "",
+      /Peer reviews required: 2/
+    );
+
+    const dateOverrideResult = searchArtifactSections(
+      index,
+      "section b extension lab 4 due",
+      {
+        scope: "course",
+        kinds: ["assignment"],
+        limit: 1,
+      }
+    );
+    assert.equal(dateOverrideResult[0]?.section.source, "Lab 4");
+    assert.match(
+      dateOverrideResult[0]?.section.text ?? "",
+      /Date override: Section B extension: type CourseSection; section 22; due 2026-04-21T23:59:00.000Z/
+    );
+
+    const peerReviewDueResult = searchArtifactSections(
+      index,
+      "when is lab 4 peer review due",
+      {
+        scope: "course",
+        kinds: ["assignment"],
+        limit: 1,
+      }
+    );
+    assert.equal(peerReviewDueResult[0]?.section.source, "Lab 4");
+    assert.match(
+      peerReviewDueResult[0]?.section.text ?? "",
+      /Peer review due date: 2026-04-23T23:59:00.000Z/
+    );
 
     const workspaceResult = searchArtifactSections(index, "branch hazard", {
       scope: "workspace",
@@ -512,6 +630,19 @@ test("section search discriminates numbered course items by single-digit tokens"
       lab4Score > lab4SecondScore * 1.5,
       `Lab 4 should score much higher than other labs (${lab4Score} vs ${lab4SecondScore})`
     );
+
+    const lab4Facts = searchArtifactSections(index, "lab 4 due date points", {
+      scope: "course",
+      kinds: ["assignment"],
+      limit: 1,
+    });
+    assert.equal(lab4Facts[0]?.section.source, "Lab 4: Cache Memory");
+    assert.equal(lab4Facts[0]?.section.section, "Key facts");
+    assert.match(
+      lab4Facts[0]?.section.text ?? "",
+      /Due date: 2026-03-15T23:59:00.000Z/
+    );
+    assert.match(lab4Facts[0]?.section.text ?? "", /Points: 100 points/);
   });
 });
 
@@ -627,6 +758,345 @@ test("section search matches morphological variants through stemming", async () 
       "should find results for 'required' matching 'requirements/required/requirement'"
     );
     assert.equal(requireResults[0]!.section.source, "Homework 2");
+  });
+});
+
+test("course artifact index extracts citable facts from prose-heavy ingested text", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted"), { recursive: true });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "syllabus-body.txt"),
+      [
+        "# Course syllabus",
+        "",
+        "## Late Policy",
+        "",
+        "Files submitted after the deadline receive a 10% penalty.",
+        "General attendance expectations are discussed in class.",
+        "",
+        "## Final Project",
+        "",
+        "The final project is due April 30, 2026 at 11:59 PM.",
+        "Teams may choose their own implementation topic.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache: CourseCache = {
+      coursePath,
+      courseId: 10,
+      assignments: [],
+      modules: [],
+      files: [],
+      pages: [],
+      announcements: [],
+      discussions: [],
+      syllabusCandidates: [],
+      attachments: [],
+      lectures: [],
+      ingestion: {
+        version: 1,
+        ingestedAt: "2026-04-01T12:00:00.000Z",
+        courseId: 10,
+        courseName: "CS101",
+        courseCode: "CS101",
+        refresh: false,
+        counts: {
+          assignments: 0,
+          modules: 0,
+          moduleItems: 0,
+          files: 0,
+          pages: 0,
+          syllabusCandidates: 0,
+          lectures: 0,
+          attachmentsDownloaded: 0,
+          attachmentsSkipped: 0,
+          attachmentsFailed: 0,
+        },
+      },
+    };
+
+    const index = await loadArtifactIndex({ cache });
+    const results = searchArtifactSections(
+      index,
+      "late penalty percentage final project due date",
+      {
+        scope: "course",
+        kinds: ["syllabus"],
+        limit: 3,
+      }
+    );
+
+    assert.equal(results[0]?.section.source, "Course syllabus");
+    assert.equal(results[0]?.section.section, "Detected facts");
+    assert.match(
+      results[0]?.section.text ?? "",
+      /Late Policy: Files submitted after the deadline receive a 10% \(10 percent\) penalty\./
+    );
+    assert.match(
+      results[0]?.section.text ?? "",
+      /Final Project: The final project is due April 30, 2026 at 11:59 PM\./
+    );
+    assert.doesNotMatch(
+      results[0]?.section.text ?? "",
+      /General attendance expectations/
+    );
+    assert.doesNotMatch(
+      results[0]?.section.text ?? "",
+      /Teams may choose/
+    );
+  });
+});
+
+test("course artifact index extracts citable facts from fact-bearing headings", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted"), { recursive: true });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "grading-breakdown.txt"),
+      [
+        "# Grading Breakdown",
+        "",
+        "Grading scheme: weighted (total 100%)",
+        "",
+        "## Labs (30%)",
+        "",
+        "Assignments in this category: 4",
+        "",
+        "## Final Exam (40%)",
+        "",
+        "Assignments in this category: 1",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache: CourseCache = {
+      coursePath,
+      courseId: 10,
+      assignments: [],
+      modules: [],
+      files: [],
+      pages: [],
+      announcements: [],
+      discussions: [],
+      syllabusCandidates: [],
+      attachments: [],
+      lectures: [],
+      ingestion: {
+        version: 1,
+        ingestedAt: "2026-04-01T12:00:00.000Z",
+        courseId: 10,
+        courseName: "CS101",
+        courseCode: "CS101",
+        refresh: false,
+        counts: {
+          assignments: 0,
+          modules: 0,
+          moduleItems: 0,
+          files: 0,
+          pages: 0,
+          syllabusCandidates: 0,
+          lectures: 0,
+          attachmentsDownloaded: 0,
+          attachmentsSkipped: 0,
+          attachmentsFailed: 0,
+        },
+      },
+    };
+
+    const index = await loadArtifactIndex({ cache });
+    const results = searchArtifactSections(
+      index,
+      "what percentage of the grade are labs worth",
+      {
+        scope: "course",
+        kinds: ["grading"],
+        limit: 3,
+      }
+    );
+
+    const detectedFacts = results.find(
+      (result) => result.section.section === "Detected facts"
+    );
+    assert.equal(detectedFacts?.section.source, "Grading breakdown");
+    assert.match(
+      detectedFacts?.section.text ?? "",
+      /Labs: 30% \(30 percent\)/
+    );
+    assert.match(
+      detectedFacts?.section.text ?? "",
+      /Final Exam: 40% \(40 percent\)/
+    );
+  });
+});
+
+test("course artifact index promotes relative course deadlines into detected facts", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted"), { recursive: true });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "syllabus-body.txt"),
+      [
+        "# Course syllabus",
+        "",
+        "## Lab checkout",
+        "",
+        "Submit the design worksheet before your lab period in Week 6.",
+        "The simulator opens Week 5 Monday and closes Week 6 Friday.",
+        "Bring your notes to the checkout table.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache: CourseCache = {
+      coursePath,
+      courseId: 10,
+      assignments: [],
+      modules: [],
+      files: [],
+      pages: [],
+      announcements: [],
+      discussions: [],
+      syllabusCandidates: [],
+      attachments: [],
+      lectures: [],
+      ingestion: {
+        version: 1,
+        ingestedAt: "2026-04-01T12:00:00.000Z",
+        courseId: 10,
+        courseName: "CS101",
+        courseCode: "CS101",
+        refresh: false,
+        counts: {
+          assignments: 0,
+          modules: 0,
+          moduleItems: 0,
+          files: 0,
+          pages: 0,
+          syllabusCandidates: 0,
+          lectures: 0,
+          attachmentsDownloaded: 0,
+          attachmentsSkipped: 0,
+          attachmentsFailed: 0,
+        },
+      },
+    };
+
+    const index = await loadArtifactIndex({ cache });
+    const results = searchArtifactSections(
+      index,
+      "lab checkout deadline week 6",
+      {
+        scope: "course",
+        kinds: ["syllabus"],
+        limit: 3,
+      }
+    );
+
+    const detectedFacts = results.find(
+      (result) => result.section.section === "Detected facts"
+    );
+    assert.equal(detectedFacts?.section.source, "Course syllabus");
+    assert.match(
+      detectedFacts?.section.text ?? "",
+      /Lab checkout: Submit the design worksheet before your lab period in Week 6\./
+    );
+    assert.match(
+      detectedFacts?.section.text ?? "",
+      /Lab checkout: The simulator opens Week 5 Monday and closes Week 6 Friday\./
+    );
+    assert.doesNotMatch(
+      detectedFacts?.section.text ?? "",
+      /Bring your notes to the checkout table/
+    );
+  });
+});
+
+test("course artifact index treats standalone Canvas label paragraphs as sections", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+
+    const coursePath = path.join(tempDir, "course");
+    await fs.mkdir(path.join(coursePath, "extracted", "pages"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(coursePath, "extracted", "pages", "project-brief.txt"),
+      [
+        "# Project Brief",
+        "",
+        "**Deliverables:**",
+        "",
+        "Submit report.pdf and demo.mp4 by April 18 at 11:59 PM.",
+        "",
+        "Reference Material:",
+        "",
+        "Read the appendix about cache replacement policy.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const cache: CourseCache = {
+      coursePath,
+      courseId: 10,
+      assignments: [],
+      modules: [],
+      files: [],
+      pages: [
+        {
+          pageId: "project-brief",
+          title: "Project Brief",
+          htmlUrl: "https://canvas.example/courses/10/pages/project-brief",
+          updatedAt: null,
+          hasBody: true,
+        },
+      ],
+      announcements: [],
+      discussions: [],
+      syllabusCandidates: [],
+      attachments: [],
+      lectures: [],
+      ingestion: null,
+    };
+
+    const index = await loadArtifactIndex({ cache });
+    const deliverableResults = searchArtifactSections(
+      index,
+      "deliverables report pdf demo mp4",
+      {
+        scope: "course",
+        kinds: ["page"],
+        limit: 3,
+      }
+    );
+
+    assert.equal(deliverableResults[0]?.section.source, "Project Brief");
+    assert.equal(deliverableResults[0]?.section.section, "Deliverables");
+    assert.match(deliverableResults[0]?.section.text ?? "", /report\.pdf/);
+    assert.doesNotMatch(
+      deliverableResults[0]?.section.text ?? "",
+      /cache replacement/i
+    );
+
+    const referenceResults = searchArtifactSections(
+      index,
+      "reference material cache replacement",
+      {
+        scope: "course",
+        kinds: ["page"],
+        limit: 3,
+      }
+    );
+
+    assert.equal(referenceResults[0]?.section.section, "Reference Material");
+    assert.match(referenceResults[0]?.section.text ?? "", /cache replacement/);
   });
 });
 

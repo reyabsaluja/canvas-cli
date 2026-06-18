@@ -197,6 +197,146 @@ test("ingestCourse captures page bodies from the Pages index even when no other 
   });
 });
 
+test("ingestCourse captures module prerequisites and completion requirements", async () => {
+  await withTempCwd(async () => {
+    const course: Course = {
+      id: 17,
+      name: "ECE243",
+      courseCode: "ECE243H1",
+      termName: "Winter 2026",
+      isCurrent: true,
+    };
+
+    const client = {
+      async getCourseDetail() {
+        return {
+          id: course.id,
+          name: course.name,
+          course_code: course.courseCode,
+          syllabus_body: null,
+          start_at: null,
+          end_at: null,
+          term: null,
+          html_url: "https://canvas.example/courses/17",
+        };
+      },
+      async getAssignments() {
+        return [];
+      },
+      async getModulesSafe() {
+        return [
+          {
+            id: 10,
+            name: "Module 1: Setup",
+            position: 1,
+            items_count: 1,
+            items_url: "",
+            require_sequential_progress: false,
+            prerequisite_module_ids: [],
+          },
+          {
+            id: 11,
+            name: "Module 2: Lab Prep",
+            position: 2,
+            items_count: 2,
+            items_url: "",
+            unlock_at: "2026-04-10T13:00:00Z",
+            require_sequential_progress: true,
+            prerequisite_module_ids: [10],
+          },
+        ];
+      },
+      async getModuleItemsSafe(_courseId: number, moduleId: number) {
+        if (moduleId === 10) {
+          return [
+            {
+              id: 100,
+              title: "Read the setup guide",
+              type: "Page",
+              position: 1,
+              page_url: "setup-guide",
+              completion_requirement: {
+                type: "must_view",
+                completed: true,
+              },
+            },
+          ];
+        }
+        return [
+          {
+            id: 110,
+            title: "Mark the safety checklist done",
+            type: "Page",
+            position: 1,
+            page_url: "safety-checklist",
+            completion_requirement: {
+              type: "must_mark_done",
+              completed: false,
+            },
+          },
+          {
+            id: 111,
+            title: "Score at least 8 on the readiness quiz",
+            type: "Quiz",
+            position: 2,
+            content_id: 501,
+            completion_requirement: {
+              type: "min_score",
+              min_score: 8,
+              completed: false,
+            },
+          },
+        ];
+      },
+      async getFilesSafe() {
+        return [];
+      },
+      async getPagesSafe() {
+        return [];
+      },
+      async getFrontPageSafe() {
+        return null;
+      },
+      async getPageBySlugSafe() {
+        return null;
+      },
+      skippedEndpoints: [] as string[],
+      resetSkippedEndpoints() {},
+    } as any;
+
+    const result = await ingestCourse(
+      course,
+      client,
+      {
+        baseUrl: "https://canvas.example/api/v1",
+        accessToken: "token",
+      },
+      { refresh: false }
+    );
+
+    const labPrep = result.modules.find((module) => module.id === 11);
+    assert.ok(labPrep);
+    assert.deepEqual(labPrep.prerequisiteModuleIds, [10]);
+    assert.equal(labPrep.requiresSequentialProgress, true);
+    assert.equal(
+      labPrep.items[1].completionRequirement?.minScore,
+      8
+    );
+
+    const moduleExtract = await fs.readFile(
+      path.join(result.coursePath, "extracted", "modules", "11.txt"),
+      "utf-8"
+    );
+    assert.match(moduleExtract, /^# Module 2: Lab Prep/m);
+    assert.match(moduleExtract, /## Key facts/);
+    assert.match(moduleExtract, /Unlocks: 2026-04-10T13:00:00Z/);
+    assert.match(moduleExtract, /Requires sequential progress: yes/);
+    assert.match(moduleExtract, /Module 1: Setup \(module 10\)/);
+    assert.match(moduleExtract, /Completion requirement: must mark done/);
+    assert.match(moduleExtract, /minimum score with at least 8/);
+  });
+});
+
 test("ingestCourse crawls announcement and linked-page content into the cache", async () => {
   await withTempCwd(async () => {
     const course: Course = {
@@ -419,8 +559,45 @@ test("ingestCourse stores assignment descriptions as rich extracted documents", 
             grading_type: "points",
             submission_types: ["online_upload"],
             allowed_extensions: [".pdf", ".zip"],
+            peer_reviews: true,
+            automatic_peer_reviews: true,
+            anonymous_peer_reviews: true,
+            intra_group_peer_reviews: false,
+            peer_review_count: 2,
+            peer_reviews_assign_at: "2026-04-24T16:00:00.000Z",
           },
         ];
+      },
+      async getAssignmentDateDetailsSafe() {
+        return {
+          due_at: "2026-04-30T23:59:00.000Z",
+          unlock_at: "2026-04-20T12:00:00.000Z",
+          lock_at: "2026-05-07T23:59:00.000Z",
+          only_visible_to_overrides: false,
+          assignment_overrides: [
+            {
+              id: 901,
+              title: "Lab section 2 extension",
+              set_type: "CourseSection",
+              course_section_id: 22,
+              due_at: "2026-05-02T23:59:00.000Z",
+            },
+          ],
+          peer_review_sub_assignment: {
+            id: 902,
+            title: "Lab 4 Peer Review",
+            due_at: "2026-05-05T23:59:00.000Z",
+            assignment_overrides: [
+              {
+                id: 903,
+                title: "Lab section 2 peer review extension",
+                set_type: "CourseSection",
+                course_section_id: 22,
+                due_at: "2026-05-06T23:59:00.000Z",
+              },
+            ],
+          },
+        };
       },
       async getModulesSafe() {
         return [];
@@ -463,16 +640,299 @@ test("ingestCourse stores assignment descriptions as rich extracted documents", 
     );
 
     assert.match(assignmentExtract, /^# Lab 4/m);
+    assert.match(assignmentExtract, /## Key facts/);
     assert.match(assignmentExtract, /Due: 2026-04-30T23:59:00.000Z/);
     assert.match(assignmentExtract, /Points: 25/);
     assert.match(assignmentExtract, /Submission types: online_upload/);
     assert.match(assignmentExtract, /Allowed file extensions: \.pdf, \.zip/);
+    assert.match(assignmentExtract, /Peer reviews: yes/);
+    assert.match(assignmentExtract, /Peer reviews assigned automatically: yes/);
+    assert.match(assignmentExtract, /Anonymous peer reviews: yes/);
+    assert.match(assignmentExtract, /Intra-group peer reviews: no/);
+    assert.match(assignmentExtract, /Peer reviews required: 2/);
+    assert.match(
+      assignmentExtract,
+      /Peer reviews assigned at: 2026-04-24T16:00:00.000Z/
+    );
+    assert.match(assignmentExtract, /## Assignment Dates/);
+    assert.match(assignmentExtract, /### Assignment date overrides/);
+    assert.match(
+      assignmentExtract,
+      /Lab section 2 extension; type CourseSection; section 22; due 2026-05-02T23:59:00.000Z/
+    );
+    assert.match(assignmentExtract, /### Peer review dates/);
+    assert.match(assignmentExtract, /Peer review assignment: Lab 4 Peer Review/);
+    assert.match(assignmentExtract, /Due: 2026-05-05T23:59:00.000Z/);
+    assert.match(
+      assignmentExtract,
+      /Lab section 2 peer review extension; type CourseSection; section 22; due 2026-05-06T23:59:00.000Z/
+    );
     assert.match(assignmentExtract, /## Description/);
     assert.match(assignmentExtract, /Waveform screenshot/);
     assert.match(
       assignmentExtract,
       /lab spec \(https:\/\/canvas\.example\/courses\/17\/pages\/lab-4-spec\)/
     );
+
+    assert.equal(result.assignments[0]?.peerReviews, true);
+    assert.equal(result.assignments[0]?.automaticPeerReviews, true);
+    assert.equal(result.assignments[0]?.anonymousPeerReviews, true);
+    assert.equal(result.assignments[0]?.intraGroupPeerReviews, false);
+    assert.equal(result.assignments[0]?.peerReviewCount, 2);
+    assert.equal(
+      result.assignments[0]?.peerReviewsAssignAt,
+      "2026-04-24T16:00:00.000Z"
+    );
+    assert.equal(result.assignments[0]?.dateDetails?.overrideCount, 1);
+    assert.equal(
+      result.assignments[0]?.dateDetails?.peerReviewSubAssignment?.dueAt,
+      "2026-05-05T23:59:00.000Z"
+    );
+  });
+});
+
+test("ingestCourse captures submission feedback comments and files", async () => {
+  await withTempCwd(async () => {
+    const course: Course = {
+      id: 17,
+      name: "ECE243",
+      courseCode: "ECE243H1",
+      termName: "Winter 2026",
+      isCurrent: true,
+    };
+
+    const downloadUrls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: string | URL | Request) => {
+      const url = String(input);
+      downloadUrls.push(url);
+      return new Response(`downloaded feedback resource: ${url}\n`, {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      });
+    };
+
+    try {
+      const client = {
+        async getCourseDetail() {
+          return {
+            id: course.id,
+            name: course.name,
+            course_code: course.courseCode,
+            syllabus_body: null,
+            start_at: null,
+            end_at: null,
+            term: null,
+            html_url: "https://canvas.example/courses/17",
+          };
+        },
+        async getAssignments() {
+          return [
+            {
+              id: 42,
+              name: "Lab 4",
+              due_at: "2026-04-30T23:59:00.000Z",
+              html_url: "https://canvas.example/courses/17/assignments/42",
+              course_id: course.id,
+              has_submitted_submissions: true,
+              description: "<p>Submit your final lab report.</p>",
+              points_possible: 25,
+              grading_type: "points",
+              submission_types: ["online_upload"],
+              rubric: [
+                {
+                  id: "clarity",
+                  description: "Argument clarity",
+                  points: 5,
+                  ratings: [
+                    {
+                      id: "clear",
+                      description: "Clear",
+                      points: 4,
+                    },
+                  ],
+                },
+              ],
+              submission: {
+                workflow_state: "graded",
+                submitted_at: "2026-04-29T20:00:00.000Z",
+                score: 21,
+                grade: "21",
+                attempt: 1,
+                late: false,
+                missing: false,
+              },
+            },
+          ];
+        },
+        async getCurrentUserSubmissionsSafe() {
+          return [
+            {
+              assignment_id: 42,
+              user_id: 99,
+              workflow_state: "graded",
+              submitted_at: "2026-04-29T20:00:00.000Z",
+              score: 21,
+              grade: "21",
+              attempt: 1,
+              late: false,
+              missing: false,
+              submission_comments: [
+                {
+                  id: 501,
+                  author_id: 7,
+                  author_name: "Prof. Ada",
+                  comment:
+                    "Revise the introduction using the posted feedback guide.",
+                  html_comment:
+                    '<p>Revise the introduction using the <a href="/courses/17/pages/revision-notes">revision notes</a> and <a class="instructure_file_link" title="annotated-rubric.pdf" href="https://canvas.example/courses/17/files/334?verifier=comment">annotated rubric</a>.</p>',
+                  created_at: "2026-05-01T14:00:00.000Z",
+                  attachments: [
+                    {
+                      id: 333,
+                      display_name: "prof-feedback.txt",
+                      filename: "prof-feedback.txt",
+                      url: "https://canvas.example/courses/17/files/333/download?verifier=feedback",
+                      content_type: "text/plain",
+                      size: 2048,
+                    },
+                  ],
+                },
+              ],
+              rubric_assessment: {
+                clarity: {
+                  points: 4,
+                  rating_id: "clear",
+                  comments:
+                    '<p>Good structure. Read the <a href="/courses/17/pages/rubric-feedback">rubric feedback</a> and keep the <a class="instructure_file_link" title="criterion-notes.pdf" href="https://canvas.example/courses/17/files/335?verifier=rubric">criterion notes</a>.</p>',
+                },
+              },
+            },
+          ];
+        },
+        async getModulesSafe() {
+          return [];
+        },
+        async getModuleItemsSafe() {
+          return [];
+        },
+        async getFilesSafe() {
+          return [];
+        },
+        async getPagesSafe() {
+          return [];
+        },
+        async getAnnouncementsSafe() {
+          return [];
+        },
+        async getFrontPageSafe() {
+          return null;
+        },
+        async getPageBySlugSafe(_courseId: number, slug: string) {
+          if (slug === "revision-notes") {
+            return {
+              title: "Revision Notes",
+              body: "<p>Clarify your motivation and cite waveform evidence.</p>",
+              url: slug,
+            };
+          }
+          if (slug === "rubric-feedback") {
+            return {
+              title: "Rubric Feedback",
+              body: "<p>Explain the setup before evaluating the loop.</p>",
+              url: slug,
+            };
+          }
+          return null;
+        },
+        skippedEndpoints: [] as string[],
+        resetSkippedEndpoints() {},
+      } as any;
+
+      const result = await ingestCourse(
+        course,
+        client,
+        {
+          baseUrl: "https://canvas.example/api/v1",
+          accessToken: "token",
+        },
+        { refresh: false }
+      );
+
+      assert.deepEqual(downloadUrls.sort(), [
+        "https://canvas.example/courses/17/files/333/download?verifier=feedback",
+        "https://canvas.example/courses/17/files/334/download?verifier=comment",
+        "https://canvas.example/courses/17/files/335/download?verifier=rubric",
+      ]);
+      assert.equal(result.attachments.length, 3);
+      assert.ok(
+        result.attachments.every(
+          (attachment) =>
+            attachment.sourceType === "submission_comment_attachment"
+        )
+      );
+      assert.ok(
+        result.attachments.some(
+          (attachment) => attachment.originalFilename === "prof-feedback.txt"
+        )
+      );
+      assert.ok(
+        result.attachments.some(
+          (attachment) => attachment.originalFilename === "annotated-rubric.pdf"
+        )
+      );
+      assert.ok(
+        result.attachments.some(
+          (attachment) => attachment.originalFilename === "criterion-notes.pdf"
+        )
+      );
+      assert.ok(
+        result.pages.some((page) => page.pageId === "revision-notes")
+      );
+      assert.ok(
+        result.pages.some((page) => page.pageId === "rubric-feedback")
+      );
+
+      const assignmentExtract = await fs.readFile(
+        path.join(result.coursePath, "extracted", "assignments", "42.txt"),
+        "utf-8"
+      );
+      assert.match(assignmentExtract, /## Submission Feedback/);
+      assert.match(assignmentExtract, /### Prof\. Ada/);
+      assert.match(assignmentExtract, /Revise the introduction/);
+      assert.match(
+        assignmentExtract,
+        /revision notes \(https:\/\/canvas\.example\/courses\/17\/pages\/revision-notes\)/
+      );
+      assert.match(assignmentExtract, /Attachments:/);
+      assert.match(assignmentExtract, /prof-feedback\.txt/);
+      assert.match(assignmentExtract, /### Rubric Assessment/);
+      assert.match(assignmentExtract, /#### Argument clarity/);
+      assert.match(assignmentExtract, /Points: 4 \/ 5/);
+      assert.match(assignmentExtract, /Rating: Clear \(4 points\)/);
+      assert.match(
+        assignmentExtract,
+        /rubric feedback \(https:\/\/canvas\.example\/courses\/17\/pages\/rubric-feedback\)/
+      );
+      assert.match(
+        assignmentExtract,
+        /criterion notes \(https:\/\/canvas\.example\/courses\/17\/files\/335\?verifier=rubric\)/
+      );
+
+      const feedbackText = await fs.readFile(
+        path.join(
+          result.coursePath,
+          "extracted",
+          "attachments",
+          "submission-comments",
+          "prof-feedback.txt.txt"
+        ),
+        "utf-8"
+      );
+      assert.match(feedbackText, /downloaded feedback resource/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 
@@ -2049,6 +2509,7 @@ test("ingestCourse captures quiz instructions and linked resources", async () =>
         path.join(result.coursePath, "extracted", "quizzes", "7.txt"),
         "utf-8"
       );
+      assert.match(quizExtract, /## Key facts/);
       assert.match(quizExtract, /Due: 2026-04-15T23:59:00.000Z/);
       assert.match(quizExtract, /Points: 10/);
       assert.match(quizExtract, /Questions: 12/);
@@ -2260,6 +2721,7 @@ test("ingestCourse captures calendar event descriptions and linked resources", a
         path.join(result.coursePath, "extracted", "calendar-events", "88.txt"),
         "utf-8"
       );
+      assert.match(eventExtract, /## Key facts/);
       assert.match(eventExtract, /Starts: 2026-04-20T18:00:00.000Z/);
       assert.match(eventExtract, /Location: BA 1160/);
       assert.match(eventExtract, /Address: 40 St George St/);
@@ -2471,6 +2933,160 @@ test("ingestCourse captures external resources linked from course content and mo
       assert.match(externalExtract, /assignment "Homework 1" description/);
       assert.match(externalExtract, /module "Week 4" item "Shared Lab Spec"/);
       assert.match(externalExtract, /Source URL: https:\/\/public\.example\/shared-spec/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+test("ingestCourse captures external URLs from course navigation tabs", async () => {
+  await withTempCwd(async () => {
+    const course: Course = {
+      id: 17,
+      name: "ECE243",
+      courseCode: "ECE243H1",
+      termName: "Winter 2026",
+      isCurrent: true,
+    };
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const headers =
+        init?.headers instanceof Headers
+          ? init.headers
+          : new Headers((init?.headers as Record<string, string> | undefined) ?? {});
+
+      if (url === "https://zoom.example/ece243-lab") {
+        assert.equal(headers.get("Authorization"), null);
+        return new Response(
+          [
+            "<html>",
+            "<head><title>ECE243 Lab Room</title></head>",
+            "<body>",
+            "<h1>ECE243 Lab Room</h1>",
+            "<p>Use this Zoom room for Friday lab help and office hours.</p>",
+            "</body>",
+            "</html>",
+          ].join(""),
+          {
+            status: 200,
+            headers: {
+              "content-type": "text/html; charset=utf-8",
+            },
+          }
+        );
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    };
+
+    try {
+      const client = {
+        async getCourseDetail() {
+          return {
+            id: course.id,
+            name: course.name,
+            course_code: course.courseCode,
+            syllabus_body: null,
+            start_at: null,
+            end_at: null,
+            term: null,
+            html_url: "https://canvas.example/courses/17",
+          };
+        },
+        async getAssignments() {
+          return [];
+        },
+        async getModulesSafe() {
+          return [];
+        },
+        async getModuleItemsSafe() {
+          return [];
+        },
+        async getFilesSafe() {
+          return [];
+        },
+        async getPagesSafe() {
+          return [];
+        },
+        async getCourseTabsSafe() {
+          return [
+            {
+              id: "context_external_tool_99",
+              label: "Course Zoom",
+              type: "external",
+              hidden: false,
+              visibility: "public",
+              position: 4,
+              html_url: "https://canvas.example/courses/17/external_tools/99",
+              full_url: "https://zoom.example/ece243-lab",
+            },
+          ];
+        },
+        async getAnnouncementsSafe() {
+          return [];
+        },
+        async getDiscussionTopicsSafe() {
+          return [];
+        },
+        async getFrontPageSafe() {
+          return null;
+        },
+        async getPageBySlugSafe() {
+          return null;
+        },
+        skippedEndpoints: [] as string[],
+        resetSkippedEndpoints() {},
+      } as any;
+
+      const result = await ingestCourse(
+        course,
+        client,
+        {
+          baseUrl: "https://canvas.example/api/v1",
+          accessToken: "token",
+        },
+        { refresh: false }
+      );
+
+      assert.equal(result.tabs?.length, 1);
+      assert.equal(result.tabs?.[0]?.label, "Course Zoom");
+      assert.equal(result.externalLinks?.length, 1);
+      assert.equal(result.externalLinks?.[0]?.url, "https://zoom.example/ece243-lab");
+      assert.deepEqual(result.externalLinks?.[0]?.sources, [
+        'course navigation tab "Course Zoom"',
+      ]);
+
+      const tabs = JSON.parse(
+        await fs.readFile(path.join(result.coursePath, "tabs.json"), "utf-8")
+      ) as Array<{ label: string; fullUrl: string | null }>;
+      assert.equal(tabs[0]?.label, "Course Zoom");
+      assert.equal(tabs[0]?.fullUrl, "https://zoom.example/ece243-lab");
+
+      const tabExtract = await fs.readFile(
+        path.join(
+          result.coursePath,
+          "extracted",
+          "course-tabs",
+          "context_external_tool_99.txt"
+        ),
+        "utf-8"
+      );
+      assert.match(tabExtract, /# Course Zoom/);
+      assert.match(tabExtract, /Full URL: https:\/\/zoom\.example\/ece243-lab/);
+
+      const externalExtract = await fs.readFile(
+        path.join(
+          result.coursePath,
+          "extracted",
+          "external-links",
+          `${result.externalLinks?.[0]?.id}.txt`
+        ),
+        "utf-8"
+      );
+      assert.match(externalExtract, /Friday lab help and office hours/);
+      assert.match(externalExtract, /course navigation tab "Course Zoom"/);
     } finally {
       globalThis.fetch = originalFetch;
     }

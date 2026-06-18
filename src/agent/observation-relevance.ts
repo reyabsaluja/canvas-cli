@@ -7,14 +7,24 @@ const OBSERVATION_RELEVANCE_STOP_WORDS = new Set([
   "also",
   "and",
   "are",
+  "before",
+  "can",
+  "could",
   "does",
   "explain",
+  "for",
   "from",
   "give",
   "into",
+  "know",
+  "look",
   "need",
+  "prepare",
   "read",
+  "review",
   "say",
+  "should",
+  "study",
   "tell",
   "that",
   "the",
@@ -26,6 +36,7 @@ const OBSERVATION_RELEVANCE_STOP_WORDS = new Set([
   "when",
   "where",
   "which",
+  "would",
   "with",
 ]);
 
@@ -53,6 +64,11 @@ export function scoreObservationRelevance(
   const titleText = normalizeObservationRelevanceText(
     observation.artifacts.map((artifact) => artifact.title).join(" ")
   );
+  const sectionText = normalizeObservationRelevanceText(
+    observation.artifacts
+      .map((artifact) => artifact.sectionLabel ?? "")
+      .join(" ")
+  );
   const summaryText = normalizeObservationRelevanceText(observation.summary ?? "");
   const excerptText = normalizeObservationRelevanceText(
     observation.artifacts
@@ -60,20 +76,28 @@ export function scoreObservationRelevance(
       .join(" ")
   );
   const contentText = normalizeObservationRelevanceText(observation.content ?? "");
-  const haystack = `${titleText} ${summaryText} ${excerptText} ${contentText}`.trim();
+  const haystack =
+    `${titleText} ${sectionText} ${summaryText} ${excerptText} ${contentText}`.trim();
   if (!haystack) {
     return 0;
   }
 
   const questionTokens = tokenizeObservationRelevanceText(normalizedQuestion);
   const fullPhraseMatch =
-    haystack.includes(normalizedQuestion) || titleText.includes(normalizedQuestion);
+    haystack.includes(normalizedQuestion) ||
+    titleText.includes(normalizedQuestion) ||
+    sectionText.includes(normalizedQuestion);
   let score = fullPhraseMatch ? 14 : 0;
   let matchedTokens = 0;
 
   for (const token of questionTokens) {
     if (titleText.includes(token)) {
       score += 8;
+      matchedTokens += 1;
+      continue;
+    }
+    if (sectionText.includes(token)) {
+      score += 6;
       matchedTokens += 1;
       continue;
     }

@@ -29,7 +29,9 @@ export function promptLine(question: string): Promise<string | typeof ESCAPED> {
     const onData = (buf: Buffer) => {
       try {
         const str = buf.toString();
-        for (const c of str) {
+        let i = 0;
+        while (i < str.length) {
+          const c = str[i]!;
           const code = c.charCodeAt(0);
           if (c === "\r" || c === "\n") {
             cleanup();
@@ -44,6 +46,13 @@ export function promptLine(question: string): Promise<string | typeof ESCAPED> {
             return;
           }
           if (code === 27) {
+            if (i + 1 < str.length && str[i + 1] === "[") {
+              // CSI sequence (arrow keys, bracketed paste, etc.) — skip it
+              i += 2;
+              while (i < str.length && str.charCodeAt(i) >= 0x20 && str.charCodeAt(i) <= 0x3f) i++;
+              if (i < str.length) i++; // skip final byte
+              continue;
+            }
             cleanup();
             process.stdout.write("\n");
             resolve(ESCAPED);
@@ -58,6 +67,7 @@ export function promptLine(question: string): Promise<string | typeof ESCAPED> {
             input += c;
             process.stdout.write(c);
           }
+          i++;
         }
       } catch {
         cleanup();
@@ -96,7 +106,9 @@ export function promptSecret(question: string): Promise<string | typeof ESCAPED>
     const onData = (buf: Buffer) => {
       try {
         const str = buf.toString();
-        for (const c of str) {
+        let i = 0;
+        while (i < str.length) {
+          const c = str[i]!;
           const code = c.charCodeAt(0);
           if (c === "\r" || c === "\n") {
             cleanup();
@@ -111,6 +123,12 @@ export function promptSecret(question: string): Promise<string | typeof ESCAPED>
             return;
           }
           if (code === 27) {
+            if (i + 1 < str.length && str[i + 1] === "[") {
+              i += 2;
+              while (i < str.length && str.charCodeAt(i) >= 0x20 && str.charCodeAt(i) <= 0x3f) i++;
+              if (i < str.length) i++;
+              continue;
+            }
             cleanup();
             process.stdout.write("\n");
             resolve(ESCAPED);
@@ -125,6 +143,7 @@ export function promptSecret(question: string): Promise<string | typeof ESCAPED>
             input += c;
             process.stdout.write("•");
           }
+          i++;
         }
       } catch {
         cleanup();

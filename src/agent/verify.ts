@@ -35,7 +35,11 @@ export function verifyWorkspaceAnswer(
   );
   const specificClaimEvidence = buildSpecificClaimEvidenceText(input);
   const unsupportedSpecificDetails = specificClaimEvidence
-    ? collectUnsupportedSpecificDetails(trimmedAnswer, specificClaimEvidence)
+    ? collectUnsupportedSpecificDetails(
+        input.question,
+        trimmedAnswer,
+        specificClaimEvidence
+      )
     : [];
   const sources = collectSources(
     input.question,
@@ -578,6 +582,40 @@ const SECTION_MATCH_STOP_WORDS = new Set([
   "with",
 ]);
 
+const SPECIFIC_DETAIL_CONTEXT_STOP_WORDS = new Set([
+  "about",
+  "and",
+  "are",
+  "can",
+  "did",
+  "does",
+  "for",
+  "from",
+  "have",
+  "how",
+  "into",
+  "is",
+  "it",
+  "me",
+  "my",
+  "of",
+  "on",
+  "or",
+  "please",
+  "say",
+  "says",
+  "should",
+  "that",
+  "the",
+  "this",
+  "to",
+  "what",
+  "when",
+  "where",
+  "which",
+  "with",
+]);
+
 function tokenizeForMatch(value: string): string[] {
   const seen = new Set<string>();
   const tokens: string[] = [];
@@ -761,6 +799,7 @@ function buildSpecificClaimEvidenceText(input: VerifyWorkspaceAnswerInput): stri
 }
 
 function collectUnsupportedSpecificDetails(
+  question: string,
   answer: string,
   evidenceText: string
 ): string[] {
@@ -770,36 +809,216 @@ function collectUnsupportedSpecificDetails(
 
   const normalizedEvidence = normalizeSpecificDetailText(evidenceText);
   const details = collectSpecificDetails(answer);
-  return details.filter(
+  const answerContext = buildSpecificDetailAnswerContext(`${question}\n${answer}`);
+  const evidenceDetails = collectSpecificDetailRecords(evidenceText);
+  const unsupportedDetails = details.filter(
     (detail) =>
-      !specificDetailAppearsInEvidence(detail, normalizedEvidence)
+      !specificDetailAppearsInEvidence(detail, normalizedEvidence) ||
+      !specificDetailIsContextuallySupported(
+        detail,
+        answer,
+        answerContext,
+        evidenceText,
+        evidenceDetails
+      )
+  );
+  return uniqueUnsupportedDetails([
+    ...unsupportedDetails,
+    ...collectUnsupportedRequirementClaims(answer, evidenceText),
+  ]);
+}
+
+interface SpecificDetailRecord {
+  value: string;
+  key: string;
+  category: string;
+}
+
+function uniqueUnsupportedDetails(details: string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const detail of details) {
+    const key = normalizeSpecificDetailText(detail);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(detail);
+  }
+  return unique;
+}
+
+const STRONG_REQUIREMENT_RE =
+  /\b(?:must|mandatory|required|requires?|need(?:ed)?\s+to|have\s+to|has\s+to|shall)\b/i;
+const WEAK_REQUIREMENT_RE =
+  /\b(?:may|can|could|optional|recommended|suggested|encouraged|usually|typically|generally|not\s+required|not\s+mandatory|do(?:es)?\s+not\s+need|don'?t\s+need|need\s+not)\b/i;
+const IMPERATIVE_REQUIREMENT_RE =
+  /^(?:[-*]\s*)?(?:\d+\.\s*)?(?:submit|include|upload|attach|bring|complete|use|provide|turn\s+in)\b/i;
+const REQUIREMENT_CLAIM_STOP_WORDS = new Set([
+  ...SPECIFIC_DETAIL_CONTEXT_STOP_WORDS,
+  "attach",
+  "bring",
+  "complete",
+  "could",
+  "encouraged",
+  "have",
+  "include",
+  "mandatory",
+  "may",
+  "must",
+  "need",
+  "needed",
+  "optional",
+  "provide",
+  "recommended",
+  "required",
+  "requires",
+  "shall",
+  "submit",
+  "suggested",
+  "turn",
+  "upload",
+  "use",
+]);
+
+function collectUnsupportedRequirementClaims(
+  answer: string,
+  evidenceText: string
+): string[] {
+  const evidenceClauses = splitRequirementClauses(evidenceText);
+  if (evidenceClauses.length === 0) {
+    return [];
+  }
+
+  const unsupported: string[] = [];
+  for (const claim of splitRequirementClauses(answer)) {
+    if (!isStrongUnqualifiedRequirementClaim(claim)) {
+      continue;
+    }
+
+    const claimTokens = tokenizeRequirementClaim(claim);
+    if (claimTokens.length === 0) {
+      continue;
+    }
+
+    const threshold = requirementClaimOverlapThreshold(claimTokens);
+    const matchingEvidence = evidenceClauses.filter(
+      (clause) => countRequirementTokenOverlap(claimTokens, clause) >= threshold
+    );
+    if (matchingEvidence.length === 0) {
+      continue;
+    }
+
+    const hasStrongSupport = matchingEvidence.some((clause) =>
+      evidenceClauseStronglyRequires(clause)
+    );
+    if (hasStrongSupport) {
+      continue;
+    }
+
+    const hasWeakContradiction = matchingEvidence.some((clause) =>
+      WEAK_REQUIREMENT_RE.test(clause)
+    );
+    if (hasWeakContradiction) {
+      unsupported.push(claim);
+    }
+  }
+
+  return unsupported;
+}
+
+function splitRequirementClauses(text: string): string[] {
+  return splitSpecificDetailSentences(text)
+    .flatMap((sentence) =>
+      sentence.split(/\s*(?:;|\bbut\b|\bhowever\b)\s*/i)
+    )
+    .map((clause) => clause.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+function isStrongUnqualifiedRequirementClaim(claim: string): boolean {
+  return STRONG_REQUIREMENT_RE.test(claim) && !WEAK_REQUIREMENT_RE.test(claim);
+}
+
+function evidenceClauseStronglyRequires(clause: string): boolean {
+  return (
+    isStrongUnqualifiedRequirementClaim(clause) ||
+    (IMPERATIVE_REQUIREMENT_RE.test(clause) && !WEAK_REQUIREMENT_RE.test(clause))
   );
 }
 
-function collectSpecificDetails(answer: string): string[] {
-  const patterns = [
-    /\b\d{4}-\d{1,2}-\d{1,2}\b/g,
-    /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t\.?|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,\s*\d{4})?\b/gi,
-    /\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g,
-    /\b\d{1,2}:\d{2}\s*(?:a\.?m\.?|p\.?m\.?)?\b/gi,
-    /\b\d+(?:\.\d+)?\s*(?:%|points?|pts?|marks?|hours?|hrs?|minutes?|mins?|seconds?|secs?|pages?|words?|files?|attempts?|submissions?|days?|weeks?|ohms?|k(?:ilo)?ohms?|kb|mb|gb)\b/gi,
-    /\b0x[0-9a-f]+\b/gi,
-    /\b[\w.-]+\.(?:pdf|docx?|pptx?|xlsx?|zip|txt|md|html?|py|java|c|cpp|js|ts|json|csv)\b/gi,
-  ];
-  const details: string[] = [];
+function tokenizeRequirementClaim(claim: string): string[] {
   const seen = new Set<string>();
-  for (const pattern of patterns) {
-    for (const match of answer.matchAll(pattern)) {
+  const tokens: string[] = [];
+  for (const token of normalizeSpecificDetailText(claim).split(/\s+/)) {
+    if (
+      token.length < 3 ||
+      REQUIREMENT_CLAIM_STOP_WORDS.has(token) ||
+      seen.has(token)
+    ) {
+      continue;
+    }
+    seen.add(token);
+    tokens.push(token);
+  }
+  return tokens;
+}
+
+function countRequirementTokenOverlap(tokens: string[], clause: string): number {
+  const clauseTokens = new Set(tokenizeRequirementClaim(clause));
+  return tokens.filter((token) => clauseTokens.has(token)).length;
+}
+
+function requirementClaimOverlapThreshold(tokens: string[]): number {
+  if (tokens.length <= 2) {
+    return 1;
+  }
+  return Math.min(3, Math.max(2, Math.ceil(tokens.length * 0.4)));
+}
+
+function collectSpecificDetails(answer: string): string[] {
+  return collectSpecificDetailRecords(answer).map((record) => record.value);
+}
+
+function collectSpecificDetailRecords(value: string): SpecificDetailRecord[] {
+  const patterns: Array<{ category: string; pattern: RegExp }> = [
+    { category: "date", pattern: /\b\d{4}-\d{1,2}-\d{1,2}\b/g },
+    {
+      category: "date",
+      pattern:
+        /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t\.?|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,\s*\d{4})?\b/gi,
+    },
+    { category: "date", pattern: /\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g },
+    {
+      category: "time",
+      pattern: /\b\d{1,2}:\d{2}\s*(?:a\.?m\.?|p\.?m\.?)?\b/gi,
+    },
+    {
+      category: "quantity",
+      pattern:
+        /\b\d+(?:\.\d+)?\s*(?:%|(?:percent(?:age)?|points?|pts?|marks?|hours?|hrs?|minutes?|mins?|seconds?|secs?|pages?|words?|files?|attempts?|submissions?|days?|weeks?|ohms?|k(?:ilo)?ohms?|kb|mb|gb)\b)/gi,
+    },
+    { category: "hex", pattern: /\b0x[0-9a-f]+\b/gi },
+    {
+      category: "file",
+      pattern:
+        /\b[\w.-]+\.(?:pdf|docx?|pptx?|xlsx?|zip|txt|md|html?|py|java|c|cpp|js|ts|json|csv)\b/gi,
+    },
+  ];
+  const records: SpecificDetailRecord[] = [];
+  const seen = new Set<string>();
+  for (const { category, pattern } of patterns) {
+    for (const match of value.matchAll(pattern)) {
       const detail = match[0].trim();
-      const key = normalizeSpecificDetailText(detail);
+      const key = normalizeSpecificDetailKey(detail, category);
       if (!key || seen.has(key)) {
         continue;
       }
       seen.add(key);
-      details.push(detail);
+      records.push({ value: detail, key, category });
     }
   }
-  return details;
+  return records;
 }
 
 function specificDetailAppearsInEvidence(
@@ -825,9 +1044,284 @@ function specificDetailAppearsInEvidence(
   return dateAppearsInEvidence(parsedDate, normalizedEvidence);
 }
 
+function specificDetailIsContextuallySupported(
+  detail: string,
+  answer: string,
+  answerContext: SpecificDetailAnswerContext,
+  evidenceText: string,
+  evidenceDetails: SpecificDetailRecord[]
+): boolean {
+  if (
+    evidenceQualifiesSpecificDetail(detail, evidenceText) &&
+    !answerQualifiesSpecificDetail(detail, answer)
+  ) {
+    return false;
+  }
+
+  const category = inferSpecificDetailCategory(detail);
+  if (!category || !evidenceHasCompetingDetails(detail, category, evidenceDetails)) {
+    return true;
+  }
+
+  const detailEvidenceChunks = splitEvidenceChunks(evidenceText).filter((chunk) =>
+    specificDetailAppearsInEvidence(detail, normalizeSpecificDetailText(chunk))
+  );
+  if (detailEvidenceChunks.length === 0) {
+    return false;
+  }
+
+  if (
+    answerContext.anchors.length > 0 &&
+    evidenceContainsCompetingAnchoredDetail(
+      detail,
+      category,
+      answerContext.anchors,
+      evidenceText,
+      evidenceDetails
+    )
+  ) {
+    return false;
+  }
+
+  if (answerContext.anchors.length > 0) {
+    return detailEvidenceChunks.some((chunk) =>
+      answerContext.anchors.some((anchor) =>
+        normalizeSpecificDetailText(chunk).includes(anchor)
+      )
+    );
+  }
+
+  if (answerContext.tokens.length === 0) {
+    return true;
+  }
+
+  return detailEvidenceChunks.some((chunk) => {
+    const chunkTokens = new Set(tokenizeSpecificDetailContext(chunk));
+    return answerContext.tokens.some((token) => chunkTokens.has(token));
+  });
+}
+
+function evidenceContainsCompetingAnchoredDetail(
+  detail: string,
+  category: string,
+  anchors: string[],
+  evidenceText: string,
+  evidenceDetails: SpecificDetailRecord[]
+): boolean {
+  const detailAmbiguityKey = normalizeSpecificDetailAmbiguityKey(detail, category);
+  const competingDetails = evidenceDetails.filter(
+    (record) =>
+      record.category === category &&
+      normalizeSpecificDetailAmbiguityKey(record.value, record.category) !==
+        detailAmbiguityKey
+  );
+  if (competingDetails.length === 0) {
+    return false;
+  }
+
+  return splitEvidenceChunks(evidenceText).some((chunk) => {
+    const normalizedChunk = normalizeSpecificDetailText(chunk);
+    if (!anchors.some((anchor) => normalizedChunk.includes(anchor))) {
+      return false;
+    }
+    return competingDetails.some((record) =>
+      specificDetailAppearsInEvidence(record.value, normalizedChunk)
+    );
+  });
+}
+
+const SPECIFIC_DETAIL_QUALIFIER_RE =
+  /\b(?:approx(?:imate|imately)?|about|around|roughly|usually|typically|generally|normally|estimated?|tentative(?:ly)?|expected|planned|subject to change)\b/;
+
+function evidenceQualifiesSpecificDetail(
+  detail: string,
+  evidenceText: string
+): boolean {
+  const detailSentences = splitSpecificDetailSentences(evidenceText).filter(
+    (sentence) =>
+      specificDetailAppearsInEvidence(detail, normalizeSpecificDetailText(sentence))
+  );
+  if (detailSentences.length === 0) {
+    return false;
+  }
+
+  return detailSentences.every((sentence) =>
+    sentenceQualifiesSpecificDetail(sentence, detail)
+  );
+}
+
+function answerQualifiesSpecificDetail(detail: string, answer: string): boolean {
+  const detailSentences = splitSpecificDetailSentences(answer).filter((sentence) =>
+    specificDetailAppearsInEvidence(detail, normalizeSpecificDetailText(sentence))
+  );
+  if (detailSentences.length === 0) {
+    return false;
+  }
+
+  return detailSentences.every((sentence) =>
+    sentenceQualifiesSpecificDetail(sentence, detail)
+  );
+}
+
+function splitSpecificDetailSentences(text: string): string[] {
+  return splitEvidenceChunks(text)
+    .flatMap((chunk) =>
+      chunk
+        .replace(/\s+/g, " ")
+        .split(/(?<=[.!?])\s+/)
+    )
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+}
+
+function sentenceQualifiesSpecificDetail(sentence: string, detail: string): boolean {
+  const normalizedSentence = normalizeSpecificDetailText(sentence);
+  const normalizedDetail = normalizeSpecificDetailText(detail);
+  if (!normalizedSentence || !normalizedDetail) {
+    return false;
+  }
+
+  const detailIndex = normalizedSentence.indexOf(normalizedDetail);
+  if (detailIndex < 0) {
+    return SPECIFIC_DETAIL_QUALIFIER_RE.test(normalizedSentence);
+  }
+
+  const start = Math.max(0, detailIndex - 80);
+  const end = Math.min(
+    normalizedSentence.length,
+    detailIndex + normalizedDetail.length + 80
+  );
+  return SPECIFIC_DETAIL_QUALIFIER_RE.test(
+    normalizedSentence.slice(start, end)
+  );
+}
+
+interface SpecificDetailAnswerContext {
+  anchors: string[];
+  tokens: string[];
+}
+
+function buildSpecificDetailAnswerContext(answer: string): SpecificDetailAnswerContext {
+  return {
+    anchors: collectSpecificDetailAnchors(answer),
+    tokens: tokenizeSpecificDetailContext(answer),
+  };
+}
+
+function collectSpecificDetailAnchors(value: string): string[] {
+  const anchors: string[] = [];
+  const seen = new Set<string>();
+  const patterns = [
+    /\b(?:lab|assignment|homework|hw|project|quiz|module|week|part|task|milestone)\s*#?\s*\d+[a-z]?\b/gi,
+    /\b[\w.-]+\.(?:pdf|docx?|pptx?|xlsx?|zip|txt|md|html?|py|java|c|cpp|js|ts|json|csv)\b/gi,
+  ];
+  for (const pattern of patterns) {
+    for (const match of value.matchAll(pattern)) {
+      const anchor = normalizeSpecificDetailText(match[0]);
+      if (!anchor || seen.has(anchor)) {
+        continue;
+      }
+      seen.add(anchor);
+      anchors.push(anchor);
+    }
+  }
+  return anchors;
+}
+
+function tokenizeSpecificDetailContext(value: string): string[] {
+  const specificDetailText = collectSpecificDetails(value)
+    .map(normalizeSpecificDetailText)
+    .join(" ");
+  const detailTokens = new Set(specificDetailText.split(/\s+/).filter(Boolean));
+  const seen = new Set<string>();
+  const tokens: string[] = [];
+  for (const rawToken of normalizeSpecificDetailText(value).split(/\s+/)) {
+    if (
+      !rawToken ||
+      detailTokens.has(rawToken) ||
+      SPECIFIC_DETAIL_CONTEXT_STOP_WORDS.has(rawToken) ||
+      seen.has(rawToken)
+    ) {
+      continue;
+    }
+    if (rawToken.length < 2 && !/^\d+$/.test(rawToken)) {
+      continue;
+    }
+    seen.add(rawToken);
+    tokens.push(rawToken);
+  }
+  return tokens;
+}
+
+function evidenceHasCompetingDetails(
+  detail: string,
+  category: string,
+  evidenceDetails: SpecificDetailRecord[]
+): boolean {
+  const detailKey = normalizeSpecificDetailKey(detail, category);
+  const detailAmbiguityKey = normalizeSpecificDetailAmbiguityKey(
+    detail,
+    category
+  );
+  const competingKeys = new Set(
+    evidenceDetails
+      .filter((record) => record.category === category)
+      .map((record) =>
+        normalizeSpecificDetailAmbiguityKey(record.value, record.category)
+      )
+      .filter((key) => key.length > 0)
+  );
+  return (
+    competingKeys.size > 1 &&
+    (competingKeys.has(detailKey) || competingKeys.has(detailAmbiguityKey))
+  );
+}
+
+function inferSpecificDetailCategory(detail: string): string | null {
+  return collectSpecificDetailRecords(detail)[0]?.category ?? null;
+}
+
+function normalizeSpecificDetailKey(value: string, category: string): string {
+  if (category === "date") {
+    const parsedDate =
+      parseMonthDaySpecificDetail(value) ??
+      parseIsoSpecificDetail(value) ??
+      parseSlashDateSpecificDetail(value);
+    if (parsedDate) {
+      return [
+        parsedDate.year ?? "",
+        String(parsedDate.month).padStart(2, "0"),
+        String(parsedDate.day).padStart(2, "0"),
+      ].join("-");
+    }
+  }
+  return normalizeSpecificDetailText(value);
+}
+
+function normalizeSpecificDetailAmbiguityKey(
+  value: string,
+  category: string
+): string {
+  if (category === "date") {
+    const parsedDate =
+      parseMonthDaySpecificDetail(value) ??
+      parseIsoSpecificDetail(value) ??
+      parseSlashDateSpecificDetail(value);
+    if (parsedDate) {
+      return [
+        String(parsedDate.month).padStart(2, "0"),
+        String(parsedDate.day).padStart(2, "0"),
+      ].join("-");
+    }
+  }
+  return normalizeSpecificDetailKey(value, category);
+}
+
 function normalizeSpecificDetailText(value: string): string {
   return value
     .toLowerCase()
+    .replace(/\b(\d+(?:\.\d+)?)\s*%/g, "$1 percent")
+    .replace(/\b(\d+(?:\.\d+)?)\s+percent(?:age)?\b/g, "$1 percent")
     .replace(/\b(\d+)(?:st|nd|rd|th)\b/g, "$1")
     .replace(/\ba\.?m\.?\b/g, "am")
     .replace(/\bp\.?m\.?\b/g, "pm")

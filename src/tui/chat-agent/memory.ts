@@ -245,6 +245,14 @@ function buildNextToolStep(
 
   const needsMultipleSources = questionNeedsMultipleSources(question);
   if (groundedArtifactIds.size > 0) {
+    const sourceSpecificCandidate = selectSourceSpecificCandidateTitle(
+      question,
+      candidateTitles
+    );
+    if (sourceSpecificCandidate) {
+      return `Unresolved next step: the question points at a specific source type and "${sourceSpecificCandidate}" is an unread search result. Call read_file on "${sourceSpecificCandidate}" before answering from snippets or the current partial evidence.`;
+    }
+
     if (!needsMultipleSources || groundedArtifactIds.size > 1) {
       return buildEvidenceSufficientDirective(
         groundedObservations,
@@ -283,6 +291,30 @@ function buildNextToolStep(
           .join(", ");
 
   return `Unresolved next step: you already found candidate sources but do not have grounded text yet. Reuse those breadcrumbs and call read_file on ${candidates} before running another search or answering from snippets.`;
+}
+
+function selectSourceSpecificCandidateTitle(
+  question: string,
+  candidateTitles: string[]
+): string | null {
+  if (candidateTitles.length === 0) {
+    return null;
+  }
+
+  const sourceCues = [
+    /\brubric\b/i,
+    /\bsyllabus\b/i,
+    /\b(?:slides?|slide\s+deck|lecture)\b/i,
+    /\b(?:spec|specification)\b/i,
+    /\b(?:instructions?|brief)\b/i,
+    /\b(?:worksheet|handout)\b/i,
+  ];
+  const matchingCue = sourceCues.find((cue) => cue.test(question));
+  if (!matchingCue) {
+    return null;
+  }
+
+  return candidateTitles.find((title) => matchingCue.test(title)) ?? null;
 }
 
 function buildThreadReadNextStep(

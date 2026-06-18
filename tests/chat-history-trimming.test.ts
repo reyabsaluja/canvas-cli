@@ -376,6 +376,149 @@ test("buildToolPromptMessages treats multi-topic questions as needing multiple s
   assert.doesNotMatch(latestMessage, /Evidence checkpoint/i);
 });
 
+test("buildToolPromptMessages treats joined evidence topics as needing another read", () => {
+  const promptMessages = buildToolPromptMessages(
+    [],
+    "What are the due date and submission format?",
+    {
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read assignment.md.",
+          artifacts: [
+            {
+              artifactId: "artifact-due",
+              title: "assignment.md",
+              kind: "assignment",
+              excerpt: "The report is due on April 10 at 11:59 PM.",
+              sectionLabel: "Due date",
+            },
+          ],
+          content: "The report is due on April 10 at 11:59 PM.",
+        },
+        {
+          tool: "search_workspace",
+          status: "ok",
+          summary: "Found 1 workspace match for 'submission format'.",
+          artifacts: [
+            {
+              artifactId: "artifact-submission",
+              title: "submission-guidelines.pdf",
+              kind: "attachment",
+              excerpt: "Submit a single PDF report through Canvas.",
+              sectionLabel: "Submission format",
+            },
+          ],
+        },
+      ],
+      readArtifactIds: ["artifact-due"],
+      stepCount: 2,
+    }
+  );
+
+  const latestMessage = promptMessages.at(-1)?.content ?? "";
+  assert.match(latestMessage, /Unresolved next step:/i);
+  assert.match(latestMessage, /submission-guidelines\.pdf/i);
+  assert.match(latestMessage, /read_file/i);
+  assert.doesNotMatch(latestMessage, /Evidence checkpoint/i);
+});
+
+test("buildToolPromptMessages treats broad prep questions as needing another source", () => {
+  const promptMessages = buildToolPromptMessages(
+    [],
+    "What do I need to know for the lab?",
+    {
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read lab4-overview.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-overview",
+              title: "lab4-overview.txt",
+              kind: "extracted",
+              excerpt:
+                "The lab asks students to build and test the cache controller.",
+            },
+          ],
+          content: "The lab asks students to build and test the cache controller.",
+        },
+        {
+          tool: "search_workspace",
+          status: "ok",
+          summary: "Found 1 workspace match for 'lab rubric'.",
+          artifacts: [
+            {
+              artifactId: "artifact-rubric",
+              title: "lab4-rubric.pdf",
+              kind: "attachment",
+              excerpt:
+                "The rubric emphasizes explanation quality and waveform evidence.",
+            },
+          ],
+        },
+      ],
+      readArtifactIds: ["artifact-overview"],
+      stepCount: 2,
+    }
+  );
+
+  const latestMessage = promptMessages.at(-1)?.content ?? "";
+  assert.match(latestMessage, /Unresolved next step:/i);
+  assert.match(latestMessage, /lab4-rubric\.pdf/i);
+  assert.match(latestMessage, /read_file/i);
+  assert.doesNotMatch(latestMessage, /Evidence checkpoint/i);
+});
+
+test("buildToolPromptMessages forces a read for source-specific search breadcrumbs", () => {
+  const promptMessages = buildToolPromptMessages(
+    [],
+    "What does the rubric say about waveform evidence?",
+    {
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read lab4-overview.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-overview",
+              title: "lab4-overview.txt",
+              kind: "extracted",
+              excerpt: "The lab overview mentions waveform evidence.",
+            },
+          ],
+          content: "The lab overview mentions waveform evidence.",
+        },
+        {
+          tool: "search_workspace",
+          status: "ok",
+          summary: "Found 1 workspace match for 'rubric waveform evidence'.",
+          artifacts: [
+            {
+              artifactId: "artifact-rubric",
+              title: "lab4-rubric.pdf",
+              kind: "attachment",
+              excerpt:
+                "The rubric gives 30% credit for waveform evidence.",
+            },
+          ],
+        },
+      ],
+      readArtifactIds: ["artifact-overview"],
+      stepCount: 2,
+    }
+  );
+
+  const latestMessage = promptMessages.at(-1)?.content ?? "";
+  assert.match(latestMessage, /Unresolved next step:/i);
+  assert.match(latestMessage, /lab4-rubric\.pdf/i);
+  assert.match(latestMessage, /read_file/i);
+  assert.doesNotMatch(latestMessage, /Evidence checkpoint/i);
+});
+
 test("buildToolPromptMessages prefers viable breadcrumbs over already-failed artifacts", () => {
   const promptMessages = buildToolPromptMessages(
     [],

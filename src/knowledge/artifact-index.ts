@@ -8,9 +8,11 @@ import {
   getExtractedAnnouncementPath,
   getExtractedAttachmentPath,
   getExtractedCalendarEventPath,
+  getExtractedCourseTabPath,
   getExtractedDiscussionPath,
   getExtractedExternalLinkPath,
   getExtractedFrontPagePath,
+  getExtractedModulePath,
   getExtractedPagePath,
   getExtractedQuizPath,
   getExtractedSyllabusPath,
@@ -23,6 +25,7 @@ export type ArtifactKind =
   | "module"
   | "file"
   | "page"
+  | "course_tab"
   | "quiz"
   | "calendar_event"
   | "announcement"
@@ -118,7 +121,9 @@ const SEARCH_QUERY_STOP_WORDS_RAW = [
   "assignment",
   "assignments",
   "class",
+  "can",
   "course",
+  "did",
   "does",
   "do",
   "for",
@@ -129,6 +134,7 @@ const SEARCH_QUERY_STOP_WORDS_RAW = [
   "how",
   "i",
   "in",
+  "instructor",
   "is",
   "it",
   "me",
@@ -138,11 +144,15 @@ const SEARCH_QUERY_STOP_WORDS_RAW = [
   "on",
   "or",
   "please",
+  "prof",
+  "professor",
   "say",
+  "said",
   "says",
   "should",
   "show",
   "tell",
+  "teacher",
   "that",
   "the",
   "this",
@@ -167,13 +177,21 @@ const SNIPPET_QUERY_STOP_WORDS_RAW = [
   "about",
   "assignment",
   "course",
+  "did",
   "does",
   "explain",
   "from",
   "have",
+  "instructor",
   "need",
+  "prof",
+  "professor",
+  "say",
+  "says",
+  "said",
   "should",
   "that",
+  "teacher",
   "the",
   "this",
   "what",
@@ -191,12 +209,34 @@ function getSnippetQueryStopWords(): Set<string> {
 }
 
 const SEARCH_TOKEN_ALIASES: Record<string, string[]> = {
+  date: ["due", "deadline", "time"],
   deadline: ["due", "date"],
+  deliverable: ["submission", "submit", "format", "file", "report"],
+  due: ["deadline", "date"],
+  extend: ["extension", "late", "grace", "deadline"],
+  extension: ["late", "grace", "deadline", "accommodation"],
+  file: ["format", "package", "pdf"],
+  format: ["package", "type", "file", "deliverable", "report", "pdf"],
   grade: ["point", "mark", "score"],
   grad: ["point", "mark", "score"],
+  hand: ["submit", "upload"],
+  late: ["penalty", "deadline", "extension", "extend", "due", "grace"],
   mark: ["point", "score", "grade"],
+  package: ["format", "file"],
+  penalty: ["late", "deduction"],
+  percent: ["percentage"],
+  percentage: ["percent"],
   point: ["mark", "score", "grade"],
   score: ["point", "mark", "grade"],
+  submit: ["submission", "upload", "hand", "deliverable", "file", "report"],
+  submission: ["submit", "upload", "deliverable", "file", "report"],
+  skeleton: ["starter", "template", "scaffold", "boilerplate"],
+  scaffold: ["starter", "template", "skeleton", "boilerplate"],
+  starter: ["template", "skeleton", "scaffold", "boilerplate"],
+  template: ["starter", "skeleton", "scaffold", "boilerplate"],
+  turn: ["submit", "submission", "upload", "hand", "deliverable", "file", "report"],
+  type: ["format"],
+  upload: ["submit", "submission", "deliverable", "file"],
   worth: ["point", "grade"],
 };
 
@@ -227,8 +267,14 @@ export async function getCourseArtifactSetKey(
         getExtractedAssignmentPath(cache.coursePath, assignment.id)
       )
     ),
+    ...cache.modules.map((module) =>
+      getFileSignature(getExtractedModulePath(cache.coursePath, module.id))
+    ),
     ...cache.pages.map((page) =>
       getFileSignature(getExtractedPagePath(cache.coursePath, page.pageId))
+    ),
+    ...(cache.tabs ?? []).map((tab) =>
+      getFileSignature(getExtractedCourseTabPath(cache.coursePath, tab.id))
     ),
     ...(cache.quizzes ?? []).map((quiz) =>
       getFileSignature(getExtractedQuizPath(cache.coursePath, quiz.id))
@@ -282,12 +328,22 @@ export async function getCourseArtifactSetKey(
         htmlUrl: assignment.htmlUrl,
         hasDescription: assignment.hasDescription,
         descriptionLinkCount: assignment.descriptionLinkCount,
+        peerReviews: assignment.peerReviews ?? null,
+        automaticPeerReviews: assignment.automaticPeerReviews ?? null,
+        anonymousPeerReviews: assignment.anonymousPeerReviews ?? null,
+        intraGroupPeerReviews: assignment.intraGroupPeerReviews ?? null,
+        peerReviewCount: assignment.peerReviewCount ?? null,
+        peerReviewsAssignAt: assignment.peerReviewsAssignAt ?? null,
+        dateDetails: assignment.dateDetails ?? null,
       })),
       modules: cache.modules.map((module) => ({
         id: module.id,
         name: module.name,
         position: module.position,
         itemCount: module.itemCount,
+        unlockAt: module.unlockAt ?? null,
+        requiresSequentialProgress: module.requiresSequentialProgress ?? null,
+        prerequisiteModuleIds: module.prerequisiteModuleIds ?? [],
         items: module.items.map((item) => ({
           id: item.id,
           title: item.title,
@@ -295,6 +351,9 @@ export async function getCourseArtifactSetKey(
           position: item.position,
           contentId: item.contentId,
           pageUrl: item.pageUrl,
+          htmlUrl: item.htmlUrl,
+          externalUrl: item.externalUrl,
+          completionRequirement: item.completionRequirement ?? null,
         })),
       })),
       files: cache.files.map((file) => ({
@@ -310,6 +369,18 @@ export async function getCourseArtifactSetKey(
         title: page.title,
         updatedAt: page.updatedAt,
         hasBody: page.hasBody,
+      })),
+      tabs: (cache.tabs ?? []).map((tab) => ({
+        id: tab.id,
+        label: tab.label,
+        type: tab.type,
+        position: tab.position,
+        hidden: tab.hidden,
+        visibility: tab.visibility,
+        htmlUrl: tab.htmlUrl,
+        fullUrl: tab.fullUrl,
+        url: tab.url,
+        externalUrl: tab.externalUrl,
       })),
       quizzes: (cache.quizzes ?? []).map((quiz) => ({
         id: quiz.id,
@@ -1041,6 +1112,9 @@ async function addCourseArtifacts(
       cache.coursePath,
       assignment.id
     );
+    const assignmentPeerReviewFacts = formatAssignmentPeerReviewFacts(assignment);
+    const assignmentDateDetailFacts =
+      formatAssignmentDateDetailFacts(assignment);
     const fallbackText = [
       assignment.name,
       assignment.dueAt ?? "no due date",
@@ -1049,6 +1123,12 @@ async function addCourseArtifacts(
         : "points not specified",
       assignment.gradingType,
       assignment.submissionTypes.join(" "),
+      ...assignmentPeerReviewFacts.map(
+        ([label, value]) => `${label}: ${value}`
+      ),
+      ...assignmentDateDetailFacts.map(
+        ([label, value]) => `${label}: ${value}`
+      ),
     ].join(" ");
     await registerCourseTextArtifact(
       {
@@ -1066,7 +1146,41 @@ async function addCourseArtifacts(
           pointsPossible: assignment.pointsPossible,
           gradingType: assignment.gradingType,
           submissionTypes: assignment.submissionTypes,
+          peerReviews: assignment.peerReviews ?? null,
+          automaticPeerReviews: assignment.automaticPeerReviews ?? null,
+          anonymousPeerReviews: assignment.anonymousPeerReviews ?? null,
+          intraGroupPeerReviews: assignment.intraGroupPeerReviews ?? null,
+          peerReviewCount: assignment.peerReviewCount ?? null,
+          peerReviewsAssignAt: assignment.peerReviewsAssignAt ?? null,
+          dateDetails: assignment.dateDetails ?? null,
         },
+        syntheticSections: [
+          {
+            section: "Key facts",
+            text: formatKeyFacts([
+              ["Assignment", assignment.name],
+              ["Due date", assignment.dueAt ?? "No due date"],
+              ["Unlocks", assignment.unlockAt],
+              ["Locks", assignment.lockAt],
+              [
+                "Points",
+                assignment.pointsPossible !== null
+                  ? `${assignment.pointsPossible} points`
+                  : "Not specified",
+              ],
+              ["Grading type", assignment.gradingType],
+              [
+                "Submission types",
+                assignment.submissionTypes.length > 0
+                  ? assignment.submissionTypes.join(", ")
+                  : "Not specified",
+              ],
+              ...assignmentPeerReviewFacts,
+              ...assignmentDateDetailFacts,
+            ]),
+            scoreBoost: 1.2,
+          },
+        ],
       },
       registerArtifact,
       registerSection,
@@ -1076,23 +1190,73 @@ async function addCourseArtifacts(
   }
 
   for (const module of cache.modules) {
-    const body = module.items
-      .map((item) => `${item.type} ${item.title}`)
-      .join(" ");
-    const artifact = createArtifact({
-      id: `course:module:${module.id}`,
-      scope: "course",
-      kind: "module",
-      title: module.name,
-      source: module.name,
-      location: "module",
-      body,
-      scoreBoost: 1,
-      metadata: { moduleId: module.id },
-    });
-    registerArtifact(artifact);
-    registerSection(
-      createSectionFromText(artifact, "Metadata", body, artifact.scoreBoost)
+    const modulePath = getExtractedModulePath(cache.coursePath, module.id);
+    const fallbackText = [
+      module.name,
+      module.unlockAt ?? "",
+      module.requiresSequentialProgress ? "requires sequential progress" : "",
+      ...(module.prerequisiteModuleIds ?? []).map(
+        (id) => `prerequisite module ${id}`
+      ),
+      ...module.items.map((item) =>
+        [
+          item.type,
+          item.title,
+          item.completionRequirement?.type ?? "",
+          item.completionRequirement?.minScore !== null &&
+          item.completionRequirement?.minScore !== undefined
+            ? String(item.completionRequirement.minScore)
+            : "",
+        ].join(" ")
+      ),
+    ].join(" ");
+    await registerCourseTextArtifact(
+      {
+        id: `course:module:${module.id}`,
+        kind: "module",
+        title: module.name,
+        source: module.name,
+        location: "module",
+        fallbackText,
+        contentPath: modulePath,
+        scoreBoost: 1,
+        metadata: {
+          moduleId: module.id,
+          unlockAt: module.unlockAt ?? null,
+          requiresSequentialProgress: module.requiresSequentialProgress ?? null,
+          prerequisiteModuleIds: module.prerequisiteModuleIds ?? [],
+        },
+        syntheticSections: [
+          {
+            section: "Key facts",
+            text: formatKeyFacts([
+              ["Module", module.name],
+              ["Unlocks", module.unlockAt],
+              [
+                "Requires sequential progress",
+                module.requiresSequentialProgress === null ||
+                module.requiresSequentialProgress === undefined
+                  ? null
+                  : module.requiresSequentialProgress
+                    ? "yes"
+                    : "no",
+              ],
+              [
+                "Prerequisite module IDs",
+                (module.prerequisiteModuleIds ?? []).length > 0
+                  ? (module.prerequisiteModuleIds ?? []).join(", ")
+                  : null,
+              ],
+              ["Items", `${module.itemCount}`],
+            ]),
+            scoreBoost: 1.15,
+          },
+        ],
+      },
+      registerArtifact,
+      registerSection,
+      contentCache,
+      loaders
     );
   }
 
@@ -1154,6 +1318,79 @@ async function addCourseArtifacts(
     contentCache,
     loaders
   );
+
+  for (const tab of cache.tabs ?? []) {
+    const tabPath = getExtractedCourseTabPath(cache.coursePath, tab.id);
+    const tabUrls = [
+      tab.fullUrl,
+      tab.externalUrl,
+      tab.url,
+      tab.htmlUrl,
+    ].filter((value): value is string => Boolean(value));
+    await registerCourseTextArtifact(
+      {
+        id: `course:course_tab:${tab.id}`,
+        kind: "course_tab",
+        title: tab.label,
+        source: tab.label,
+        location: tab.fullUrl ?? tab.externalUrl ?? tab.htmlUrl ?? tab.url ?? "course tab",
+        fallbackText: [
+          tab.label,
+          tab.type ?? "",
+          tab.visibility ?? "",
+          tab.hidden === true ? "hidden" : tab.hidden === false ? "visible" : "",
+          ...tabUrls,
+        ]
+          .filter((value) => value.length > 0)
+          .join(" "),
+        contentPath: tabPath,
+        scoreBoost: 1.02,
+        metadata: {
+          tabId: tab.id,
+          type: tab.type,
+          position: tab.position,
+          hidden: tab.hidden,
+          visibility: tab.visibility,
+          htmlUrl: tab.htmlUrl,
+          fullUrl: tab.fullUrl,
+          url: tab.url,
+          externalUrl: tab.externalUrl,
+        },
+        syntheticSections: [
+          {
+            section: "Key facts",
+            text: formatKeyFacts([
+              ["Tab", tab.label],
+              ["Type", tab.type],
+              [
+                "Position",
+                tab.position !== null && tab.position !== undefined
+                  ? String(tab.position)
+                  : null,
+              ],
+              [
+                "Hidden",
+                tab.hidden === null || tab.hidden === undefined
+                  ? null
+                  : tab.hidden
+                    ? "yes"
+                    : "no",
+              ],
+              ["Visibility", tab.visibility],
+              ["Full URL", tab.fullUrl],
+              ["External URL", tab.externalUrl],
+              ["Canvas URL", tab.htmlUrl],
+            ]),
+            scoreBoost: 1.15,
+          },
+        ],
+      },
+      registerArtifact,
+      registerSection,
+      contentCache,
+      loaders
+    );
+  }
 
   const gradingBreakdownPath = path.join(
     cache.coursePath,
@@ -1238,6 +1475,42 @@ async function addCourseArtifacts(
           allowedAttempts: quiz.allowedAttempts,
           assignmentId: quiz.assignmentId,
         },
+        syntheticSections: [
+          {
+            section: "Key facts",
+            text: formatKeyFacts([
+              ["Quiz", quiz.title],
+              ["Due date", quiz.dueAt ?? "No due date"],
+              ["Unlocks", quiz.unlockAt],
+              ["Locks", quiz.lockAt],
+              [
+                "Points",
+                quiz.pointsPossible !== null
+                  ? `${quiz.pointsPossible} points`
+                  : "Not specified",
+              ],
+              [
+                "Time limit",
+                quiz.timeLimit !== null
+                  ? `${quiz.timeLimit} minutes`
+                  : "Not specified",
+              ],
+              [
+                "Allowed attempts",
+                quiz.allowedAttempts !== null
+                  ? quiz.allowedAttempts < 0
+                    ? "unlimited"
+                    : `${quiz.allowedAttempts}`
+                  : "Not specified",
+              ],
+              [
+                "Question count",
+                quiz.questionCount !== null ? `${quiz.questionCount}` : null,
+              ],
+            ]),
+            scoreBoost: 1.2,
+          },
+        ],
       },
       registerArtifact,
       registerSection,
@@ -1275,6 +1548,24 @@ async function addCourseArtifacts(
           locationAddress: event.locationAddress,
           workflowState: event.workflowState,
         },
+        syntheticSections: [
+          {
+            section: "Key facts",
+            text: formatKeyFacts([
+              ["Event", event.title],
+              ["Starts", event.startAt ?? "No start time"],
+              ["Ends", event.endAt],
+              [
+                "All day",
+                event.allDay === null ? null : event.allDay ? "yes" : "no",
+              ],
+              ["Location", event.locationName],
+              ["Address", event.locationAddress],
+              ["Status", event.workflowState],
+            ]),
+            scoreBoost: 1.15,
+          },
+        ],
       },
       registerArtifact,
       registerSection,
@@ -1578,6 +1869,11 @@ async function registerCourseTextArtifact(
     scoreBoost: number;
     metadata: Record<string, unknown>;
     skipIfMissingContent?: boolean;
+    syntheticSections?: Array<{
+      section: string;
+      text: string;
+      scoreBoost?: number;
+    }>;
   },
   registerArtifact: (artifact: ArtifactRecord) => void,
   registerSection: (section: ArtifactSection) => void,
@@ -1607,14 +1903,385 @@ async function registerCourseTextArtifact(
   contentCache.set(artifact.id, content);
   loaders.set(artifact.id, loader);
 
-  for (const section of buildCourseTextSections(
+  const courseSections = buildCourseTextSections(
     artifact,
     body,
     content ? "Full text" : "Summary",
     artifact.scoreBoost
-  )) {
+  );
+  const syntheticSections = (options.syntheticSections ?? [])
+    .filter((section) => section.text.trim().length > 0)
+    .filter(
+      (section) => !(content && markdownHasHeading(content, section.section))
+    )
+    .map((section) =>
+      createSectionFromText(
+        artifact,
+        section.section,
+        section.text,
+        section.scoreBoost ?? artifact.scoreBoost
+      )
+    );
+
+  for (const section of courseSections) {
     registerSection(section);
   }
+
+  if (
+    content &&
+    shouldAddDetectedFactsSection(artifact.kind) &&
+    !markdownHasHeading(content, "Detected facts")
+  ) {
+    const detectedFacts = extractDetectedFactLines([
+      ...syntheticSections,
+      ...courseSections,
+    ]);
+    if (detectedFacts.length > 0) {
+      registerSection(
+        createSectionFromText(
+          artifact,
+          "Detected facts",
+          detectedFacts.join("\n"),
+          artifact.scoreBoost * 1.8
+        )
+      );
+    }
+  }
+
+  for (const section of syntheticSections) {
+    registerSection(section);
+  }
+}
+
+function markdownHasHeading(markdown: string, heading: string): boolean {
+  return new RegExp(`^#{1,6}\\s+${escapeRegExp(heading)}\\s*$`, "im").test(
+    markdown
+  );
+}
+
+function formatKeyFacts(
+  facts: Array<[label: string, value: string | number | null | undefined]>
+): string {
+  return facts
+    .filter(
+      ([, value]) =>
+        value !== null && value !== undefined && `${value}`.length > 0
+    )
+    .map(([label, value]) => `${label}: ${value}`)
+    .join("\n");
+}
+
+function formatAssignmentPeerReviewFacts(
+  assignment: CourseCache["assignments"][number]
+): Array<[label: string, value: string | number | null | undefined]> {
+  const facts: Array<[label: string, value: string | number | null | undefined]> =
+    [];
+
+  if (assignment.peerReviews !== null && assignment.peerReviews !== undefined) {
+    facts.push(["Peer reviews", formatBooleanFact(assignment.peerReviews)]);
+  }
+
+  if (assignment.peerReviews === false) {
+    return facts;
+  }
+
+  if (
+    assignment.automaticPeerReviews !== null &&
+    assignment.automaticPeerReviews !== undefined
+  ) {
+    facts.push([
+      "Peer reviews assigned automatically",
+      formatBooleanFact(assignment.automaticPeerReviews),
+    ]);
+  }
+  if (
+    assignment.anonymousPeerReviews !== null &&
+    assignment.anonymousPeerReviews !== undefined
+  ) {
+    facts.push([
+      "Anonymous peer reviews",
+      formatBooleanFact(assignment.anonymousPeerReviews),
+    ]);
+  }
+  if (
+    assignment.intraGroupPeerReviews !== null &&
+    assignment.intraGroupPeerReviews !== undefined
+  ) {
+    facts.push([
+      "Intra-group peer reviews",
+      formatBooleanFact(assignment.intraGroupPeerReviews),
+    ]);
+  }
+  if (
+    assignment.peerReviewCount !== null &&
+    assignment.peerReviewCount !== undefined
+  ) {
+    facts.push(["Peer reviews required", assignment.peerReviewCount]);
+  }
+  if (
+    assignment.peerReviewsAssignAt !== null &&
+    assignment.peerReviewsAssignAt !== undefined
+  ) {
+    facts.push(["Peer reviews assigned at", assignment.peerReviewsAssignAt]);
+  }
+
+  return facts;
+}
+
+function formatAssignmentDateDetailFacts(
+  assignment: CourseCache["assignments"][number]
+): Array<[label: string, value: string | number | null | undefined]> {
+  const details = assignment.dateDetails;
+  if (!details) {
+    return [];
+  }
+
+  const facts: Array<[label: string, value: string | number | null | undefined]> =
+    [];
+
+  if (details.onlyVisibleToOverrides !== null) {
+    facts.push([
+      "Only visible to override recipients",
+      formatBooleanFact(details.onlyVisibleToOverrides),
+    ]);
+  }
+
+  if (details.overrideCount > 0) {
+    facts.push([
+      "Assignment date overrides",
+      `${details.overrideCount} override${details.overrideCount === 1 ? "" : "s"}`,
+    ]);
+  }
+  for (const override of details.overrides) {
+    facts.push([
+      `Date override: ${override.title ?? "override"}`,
+      formatDateOverrideFact(override),
+    ]);
+  }
+
+  const peerReview = details.peerReviewSubAssignment;
+  if (peerReview) {
+    facts.push(["Peer review assignment", peerReview.title]);
+    facts.push(["Peer review due date", peerReview.dueAt]);
+    facts.push(["Peer review unlocks", peerReview.unlockAt]);
+    facts.push(["Peer review locks", peerReview.lockAt]);
+    if (peerReview.onlyVisibleToOverrides !== null) {
+      facts.push([
+        "Peer review only visible to override recipients",
+        formatBooleanFact(peerReview.onlyVisibleToOverrides),
+      ]);
+    }
+    if (peerReview.overrideCount > 0) {
+      facts.push([
+        "Peer review date overrides",
+        `${peerReview.overrideCount} override${
+          peerReview.overrideCount === 1 ? "" : "s"
+        }`,
+      ]);
+    }
+    for (const override of peerReview.overrides) {
+      facts.push([
+        `Peer review date override: ${override.title ?? "override"}`,
+        formatDateOverrideFact(override),
+      ]);
+    }
+  }
+
+  return facts;
+}
+
+function formatDateOverrideFact(
+  override: NonNullable<
+    CourseCache["assignments"][number]["dateDetails"]
+  >["overrides"][number]
+): string {
+  return [
+    override.setType ? `type ${override.setType}` : null,
+    override.courseSectionId !== null
+      ? `section ${override.courseSectionId}`
+      : null,
+    override.groupId !== null ? `group ${override.groupId}` : null,
+    override.studentCount !== null
+      ? `${override.studentCount} student${override.studentCount === 1 ? "" : "s"}`
+      : null,
+    override.dueAt ? `due ${override.dueAt}` : null,
+    override.unlockAt ? `unlocks ${override.unlockAt}` : null,
+    override.lockAt ? `locks ${override.lockAt}` : null,
+    override.allDayDate ? `all-day date ${override.allDayDate}` : null,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join("; ");
+}
+
+function formatBooleanFact(value: boolean): string {
+  return value ? "yes" : "no";
+}
+
+const DETECTED_FACT_KINDS = new Set<ArtifactKind>([
+  "syllabus",
+  "front_page",
+  "page",
+  "announcement",
+  "discussion",
+  "external_link",
+  "attachment",
+  "grading",
+]);
+
+const FACT_DATE_RE =
+  /\b(?:\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?Z?)?|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2}(?:,\s*\d{4})?)\b/i;
+const FACT_TIME_RE =
+  /\b\d{1,2}(?::\d{2})\s*(?:a\.?m\.?|p\.?m\.?)?\b|\b\d{1,2}\s*(?:a\.?m\.?|p\.?m\.?)\b/i;
+const FACT_RELATIVE_TIME_RE =
+  /\b(?:(?:week|module)\s*\d+[a-z]?|(?:mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:r(?:s(?:day)?)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)|(?:next|this|following)\s+(?:week|class|lecture|lab|tutorial|recitation|session|meeting|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:r(?:s(?:day)?)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)|(?:start|beginning|end)\s+of\s+(?:week|class|lecture|lab|tutorial|recitation|session|term|semester)|(?:lab|class|lecture|tutorial|recitation)\s+(?:period|session|meeting))\b/i;
+const FACT_PERCENT_RE = /\b\d+(?:\.\d+)?\s*(?:%(?!\w)|percent(?:age)?\b)/i;
+const FACT_POINTS_RE =
+  /\b(?:\d+(?:\.\d+)?\s*(?:points?|pts?|marks?)|(?:points?|pts?|marks?)\s*[:=-]?\s*\d+(?:\.\d+)?)\b/i;
+const FACT_KEYWORD_RE =
+  /\b(?:due|deadline|before|after|until|late|penalt(?:y|ies)|grace|extension|points?|pts?|marks?|percent(?:age)?|grade|score|worth|weight(?:ed)?|unlock|lock|available|opens?|closes?|starts?|ends?)\b/i;
+const FACT_STRONG_POLICY_RE =
+  /\b(?:due|deadline|late|penalt(?:y|ies)|grace period|extension|lock(?:s|ed)?|unlock(?:s|ed)?|available until)\b/i;
+
+function shouldAddDetectedFactsSection(kind: ArtifactKind): boolean {
+  return DETECTED_FACT_KINDS.has(kind);
+}
+
+function extractDetectedFactLines(
+  sections: ArtifactSection[],
+  options?: { maxFacts?: number }
+): string[] {
+  const maxFacts = options?.maxFacts ?? 24;
+  const facts: string[] = [];
+  const seen = new Set<string>();
+
+  for (const section of sections) {
+    for (const candidate of extractFactCandidatesForSection(section)) {
+      if (!isDetectedFactCandidate(candidate.text)) {
+        continue;
+      }
+
+      const line = formatDetectedFactLine(section, candidate);
+      const key = normalizeText(line);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      facts.push(line);
+      if (facts.length >= maxFacts) {
+        return facts;
+      }
+    }
+  }
+
+  return facts;
+}
+
+interface DetectedFactCandidate {
+  text: string;
+  fromLabel: boolean;
+}
+
+function extractFactCandidatesForSection(
+  section: ArtifactSection
+): DetectedFactCandidate[] {
+  const candidates: DetectedFactCandidate[] = [];
+  for (const label of [section.searchContext, section.section]) {
+    const trimmed = label?.trim() ?? "";
+    if (!trimmed || !isSpecificSectionLabel(trimmed)) {
+      continue;
+    }
+    candidates.push({ text: trimmed, fromLabel: true });
+  }
+  candidates.push(
+    ...extractFactCandidates(section.text).map((text) => ({
+      text,
+      fromLabel: false,
+    }))
+  );
+  return candidates;
+}
+
+function extractFactCandidates(text: string): string[] {
+  const candidates: string[] = [];
+
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine
+      .replace(/^[-*]\s+/, "")
+      .replace(/^\d+\.\s+/, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (line.length === 0) {
+      continue;
+    }
+
+    if (line.length <= 240) {
+      candidates.push(line);
+      continue;
+    }
+
+    candidates.push(
+      ...line
+        .split(/(?<=[.!?])\s+/)
+        .map((sentence) => sentence.trim())
+        .filter((sentence) => sentence.length > 0 && sentence.length <= 240)
+    );
+  }
+
+  return candidates;
+}
+
+function isDetectedFactCandidate(candidate: string): boolean {
+  if (
+    FACT_KEYWORD_RE.test(candidate) &&
+    (FACT_POINTS_RE.test(candidate) ||
+      FACT_PERCENT_RE.test(candidate) ||
+      FACT_DATE_RE.test(candidate) ||
+      FACT_TIME_RE.test(candidate) ||
+      FACT_RELATIVE_TIME_RE.test(candidate) ||
+      FACT_STRONG_POLICY_RE.test(candidate))
+  ) {
+    return true;
+  }
+
+  return FACT_PERCENT_RE.test(candidate);
+}
+
+function formatDetectedFactLine(
+  section: ArtifactSection,
+  candidate: DetectedFactCandidate
+): string {
+  const label = formatArtifactSectionLabel(section);
+  const hasSpecificLabel =
+    label &&
+    isSpecificSectionLabel(label) &&
+    !isGenericDetectedFactLabel(label);
+  const factText = expandPercentForSearch(candidate.text);
+
+  if (
+    candidate.fromLabel ||
+    !hasSpecificLabel ||
+    normalizeText(factText).startsWith(normalizeText(label))
+  ) {
+    return factText;
+  }
+
+  return `${label}: ${factText}`;
+}
+
+function isGenericDetectedFactLabel(label: string): boolean {
+  return /^(key facts|detected facts|metadata|summary|full text|top)$/i.test(
+    label.trim()
+  );
+}
+
+function expandPercentForSearch(value: string): string {
+  const parentheticalPercent = value.match(/^(.+?)\s*\((\d+(?:\.\d+)?)%\)$/);
+  if (parentheticalPercent?.[1] && parentheticalPercent[2]) {
+    return `${parentheticalPercent[1].trim()}: ${parentheticalPercent[2]}% (${parentheticalPercent[2]} percent)`;
+  }
+  return value.replace(/\b(\d+(?:\.\d+)?)\s*%/g, (_match, amount) => {
+    return `${amount}% (${amount} percent)`;
+  });
 }
 
 function registerWorkspaceMarkdownArtifact(
@@ -1834,7 +2501,8 @@ function splitMarkdownIntoSections(
   let currentSection = "Top";
   let currentSearchContext: string | undefined;
   let currentText: string[] = [];
-  let headingStack: Array<{ level: number; text: string }> = [];
+  let headingStack: Array<{ level: number; text: string; inferred?: boolean }> =
+    [];
 
   const flush = () => {
     const text = currentText.join("\n").trim();
@@ -1864,6 +2532,22 @@ function splitMarkdownIntoSections(
       currentText = [];
       continue;
     }
+
+    const inferredHeading = parseStandaloneLabelHeading(line);
+    if (inferredHeading) {
+      flush();
+      const parentLevel =
+        [...headingStack].reverse().find((heading) => !heading.inferred)
+          ?.level ?? 1;
+      const level = Math.min(parentLevel + 1, 6);
+      headingStack = headingStack.filter((heading) => heading.level < level);
+      headingStack.push({ level, text: inferredHeading, inferred: true });
+      currentSection = inferredHeading;
+      currentSearchContext = buildMarkdownHeadingSearchContext(headingStack);
+      currentText = [];
+      continue;
+    }
+
     currentText.push(line);
   }
 
@@ -1872,7 +2556,7 @@ function splitMarkdownIntoSections(
 }
 
 function buildMarkdownHeadingSearchContext(
-  headingStack: Array<{ level: number; text: string }>
+  headingStack: Array<{ level: number; text: string; inferred?: boolean }>
 ): string | undefined {
   const context = headingStack
     .filter((heading) => heading.level > 1)
@@ -1882,6 +2566,41 @@ function buildMarkdownHeadingSearchContext(
     return undefined;
   }
   return context.join(" > ");
+}
+
+function parseStandaloneLabelHeading(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.length > 80) {
+    return null;
+  }
+  if (/^(?:[-*+]|\d+\.)\s+/.test(trimmed)) {
+    return null;
+  }
+
+  const boldMatch = trimmed.match(/^(?:\*\*|__)(.+?)(?:\*\*|__)$/);
+  const rawLabel = boldMatch?.[1]?.trim() ?? trimmed;
+  const requiresExplicitLabel = !boldMatch;
+  if (requiresExplicitLabel && !rawLabel.endsWith(":")) {
+    return null;
+  }
+
+  const label = rawLabel.replace(/:$/, "").replace(/\s+/g, " ").trim();
+  if (
+    !label ||
+    label.length > 64 ||
+    /[.!?]$/.test(label) ||
+    /https?:\/\//i.test(label) ||
+    /\d{1,2}:\d{2}/.test(label)
+  ) {
+    return null;
+  }
+
+  const words = label.split(/\s+/);
+  if (words.length > 7) {
+    return null;
+  }
+
+  return label;
 }
 
 function buildCourseTextSections(

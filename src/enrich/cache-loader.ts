@@ -7,6 +7,7 @@ import type {
   ModuleIndexEntry,
   FileIndexEntry,
   PageIndexEntry,
+  CourseTabIndexEntry,
   QuizIndexEntry,
   CalendarEventIndexEntry,
   AnnouncementIndexEntry,
@@ -28,6 +29,7 @@ export interface CourseCache {
   modules: ModuleIndexEntry[];
   files: FileIndexEntry[];
   pages: PageIndexEntry[];
+  tabs?: CourseTabIndexEntry[];
   quizzes?: QuizIndexEntry[];
   calendarEvents?: CalendarEventIndexEntry[];
   announcements?: AnnouncementIndexEntry[];
@@ -64,6 +66,7 @@ export async function loadCourseCache(
       modules,
       files,
       pages,
+      tabs,
       quizzes,
       calendarEvents,
       announcements,
@@ -79,6 +82,7 @@ export async function loadCourseCache(
         readJsonSafe<ModuleIndexEntry[]>(path.join(coursePath, "modules.json"), []),
         readJsonSafe<FileIndexEntry[]>(path.join(coursePath, "files.json"), []),
         readJsonSafe<PageIndexEntry[]>(path.join(coursePath, "pages.json"), []),
+        readJsonSafe<CourseTabIndexEntry[]>(path.join(coursePath, "tabs.json"), []),
         readJsonSafe<QuizIndexEntry[]>(path.join(coursePath, "quizzes.json"), []),
         readJsonSafe<CalendarEventIndexEntry[]>(path.join(coursePath, "calendar-events.json"), []),
         readJsonSafe<AnnouncementIndexEntry[]>(path.join(coursePath, "announcements.json"), []),
@@ -97,6 +101,7 @@ export async function loadCourseCache(
       modules,
       files,
       pages,
+      tabs,
       quizzes,
       calendarEvents,
       announcements,

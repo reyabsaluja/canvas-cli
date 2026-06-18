@@ -259,14 +259,27 @@ function renderList(
       .filter(Boolean);
     if (contentLines.length === 0) continue;
 
-    const marker = type === "ol" ? `${start + index}. ` : "- ";
-    lines.push(`${marker}${contentLines[0]}`);
+    const itemNumber = start + index;
+    const marker = type === "ol" ? `${itemNumber}. ` : "- ";
+    const firstLine =
+      type === "ol"
+        ? addOrderedListStepLabel(contentLines[0] ?? "", itemNumber)
+        : contentLines[0];
+    lines.push(`${marker}${firstLine}`);
     for (const continuation of contentLines.slice(1)) {
       lines.push(`   ${continuation}`);
     }
   }
 
   return lines.join("\n");
+}
+
+function addOrderedListStepLabel(text: string, itemNumber: number): string {
+  const trimmed = text.trim();
+  if (new RegExp(`^step\\s+${itemNumber}\\b`, "i").test(trimmed)) {
+    return text;
+  }
+  return `Step ${itemNumber}: ${text}`;
 }
 
 function replaceDefinitionLists(

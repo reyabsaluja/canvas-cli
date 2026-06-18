@@ -6,8 +6,10 @@ import {
   getExtractedAssignmentPath,
   getExtractedAnnouncementPath,
   getExtractedCalendarEventPath,
+  getExtractedCourseTabPath,
   getExtractedDiscussionPath,
   getExtractedExternalLinkPath,
+  getExtractedModulePath,
   getExtractedPagePath,
   getExtractedQuizPath,
 } from "../enrich/course-documents.js";
@@ -19,14 +21,20 @@ import type {
   CanvasCalendarEvent,
   CanvasQuiz,
   CanvasQuizQuestion,
+  CanvasRubricAssessment,
+  CanvasRubricAssessmentCriterion,
   CanvasRubricCriterion,
+  CanvasSubmissionComment,
 } from "../canvas/types.js";
 import type {
   CourseMetadata,
   AssignmentIndexEntry,
+  AssignmentDateDetailsIndex,
+  AssignmentDateOverrideIndexEntry,
   ModuleIndexEntry,
   FileIndexEntry,
   PageIndexEntry,
+  CourseTabIndexEntry,
   QuizIndexEntry,
   CalendarEventIndexEntry,
   AnnouncementIndexEntry,
@@ -52,6 +60,7 @@ export async function writeIngestionArtifacts(
   modules: ModuleIndexEntry[],
   files: FileIndexEntry[],
   pages: PageIndexEntry[],
+  tabs: CourseTabIndexEntry[],
   quizzes: QuizIndexEntry[],
   calendarEvents: CalendarEventIndexEntry[],
   announcements: AnnouncementIndexEntry[],
@@ -88,6 +97,7 @@ export async function writeIngestionArtifacts(
     ["modules.json", modules],
     ["files.json", files],
     ["pages.json", pages],
+    ["tabs.json", tabs],
     ["quizzes.json", quizzes],
     ["calendar-events.json", calendarEvents],
     ["announcements.json", announcements],
@@ -123,6 +133,30 @@ export async function writeIngestionArtifacts(
   );
 
   const assignmentContext = buildAssignmentContext(assignments, modules, gradingGroups);
+
+  if (tabs.length > 0) {
+    await fs.mkdir(path.join(coursePath, "extracted", "course-tabs"), {
+      recursive: true,
+    });
+    for (const tab of tabs) {
+      await writeAtomic(
+        getExtractedCourseTabPath(coursePath, tab.id),
+        formatCourseTabText(tab)
+      );
+    }
+  }
+
+  if (modules.length > 0) {
+    await fs.mkdir(path.join(coursePath, "extracted", "modules"), {
+      recursive: true,
+    });
+    for (const module of modules) {
+      await writeAtomic(
+        getExtractedModulePath(coursePath, module.id),
+        formatModuleText(module, modules)
+      );
+    }
+  }
 
   if (assignments.length > 0) {
     await fs.mkdir(path.join(coursePath, "extracted", "assignments"), {
@@ -267,6 +301,34 @@ async function writeAtomic(filePath: string, content: string): Promise<void> {
   await fs.rename(tmpPath, filePath);
 }
 
+function formatCourseTabText(tab: CourseTabIndexEntry): string {
+  const lines = [`# ${tab.label}`, ""];
+
+  lines.push("## Key facts");
+  lines.push("");
+  lines.push(`ID: ${tab.id}`);
+  lines.push(`Type: ${tab.type ?? "Not specified"}`);
+  lines.push(
+    `Position: ${tab.position !== null ? String(tab.position) : "Not specified"}`
+  );
+  lines.push(`Hidden: ${tab.hidden === null ? "Not specified" : tab.hidden ? "yes" : "no"}`);
+  lines.push(`Visibility: ${tab.visibility ?? "Not specified"}`);
+  if (tab.htmlUrl) {
+    lines.push(`Canvas URL: ${tab.htmlUrl}`);
+  }
+  if (tab.fullUrl) {
+    lines.push(`Full URL: ${tab.fullUrl}`);
+  }
+  if (tab.externalUrl) {
+    lines.push(`External URL: ${tab.externalUrl}`);
+  }
+  if (tab.url) {
+    lines.push(`API or launch URL: ${tab.url}`);
+  }
+
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+}
+
 interface AssignmentContext {
   moduleName: string | null;
   modulePosition: number | null;
@@ -326,6 +388,111 @@ function buildAssignmentContext(
   return contextMap;
 }
 
+function formatModuleText(
+  module: ModuleIndexEntry,
+  modules: ModuleIndexEntry[]
+): string {
+  const lines = [`# ${module.name}`, ""];
+
+  lines.push("## Key facts");
+  lines.push("");
+  lines.push(`Position: ${module.position}`);
+  lines.push(`Items: ${module.itemCount}`);
+  if (module.unlockAt) {
+    lines.push(`Unlocks: ${module.unlockAt}`);
+  }
+  if (
+    module.requiresSequentialProgress !== null &&
+    module.requiresSequentialProgress !== undefined
+  ) {
+    lines.push(
+      `Requires sequential progress: ${
+        module.requiresSequentialProgress ? "yes" : "no"
+      }`
+    );
+  }
+
+  const prerequisiteIds = module.prerequisiteModuleIds ?? [];
+  if (prerequisiteIds.length > 0) {
+    lines.push("");
+    lines.push("## Prerequisites");
+    for (const prerequisiteId of prerequisiteIds) {
+      const prerequisite = modules.find(
+        (candidate) => candidate.id === prerequisiteId
+      );
+      lines.push(
+        `- ${prerequisite?.name ?? `Module ${prerequisiteId}`} (module ${prerequisiteId})`
+      );
+    }
+  }
+
+  if (module.items.length > 0) {
+    lines.push("");
+    lines.push("## Items");
+    lines.push("");
+    for (const item of [...module.items].sort(
+      (left, right) => left.position - right.position
+    )) {
+      const itemParts = [
+        `${item.position}. ${item.title}`,
+        `type: ${item.type}`,
+      ];
+      if (item.contentId !== null) {
+        itemParts.push(`content ID: ${item.contentId}`);
+      }
+      if (item.pageUrl) {
+        itemParts.push(`page: ${item.pageUrl}`);
+      }
+      if (item.htmlUrl) {
+        itemParts.push(`Canvas URL: ${item.htmlUrl}`);
+      }
+      if (item.externalUrl) {
+        itemParts.push(`External URL: ${item.externalUrl}`);
+      }
+      lines.push(itemParts.join(" — "));
+
+      const requirement = item.completionRequirement;
+      if (requirement) {
+        const completed =
+          requirement.completed !== null
+            ? `; completed: ${requirement.completed ? "yes" : "no"}`
+            : "";
+        lines.push(
+          `   Completion requirement: ${formatModuleItemRequirement(requirement)}${completed}`
+        );
+      }
+    }
+  }
+
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+}
+
+function formatModuleItemRequirement(
+  requirement: NonNullable<
+    ModuleIndexEntry["items"][number]["completionRequirement"]
+  >
+): string {
+  switch (requirement.type) {
+    case "must_view":
+      return "must view";
+    case "must_mark_done":
+      return "must mark done";
+    case "must_submit":
+      return "must submit";
+    case "min_score": {
+      const score =
+        requirement.minScore !== null
+          ? ` with at least ${requirement.minScore}`
+          : "";
+      return `must earn a minimum score${score}`;
+    }
+    case "must_contribute":
+      return "must contribute";
+    default:
+      return requirement.type.replace(/_/g, " ");
+  }
+}
+
 function formatAssignmentText(
   assignment: AssignmentIndexEntry,
   rawAssignment?: RawAssignmentRecord,
@@ -333,6 +500,8 @@ function formatAssignmentText(
 ): string {
   const lines = [`# ${assignment.name}`, ""];
 
+  lines.push("## Key facts");
+  lines.push("");
   if (context?.moduleName) {
     lines.push(`Module: ${context.moduleName}`);
   }
@@ -366,7 +535,19 @@ function formatAssignmentText(
       `Allowed file extensions: ${rawAssignment.allowed_extensions.join(", ")}`
     );
   }
+  lines.push(...formatAssignmentPeerReviewLines(assignment, rawAssignment));
   lines.push(`Canvas URL: ${assignment.htmlUrl}`);
+
+  const dateDetailsText = formatAssignmentDateDetailsText(
+    assignment.dateDetails ?? null
+  );
+  if (dateDetailsText) {
+    lines.push("");
+    lines.push("## Assignment Dates");
+    lines.push("");
+    lines.push(dateDetailsText);
+  }
+
   lines.push("");
   lines.push("## Description");
   lines.push("");
@@ -391,7 +572,234 @@ function formatAssignmentText(
     lines.push(formatRubricText(rubric, assignment.htmlUrl));
   }
 
+  const submission = rawAssignment?.submission;
+  const submissionComments = submission?.submission_comments ?? [];
+  const rubricAssessmentText = formatSubmissionRubricAssessmentText(
+    submission?.rubric_assessment,
+    rubric,
+    assignment.htmlUrl
+  );
+  if (submissionComments.length > 0 || rubricAssessmentText) {
+    lines.push("");
+    lines.push("## Submission Feedback");
+    lines.push("");
+    if (submissionComments.length > 0) {
+      lines.push(formatSubmissionFeedbackText(submissionComments, assignment.htmlUrl));
+    }
+    if (rubricAssessmentText) {
+      if (submissionComments.length > 0) {
+        lines.push("");
+      }
+      lines.push(rubricAssessmentText);
+    }
+  }
+
   return lines.join("\n") + "\n";
+}
+
+function formatAssignmentPeerReviewLines(
+  assignment: AssignmentIndexEntry,
+  rawAssignment?: RawAssignmentRecord
+): string[] {
+  const peerReviews = coalesceBoolean(
+    assignment.peerReviews,
+    rawAssignment?.peer_reviews
+  );
+  const automaticPeerReviews = coalesceBoolean(
+    assignment.automaticPeerReviews,
+    rawAssignment?.automatic_peer_reviews
+  );
+  const anonymousPeerReviews = coalesceBoolean(
+    assignment.anonymousPeerReviews,
+    rawAssignment?.anonymous_peer_reviews
+  );
+  const intraGroupPeerReviews = coalesceBoolean(
+    assignment.intraGroupPeerReviews,
+    rawAssignment?.intra_group_peer_reviews
+  );
+  const peerReviewCount = coalesceNumber(
+    assignment.peerReviewCount,
+    rawAssignment?.peer_review_count
+  );
+  const peerReviewsAssignAt = coalesceString(
+    assignment.peerReviewsAssignAt,
+    rawAssignment?.peer_reviews_assign_at
+  );
+
+  const lines: string[] = [];
+  if (peerReviews !== null) {
+    lines.push(`Peer reviews: ${formatBooleanLabel(peerReviews)}`);
+  }
+
+  if (peerReviews === false) {
+    return lines;
+  }
+
+  if (automaticPeerReviews !== null) {
+    lines.push(
+      `Peer reviews assigned automatically: ${formatBooleanLabel(automaticPeerReviews)}`
+    );
+  }
+  if (anonymousPeerReviews !== null) {
+    lines.push(
+      `Anonymous peer reviews: ${formatBooleanLabel(anonymousPeerReviews)}`
+    );
+  }
+  if (intraGroupPeerReviews !== null) {
+    lines.push(
+      `Intra-group peer reviews: ${formatBooleanLabel(intraGroupPeerReviews)}`
+    );
+  }
+  if (peerReviewCount !== null) {
+    lines.push(`Peer reviews required: ${peerReviewCount}`);
+  }
+  if (peerReviewsAssignAt !== null) {
+    lines.push(`Peer reviews assigned at: ${peerReviewsAssignAt}`);
+  }
+
+  return lines;
+}
+
+function formatAssignmentDateDetailsText(
+  details: AssignmentDateDetailsIndex | null
+): string | null {
+  if (!details) {
+    return null;
+  }
+
+  const sections: string[] = [];
+  const baseLines = formatDateDetailLines({
+    dueAt: details.dueAt,
+    unlockAt: details.unlockAt,
+    lockAt: details.lockAt,
+    onlyVisibleToOverrides: details.onlyVisibleToOverrides,
+  });
+  if (baseLines.length > 0) {
+    sections.push("### Base assignment dates");
+    sections.push("");
+    sections.push(...baseLines);
+  }
+
+  if (details.overrides.length > 0) {
+    sections.push("");
+    sections.push("### Assignment date overrides");
+    sections.push("");
+    sections.push(...formatDateOverrideLines(details.overrides));
+  }
+
+  const peerReview = details.peerReviewSubAssignment;
+  if (peerReview) {
+    sections.push("");
+    sections.push("### Peer review dates");
+    sections.push("");
+    const label = peerReview.title ?? "Peer review sub-assignment";
+    sections.push(`Peer review assignment: ${label}`);
+    const peerLines = formatDateDetailLines(peerReview);
+    if (peerLines.length > 0) {
+      sections.push(...peerLines);
+    }
+    if (peerReview.overrides.length > 0) {
+      sections.push("");
+      sections.push("Peer review date overrides:");
+      sections.push(...formatDateOverrideLines(peerReview.overrides));
+    }
+  }
+
+  return sections.join("\n").trim() || null;
+}
+
+function formatDateDetailLines(details: {
+  dueAt: string | null;
+  unlockAt: string | null;
+  lockAt: string | null;
+  onlyVisibleToOverrides: boolean | null;
+}): string[] {
+  const lines: string[] = [];
+  if (details.dueAt) {
+    lines.push(`Due: ${details.dueAt}`);
+  }
+  if (details.unlockAt) {
+    lines.push(`Unlocks: ${details.unlockAt}`);
+  }
+  if (details.lockAt) {
+    lines.push(`Locks: ${details.lockAt}`);
+  }
+  if (details.onlyVisibleToOverrides !== null) {
+    lines.push(
+      `Only visible to override recipients: ${formatBooleanLabel(details.onlyVisibleToOverrides)}`
+    );
+  }
+  return lines;
+}
+
+function formatDateOverrideLines(
+  overrides: AssignmentDateOverrideIndexEntry[]
+): string[] {
+  return overrides.map((override, index) => {
+    const label = override.title ?? `Override ${index + 1}`;
+    const parts = [`- ${label}`];
+    if (override.setType) {
+      parts.push(`type ${override.setType}`);
+    }
+    if (override.courseSectionId !== null) {
+      parts.push(`section ${override.courseSectionId}`);
+    }
+    if (override.groupId !== null) {
+      parts.push(`group ${override.groupId}`);
+    }
+    if (override.studentCount !== null) {
+      parts.push(`${override.studentCount} student${override.studentCount === 1 ? "" : "s"}`);
+    }
+    if (override.dueAt) {
+      parts.push(`due ${override.dueAt}`);
+    }
+    if (override.unlockAt) {
+      parts.push(`unlocks ${override.unlockAt}`);
+    }
+    if (override.lockAt) {
+      parts.push(`locks ${override.lockAt}`);
+    }
+    if (override.allDayDate) {
+      parts.push(`all-day date ${override.allDayDate}`);
+    }
+    if (override.allDay !== null) {
+      parts.push(`all day ${formatBooleanLabel(override.allDay)}`);
+    }
+    return parts.join("; ");
+  });
+}
+
+function coalesceBoolean(
+  ...values: Array<boolean | null | undefined>
+): boolean | null {
+  for (const value of values) {
+    if (typeof value === "boolean") {
+      return value;
+    }
+  }
+  return null;
+}
+
+function coalesceNumber(...values: Array<number | null | undefined>): number | null {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function coalesceString(...values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function formatBooleanLabel(value: boolean): string {
+  return value ? "yes" : "no";
 }
 
 function formatQuizText(
@@ -402,6 +810,8 @@ function formatQuizText(
 ): string {
   const lines = [`# ${quiz.title}`, ""];
 
+  lines.push("## Key facts");
+  lines.push("");
   lines.push(`Due: ${quiz.dueAt ?? "No due date"}`);
   if (quiz.unlockAt) {
     lines.push(`Unlocks: ${quiz.unlockAt}`);
@@ -486,6 +896,8 @@ function formatCalendarEventText(
 ): string {
   const lines = [`# ${event.title}`, ""];
 
+  lines.push("## Key facts");
+  lines.push("");
   lines.push(`Starts: ${event.startAt ?? "No start time"}`);
   if (event.endAt) {
     lines.push(`Ends: ${event.endAt}`);
@@ -565,6 +977,181 @@ function formatRubricText(
   }
 
   return sections.join("\n").trimEnd();
+}
+
+function formatSubmissionFeedbackText(
+  comments: CanvasSubmissionComment[],
+  baseUrl: string | null
+): string {
+  const sections: string[] = [];
+
+  for (const comment of comments) {
+    const headingParts = [
+      comment.author_name ?? "Unknown author",
+      comment.created_at ?? null,
+    ].filter((part) => typeof part === "string" && part.length > 0);
+    sections.push(`### ${headingParts.join(" — ")}`);
+    sections.push("");
+
+    const body =
+      renderRichText(comment.html_comment, baseUrl) ||
+      renderRichText(comment.comment, baseUrl);
+    sections.push(body || "No text feedback captured.");
+
+    if (comment.media_comment) {
+      const media = comment.media_comment;
+      const label =
+        media.display_name ||
+        media.media_id ||
+        `${media.media_type ?? "media"} comment`;
+      const mediaParts = [`Media comment: ${label}`];
+      if (media.media_type) {
+        mediaParts.push(`type: ${media.media_type}`);
+      }
+      if (media.url) {
+        mediaParts.push(`URL: ${media.url}`);
+      }
+      sections.push("");
+      sections.push(mediaParts.join(" — "));
+    }
+
+    const attachments = comment.attachments ?? [];
+    if (attachments.length > 0) {
+      sections.push("");
+      sections.push("Attachments:");
+      for (const attachment of attachments) {
+        const name =
+          attachment.display_name ||
+          attachment.filename ||
+          `attachment ${attachment.id}`;
+        const url = attachment.url ? ` — ${attachment.url}` : "";
+        sections.push(`- ${name}${url}`);
+      }
+    }
+
+    sections.push("");
+  }
+
+  return sections.join("\n").trimEnd();
+}
+
+function formatSubmissionRubricAssessmentText(
+  assessment: CanvasRubricAssessment | null | undefined,
+  rubric: CanvasRubricCriterion[],
+  baseUrl: string | null
+): string {
+  const rows = normalizeRubricAssessmentRows(assessment, rubric);
+  if (rows.length === 0) {
+    return "";
+  }
+
+  const criterionById = new Map(
+    rubric.map((criterion) => [String(criterion.id), criterion])
+  );
+  const sections = ["### Rubric Assessment", ""];
+
+  for (const [criterionId, row] of rows) {
+    const criterion = criterionById.get(criterionId);
+    const heading =
+      (criterion ? toSingleLineText(criterion.description, baseUrl) : "") ||
+      `Criterion ${criterionId}`;
+    sections.push(`#### ${heading}`);
+    sections.push("");
+
+    const facts: string[] = [];
+    if (typeof row.points === "number" && Number.isFinite(row.points)) {
+      facts.push(
+        `Points: ${formatRubricAssessmentPoints(row.points, criterion?.points)}`
+      );
+    }
+
+    const ratingId =
+      row.rating_id !== null && row.rating_id !== undefined
+        ? String(row.rating_id)
+        : null;
+    if (ratingId) {
+      const rating = criterion?.ratings?.find(
+        (candidate) => String(candidate.id) === ratingId
+      );
+      if (rating) {
+        const ratingLabel =
+          toSingleLineText(rating.description, baseUrl) || ratingId;
+        const ratingPoints = formatPointLabel(rating.points);
+        facts.push(
+          `Rating: ${ratingLabel}${ratingPoints ? ` (${ratingPoints})` : ""}`
+        );
+      } else {
+        facts.push(`Rating ID: ${ratingId}`);
+      }
+    }
+
+    sections.push(...facts);
+
+    const comments = renderRichText(row.comments, baseUrl);
+    if (comments) {
+      if (facts.length > 0) {
+        sections.push("");
+      }
+      sections.push(comments);
+    }
+
+    sections.push("");
+  }
+
+  return sections.join("\n").trimEnd();
+}
+
+function normalizeRubricAssessmentRows(
+  assessment: CanvasRubricAssessment | null | undefined,
+  rubric: CanvasRubricCriterion[]
+): Array<[string, CanvasRubricAssessmentCriterion]> {
+  if (!assessment || typeof assessment !== "object") {
+    return [];
+  }
+
+  const rubricOrder = new Map(
+    rubric.map((criterion, index) => [String(criterion.id), index])
+  );
+  return Object.entries(assessment)
+    .filter(
+      (entry): entry is [string, CanvasRubricAssessmentCriterion] =>
+        isRubricAssessmentCriterion(entry[1])
+    )
+    .sort(([leftId], [rightId]) => {
+      const leftOrder = rubricOrder.get(leftId);
+      const rightOrder = rubricOrder.get(rightId);
+      if (leftOrder !== undefined && rightOrder !== undefined) {
+        return leftOrder - rightOrder;
+      }
+      if (leftOrder !== undefined) return -1;
+      if (rightOrder !== undefined) return 1;
+      return 0;
+    });
+}
+
+function isRubricAssessmentCriterion(
+  value: CanvasRubricAssessment[string]
+): value is CanvasRubricAssessmentCriterion {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  if (typeof value.points === "number" && Number.isFinite(value.points)) {
+    return true;
+  }
+  if (value.rating_id !== null && value.rating_id !== undefined) {
+    return true;
+  }
+  return typeof value.comments === "string" && value.comments.trim().length > 0;
+}
+
+function formatRubricAssessmentPoints(
+  points: number,
+  maxPoints: number | null | undefined
+): string {
+  if (typeof maxPoints === "number" && Number.isFinite(maxPoints)) {
+    return `${points} / ${maxPoints}`;
+  }
+  return String(points);
 }
 
 function renderRichText(

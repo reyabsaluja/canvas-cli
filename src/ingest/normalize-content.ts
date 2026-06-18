@@ -2,9 +2,13 @@ import type { RawCourseContent } from "./fetch-course-content.js";
 import type {
   CourseMetadata,
   AssignmentIndexEntry,
+  AssignmentDateDetailsIndex,
+  AssignmentDateOverrideIndexEntry,
+  AssignmentPeerReviewDateDetailsIndex,
   ModuleIndexEntry,
   FileIndexEntry,
   PageIndexEntry,
+  CourseTabIndexEntry,
   QuizIndexEntry,
   CalendarEventIndexEntry,
   AnnouncementIndexEntry,
@@ -22,6 +26,7 @@ export function normalizeCourseContent(raw: RawCourseContent): {
   modules: ModuleIndexEntry[];
   files: FileIndexEntry[];
   pages: PageIndexEntry[];
+  tabs: CourseTabIndexEntry[];
   quizzes: QuizIndexEntry[];
   calendarEvents: CalendarEventIndexEntry[];
   announcements: AnnouncementIndexEntry[];
@@ -58,6 +63,16 @@ export function normalizeCourseContent(raw: RawCourseContent): {
       htmlUrl: a.html_url,
       hasDescription: !!description,
       descriptionLinkCount: linkCount,
+      peerReviews: normalizeBoolean(raw_any.peer_reviews),
+      automaticPeerReviews: normalizeBoolean(raw_any.automatic_peer_reviews),
+      anonymousPeerReviews: normalizeBoolean(raw_any.anonymous_peer_reviews),
+      intraGroupPeerReviews: normalizeBoolean(raw_any.intra_group_peer_reviews),
+      peerReviewCount: normalizeNumber(raw_any.peer_review_count),
+      peerReviewsAssignAt:
+        typeof raw_any.peer_reviews_assign_at === "string"
+          ? raw_any.peer_reviews_assign_at
+          : null,
+      dateDetails: normalizeAssignmentDateDetails(raw_any.date_details),
     };
   });
 
@@ -66,6 +81,9 @@ export function normalizeCourseContent(raw: RawCourseContent): {
     name: m.name,
     position: m.position,
     itemCount: m.items.length,
+    unlockAt: m.unlock_at ?? null,
+    requiresSequentialProgress: m.require_sequential_progress ?? null,
+    prerequisiteModuleIds: m.prerequisite_module_ids ?? [],
     items: m.items.map((item) => ({
       id: item.id,
       title: item.title,
@@ -75,6 +93,14 @@ export function normalizeCourseContent(raw: RawCourseContent): {
       pageUrl: item.page_url ?? null,
       htmlUrl: item.html_url ?? null,
       externalUrl: item.external_url ?? null,
+      indent: item.indent ?? null,
+      completionRequirement: item.completion_requirement
+        ? {
+            type: item.completion_requirement.type,
+            minScore: item.completion_requirement.min_score ?? null,
+            completed: item.completion_requirement.completed ?? null,
+          }
+        : null,
     })),
   }));
 
@@ -117,6 +143,19 @@ export function normalizeCourseContent(raw: RawCourseContent): {
   }
 
   const pages = Array.from(pagesById.values());
+
+  const tabs: CourseTabIndexEntry[] = (raw.tabs ?? []).map((tab) => ({
+    id: String(tab.id),
+    label: tab.label,
+    type: tab.type ?? null,
+    position: normalizeNumber(tab.position),
+    hidden: normalizeBoolean(tab.hidden),
+    visibility: tab.visibility ?? null,
+    htmlUrl: tab.html_url ?? null,
+    fullUrl: tab.full_url ?? null,
+    url: tab.url ?? null,
+    externalUrl: tab.external_url ?? null,
+  }));
 
   const quizzes: QuizIndexEntry[] = raw.quizzes.map((quiz) => {
     const description =
@@ -251,10 +290,99 @@ export function normalizeCourseContent(raw: RawCourseContent): {
     modules,
     files,
     pages,
+    tabs,
     quizzes,
     calendarEvents,
     announcements,
     discussions,
     gradingGroups,
   };
+}
+
+function normalizeBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function normalizeNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizeString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function normalizeAssignmentDateDetails(
+  value: unknown
+): AssignmentDateDetailsIndex | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const raw = value as Record<string, unknown>;
+  const overrides = normalizeAssignmentDateOverrides(
+    raw.overrides ?? raw.assignment_overrides
+  );
+  return {
+    dueAt: normalizeString(raw.due_at),
+    unlockAt: normalizeString(raw.unlock_at),
+    lockAt: normalizeString(raw.lock_at),
+    onlyVisibleToOverrides: normalizeBoolean(raw.only_visible_to_overrides),
+    overrideCount: overrides.length,
+    overrides,
+    peerReviewSubAssignment: normalizePeerReviewSubAssignmentDateDetails(
+      raw.peer_review_sub_assignment
+    ),
+  };
+}
+
+function normalizePeerReviewSubAssignmentDateDetails(
+  value: unknown
+): AssignmentPeerReviewDateDetailsIndex | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const raw = value as Record<string, unknown>;
+  const overrides = normalizeAssignmentDateOverrides(
+    raw.overrides ?? raw.assignment_overrides
+  );
+  return {
+    id: normalizeNumber(raw.id),
+    title: normalizeString(raw.title) ?? normalizeString(raw.name),
+    dueAt: normalizeString(raw.due_at),
+    unlockAt: normalizeString(raw.unlock_at),
+    lockAt: normalizeString(raw.lock_at),
+    onlyVisibleToOverrides: normalizeBoolean(raw.only_visible_to_overrides),
+    overrideCount: overrides.length,
+    overrides,
+  };
+}
+
+function normalizeAssignmentDateOverrides(
+  value: unknown
+): AssignmentDateOverrideIndexEntry[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+      const raw = entry as Record<string, unknown>;
+      const studentIds = raw.student_ids;
+      return {
+        id: normalizeNumber(raw.id),
+        title: normalizeString(raw.title),
+        dueAt: normalizeString(raw.due_at),
+        unlockAt: normalizeString(raw.unlock_at),
+        lockAt: normalizeString(raw.lock_at),
+        allDay: normalizeBoolean(raw.all_day),
+        allDayDate: normalizeString(raw.all_day_date),
+        setType: normalizeString(raw.set_type),
+        studentCount: Array.isArray(studentIds) ? studentIds.length : null,
+        groupId: normalizeNumber(raw.group_id),
+        courseSectionId: normalizeNumber(raw.course_section_id),
+      };
+    })
+    .filter((entry): entry is AssignmentDateOverrideIndexEntry => entry !== null);
 }

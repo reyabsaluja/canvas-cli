@@ -10,6 +10,8 @@ import type {
   ZipAttachmentEntry,
 } from "./types.js";
 
+const MAX_NESTED_ZIP_DEPTH = 3;
+
 /**
  * Shared attachment-content pipeline used by both full ingestion and on-demand
  * chat downloads. Writes a `.txt` sidecar for every extractable attachment
@@ -76,6 +78,18 @@ export async function unpackAttachmentZip(
 ): Promise<ZipAttachmentEntry[]> {
   const zipAbsolutePath = path.join(coursePath, attachment.localPath);
   const unpackDirAbsolute = getUnpackedZipDir(coursePath, attachment.localPath);
+  return unpackZipEntries(coursePath, zipAbsolutePath, unpackDirAbsolute, {
+    depth: 0,
+    entryNamePrefix: "",
+  });
+}
+
+async function unpackZipEntries(
+  coursePath: string,
+  zipAbsolutePath: string,
+  unpackDirAbsolute: string,
+  options: { depth: number; entryNamePrefix: string }
+): Promise<ZipAttachmentEntry[]> {
   await fs.mkdir(unpackDirAbsolute, { recursive: true });
 
   const unpackedEntries = await unpackZipToDirectory(
@@ -85,41 +99,72 @@ export async function unpackAttachmentZip(
 
   const entries: ZipAttachmentEntry[] = [];
   for (const unpacked of unpackedEntries) {
+    const entryName = `${options.entryNamePrefix}${unpacked.entryName}`;
     const entryLocalPath = path.relative(coursePath, unpacked.absolutePath);
-    let extractedTextPath: string | null = null;
-
-    const innerExt = path.extname(unpacked.entryName).toLowerCase();
-    if (innerExt !== ".zip") {
-      try {
-        const filename = path.basename(unpacked.entryName);
-        const text = await extractFileText(unpacked.absolutePath, filename);
-        if (isReadableExtractedText(text)) {
-          const absoluteExtractedPath = getExtractedAttachmentPath(
-            coursePath,
-            entryLocalPath
-          );
-          await fs.mkdir(path.dirname(absoluteExtractedPath), { recursive: true });
-          await writeAtomicText(
-            absoluteExtractedPath,
-            text.endsWith("\n") ? text : text + "\n"
-          );
-          extractedTextPath = path.relative(coursePath, absoluteExtractedPath);
-        }
-      } catch {
-        // Best-effort — leave extractedTextPath as null if extraction fails.
-      }
-    }
+    const filename = path.basename(unpacked.entryName);
+    const extractedTextPath = await writeExtractedEntryText(
+      coursePath,
+      entryLocalPath,
+      unpacked.absolutePath,
+      filename
+    );
 
     entries.push({
-      entryName: unpacked.entryName,
-      filename: path.basename(unpacked.entryName),
+      entryName,
+      filename,
       localPath: entryLocalPath,
       extractedTextPath,
       size: unpacked.size,
     });
+
+    if (
+      path.extname(unpacked.entryName).toLowerCase() === ".zip" &&
+      options.depth < MAX_NESTED_ZIP_DEPTH
+    ) {
+      try {
+        const nestedEntries = await unpackZipEntries(
+          coursePath,
+          unpacked.absolutePath,
+          `${unpacked.absolutePath}.unpacked`,
+          {
+            depth: options.depth + 1,
+            entryNamePrefix: `${entryName}.unpacked/`,
+          }
+        );
+        entries.push(...nestedEntries);
+      } catch {
+        // Best-effort — keep the nested zip entry even if it cannot be unpacked.
+      }
+    }
   }
 
   return entries;
+}
+
+async function writeExtractedEntryText(
+  coursePath: string,
+  entryLocalPath: string,
+  absolutePath: string,
+  filename: string
+): Promise<string | null> {
+  try {
+    const text = await extractFileText(absolutePath, filename);
+    if (isReadableExtractedText(text)) {
+      const absoluteExtractedPath = getExtractedAttachmentPath(
+        coursePath,
+        entryLocalPath
+      );
+      await fs.mkdir(path.dirname(absoluteExtractedPath), { recursive: true });
+      await writeAtomicText(
+        absoluteExtractedPath,
+        text.endsWith("\n") ? text : text + "\n"
+      );
+      return path.relative(coursePath, absoluteExtractedPath);
+    }
+  } catch {
+    // Best-effort — leave extractedTextPath as null if extraction fails.
+  }
+  return null;
 }
 
 function isReadableExtractedText(text: string): boolean {

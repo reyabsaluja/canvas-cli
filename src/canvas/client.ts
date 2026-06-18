@@ -12,11 +12,13 @@ import { debug, debugApiRequest, debugApiResponse, maskUrl } from "../debug.js";
 import { fetchWithRetry, type RetryOptions, RateLimitThrottle } from "./retry.js";
 import type {
   CanvasAssignment,
+  CanvasAssignmentDateDetails,
   CanvasAssignmentDetail,
   CanvasAssignmentGroup,
   CanvasCalendarEvent,
   CanvasCourse,
   CanvasCourseDetail,
+  CanvasCourseTab,
   CanvasDiscussionTopic,
   CanvasDiscussionTopicView,
   CanvasEnrollment,
@@ -26,6 +28,7 @@ import type {
   CanvasPage,
   CanvasQuiz,
   CanvasQuizQuestion,
+  CanvasSubmission,
 } from "./types.js";
 
 export class CanvasClient {
@@ -163,6 +166,26 @@ export class CanvasClient {
     return this.fetchOne<CanvasAssignmentDetail>(url, signal);
   }
 
+  /**
+   * Get assignment date details, including differentiated overrides and
+   * peer-review sub-assignment dates when Canvas exposes them.
+   */
+  async getAssignmentDateDetailsSafe(
+    courseId: number,
+    assignmentId: number,
+    signal?: AbortSignal | null
+  ): Promise<CanvasAssignmentDateDetails | null> {
+    try {
+      const params = new URLSearchParams();
+      params.append("include[]", "peer_review");
+      const url = `${this.baseUrl}/courses/${courseId}/assignments/${assignmentId}/date_details?${params.toString()}`;
+      return await this.fetchOne<CanvasAssignmentDateDetails>(url, signal);
+    } catch (err) {
+      if (isAbortError(err)) throw err;
+      return null;
+    }
+  }
+
   /** Get course detail with syllabus body. */
   async getCourseDetail(courseId: number, signal?: AbortSignal | null): Promise<CanvasCourseDetail> {
     const url = `${this.baseUrl}/courses/${courseId}?include[]=syllabus_body&include[]=term`;
@@ -235,6 +258,21 @@ export class CanvasClient {
     return this.fetchPaginatedSafe<CanvasPage>(url, signal);
   }
 
+  /**
+   * Get course navigation tabs. With include[]=external, Canvas includes the
+   * resolved readable URL for external tools/redirect tabs when available.
+   */
+  async getCourseTabsSafe(
+    courseId: number,
+    signal?: AbortSignal | null
+  ): Promise<CanvasCourseTab[]> {
+    const params = new URLSearchParams();
+    params.set("per_page", "50");
+    params.append("include[]", "external");
+    const url = `${this.baseUrl}/courses/${courseId}/tabs?${params.toString()}`;
+    return this.fetchPaginatedSafe<CanvasCourseTab>(url, signal);
+  }
+
   /** Get full detail for a single classic Canvas quiz. */
   async getQuizDetail(
     courseId: number,
@@ -265,6 +303,23 @@ export class CanvasClient {
   ): Promise<CanvasQuizQuestion[]> {
     const url = `${this.baseUrl}/courses/${courseId}/quizzes/${quizId}/questions?per_page=50`;
     return this.fetchPaginatedSafe<CanvasQuizQuestion>(url, signal);
+  }
+
+  /**
+   * Get the current user's submissions, including visible grader comments.
+   * Student callers receive their own submissions when student_ids[] is omitted.
+   */
+  async getCurrentUserSubmissionsSafe(
+    courseId: number,
+    signal?: AbortSignal | null
+  ): Promise<CanvasSubmission[]> {
+    const params = new URLSearchParams();
+    params.set("per_page", "50");
+    params.append("include[]", "submission_comments");
+    params.append("include[]", "submission_html_comments");
+    params.append("include[]", "rubric_assessment");
+    const url = `${this.baseUrl}/courses/${courseId}/students/submissions?${params.toString()}`;
+    return this.fetchPaginatedSafe<CanvasSubmission>(url, signal);
   }
 
   /**

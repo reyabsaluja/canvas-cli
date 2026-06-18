@@ -339,6 +339,7 @@ const COURSE_ARTIFACT_KINDS: ArtifactKind[] = [
   "module",
   "file",
   "page",
+  "course_tab",
   "quiz",
   "calendar_event",
   "announcement",
@@ -353,6 +354,7 @@ const COURSE_ARTIFACT_KINDS: ArtifactKind[] = [
 const COURSE_READABLE_KINDS: ArtifactKind[] = [
   "assignment",
   "page",
+  "course_tab",
   "quiz",
   "calendar_event",
   "announcement",

@@ -23,6 +23,48 @@ export interface AssignmentIndexEntry {
   htmlUrl: string;
   hasDescription: boolean;
   descriptionLinkCount: number;
+  peerReviews?: boolean | null;
+  automaticPeerReviews?: boolean | null;
+  anonymousPeerReviews?: boolean | null;
+  intraGroupPeerReviews?: boolean | null;
+  peerReviewCount?: number | null;
+  peerReviewsAssignAt?: string | null;
+  dateDetails?: AssignmentDateDetailsIndex | null;
+}
+
+export interface AssignmentDateDetailsIndex {
+  dueAt: string | null;
+  unlockAt: string | null;
+  lockAt: string | null;
+  onlyVisibleToOverrides: boolean | null;
+  overrideCount: number;
+  overrides: AssignmentDateOverrideIndexEntry[];
+  peerReviewSubAssignment: AssignmentPeerReviewDateDetailsIndex | null;
+}
+
+export interface AssignmentPeerReviewDateDetailsIndex {
+  id: number | null;
+  title: string | null;
+  dueAt: string | null;
+  unlockAt: string | null;
+  lockAt: string | null;
+  onlyVisibleToOverrides: boolean | null;
+  overrideCount: number;
+  overrides: AssignmentDateOverrideIndexEntry[];
+}
+
+export interface AssignmentDateOverrideIndexEntry {
+  id: number | null;
+  title: string | null;
+  dueAt: string | null;
+  unlockAt: string | null;
+  lockAt: string | null;
+  allDay: boolean | null;
+  allDayDate: string | null;
+  setType: string | null;
+  studentCount: number | null;
+  groupId: number | null;
+  courseSectionId: number | null;
 }
 
 export interface ModuleIndexEntry {
@@ -30,7 +72,16 @@ export interface ModuleIndexEntry {
   name: string;
   position: number;
   itemCount: number;
+  unlockAt?: string | null;
+  requiresSequentialProgress?: boolean | null;
+  prerequisiteModuleIds?: number[];
   items: ModuleItemIndexEntry[];
+}
+
+export interface ModuleItemCompletionRequirement {
+  type: string;
+  minScore: number | null;
+  completed: boolean | null;
 }
 
 export interface ModuleItemIndexEntry {
@@ -42,6 +93,8 @@ export interface ModuleItemIndexEntry {
   pageUrl: string | null;
   htmlUrl: string | null;
   externalUrl: string | null;
+  indent?: number | null;
+  completionRequirement?: ModuleItemCompletionRequirement | null;
 }
 
 export interface FileIndexEntry {
@@ -61,6 +114,19 @@ export interface PageIndexEntry {
   htmlUrl: string | null;
   updatedAt: string | null;
   hasBody: boolean;
+}
+
+export interface CourseTabIndexEntry {
+  id: string;
+  label: string;
+  type: string | null;
+  position: number | null;
+  hidden: boolean | null;
+  visibility: string | null;
+  htmlUrl: string | null;
+  fullUrl: string | null;
+  url: string | null;
+  externalUrl: string | null;
 }
 
 export interface QuizIndexEntry {
@@ -161,6 +227,7 @@ export type AttachmentSourceType =
   | "assignment_attachment"
   | "announcement_attachment"
   | "discussion_attachment"
+  | "submission_comment_attachment"
   | "assignment_linked"
   | "quiz_linked"
   | "calendar_event_linked"
@@ -224,6 +291,7 @@ export interface IngestionMeta {
     moduleItems: number;
     files: number;
     pages: number;
+    tabs?: number;
     syllabusCandidates: number;
     lectures: number;
     attachmentsDownloaded: number;
@@ -238,6 +306,7 @@ export interface IngestionResult {
   modules: ModuleIndexEntry[];
   files: FileIndexEntry[];
   pages: PageIndexEntry[];
+  tabs?: CourseTabIndexEntry[];
   quizzes?: QuizIndexEntry[];
   calendarEvents?: CalendarEventIndexEntry[];
   announcements?: AnnouncementIndexEntry[];

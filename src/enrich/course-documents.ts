@@ -21,6 +21,18 @@ export function getExtractedPagePath(
   );
 }
 
+export function getExtractedCourseTabPath(
+  coursePath: string,
+  tabId: string
+): string {
+  return path.join(
+    coursePath,
+    "extracted",
+    "course-tabs",
+    `${sanitizeDocumentSegment(tabId)}.txt`
+  );
+}
+
 export function getExtractedAssignmentPath(
   coursePath: string,
   assignmentId: number
@@ -30,6 +42,18 @@ export function getExtractedAssignmentPath(
     "extracted",
     "assignments",
     `${sanitizeDocumentSegment(String(assignmentId))}.txt`
+  );
+}
+
+export function getExtractedModulePath(
+  coursePath: string,
+  moduleId: number
+): string {
+  return path.join(
+    coursePath,
+    "extracted",
+    "modules",
+    `${sanitizeDocumentSegment(String(moduleId))}.txt`
   );
 }
 

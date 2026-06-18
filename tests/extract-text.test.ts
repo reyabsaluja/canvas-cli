@@ -29,6 +29,21 @@ test("extractFileText extracts searchable text from PowerPoint slides and notes"
             '<p:sld><p:cSld><p:spTree><a:p><a:r><a:t>Polling and Timers</a:t></a:r></a:p><a:p><a:r><a:t>Use timer interrupts for periodic sampling.</a:t></a:r></a:p></p:spTree></p:cSld></p:sld>',
         },
         {
+          name: "ppt/slides/_rels/slide1.xml.rels",
+          content: [
+            "<Relationships>",
+            '<Relationship Id="rIdComments"',
+            ' Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"',
+            ' Target="../comments/comment1.xml"/>',
+            "</Relationships>",
+          ].join(""),
+        },
+        {
+          name: "ppt/comments/comment1.xml",
+          content:
+            '<p:cmLst><p:cm authorId="0" idx="1"><p:text>Instructor comment: quiz students on timer drift.</p:text></p:cm></p:cmLst>',
+        },
+        {
           name: "ppt/notesSlides/notesSlide1.xml",
           content:
             '<p:notes><a:p><a:r><a:t>Mention debouncing as a common pitfall.</a:t></a:r></a:p></p:notes>',
@@ -47,6 +62,8 @@ test("extractFileText extracts searchable text from PowerPoint slides and notes"
     assert.match(text, /## Slide 1/);
     assert.match(text, /Polling and Timers/);
     assert.match(text, /Use timer interrupts for periodic sampling\./);
+    assert.match(text, /## Slide 1 Comments/);
+    assert.match(text, /Instructor comment: quiz students on timer drift\./);
     assert.match(text, /## Speaker Notes 1/);
     assert.match(text, /Mention debouncing as a common pitfall\./);
     assert.match(text, /## Slide 2/);
@@ -98,12 +115,12 @@ test("extractFileText extracts Word paragraphs and spreadsheet shared strings", 
         {
           name: "xl/sharedStrings.xml",
           content:
-            "<sst><si><t>Due date</t></si><si><t>April 10</t></si><si><t>Points</t></si></sst>",
+            "<sst><si><t>Due date</t></si><si><t>April 10</t></si><si><t>Points</t></si><si><t>Weighted points</t></si></sst>",
         },
         {
           name: "xl/worksheets/sheet1.xml",
           content:
-            '<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row><row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>25</v></c></row></sheetData></worksheet>',
+            '<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>3</v></c></row><row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>25</v></c><c r="C2"><f>B2*0.15</f><v>3.75</v></c></row></sheetData></worksheet>',
         },
       ])
     );
@@ -111,8 +128,8 @@ test("extractFileText extracts Word paragraphs and spreadsheet shared strings", 
     const sheetText = await extractFileText(xlsxPath, "schedule.xlsx");
 
     assert.match(sheetText, /## Schedule/);
-    assert.match(sheetText, /A1: Due date \| B1: April 10/);
-    assert.match(sheetText, /A2: Points \| B2: 25/);
+    assert.match(sheetText, /A1: Due date \| B1: April 10 \| C1: Weighted points/);
+    assert.match(sheetText, /A2: Points \| B2: 25 \| C2: 3\.75 \(formula: =B2\*0\.15\)/);
     assert.doesNotMatch(sheetText, /Binary file/);
   });
 });
@@ -311,5 +328,38 @@ test("extractFileText preserves Office media descriptions and targets", async ()
       /- Image: Waveform showing enable pulses \| name: Timing diagram \| target: ppt\/media\/image2\.png/
     );
     assert.doesNotMatch(deckText, /rId2/);
+  });
+});
+
+test("extractFileText extracts searchable text from zip files inside zips", async () => {
+  await withTempDir(async (tempDir) => {
+    const innerZip = buildZipBuffer([
+      {
+        name: "specs/lab-rubric.md",
+        content: "# Lab Rubric\nNested archive says timing diagrams are required.\n",
+      },
+    ]);
+    const outerZipPath = path.join(tempDir, "starter-bundle.zip");
+    await fs.writeFile(
+      outerZipPath,
+      buildZipBuffer([
+        {
+          name: "README.md",
+          content: "# Starter Bundle\nOpen the nested archive for the rubric.\n",
+        },
+        {
+          name: "resources/rubric-pack.zip",
+          content: innerZip,
+        },
+      ])
+    );
+
+    const text = await extractFileText(outerZipPath, "starter-bundle.zip");
+
+    assert.match(text, /ZIP: starter-bundle\.zip \(2 files\)/);
+    assert.match(text, /resources\/rubric-pack\.zip/);
+    assert.match(text, /ZIP: resources\/rubric-pack\.zip \(1 files\)/);
+    assert.match(text, /--- specs\/lab-rubric\.md ---/);
+    assert.match(text, /Nested archive says timing diagrams are required\./);
   });
 });

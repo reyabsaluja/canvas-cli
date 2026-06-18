@@ -144,6 +144,38 @@ export function selectRecoveryReadArtifactId(
   return null;
 }
 
+export function selectUngroundedSearchRecoveryReadArtifactId(
+  question: string,
+  currentTurnObservations: Observation[],
+  allObservations: Observation[] = currentTurnObservations
+): string | null {
+  const groundedArtifactIds = collectObservationArtifactIds(
+    currentTurnObservations.filter((observation) =>
+      isGroundedContentObservation(observation)
+    )
+  );
+  const failedArtifactIds = collectFailedReadArtifactIds(allObservations);
+  const breadcrumbs = selectRelevantSearchBreadcrumbObservations(
+    question,
+    currentTurnObservations,
+    { coveredArtifactIds: groundedArtifactIds, failedArtifactIds }
+  );
+
+  for (const observation of breadcrumbs) {
+    for (const artifact of observation.artifacts) {
+      if (
+        groundedArtifactIds.has(artifact.artifactId) ||
+        failedArtifactIds.has(artifact.artifactId)
+      ) {
+        continue;
+      }
+      return artifact.artifactId;
+    }
+  }
+
+  return null;
+}
+
 export function selectComplementaryRecoveryReadArtifactId(
   question: string,
   currentTurnObservations: Observation[],
@@ -361,19 +393,136 @@ export function shouldRecoverFromToolLoop(
   return observations.some(canObservationSupportAnswerRecovery);
 }
 
+export interface NoInfoRecoveryToolCall {
+  name: string;
+  input: Record<string, unknown>;
+}
+
+export function selectComplementarySearchToolCalls(
+  question: string,
+  availableToolNames: string[],
+  currentTurnObservations: Observation[],
+  allObservations: Observation[] = currentTurnObservations
+): NoInfoRecoveryToolCall[] {
+  if (!questionNeedsMultipleSources(question)) {
+    return [];
+  }
+
+  const groundedCurrentTurn = currentTurnObservations.filter((observation) =>
+    isGroundedContentObservation(observation)
+  );
+  const relevantGrounded = selectRelevantObservations(
+    groundedCurrentTurn,
+    question,
+    3
+  );
+  if (relevantGrounded.length === 0) {
+    return [];
+  }
+
+  const relevantGroundedArtifactIds = collectObservationArtifactIds(
+    relevantGrounded
+  );
+  if (relevantGroundedArtifactIds.size >= 2) {
+    return [];
+  }
+
+  const existingComplement = selectComplementaryRecoveryReadArtifactId(
+    question,
+    currentTurnObservations,
+    allObservations
+  );
+  if (existingComplement) {
+    return [];
+  }
+
+  const available = new Set(availableToolNames);
+  const query = buildNoInfoRecoverySearchQuery(question);
+  const calls: NoInfoRecoveryToolCall[] = [];
+
+  if (
+    available.has("search_workspace") &&
+    !searchToolWasTried("search_workspace", query, currentTurnObservations)
+  ) {
+    calls.push({ name: "search_workspace", input: { query } });
+  }
+
+  if (
+    available.has("search_course") &&
+    !searchToolWasTried("search_course", query, currentTurnObservations)
+  ) {
+    calls.push({ name: "search_course", input: { query } });
+  }
+
+  return calls;
+}
+
+export function shouldRecoverFromNoInfoAnswer(
+  answer: string,
+  _currentTurnObservations: Observation[]
+): boolean {
+  return answerLooksLikeNoInfo(answer);
+}
+
+export function selectNoInfoRecoveryToolCalls(
+  question: string,
+  availableToolNames: string[],
+  currentTurnObservations: Observation[]
+): NoInfoRecoveryToolCall[] {
+  const available = new Set(availableToolNames);
+  const query = buildNoInfoRecoverySearchQuery(question);
+  const calls: NoInfoRecoveryToolCall[] = [];
+
+  if (
+    available.has("list_assignments") &&
+    questionLooksLikeAssignmentListQuestion(question) &&
+    !toolWasTried("list_assignments", currentTurnObservations)
+  ) {
+    calls.push({ name: "list_assignments", input: {} });
+  }
+
+  if (
+    available.has("list_announcements") &&
+    questionNeedsThreadContent(question) &&
+    !toolWasTried("list_announcements", currentTurnObservations)
+  ) {
+    calls.push({
+      name: "list_announcements",
+      input: { filter: "all", query },
+    });
+  }
+
+  if (
+    available.has("search_workspace") &&
+    !searchToolWasTried("search_workspace", query, currentTurnObservations)
+  ) {
+    calls.push({ name: "search_workspace", input: { query } });
+  }
+
+  if (
+    available.has("search_course") &&
+    !searchToolWasTried("search_course", query, currentTurnObservations)
+  ) {
+    calls.push({ name: "search_course", input: { query } });
+  }
+
+  if (
+    calls.length === 0 &&
+    available.has("list_files") &&
+    !toolWasTried("list_files", currentTurnObservations)
+  ) {
+    calls.push({ name: "list_files", input: {} });
+  }
+
+  return calls;
+}
+
 export function shouldGroundUnverifiedAnswer(
   answer: string,
   currentTurnObservations: Observation[],
   question: string
 ): boolean {
   if (answer.trim().length === 0) {
-    return false;
-  }
-
-  const hasGroundedRead = currentTurnObservations.some((observation) =>
-    isGroundedContentObservation(observation)
-  );
-  if (hasGroundedRead) {
     return false;
   }
 
@@ -384,7 +533,7 @@ export function shouldGroundUnverifiedAnswer(
     return false;
   }
 
-  const hasRecoverableTarget = selectRecoveryReadArtifactId(
+  const hasRecoverableTarget = selectUngroundedSearchRecoveryReadArtifactId(
     question,
     currentTurnObservations,
     currentTurnObservations
@@ -484,6 +633,149 @@ function answerAlreadySignalsUncertainty(answer: string): boolean {
   return /\b(?:i\s+(?:do\s+not|don't|can't|cannot)\s+(?:see|find|verify|confirm)|could\s+not\s+verify|couldn't\s+verify|cannot\s+verify|can't\s+verify|not\s+enough\s+evidence|unclear|not\s+clear)\b/i.test(
     answer
   );
+}
+
+function answerLooksLikeNoInfo(answer: string): boolean {
+  const trimmed = answer.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  return (
+    /\bi\s+(?:do\s+not|don't|can't|cannot)\s+(?:have|see|find|access|verify|confirm|know)\b/i.test(
+      trimmed
+    ) ||
+    /\bi\s+(?:wasn't|was not|am not)\s+able\s+to\s+(?:find|verify|confirm|locate)\b/i.test(
+      trimmed
+    ) ||
+    /\bcould(?:n't| not)\s+(?:find|verify|confirm|locate)\b/i.test(trimmed) ||
+    /\b(?:no|not enough)\s+(?:information|details|evidence|context)\b/i.test(
+      trimmed
+    ) ||
+    /\b(?:the\s+)?(?:materials|evidence|sources)\s+(?:do\s+not|don't|does\s+not|doesn't)\s+(?:include|mention|show|say|provide)\b/i.test(
+      trimmed
+    )
+  );
+}
+
+const NO_INFO_RECOVERY_QUERY_STOP_WORDS = new Set([
+  "about",
+  "after",
+  "again",
+  "also",
+  "and",
+  "any",
+  "are",
+  "between",
+  "both",
+  "can",
+  "change",
+  "changed",
+  "compare",
+  "comparison",
+  "could",
+  "did",
+  "difference",
+  "different",
+  "does",
+  "each",
+  "for",
+  "from",
+  "have",
+  "how",
+  "instructor",
+  "into",
+  "is",
+  "it",
+  "me",
+  "mention",
+  "my",
+  "of",
+  "on",
+  "or",
+  "please",
+  "prof",
+  "professor",
+  "say",
+  "says",
+  "said",
+  "should",
+  "that",
+  "the",
+  "this",
+  "to",
+  "was",
+  "were",
+  "what",
+  "when",
+  "where",
+  "which",
+  "with",
+  "versus",
+]);
+
+function buildNoInfoRecoverySearchQuery(question: string): string {
+  const seen = new Set<string>();
+  const tokens: string[] = [];
+  for (const rawToken of question
+    .toLowerCase()
+    .replace(/['’]s\b/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/)) {
+    const token = rawToken.trim();
+    if (
+      !token ||
+      seen.has(token) ||
+      NO_INFO_RECOVERY_QUERY_STOP_WORDS.has(token)
+    ) {
+      continue;
+    }
+    if (token.length < 3 && !/^\d+$/.test(token)) {
+      continue;
+    }
+    seen.add(token);
+    tokens.push(token);
+  }
+
+  const query = tokens.slice(0, 4).join(" ");
+  return query || question.trim().replace(/\s+/g, " ").slice(0, 80);
+}
+
+function questionLooksLikeAssignmentListQuestion(question: string): boolean {
+  return /\b(assignments?|labs?|homeworks?|projects?|quizzes?|work|todo|to-do|due|deadline|deadlines|upcoming|submit|submission)\b/i.test(
+    question
+  );
+}
+
+function toolWasTried(toolName: string, observations: Observation[]): boolean {
+  return observations.some((observation) => observation.tool === toolName);
+}
+
+function searchToolWasTried(
+  toolName: string,
+  query: string,
+  observations: Observation[]
+): boolean {
+  const normalizedQuery = normalizeRecoverySearchText(query);
+  return observations.some((observation) => {
+    if (observation.tool !== toolName) {
+      return false;
+    }
+    if (!normalizedQuery) {
+      return true;
+    }
+    return normalizeRecoverySearchText(observation.summary).includes(
+      normalizedQuery
+    );
+  });
+}
+
+function normalizeRecoverySearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function canObservationSupportAnswerRecovery(

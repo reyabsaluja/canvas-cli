@@ -1,4 +1,12 @@
-import type { MockCourse, MockAssignment, MockModule, MockPage, MockFile, MockServerData } from "./mock-canvas-server.js";
+import type {
+  MockAssignment,
+  MockCourse,
+  MockFile,
+  MockModule,
+  MockPage,
+  MockServerData,
+  MockSubmission,
+} from "./mock-canvas-server.js";
 
 export const COURSES: MockCourse[] = [
   {
@@ -87,6 +95,25 @@ export const CS101_ASSIGNMENTS: MockAssignment[] = [
     description: null,
     points_possible: 100,
     submission_types: ["online_quiz"],
+    rubric: [
+      {
+        id: "crit-analysis",
+        description: "Loop Invariant Analysis",
+        points: 10,
+        ratings: [
+          {
+            id: "rating-strong",
+            description: "Strong",
+            points: 10,
+          },
+          {
+            id: "rating-partial",
+            description: "Partial",
+            points: 7,
+          },
+        ],
+      },
+    ],
     submission: {
       workflow_state: "graded",
       submitted_at: "2026-03-15T13:55:00Z",
@@ -140,8 +167,20 @@ export const CS101_MODULES: MockModule[] = [
     position: 2,
     items_count: 1,
     items_url: "http://localhost/api/v1/courses/101/modules/11/items",
+    require_sequential_progress: true,
+    prerequisite_module_ids: [10],
     items: [
-      { id: 102, title: "Variables Lecture Notes", type: "Page", position: 1, page_url: "variables-lecture" },
+      {
+        id: 102,
+        title: "Variables Lecture Notes",
+        type: "Page",
+        position: 1,
+        page_url: "variables-lecture",
+        completion_requirement: {
+          type: "must_mark_done",
+          completed: false,
+        },
+      },
     ],
   },
 ];
@@ -188,6 +227,40 @@ export const CS101_FILES: MockFile[] = [
   },
 ];
 
+export const CS101_SUBMISSIONS: MockSubmission[] = [
+  {
+    assignment_id: 1003,
+    user_id: 7,
+    workflow_state: "graded",
+    submitted_at: "2026-03-15T13:55:00Z",
+    score: 87,
+    grade: "87",
+    attempt: 1,
+    late: false,
+    missing: false,
+    submission_comments: [
+      {
+        id: 9001,
+        author_id: 42,
+        author_name: "Prof. Ada",
+        comment:
+          "Nice work overall. Review the loop invariant feedback before the final.",
+        html_comment:
+          "<p>Nice work overall. Review the <strong>loop invariant feedback</strong> before the final.</p>",
+        created_at: "2026-03-16T10:00:00Z",
+      },
+    ],
+    rubric_assessment: {
+      "crit-analysis": {
+        points: 7,
+        rating_id: "rating-partial",
+        comments:
+          "<p>Your invariant is close, but explain initialization before the loop.</p>",
+      },
+    },
+  },
+];
+
 export function buildDefaultServerData(): MockServerData {
   return {
     courses: COURSES,
@@ -198,6 +271,65 @@ export function buildDefaultServerData(): MockServerData {
     modules: new Map([[101, CS101_MODULES]]),
     pages: new Map([[101, CS101_PAGES]]),
     files: new Map([[101, CS101_FILES]]),
+    submissions: new Map([[101, CS101_SUBMISSIONS]]),
+    assignmentDateDetails: new Map([
+      [
+        101,
+        new Map([
+          [
+            1002,
+            {
+              due_at: "2026-06-08T23:59:00Z",
+              unlock_at: "2026-06-01T00:00:00Z",
+              lock_at: "2026-06-15T23:59:00Z",
+              only_visible_to_overrides: false,
+              overrides: [
+                {
+                  id: 7001,
+                  title: "Section B extension",
+                  set_type: "CourseSection",
+                  course_section_id: 42,
+                  due_at: "2026-06-10T23:59:00Z",
+                  lock_at: "2026-06-17T23:59:00Z",
+                },
+              ],
+              peer_review_sub_assignment: {
+                id: 7102,
+                title: "Lab 2 Peer Review",
+                due_at: "2026-06-12T23:59:00Z",
+                overrides: [
+                  {
+                    id: 7103,
+                    title: "Section B peer review",
+                    set_type: "CourseSection",
+                    course_section_id: 42,
+                    due_at: "2026-06-14T23:59:00Z",
+                  },
+                ],
+              },
+            },
+          ],
+        ]),
+      ],
+    ]),
+    tabs: new Map([
+      [
+        101,
+        [
+          {
+            id: "context_external_tool_42",
+            label: "Course Zoom",
+            type: "external",
+            hidden: false,
+            visibility: "public",
+            position: 8,
+            html_url:
+              "https://canvas.example/courses/101/external_tools/42",
+            full_url: "https://zoom.example/cs101",
+          },
+        ],
+      ],
+    ]),
     courseDetails: new Map([
       [101, { syllabus_body: "<p>CS101 course syllabus content here.</p>" }],
       [202, { syllabus_body: null }],

@@ -14,6 +14,7 @@ const pdfParse: (buffer: Buffer) => Promise<{ text: string }> = require("pdf-par
 const MAX_TEXT = 30000;
 const MAX_ZIP_TEXT = 50000; // Higher limit for zips since they contain multiple files
 const MAX_ZIP_FILE_TEXT = 30000; // Per-file limit inside zips
+const MAX_ZIP_DEPTH = 3;
 
 const TEXTUAL_ZIP_EXTENSIONS = new Set([
   ".txt", ".md", ".csv", ".py", ".c", ".h", ".java", ".js",
@@ -111,6 +112,8 @@ export async function extractFileBufferText(
       case ".pptx":
       case ".xlsx":
         return (await extractOfficeOpenXmlBuffer(buffer, filename)).slice(0, MAX_TEXT);
+      case ".zip":
+        return (await extractZipSource(buffer, filename, 0)).slice(0, MAX_ZIP_TEXT);
       default:
         return `[Binary file: ${filename} — cannot extract text]`;
     }
@@ -187,9 +190,19 @@ export async function extractZip(
   zipPath: string,
   zipName: string
 ): Promise<string> {
+  return (await extractZipSource(zipPath, zipName, 0)).slice(0, MAX_ZIP_TEXT);
+}
+
+async function extractZipSource(
+  zipSource: string | Buffer,
+  zipName: string,
+  depth: number
+): Promise<string> {
   const yauzl = require("yauzl-promise");
 
-  const zip = await yauzl.open(zipPath);
+  const zip = Buffer.isBuffer(zipSource)
+    ? await yauzl.fromBuffer(zipSource)
+    : await yauzl.open(zipSource);
   const entries: Array<{ name: string; size: number }> = [];
   const textContents: Array<{ name: string; content: string }> = [];
   let totalText = 0;
@@ -207,6 +220,7 @@ export async function extractZip(
       const ext = path.extname(entry.filename).toLowerCase();
       const isTextFile = TEXTUAL_ZIP_EXTENSIONS.has(ext);
       const isOfficeFile = OFFICE_OPEN_XML_EXTENSIONS.has(ext);
+      const isZipFile = ext === ".zip";
 
       if (isTextFile) {
         try {
@@ -257,6 +271,20 @@ export async function extractZip(
           }
         } catch {
           // Skip unreadable PDFs
+        }
+      }
+
+      if (isZipFile && depth < MAX_ZIP_DEPTH) {
+        try {
+          const buffer = await readEntryBuffer(entry);
+          const text = await extractZipSource(buffer, entry.filename, depth + 1);
+          if (text.trim().length > 0) {
+            const truncated = text.slice(0, MAX_ZIP_FILE_TEXT);
+            textContents.push({ name: entry.filename, content: truncated });
+            totalText += truncated.length;
+          }
+        } catch {
+          // Skip unreadable nested zips
         }
       }
     }
@@ -459,6 +487,10 @@ function renderPptxEntries(
       /^ppt\/notesSlides\/notesSlide\d+\.xml$/i.test(name)
     )
   );
+  const comments = new Map(
+    [...entries.entries()].filter(([name]) => isPowerPointCommentEntry(name))
+  );
+  const renderedComments = new Set<string>();
 
   for (let index = 0; index < slides.length; index += 1) {
     const [name, xml] = slides[index]!;
@@ -490,6 +522,16 @@ function renderPptxEntries(
         )
       );
     }
+
+    const slideCommentEntries = powerPointCommentsForPart(entries, name, comments);
+    for (const [commentName, commentXml] of slideCommentEntries) {
+      appendSection(
+        lines,
+        `Slide ${slideNumber} Comments`,
+        extractPowerPointComments(commentXml)
+      );
+      renderedComments.add(commentName);
+    }
   }
 
   for (const [name, xml] of [...notes.entries()].sort(compareNumberedOfficeEntries)) {
@@ -511,6 +553,18 @@ function renderPptxEntries(
         xml,
         relationshipTargetsForPart(entries, name)
       )
+    );
+  }
+
+  for (const [name, xml] of [...comments.entries()].sort(compareNumberedOfficeEntries)) {
+    if (renderedComments.has(name)) {
+      continue;
+    }
+    const commentNumber = extractTrailingNumber(name);
+    appendSection(
+      lines,
+      commentNumber ? `Comments ${commentNumber}` : formatOfficeEntryHeading(name),
+      extractPowerPointComments(xml)
     );
   }
 
@@ -631,6 +685,56 @@ function extractOfficeMediaDescriptions(
   }
 
   return rendered;
+}
+
+function powerPointCommentsForPart(
+  entries: Map<string, string>,
+  partName: string,
+  comments: Map<string, string>
+): Array<[string, string]> {
+  const relationshipTargets = relationshipTargetsForPart(entries, partName);
+  const matches: Array<[string, string]> = [];
+  for (const target of relationshipTargets.values()) {
+    const commentXml = comments.get(target);
+    if (commentXml) {
+      matches.push([target, commentXml]);
+    }
+  }
+  return matches;
+}
+
+function extractPowerPointComments(xml: string): string[] {
+  const comments = [
+    ...xml.matchAll(/<(?:[a-z]+:)?cm\b[^>]*>([\s\S]*?)<\/(?:[a-z]+:)?cm>/gi),
+  ]
+    .map((match) => extractPowerPointCommentText(match[1] ?? ""))
+    .filter(Boolean);
+
+  if (comments.length > 0) {
+    return comments;
+  }
+
+  const fallback = extractPowerPointCommentText(xml);
+  return fallback ? [fallback] : [];
+}
+
+function extractPowerPointCommentText(xml: string): string {
+  const explicitText = [
+    ...xml.matchAll(
+      /<(?:[a-z]+:)?text\b[^>]*>([\s\S]*?)<\/(?:[a-z]+:)?text>/gi
+    ),
+  ].map((match) => {
+    const inner = match[1] ?? "";
+    const runText = extractOfficeTextRuns(inner);
+    return runText || decodeEntities(inner.replace(/<[^>]+>/g, " "));
+  });
+  const runText = extractOfficeTextRuns(xml);
+  const uniqueText = new Set([...explicitText, runText]);
+  return [...uniqueText]
+    .map((value) => value.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join(" ")
+    .trim();
 }
 
 function extractNearbyOfficeMediaTarget(
@@ -945,6 +1049,22 @@ function extractWorksheetCellValue(
   cellXml: string,
   sharedStrings: string[]
 ): string {
+  const formula = extractWorksheetFormula(cellXml);
+  const value = extractWorksheetCellDisplayValue(attrs, cellXml, sharedStrings);
+  if (!formula) {
+    return value;
+  }
+  if (!value) {
+    return `formula: ${formula}`;
+  }
+  return `${value} (formula: ${formula})`;
+}
+
+function extractWorksheetCellDisplayValue(
+  attrs: string,
+  cellXml: string,
+  sharedStrings: string[]
+): string {
   const type = extractXmlAttr(attrs, "t");
   if (type === "s") {
     const sharedIndex = Number.parseInt(extractXmlValue(cellXml) ?? "", 10);
@@ -954,6 +1074,17 @@ function extractWorksheetCellValue(
     return extractOfficeTextRuns(cellXml).replace(/\s+/g, " ").trim();
   }
   return decodeEntities(extractXmlValue(cellXml) ?? "").trim();
+}
+
+function extractWorksheetFormula(cellXml: string): string | null {
+  const match = cellXml.match(/<f\b[^>]*>([\s\S]*?)<\/f>/i);
+  const formula = decodeEntities(match?.[1] ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!formula) {
+    return null;
+  }
+  return formula.startsWith("=") ? formula : `=${formula}`;
 }
 
 function extractXmlValue(xml: string): string | null {
@@ -1074,9 +1205,16 @@ function isWordTextOrRelationshipEntry(name: string): boolean {
 function isPowerPointTextOrRelationshipEntry(name: string): boolean {
   return (
     /^ppt\/(?:slides|notesSlides)\/(?:slide|notesSlide)\d+\.xml$/i.test(name) ||
+    isPowerPointCommentEntry(name) ||
     /^ppt\/(?:slides|notesSlides)\/_rels\/(?:slide|notesSlide)\d+\.xml\.rels$/i.test(
       name
     )
+  );
+}
+
+function isPowerPointCommentEntry(name: string): boolean {
+  return /^ppt\/(?:comments\/comment|threadedComments\/threadedComment)\d+\.xml$/i.test(
+    name
   );
 }
 

@@ -161,24 +161,30 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
         console.log(`  ${C.dim("Opened. Paste your token when ready.")}\n`);
       }
 
-      const tokenInput = await promptSecret(`  ${C.dim("→")} `);
-      if (tokenInput === ESCAPED) {
-        step = Step.URL;
-        continue;
-      }
-      if (!tokenInput) {
-        console.error(`\n  ${C.error("✗")} ${C.text("Access token is required.")}\n`);
-        continue;
-      }
+      let tokenAccepted = false;
+      while (!tokenAccepted) {
+        const tokenInput = await promptSecret(`  ${C.dim("→")} `);
+        if (tokenInput === ESCAPED) {
+          step = Step.URL;
+          break;
+        }
+        if (!tokenInput) {
+          console.error(`\n  ${C.error("✗")} ${C.text("Access token is required.")}\n`);
+          continue;
+        }
 
-      console.log(`\n  ${C.dim("Verifying...")}`);
-      const valid = await validateCredentials(apiBaseUrl, tokenInput);
-      if (!valid.ok) {
-        console.error(`  ${C.error("✗")} ${C.text(valid.error)}\n`);
-        continue;
+        console.log(`\n  ${C.dim("Verifying...")}`);
+        const valid = await validateCredentials(apiBaseUrl, tokenInput);
+        if (!valid.ok) {
+          console.error(`  ${C.error("✗")} ${C.text(valid.error)}`);
+          console.log(`  ${C.dim("Try again or press esc to go back.")}\n`);
+          continue;
+        }
+        token = tokenInput;
+        userName = valid.userName;
+        tokenAccepted = true;
       }
-      token = tokenInput;
-      userName = valid.userName;
+      if (!tokenAccepted) continue;
       step = Step.PROVIDER;
     } else if (step === Step.PROVIDER) {
       freshStep();

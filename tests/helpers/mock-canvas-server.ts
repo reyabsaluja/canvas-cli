@@ -22,7 +22,15 @@ export interface MockAssignment {
   description?: string | null;
   points_possible?: number | null;
   submission_types?: string[];
+  peer_reviews?: boolean | null;
+  automatic_peer_reviews?: boolean | null;
+  anonymous_peer_reviews?: boolean | null;
+  intra_group_peer_reviews?: boolean | null;
+  peer_review_count?: number | null;
+  peer_reviews_assign_at?: string | null;
   submission?: {
+    assignment_id?: number;
+    user_id?: number;
     workflow_state: string;
     submitted_at: string | null;
     score: number | null;
@@ -30,7 +38,106 @@ export interface MockAssignment {
     attempt: number | null;
     late: boolean;
     missing: boolean;
+    submission_comments?: MockSubmissionComment[] | null;
+    rubric_assessment?: MockRubricAssessment | null;
   };
+  rubric?: MockRubricCriterion[] | null;
+}
+
+export interface MockAssignmentDateDetails {
+  due_at?: string | null;
+  unlock_at?: string | null;
+  lock_at?: string | null;
+  only_visible_to_overrides?: boolean | null;
+  overrides?: MockAssignmentDateOverride[] | null;
+  assignment_overrides?: MockAssignmentDateOverride[] | null;
+  peer_review_sub_assignment?: {
+    id?: number | null;
+    title?: string | null;
+    name?: string | null;
+    due_at?: string | null;
+    unlock_at?: string | null;
+    lock_at?: string | null;
+    only_visible_to_overrides?: boolean | null;
+    overrides?: MockAssignmentDateOverride[] | null;
+    assignment_overrides?: MockAssignmentDateOverride[] | null;
+  } | null;
+}
+
+export interface MockAssignmentDateOverride {
+  id?: number | null;
+  title?: string | null;
+  due_at?: string | null;
+  unlock_at?: string | null;
+  lock_at?: string | null;
+  all_day?: boolean | null;
+  all_day_date?: string | null;
+  set_type?: string | null;
+  student_ids?: number[] | null;
+  group_id?: number | null;
+  course_section_id?: number | null;
+}
+
+export interface MockSubmission {
+  assignment_id: number;
+  user_id: number;
+  workflow_state: string;
+  submitted_at: string | null;
+  score: number | null;
+  grade: string | null;
+  attempt: number | null;
+  late: boolean;
+  missing: boolean;
+  submission_comments?: MockSubmissionComment[] | null;
+  rubric_assessment?: MockRubricAssessment | null;
+}
+
+export type MockRubricAssessment = Record<
+  string,
+  {
+    points?: number | null;
+    rating_id?: string | number | null;
+    comments?: string | null;
+    comments_enabled?: boolean | null;
+  } | null | undefined
+>;
+
+export interface MockRubricCriterion {
+  id: string | number;
+  description: string;
+  long_description?: string | null;
+  points: number | null;
+  ratings?: Array<{
+    id?: string | number;
+    description: string;
+    long_description?: string | null;
+    points?: number | null;
+  }> | null;
+}
+
+export interface MockSubmissionComment {
+  id: number;
+  author_id?: number | null;
+  author_name?: string | null;
+  comment?: string | null;
+  html_comment?: string | null;
+  created_at?: string | null;
+  edited_at?: string | null;
+  media_comment?: {
+    "content-type"?: string | null;
+    display_name?: string | null;
+    media_id?: string | null;
+    media_type?: string | null;
+    url?: string | null;
+  } | null;
+  attachments?: Array<{
+    id: number;
+    display_name?: string | null;
+    filename?: string | null;
+    url?: string | null;
+    content_type?: string | null;
+    size?: number | null;
+  }> | null;
 }
 
 export interface MockModule {
@@ -39,6 +146,9 @@ export interface MockModule {
   position: number;
   items_count: number;
   items_url: string;
+  unlock_at?: string | null;
+  require_sequential_progress?: boolean | null;
+  prerequisite_module_ids?: number[] | null;
   items?: Array<{
     id: number;
     title: string;
@@ -48,6 +158,12 @@ export interface MockModule {
     page_url?: string;
     html_url?: string;
     external_url?: string;
+    indent?: number | null;
+    completion_requirement?: {
+      type: string;
+      min_score?: number | null;
+      completed?: boolean | null;
+    } | null;
   }>;
 }
 
@@ -102,12 +218,28 @@ export interface MockCalendarEvent {
   workflow_state?: string | null;
 }
 
+export interface MockCourseTab {
+  id: string;
+  label: string;
+  type?: string | null;
+  hidden?: boolean | null;
+  visibility?: string | null;
+  position?: number | null;
+  html_url?: string | null;
+  full_url?: string | null;
+  url?: string | null;
+  external_url?: string | null;
+}
+
 export interface MockServerData {
   courses: MockCourse[];
   assignments: Map<number, MockAssignment[]>;
   modules: Map<number, MockModule[]>;
   pages: Map<number, MockPage[]>;
   files: Map<number, MockFile[]>;
+  submissions?: Map<number, MockSubmission[]>;
+  assignmentDateDetails?: Map<number, Map<number, MockAssignmentDateDetails>>;
+  tabs?: Map<number, MockCourseTab[]>;
   quizzes?: Map<number, MockQuiz[]>;
   calendarEvents?: Map<number, MockCalendarEvent[]>;
   courseDetails: Map<number, { syllabus_body: string | null }>;
@@ -250,6 +382,41 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
       return;
     }
 
+    // GET /courses/:id/assignments/:aid/date_details
+    const assignmentDateDetailsMatch = path.match(/^\/courses\/(\d+)\/assignments\/(\d+)\/date_details$/);
+    if (assignmentDateDetailsMatch && req.method === "GET") {
+      const courseId = parseInt(assignmentDateDetailsMatch[1], 10);
+      const assignmentId = parseInt(assignmentDateDetailsMatch[2], 10);
+      const dateDetails = data.assignmentDateDetails
+        ?.get(courseId)
+        ?.get(assignmentId);
+      if (!dateDetails) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ errors: [{ message: "not found" }] }));
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(dateDetails));
+      return;
+    }
+
+    // GET /courses/:id/students/submissions
+    const currentUserSubmissionsMatch = path.match(/^\/courses\/(\d+)\/students\/submissions$/);
+    if (currentUserSubmissionsMatch && req.method === "GET") {
+      const courseId = parseInt(currentUserSubmissionsMatch[1], 10);
+      const submissions = data.submissions?.get(courseId) ?? [];
+      const { body, headers } = paginatedResponse(
+        submissions,
+        page,
+        effectivePerPage,
+        baseApiUrl,
+        `/courses/${courseId}/students/submissions`
+      );
+      res.writeHead(200, headers);
+      res.end(body);
+      return;
+    }
+
     // GET /courses/:id/modules
     const modulesMatch = path.match(/^\/courses\/(\d+)\/modules$/);
     if (modulesMatch && req.method === "GET") {
@@ -281,6 +448,23 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
         effectivePerPage,
         baseApiUrl,
         `/courses/${courseId}/modules/${moduleId}/items`
+      );
+      res.writeHead(200, headers);
+      res.end(body);
+      return;
+    }
+
+    // GET /courses/:id/tabs
+    const tabsMatch = path.match(/^\/courses\/(\d+)\/tabs$/);
+    if (tabsMatch && req.method === "GET") {
+      const courseId = parseInt(tabsMatch[1], 10);
+      const tabs = data.tabs?.get(courseId) ?? [];
+      const { body, headers } = paginatedResponse(
+        tabs,
+        page,
+        effectivePerPage,
+        baseApiUrl,
+        `/courses/${courseId}/tabs`
       );
       res.writeHead(200, headers);
       res.end(body);

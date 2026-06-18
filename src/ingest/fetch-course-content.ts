@@ -3,6 +3,7 @@ import type {
   CanvasAssignmentGroup,
   CanvasCourseDetail,
   CanvasAssignment,
+  CanvasAssignmentDateDetails,
   CanvasAssignmentDetail,
   CanvasCalendarEvent,
   CanvasModule,
@@ -11,13 +12,19 @@ import type {
   CanvasPage,
   CanvasQuiz,
   CanvasQuizQuestion,
+  CanvasCourseTab,
   CanvasDiscussionEntry,
   CanvasDiscussionTopic,
   CanvasDiscussionTopicView,
+  CanvasSubmission,
 } from "../canvas/types.js";
 import { decodeEntities } from "../format/html-to-text.js";
 import { mapWithConcurrency } from "./concurrency.js";
-import { collectAssignmentRubricHtmlSources } from "./rich-text-sources.js";
+import {
+  collectAssignmentRubricHtmlSources,
+  collectAssignmentSubmissionCommentHtmlSources,
+  collectAssignmentSubmissionRubricAssessmentHtmlSources,
+} from "./rich-text-sources.js";
 
 export interface RawDiscussionThread {
   topic: CanvasDiscussionTopic;
@@ -26,17 +33,21 @@ export interface RawDiscussionThread {
 }
 
 export type RawAssignmentRecord = CanvasAssignment &
-  Partial<Omit<CanvasAssignmentDetail, keyof CanvasAssignment>>;
+  Partial<Omit<CanvasAssignmentDetail, keyof CanvasAssignment>> & {
+    date_details?: CanvasAssignmentDateDetails | null;
+  };
 
 export interface RawCourseContent {
   courseDetail: CanvasCourseDetail;
   assignments: RawAssignmentRecord[];
+  submissions: CanvasSubmission[];
   modules: Array<CanvasModule & { items: CanvasModuleItem[] }>;
   files: CanvasFile[];
   pages: CanvasPage[];
   quizzes: CanvasQuiz[];
   quizQuestions: Map<number, CanvasQuizQuestion[]>;
   calendarEvents: CanvasCalendarEvent[];
+  tabs: CanvasCourseTab[];
   announcements: CanvasDiscussionTopic[];
   discussions: CanvasDiscussionTopic[];
   announcementThreads: RawDiscussionThread[];
@@ -122,17 +133,31 @@ export async function fetchCourseContent(
       signal?: AbortSignal | null
     ) => Promise<CanvasAssignmentGroup[]>;
   }).getAssignmentGroupsSafe;
+  const currentUserSubmissionsFetcher = (client as CanvasClient & {
+    getCurrentUserSubmissionsSafe?: (
+      courseId: number,
+      signal?: AbortSignal | null
+    ) => Promise<CanvasSubmission[]>;
+  }).getCurrentUserSubmissionsSafe;
+  const courseTabsFetcher = (client as CanvasClient & {
+    getCourseTabsSafe?: (
+      courseId: number,
+      signal?: AbortSignal | null
+    ) => Promise<CanvasCourseTab[]>;
+  }).getCourseTabsSafe;
   const [
     rawModules,
     files,
     pages,
     quizDetailResult,
     calendarEvents,
+    courseTabs,
     announcements,
     discussions,
     frontPage,
     assignmentDetailResult,
     assignmentGroups,
+    currentUserSubmissions,
   ] =
     await Promise.all([
       client.getModulesSafe(courseId, signal),
@@ -142,6 +167,9 @@ export async function fetchCourseContent(
       calendarEventFetcher
         ? calendarEventFetcher.call(client, courseId, signal)
         : Promise.resolve([]),
+      courseTabsFetcher
+        ? courseTabsFetcher.call(client, courseId, signal)
+        : Promise.resolve([] as CanvasCourseTab[]),
       announcementFetcher
         ? announcementFetcher.call(client, courseId, undefined, signal)
         : Promise.resolve([]),
@@ -153,8 +181,14 @@ export async function fetchCourseContent(
       assignmentGroupFetcher
         ? assignmentGroupFetcher.call(client, courseId, signal)
         : Promise.resolve([] as CanvasAssignmentGroup[]),
+      currentUserSubmissionsFetcher
+        ? currentUserSubmissionsFetcher.call(client, courseId, signal)
+        : Promise.resolve([] as CanvasSubmission[]),
     ]);
-  const assignments = assignmentDetailResult.assignments;
+  const assignments = mergeSubmissionFeedback(
+    assignmentDetailResult.assignments,
+    currentUserSubmissions
+  );
   if (assignmentDetailResult.warning) {
     warnings.push(assignmentDetailResult.warning);
   }
@@ -309,6 +343,17 @@ export async function fetchCourseContent(
       enqueueSlug(slug);
     }
   };
+  const enqueueLinkedPageUrl = (
+    url: string | null | undefined,
+    baseUrl?: string | null
+  ): void => {
+    const slug = extractCanvasPageSlugFromHref(
+      url,
+      courseId,
+      baseUrl ?? courseHtmlUrl
+    );
+    enqueueSlug(slug);
+  };
 
   // Seed the crawl from every page listed in the Pages index, explicit module
   // pages, then expand through every HTML surface we can already access. This
@@ -326,6 +371,12 @@ export async function fetchCourseContent(
       }
     }
   }
+  for (const tab of courseTabs) {
+    enqueueLinkedPageUrl(tab.html_url, courseHtmlUrl);
+    enqueueLinkedPageUrl(tab.full_url, courseHtmlUrl);
+    enqueueLinkedPageUrl(tab.url, courseHtmlUrl);
+    enqueueLinkedPageUrl(tab.external_url, courseHtmlUrl);
+  }
   enqueueLinkedPageSlugs(frontPageBody, courseHtmlUrl);
   enqueueLinkedPageSlugs(courseDetail.syllabus_body, courseHtmlUrl);
   for (const assignment of assignments) {
@@ -334,6 +385,12 @@ export async function fetchCourseContent(
       enqueueLinkedPageSlugs(description, assignment.html_url);
     }
     for (const source of collectAssignmentRubricHtmlSources(assignment)) {
+      enqueueLinkedPageSlugs(source.html, assignment.html_url);
+    }
+    for (const source of collectAssignmentSubmissionCommentHtmlSources(assignment)) {
+      enqueueLinkedPageSlugs(source.html, assignment.html_url);
+    }
+    for (const source of collectAssignmentSubmissionRubricAssessmentHtmlSources(assignment)) {
       enqueueLinkedPageSlugs(source.html, assignment.html_url);
     }
   }
@@ -397,12 +454,14 @@ export async function fetchCourseContent(
   return {
     courseDetail,
     assignments,
+    submissions: currentUserSubmissions,
     modules,
     files,
     pages,
     quizzes,
     quizQuestions,
     calendarEvents,
+    tabs: courseTabs,
     announcements,
     discussions,
     announcementThreads,
@@ -427,8 +486,15 @@ async function enrichAssignmentsWithDetails(
       signal?: AbortSignal | null
     ) => Promise<CanvasAssignmentDetail>;
   }).getAssignmentDetail;
+  const dateDetailsFetcher = (client as CanvasClient & {
+    getAssignmentDateDetailsSafe?: (
+      courseId: number,
+      assignmentId: number,
+      signal?: AbortSignal | null
+    ) => Promise<CanvasAssignmentDateDetails | null>;
+  }).getAssignmentDateDetailsSafe;
 
-  if (!detailFetcher || assignments.length === 0) {
+  if ((!detailFetcher && !dateDetailsFetcher) || assignments.length === 0) {
     return { assignments, warning: null };
   }
 
@@ -437,13 +503,29 @@ async function enrichAssignmentsWithDetails(
     assignments,
     ASSIGNMENT_DETAIL_CONCURRENCY,
     async (assignment) => {
+      let detail: CanvasAssignmentDetail | null = null;
+      let dateDetails: CanvasAssignmentDateDetails | null = null;
+
       try {
-        const detail = await detailFetcher.call(client, courseId, assignment.id, signal);
-        return { ...assignment, ...detail };
+        if (detailFetcher) {
+          detail = await detailFetcher.call(client, courseId, assignment.id, signal);
+        }
       } catch {
         failedDetails += 1;
-        return assignment;
       }
+
+      if (dateDetailsFetcher) {
+        dateDetails = await dateDetailsFetcher.call(
+          client,
+          courseId,
+          assignment.id,
+          signal
+        );
+      }
+
+      return dateDetails
+        ? { ...assignment, ...(detail ?? {}), date_details: dateDetails }
+        : { ...assignment, ...(detail ?? {}) };
     },
     signal
   );
@@ -457,6 +539,41 @@ async function enrichAssignmentsWithDetails(
           } — descriptions and rubrics may be incomplete`
         : null,
   };
+}
+
+function mergeSubmissionFeedback(
+  assignments: RawAssignmentRecord[],
+  submissions: CanvasSubmission[]
+): RawAssignmentRecord[] {
+  if (submissions.length === 0) {
+    return assignments;
+  }
+
+  const submissionByAssignmentId = new Map<number, CanvasSubmission>();
+  for (const submission of submissions) {
+    if (typeof submission.assignment_id !== "number") {
+      continue;
+    }
+    submissionByAssignmentId.set(submission.assignment_id, submission);
+  }
+
+  if (submissionByAssignmentId.size === 0) {
+    return assignments;
+  }
+
+  return assignments.map((assignment) => {
+    const submission = submissionByAssignmentId.get(assignment.id);
+    if (!submission) {
+      return assignment;
+    }
+
+    return {
+      ...assignment,
+      submission: assignment.submission
+        ? { ...assignment.submission, ...submission }
+        : submission,
+    };
+  });
 }
 
 async function enrichQuizzesWithDetails(
@@ -535,6 +652,25 @@ function extractCanvasPageSlugs(
     }
   }
   return slugs;
+}
+
+function extractCanvasPageSlugFromHref(
+  href: string | null | undefined,
+  courseId: number,
+  baseUrl?: string | null
+): string | null {
+  if (!href) {
+    return null;
+  }
+  const parsed = parseUrl(decodeEntities(href).trim(), baseUrl);
+  if (!parsed) {
+    return null;
+  }
+  const pageMatch = parsed.pathname.match(/^\/courses\/(\d+)\/pages\/([^/?#]+)/);
+  if (!pageMatch || parseInt(pageMatch[1]!, 10) !== courseId) {
+    return null;
+  }
+  return decodeURIComponent(pageMatch[2]!);
 }
 
 function parseUrl(href: string, baseUrl?: string | null): URL | null {

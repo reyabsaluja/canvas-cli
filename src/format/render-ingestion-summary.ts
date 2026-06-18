@@ -54,6 +54,11 @@ export function renderIngestionSummary(result: IngestionResult): string {
       `  ${chalk.dim("-")} ${result.discussions?.length ?? 0} discussions`
     );
   }
+  if ((result.tabs?.length ?? 0) > 0) {
+    lines.push(
+      `  ${chalk.dim("-")} ${result.tabs?.length ?? 0} course navigation tabs`
+    );
+  }
   if ((result.externalLinks?.length ?? 0) > 0) {
     lines.push(
       `  ${chalk.dim("-")} ${result.externalLinks?.length ?? 0} external resources`
@@ -135,6 +140,7 @@ export function renderIngestionJson(result: IngestionResult): object {
     calendarEvents: result.calendarEvents ?? [],
     announcements: result.announcements ?? [],
     discussions: result.discussions ?? [],
+    tabs: result.tabs ?? [],
     externalLinks: result.externalLinks ?? [],
     syllabusCandidates: result.syllabusCandidates,
     attachments: result.attachments.map((a) => ({

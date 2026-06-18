@@ -21,7 +21,22 @@ export interface CanvasCourse {
   }>;
 }
 
+export interface CanvasCourseTab {
+  id: string;
+  label: string;
+  type?: string | null;
+  hidden?: boolean | null;
+  visibility?: string | null;
+  position?: number | null;
+  html_url?: string | null;
+  full_url?: string | null;
+  url?: string | null;
+  external_url?: string | null;
+}
+
 export interface CanvasSubmission {
+  assignment_id?: number;
+  user_id?: number;
   workflow_state: string;
   submitted_at: string | null;
   score: number | null;
@@ -29,6 +44,40 @@ export interface CanvasSubmission {
   attempt: number | null;
   late: boolean;
   missing: boolean;
+  submission_comments?: CanvasSubmissionComment[] | null;
+  rubric_assessment?: CanvasRubricAssessment | null;
+}
+
+export type CanvasRubricAssessment = Record<
+  string,
+  CanvasRubricAssessmentCriterion | null | undefined
+>;
+
+export interface CanvasRubricAssessmentCriterion {
+  points?: number | null;
+  rating_id?: string | number | null;
+  comments?: string | null;
+  comments_enabled?: boolean | null;
+}
+
+export interface CanvasSubmissionComment {
+  id: number;
+  author_id?: number | null;
+  author_name?: string | null;
+  comment?: string | null;
+  html_comment?: string | null;
+  created_at?: string | null;
+  edited_at?: string | null;
+  media_comment?: CanvasMediaComment | null;
+  attachments?: CanvasAttachment[] | null;
+}
+
+export interface CanvasMediaComment {
+  "content-type"?: string | null;
+  display_name?: string | null;
+  media_id?: string | null;
+  media_type?: string | null;
+  url?: string | null;
 }
 
 export interface CanvasAssignment {
@@ -41,6 +90,12 @@ export interface CanvasAssignment {
   course_id: number;
   has_submitted_submissions: boolean;
   submission?: CanvasSubmission;
+  peer_reviews?: boolean | null;
+  automatic_peer_reviews?: boolean | null;
+  anonymous_peer_reviews?: boolean | null;
+  intra_group_peer_reviews?: boolean | null;
+  peer_review_count?: number | null;
+  peer_reviews_assign_at?: string | null;
 }
 
 /** Extended assignment fields returned when fetching a single assignment. */
@@ -54,6 +109,42 @@ export interface CanvasAssignmentDetail extends CanvasAssignment {
   allowed_extensions: string[] | null;
   rubric?: CanvasRubricCriterion[] | null;
   attachments?: CanvasAttachment[] | null;
+}
+
+export interface CanvasAssignmentDateDetails {
+  due_at?: string | null;
+  unlock_at?: string | null;
+  lock_at?: string | null;
+  only_visible_to_overrides?: boolean | null;
+  overrides?: CanvasAssignmentDateOverride[] | null;
+  assignment_overrides?: CanvasAssignmentDateOverride[] | null;
+  peer_review_sub_assignment?: CanvasPeerReviewSubAssignmentDateDetails | null;
+}
+
+export interface CanvasPeerReviewSubAssignmentDateDetails {
+  id?: number | null;
+  title?: string | null;
+  name?: string | null;
+  due_at?: string | null;
+  unlock_at?: string | null;
+  lock_at?: string | null;
+  only_visible_to_overrides?: boolean | null;
+  overrides?: CanvasAssignmentDateOverride[] | null;
+  assignment_overrides?: CanvasAssignmentDateOverride[] | null;
+}
+
+export interface CanvasAssignmentDateOverride {
+  id?: number | null;
+  title?: string | null;
+  due_at?: string | null;
+  unlock_at?: string | null;
+  lock_at?: string | null;
+  all_day?: boolean | null;
+  all_day_date?: string | null;
+  set_type?: string | null;
+  student_ids?: number[] | null;
+  group_id?: number | null;
+  course_section_id?: number | null;
 }
 
 export interface CanvasAttachment {
@@ -93,6 +184,9 @@ export interface CanvasModule {
   position: number;
   items_count: number;
   items_url: string;
+  unlock_at?: string | null;
+  require_sequential_progress?: boolean | null;
+  prerequisite_module_ids?: number[] | null;
 }
 
 export interface CanvasModuleItem {
@@ -105,6 +199,14 @@ export interface CanvasModuleItem {
   html_url?: string;
   external_url?: string;
   url?: string; // API URL to the resource
+  indent?: number | null;
+  completion_requirement?: CanvasModuleItemCompletionRequirement | null;
+}
+
+export interface CanvasModuleItemCompletionRequirement {
+  type: string;
+  min_score?: number | null;
+  completed?: boolean | null;
 }
 
 export interface CanvasFile {

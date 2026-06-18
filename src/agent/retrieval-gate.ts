@@ -12,6 +12,11 @@ import {
 import { questionNeedsMultipleSources } from "./question-intent.js";
 import { hasReadArtifact } from "./run-state.js";
 import { searchWorkspaceKnowledge } from "../tui/workspace-knowledge.js";
+import {
+  loadArtifactIndex,
+  readArtifactContent,
+  type ArtifactIndex,
+} from "../knowledge/artifact-index.js";
 
 const MAX_MEMORY_REUSE_ARTIFACTS = 3;
 const MIN_MEMORY_REUSE_SCORE = 12;
@@ -50,14 +55,37 @@ export async function decideWorkspaceRetrieval(
     return { action: "let_model_decide", reason: "explicit_tool_request" };
   }
 
+  const freshness = createCurrentArtifactFreshnessChecker(
+    input.loaded,
+    input.cache
+  );
+
+  const reusableMemoryArtifactIds = await selectReusableMemoryArtifactIds(
+    question,
+    input.runState,
+    freshness
+  );
+  const eagerDiscoveredArtifactId = await selectReusableDiscoveredArtifactId(
+    question,
+    input.runState,
+    freshness
+  );
+
+  if (needsMultipleSources && eagerDiscoveredArtifactId) {
+    return {
+      action: "read_artifact",
+      reason:
+        reusableMemoryArtifactIds.length > 0
+          ? "comparison_question_needs_second_source"
+          : "already_discovered_relevant_artifact",
+      artifactId: eagerDiscoveredArtifactId,
+    };
+  }
+
   if (workupLikelyCoversQuestion(input.loaded, question)) {
     return { action: "answer_from_workup", reason: "covered_by_workup" };
   }
 
-  const reusableMemoryArtifactIds = selectReusableMemoryArtifactIds(
-    question,
-    input.runState
-  );
   if (
     reusableMemoryArtifactIds.length > 0 &&
     (!needsMultipleSources || reusableMemoryArtifactIds.length > 1)
@@ -69,10 +97,6 @@ export async function decideWorkspaceRetrieval(
     };
   }
 
-  const eagerDiscoveredArtifactId = selectReusableDiscoveredArtifactId(
-    question,
-    input.runState
-  );
   if (eagerDiscoveredArtifactId) {
     return {
       action: "read_artifact",
@@ -97,10 +121,11 @@ export async function decideWorkspaceRetrieval(
     return { action: "let_model_decide", reason: "weak_knowledge_match" };
   }
 
-  const reusableArtifactIds = selectReusableReadArtifactIds(
+  const reusableArtifactIds = await selectReusableReadArtifactIds(
     question,
     promotedMatches,
-    input.runState
+    input.runState,
+    freshness
   );
 
   if (
@@ -208,16 +233,23 @@ function selectPreferredWorkspaceMatch<
   return matches[0] ?? null;
 }
 
-function selectReusableReadArtifactIds<
+async function selectReusableReadArtifactIds<
   T extends { artifact: { id: string; kind: string }; score: number }
 >(
   question: string,
   matches: T[],
-  runState: RunState
-): string[] {
-  const reusableMatches = matches.filter((match) =>
-    hasReadArtifact(runState, match.artifact.id)
-  );
+  runState: RunState,
+  freshness: CurrentArtifactFreshnessChecker
+): Promise<string[]> {
+  const reusableMatches: T[] = [];
+  for (const match of matches) {
+    if (
+      hasReadArtifact(runState, match.artifact.id) &&
+      (await hasFreshReadArtifact(runState, match.artifact.id, freshness))
+    ) {
+      reusableMatches.push(match);
+    }
+  }
   if (reusableMatches.length === 0) {
     return [];
   }
@@ -246,10 +278,11 @@ function filterRetryableArtifactMatches<
   );
 }
 
-function selectReusableMemoryArtifactIds(
+async function selectReusableMemoryArtifactIds(
   question: string,
-  runState: RunState
-): string[] {
+  runState: RunState,
+  freshness: CurrentArtifactFreshnessChecker
+): Promise<string[]> {
   const scoredArtifacts = new Map<string, { score: number; observationIndex: number }>();
 
   for (let index = runState.observations.length - 1; index >= 0; index -= 1) {
@@ -264,6 +297,15 @@ function selectReusableMemoryArtifactIds(
     }
 
     for (const artifact of observation.artifacts) {
+      if (
+        !(await isObservationArtifactFresh(
+          artifact.artifactId,
+          observation.content ?? "",
+          freshness
+        ))
+      ) {
+        continue;
+      }
       const previous = scoredArtifacts.get(artifact.artifactId);
       if (
         !previous ||
@@ -289,10 +331,11 @@ function selectReusableMemoryArtifactIds(
     .map(([artifactId]) => artifactId);
 }
 
-function selectReusableDiscoveredArtifactId(
+async function selectReusableDiscoveredArtifactId(
   question: string,
-  runState: RunState
-): string | null {
+  runState: RunState,
+  freshness: CurrentArtifactFreshnessChecker
+): Promise<string | null> {
   const candidates = runState.observations
     .map((observation, index) => ({
       observation,
@@ -312,17 +355,121 @@ function selectReusableDiscoveredArtifactId(
     });
 
   for (const candidate of candidates) {
-    const artifact = candidate.observation.artifacts.find(
-      (entry) =>
-        !hasReadArtifact(runState, entry.artifactId) &&
-        !hasRecentFailedArtifactRead(runState, entry.artifactId)
-    );
-    if (artifact) {
-      return artifact.artifactId;
+    for (const artifact of candidate.observation.artifacts) {
+      if (
+        !(await hasFreshReadArtifact(runState, artifact.artifactId, freshness)) &&
+        !hasRecentFailedArtifactRead(runState, artifact.artifactId)
+      ) {
+        return artifact.artifactId;
+      }
     }
   }
 
   return null;
+}
+
+interface CurrentArtifactFreshnessChecker {
+  getCurrentContent: (artifactId: string) => Promise<string | null | undefined>;
+}
+
+function createCurrentArtifactFreshnessChecker(
+  loaded: LoadedWorkspace,
+  cache: CourseCache | null
+): CurrentArtifactFreshnessChecker {
+  let indexPromise: Promise<ArtifactIndex> | null = null;
+  const contentByArtifactId = new Map<string, Promise<string | null | undefined>>();
+
+  const getIndex = (): Promise<ArtifactIndex> => {
+    indexPromise ??= loadArtifactIndex({ workspace: loaded, cache });
+    return indexPromise;
+  };
+
+  return {
+    getCurrentContent(artifactId: string): Promise<string | null | undefined> {
+      const trimmed = artifactId.trim();
+      if (!trimmed) {
+        return Promise.resolve(undefined);
+      }
+      let cached = contentByArtifactId.get(trimmed);
+      if (!cached) {
+        cached = getIndex().then(async (index) => {
+          if (!index.artifactsById.has(trimmed)) {
+            return undefined;
+          }
+          return (await readArtifactContent(index, trimmed)) ?? null;
+        });
+        contentByArtifactId.set(trimmed, cached);
+      }
+      return cached;
+    },
+  };
+}
+
+async function hasFreshReadArtifact(
+  runState: RunState,
+  artifactId: string,
+  freshness: CurrentArtifactFreshnessChecker
+): Promise<boolean> {
+  if (!hasReadArtifact(runState, artifactId)) {
+    return false;
+  }
+
+  for (let index = runState.observations.length - 1; index >= 0; index -= 1) {
+    const observation = runState.observations[index]!;
+    if (!isGroundedContentObservation(observation)) {
+      continue;
+    }
+    if (!observation.artifacts.some((artifact) => artifact.artifactId === artifactId)) {
+      continue;
+    }
+    if (
+      await isObservationArtifactFresh(
+        artifactId,
+        observation.content ?? "",
+        freshness
+      )
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function isObservationArtifactFresh(
+  artifactId: string,
+  observedContent: string,
+  freshness: CurrentArtifactFreshnessChecker
+): Promise<boolean> {
+  const currentContent = await freshness.getCurrentContent(artifactId);
+  if (currentContent === undefined) {
+    return true;
+  }
+  if (currentContent === null) {
+    return false;
+  }
+  return observedContentMatchesCurrent(observedContent, currentContent);
+}
+
+function observedContentMatchesCurrent(
+  observedContent: string,
+  currentContent: string
+): boolean {
+  const observedWasTruncated = /\n?\[\.\.\.truncated\]\s*$/i.test(observedContent);
+  const observed = normalizeGroundedContent(
+    observedContent.replace(/\n?\[\.\.\.truncated\]\s*$/i, "")
+  );
+  const current = normalizeGroundedContent(currentContent);
+  if (!observed) {
+    return false;
+  }
+  return observedWasTruncated
+    ? current.startsWith(observed)
+    : observed === current || current.includes(observed);
+}
+
+function normalizeGroundedContent(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
 }
 
 function isArtifactDiscoveryObservation(

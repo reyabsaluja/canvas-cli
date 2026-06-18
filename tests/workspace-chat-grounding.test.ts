@@ -20,10 +20,14 @@ import {
   seedTurnToolCacheEntry,
   selectArtifactSupportObservations,
   selectComplementaryRecoveryReadArtifactId,
+  selectComplementarySearchToolCalls,
+  selectNoInfoRecoveryToolCalls,
   selectRecoveryReadArtifactId,
   selectThreadRecoveryTopic,
+  selectUngroundedSearchRecoveryReadArtifactId,
   shouldContinueToolLoopAfterGateRead,
   shouldGroundUnverifiedAnswer,
+  shouldRecoverFromNoInfoAnswer,
   shouldRegenerateAnswerAfterRecoveryRead,
   shouldRecoverFromToolLoop,
 } from "../src/tui/chat-agent.js";
@@ -437,6 +441,56 @@ test("workspace retrieval gate prefers workup, then direct reads, then prior mem
       action: "answer_from_memory",
       reason: "already_read_relevant_artifact",
       sourceArtifactIds: [readResult.artifact.id],
+    });
+  });
+});
+
+test("workspace retrieval gate rereads stale memory when current artifact text changed", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+    const artifactId = "workspace:extracted:docs/reference.txt";
+    const oldContent =
+      "The waveform must show stall cycles around the branch hazard.\n";
+
+    await fs.writeFile(
+      path.join(loaded.path, "extracted", "docs", "reference.txt"),
+      "Updated branch hazard requirement: show two flush cycles after branch resolution.\n",
+      "utf-8"
+    );
+    clearArtifactIndexCache();
+
+    const decision = await decideWorkspaceRetrieval({
+      question: "Explain the branch hazard requirement in detail.",
+      runState: {
+        observations: [
+          {
+            tool: "read_file",
+            status: "ok",
+            summary: "Read docs/reference.txt.",
+            artifacts: [
+              {
+                artifactId,
+                title: "docs/reference.txt",
+                kind: "extracted",
+                excerpt: oldContent,
+              },
+            ],
+            content: oldContent,
+          },
+        ],
+        readArtifactIds: [artifactId],
+        stepCount: 1,
+      },
+      loaded,
+      cache,
+    });
+
+    assert.deepEqual(decision, {
+      action: "read_artifact",
+      reason: "top_knowledge_match_needs_read",
+      artifactId,
     });
   });
 });
@@ -1119,11 +1173,74 @@ test("workspace retrieval gate reads a second source for comparison questions be
   });
 });
 
+test("workspace retrieval gate reads a second source for joined evidence topics", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const cache = createCourseCache(path.join(tempDir, "course"));
+
+    const decision = await decideWorkspaceRetrieval({
+      question: "What are the due date and submission format?",
+      runState: {
+        observations: [
+          {
+            tool: "read_file",
+            status: "ok",
+            summary: "Read assignment.md.",
+            artifacts: [
+              {
+                artifactId: "artifact-due",
+                title: "assignment.md",
+                kind: "assignment",
+                excerpt: "The report is due on April 10 at 11:59 PM.",
+                sectionLabel: "Due date",
+              },
+            ],
+            content: "The report is due on April 10 at 11:59 PM.",
+          },
+          {
+            tool: "search_workspace",
+            status: "ok",
+            summary: "Found 1 workspace match for 'submission format'.",
+            artifacts: [
+              {
+                artifactId: "artifact-submission",
+                title: "submission-guidelines.pdf",
+                kind: "attachment",
+                excerpt: "Submit a single PDF report through Canvas.",
+                sectionLabel: "Submission format",
+              },
+            ],
+          },
+        ],
+        readArtifactIds: ["artifact-due"],
+        stepCount: 2,
+      },
+      loaded,
+      cache,
+    });
+
+    assert.deepEqual(decision, {
+      action: "read_artifact",
+      reason: "comparison_question_needs_second_source",
+      artifactId: "artifact-submission",
+    });
+  });
+});
+
 test("workspace retrieval gate prefers grounded memory over later discovered artifacts", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
     const loaded = await createWorkspace(tempDir);
     const cache = createCourseCache(path.join(tempDir, "course"));
+    const currentReference =
+      "The branch hazard requirement is to show stall cycles around the branch hazard waveform.";
+    await fs.writeFile(
+      path.join(loaded.path, "extracted", "docs", "reference.txt"),
+      `${currentReference}\n`,
+      "utf-8"
+    );
+    clearArtifactIndexCache();
 
     const decision = await decideWorkspaceRetrieval({
       question: "Explain the branch hazard requirement in detail.",
@@ -1138,12 +1255,10 @@ test("workspace retrieval gate prefers grounded memory over later discovered art
                 artifactId: "workspace:extracted:docs/reference.txt",
                 title: "docs/reference.txt",
                 kind: "extracted",
-                excerpt:
-                  "The branch hazard requirement is to show the stall cycles clearly in the waveform.",
+                excerpt: currentReference,
               },
             ],
-            content:
-              "The branch hazard requirement is to show the stall cycles clearly in the waveform.",
+            content: currentReference,
           },
           {
             tool: "search_workspace",
@@ -1154,8 +1269,7 @@ test("workspace retrieval gate prefers grounded memory over later discovered art
                 artifactId: "workspace:extracted:docs/reference.txt",
                 title: "docs/reference.txt",
                 kind: "extracted",
-                excerpt:
-                  "The branch hazard requirement is to show the stall cycles clearly in the waveform.",
+                excerpt: currentReference,
               },
               {
                 artifactId: "workspace:assignment:assignment.md",
@@ -1600,6 +1714,308 @@ test("workspace answer verification derives sources and confidence deterministic
     assert.match(
       verifiedFromUnsupportedSpecificDetail.note ?? "",
       /could not verify.*April 11/i
+    );
+
+    const verifiedFromOverstatedApproximateDetail = verifyWorkspaceAnswer({
+      question: "What is the late penalty?",
+      answer: "Late assignments receive a 10% deduction per day.",
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read syllabus.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-late-policy",
+              title: "syllabus.txt",
+              kind: "syllabus",
+              excerpt:
+                "Late assignments usually receive a 10% deduction per day.",
+              sectionLabel: "Late Policy",
+            },
+          ],
+          content:
+            "## Late Policy\nLate assignments usually receive a 10% deduction per day.",
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedFromOverstatedApproximateDetail.ok, false);
+    assert.equal(verifiedFromOverstatedApproximateDetail.confidence, "low");
+    assert.deepEqual(verifiedFromOverstatedApproximateDetail.missing, [
+      "support",
+    ]);
+    assert.match(
+      verifiedFromOverstatedApproximateDetail.note ?? "",
+      /could not verify.*10%/i
+    );
+
+    const verifiedFromPreservedApproximateDetail = verifyWorkspaceAnswer({
+      question: "What is the late penalty?",
+      answer: "Late assignments usually receive a 10% deduction per day.",
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read syllabus.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-late-policy",
+              title: "syllabus.txt",
+              kind: "syllabus",
+              excerpt:
+                "Late assignments usually receive a 10% deduction per day.",
+              sectionLabel: "Late Policy",
+            },
+          ],
+          content:
+            "## Late Policy\nLate assignments usually receive a 10% deduction per day.",
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedFromPreservedApproximateDetail.ok, true);
+    assert.equal(verifiedFromPreservedApproximateDetail.confidence, "high");
+    assert.deepEqual(verifiedFromPreservedApproximateDetail.missing, []);
+
+    const verifiedFromOverstatedOptionalRequirement = verifyWorkspaceAnswer({
+      question: "Do I need a cover page?",
+      answer: "You must include a cover page.",
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read assignment.md.",
+          artifacts: [
+            {
+              artifactId: "artifact-submission-options",
+              title: "assignment.md",
+              kind: "assignment",
+              excerpt:
+                "A cover page is recommended but optional for the report.",
+              sectionLabel: "Submission",
+            },
+          ],
+          content:
+            "## Submission\nA cover page is recommended but optional for the report.",
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedFromOverstatedOptionalRequirement.ok, false);
+    assert.equal(verifiedFromOverstatedOptionalRequirement.confidence, "low");
+    assert.deepEqual(verifiedFromOverstatedOptionalRequirement.missing, [
+      "support",
+    ]);
+    assert.match(
+      verifiedFromOverstatedOptionalRequirement.note ?? "",
+      /could not verify.*cover page/i
+    );
+
+    const verifiedFromRequiredRequirement = verifyWorkspaceAnswer({
+      question: "Do I need a cover page?",
+      answer: "You must include a cover page.",
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read assignment.md.",
+          artifacts: [
+            {
+              artifactId: "artifact-submission-required",
+              title: "assignment.md",
+              kind: "assignment",
+              excerpt: "A cover page is required for the report.",
+              sectionLabel: "Submission",
+            },
+          ],
+          content: "## Submission\nA cover page is required for the report.",
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedFromRequiredRequirement.ok, true);
+    assert.equal(verifiedFromRequiredRequirement.confidence, "high");
+    assert.deepEqual(verifiedFromRequiredRequirement.missing, []);
+
+    const verifiedFromUnsupportedPercentWordDetail = verifyWorkspaceAnswer({
+      question: "What is the late penalty?",
+      answer: "Late assignments receive a 10 percent deduction per day.",
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read syllabus.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-late-policy-word-percent",
+              title: "syllabus.txt",
+              kind: "syllabus",
+              excerpt:
+                "Late assignments receive a 15 percent deduction per day.",
+              sectionLabel: "Late Policy",
+            },
+          ],
+          content:
+            "## Late Policy\nLate assignments receive a 15 percent deduction per day.",
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedFromUnsupportedPercentWordDetail.ok, false);
+    assert.equal(verifiedFromUnsupportedPercentWordDetail.confidence, "low");
+    assert.deepEqual(verifiedFromUnsupportedPercentWordDetail.missing, [
+      "support",
+    ]);
+    assert.match(
+      verifiedFromUnsupportedPercentWordDetail.note ?? "",
+      /could not verify.*10 percent/i
+    );
+
+    const verifiedFromPercentSymbolSupportedByPercentWord = verifyWorkspaceAnswer({
+      question: "What is the late penalty?",
+      answer: "Late assignments receive a 15% deduction per day.",
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read syllabus.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-late-policy-percent-symbol",
+              title: "syllabus.txt",
+              kind: "syllabus",
+              excerpt:
+                "Late assignments receive a 15 percent deduction per day.",
+              sectionLabel: "Late Policy",
+            },
+          ],
+          content:
+            "## Late Policy\nLate assignments receive a 15 percent deduction per day.",
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedFromPercentSymbolSupportedByPercentWord.ok, true);
+    assert.equal(
+      verifiedFromPercentSymbolSupportedByPercentWord.confidence,
+      "high"
+    );
+    assert.deepEqual(
+      verifiedFromPercentSymbolSupportedByPercentWord.missing,
+      []
+    );
+
+    const verifiedCrossAssignmentDateLeak = verifyWorkspaceAnswer({
+      question: "When is Lab 4 due?",
+      answer: "Lab 4 is due Apr 10 at 11:59 PM.",
+      observations: [
+        {
+          tool: "list_assignments",
+          status: "ok",
+          summary: "Listed assignments for this course.",
+          artifacts: [
+            {
+              artifactId: "course:assignments:17",
+              title: "Course assignments",
+              kind: "assignment",
+              excerpt:
+                "- Lab 3 — 2026-04-10 11:59 PM\n- Lab 4 — 2026-04-11 11:59 PM",
+            },
+          ],
+          content:
+            "- Lab 3 — 2026-04-10 11:59 PM\n- Lab 4 — 2026-04-11 11:59 PM",
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedCrossAssignmentDateLeak.ok, false);
+    assert.equal(verifiedCrossAssignmentDateLeak.confidence, "low");
+    assert.deepEqual(verifiedCrossAssignmentDateLeak.missing, ["support"]);
+    assert.match(
+      verifiedCrossAssignmentDateLeak.note ?? "",
+      /could not verify.*Apr 10/i
+    );
+
+    const verifiedCorrectAssignmentDate = verifyWorkspaceAnswer({
+      question: "When is Lab 4 due?",
+      answer: "Lab 4 is due Apr 11 at 11:59 PM.",
+      observations: [
+        {
+          tool: "list_assignments",
+          status: "ok",
+          summary: "Listed assignments for this course.",
+          artifacts: [
+            {
+              artifactId: "course:assignments:17",
+              title: "Course assignments",
+              kind: "assignment",
+              excerpt:
+                "- Lab 3 — 2026-04-10 11:59 PM\n- Lab 4 — 2026-04-11 11:59 PM",
+            },
+          ],
+          content:
+            "- Lab 3 — 2026-04-10 11:59 PM\n- Lab 4 — 2026-04-11 11:59 PM",
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedCorrectAssignmentDate.ok, true);
+    assert.equal(verifiedCorrectAssignmentDate.confidence, "medium");
+    assert.deepEqual(verifiedCorrectAssignmentDate.missing, []);
+
+    const verifiedConflictingGroundedDate = verifyWorkspaceAnswer({
+      question: "When is Lab 4 due?",
+      answer: "Lab 4 is due Apr 10 at 11:59 PM.",
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read stale notes.",
+          artifacts: [
+            {
+              artifactId: "artifact-stale-lab-4",
+              title: "stale-notes.md",
+              kind: "notes",
+              excerpt: "Lab 4 is due Apr 10 at 11:59 PM.",
+              sectionLabel: "Lab 4",
+            },
+          ],
+          content: "Lab 4 is due Apr 10 at 11:59 PM.",
+        },
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read current assignment page.",
+          artifacts: [
+            {
+              artifactId: "artifact-current-lab-4",
+              title: "Lab 4 assignment",
+              kind: "assignment",
+              excerpt: "Lab 4 is due Apr 11 at 11:59 PM.",
+              sectionLabel: "Due date",
+            },
+          ],
+          content: "## Due date\nLab 4 is due Apr 11 at 11:59 PM.",
+        },
+      ],
+      usedWorkup: false,
+      loaded,
+    });
+    assert.equal(verifiedConflictingGroundedDate.ok, false);
+    assert.equal(verifiedConflictingGroundedDate.confidence, "low");
+    assert.deepEqual(verifiedConflictingGroundedDate.missing, ["support"]);
+    assert.match(
+      verifiedConflictingGroundedDate.note ?? "",
+      /could not verify.*Apr 10/i
     );
 
     const verifiedFromMixedEvidence = verifyWorkspaceAnswer({
@@ -2575,6 +2991,130 @@ test("tool-loop recovery only triggers when the loop produced no answer but gath
   );
 });
 
+test("tool-loop recovery forces untried tools after no-info answers", () => {
+  assert.equal(
+    shouldRecoverFromNoInfoAnswer("I don't have that information.", []),
+    true
+  );
+
+  assert.equal(
+    shouldRecoverFromNoInfoAnswer("I don't have that information.", [
+      {
+        tool: "read_file",
+        status: "ok",
+        summary: "Read lab4.txt.",
+        artifacts: [
+          {
+            artifactId: "artifact-lab4",
+            title: "lab4.txt",
+            kind: "attachment",
+            excerpt: "Lab 4 is due Apr 11.",
+          },
+        ],
+        content: "Lab 4 is due Apr 11.",
+      },
+    ]),
+    true
+  );
+
+  assert.deepEqual(
+    selectNoInfoRecoveryToolCalls(
+      "When is Lab 4 due?",
+      ["list_assignments", "search_workspace", "search_course"],
+      [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read lab4-spec.txt.",
+          artifacts: [
+            {
+              artifactId: "artifact-lab4-spec",
+              title: "lab4-spec.txt",
+              kind: "attachment",
+              excerpt: "Lab 4 setup instructions.",
+            },
+          ],
+          content: "Lab 4 setup instructions. No due date is listed here.",
+        },
+      ]
+    ).slice(0, 2),
+    [
+      { name: "list_assignments", input: {} },
+      { name: "search_workspace", input: { query: "lab 4 due" } },
+    ]
+  );
+
+  assert.deepEqual(
+    selectNoInfoRecoveryToolCalls(
+      "When is Lab 4 due?",
+      ["list_assignments", "search_workspace", "search_course"],
+      []
+    ).slice(0, 2),
+    [
+      { name: "list_assignments", input: {} },
+      { name: "search_workspace", input: { query: "lab 4 due" } },
+    ]
+  );
+
+  assert.deepEqual(
+    selectNoInfoRecoveryToolCalls(
+      "What did the prof say about extensions?",
+      ["list_announcements", "read_thread", "search_workspace", "search_course"],
+      []
+    ).slice(0, 2),
+    [
+      {
+        name: "list_announcements",
+        input: { filter: "all", query: "extensions" },
+      },
+      { name: "search_workspace", input: { query: "extensions" } },
+    ]
+  );
+
+  assert.deepEqual(
+    selectNoInfoRecoveryToolCalls(
+      "What format should I submit in?",
+      ["search_workspace", "search_course", "list_files"],
+      [
+        {
+          tool: "search_workspace",
+          status: "not_found",
+          summary: 'No relevant workspace content found for "format submit".',
+          artifacts: [],
+        },
+      ]
+    ),
+    [{ name: "search_course", input: { query: "format submit" } }]
+  );
+
+  assert.deepEqual(
+    selectNoInfoRecoveryToolCalls(
+      "What did the prof say about extensions?",
+      ["list_announcements", "search_workspace", "search_course"],
+      [
+        {
+          tool: "list_announcements",
+          status: "ok",
+          summary: 'Listed 0 announcements matching "extensions".',
+          artifacts: [
+            {
+              artifactId: "course:radar:17:all:extensions",
+              title: "Course announcements and discussions: extensions",
+              kind: "announcement",
+              excerpt: 'No recent announcements & discussions matching "extensions".',
+            },
+          ],
+          content: 'No recent announcements & discussions matching "extensions".',
+        },
+      ]
+    ),
+    [
+      { name: "search_workspace", input: { query: "extensions" } },
+      { name: "search_course", input: { query: "extensions" } },
+    ]
+  );
+});
+
 test("tool-loop recovery prefers reading a discovered artifact and skips prior failed reads", () => {
   const briefBreadcrumb: Observation = {
     tool: "search_course",
@@ -2800,6 +3340,119 @@ test("tool-loop recovery selects a complementary source for comparison questions
       ]
     ),
     null
+  );
+});
+
+test("tool-loop recovery searches for a second source when a multi-source question only has one read", () => {
+  const referenceRead: Observation = {
+    tool: "read_file",
+    status: "ok",
+    summary: "Read docs/reference.txt.",
+    artifacts: [
+      {
+        artifactId: "artifact-reference",
+        title: "docs/reference.txt",
+        kind: "extracted",
+        excerpt:
+          "The reference says the waveform must show stall cycles around the branch hazard.",
+      },
+    ],
+    content:
+      "The reference says the waveform must show stall cycles around the branch hazard.",
+  };
+  const comparisonBreadcrumb: Observation = {
+    tool: "search_workspace",
+    status: "ok",
+    summary:
+      'Found 2 relevant workspace matches for "branch hazard walkthrough reference".',
+    artifacts: [
+      {
+        artifactId: "artifact-reference",
+        title: "docs/reference.txt",
+        kind: "extracted",
+        excerpt:
+          "The reference says the waveform must show stall cycles around the branch hazard.",
+      },
+      {
+        artifactId: "artifact-walkthrough",
+        title: "docs/walkthrough.txt",
+        kind: "extracted",
+        excerpt:
+          "The walkthrough explains each branch hazard stall step by step.",
+      },
+    ],
+  };
+
+  const followUpSearches = selectComplementarySearchToolCalls(
+    "Compare the branch hazard walkthrough to the reference.",
+    ["search_workspace", "search_course", "read_file"],
+    [referenceRead]
+  );
+
+  assert.deepEqual(
+    followUpSearches.map((call) => call.name),
+    ["search_workspace", "search_course"]
+  );
+  assert.equal(
+    followUpSearches[0]?.input.query,
+    "branch hazard walkthrough reference"
+  );
+
+  assert.deepEqual(
+    selectComplementarySearchToolCalls(
+      "Compare the branch hazard walkthrough to the reference.",
+      ["search_workspace", "search_course", "read_file"],
+      [referenceRead, comparisonBreadcrumb]
+    ),
+    []
+  );
+
+  assert.deepEqual(
+    selectComplementarySearchToolCalls(
+      "Explain the branch hazard reference.",
+      ["search_workspace", "search_course", "read_file"],
+      [referenceRead]
+    ),
+    []
+  );
+});
+
+test("tool-loop recovery searches after one read for broad prep questions", () => {
+  const overviewRead: Observation = {
+    tool: "read_file",
+    status: "ok",
+    summary: "Read lab4-overview.txt.",
+    artifacts: [
+      {
+        artifactId: "artifact-overview",
+        title: "lab4-overview.txt",
+        kind: "extracted",
+        excerpt:
+          "The lab overview says to build and test the cache controller.",
+      },
+    ],
+    content: "The lab overview says to build and test the cache controller.",
+  };
+
+  const followUpSearches = selectComplementarySearchToolCalls(
+    "What should I review before the lab?",
+    ["search_workspace", "search_course", "read_file"],
+    [overviewRead]
+  );
+
+  assert.deepEqual(
+    followUpSearches.map((call) => call.name),
+    ["search_workspace", "search_course"]
+  );
+  assert.equal(followUpSearches[0]?.input.query, "review before lab");
+
+  assert.deepEqual(
+    selectComplementarySearchToolCalls(
+      "What should I submit for the lab?",
+      ["search_workspace", "search_course", "read_file"],
+      [overviewRead]
+    ),
+    []
   );
 });
 
@@ -4372,6 +5025,54 @@ test("shouldGroundUnverifiedAnswer triggers when model answered from search snip
       "The branch hazard requires stall cycles.",
       searchOnlyObservations,
       "What does the branch hazard requirement say?"
+    ),
+    true
+  );
+});
+
+test("shouldGroundUnverifiedAnswer still triggers when an unread search result remains after another read", () => {
+  const mixedObservations = [
+    {
+      tool: "read_file",
+      status: "ok" as const,
+      summary: "Read lab4-overview.txt.",
+      artifacts: [
+        {
+          artifactId: "workspace:extracted:lab4-overview.txt",
+          title: "lab4-overview.txt",
+          kind: "extracted",
+          excerpt: "The lab overview mentions waveform evidence.",
+        },
+      ],
+      content: "The lab overview mentions waveform evidence.",
+    },
+    {
+      tool: "search_workspace",
+      status: "ok" as const,
+      summary: 'Found a workspace match for "rubric waveform evidence".',
+      artifacts: [
+        {
+          artifactId: "workspace:extracted:lab4-rubric.pdf",
+          title: "lab4-rubric.pdf",
+          kind: "attachment",
+          excerpt: "The rubric gives 30% credit for waveform evidence.",
+        },
+      ],
+    },
+  ];
+
+  assert.equal(
+    selectUngroundedSearchRecoveryReadArtifactId(
+      "What does the rubric say about waveform evidence?",
+      mixedObservations
+    ),
+    "workspace:extracted:lab4-rubric.pdf"
+  );
+  assert.equal(
+    shouldGroundUnverifiedAnswer(
+      "The rubric gives 30% credit for waveform evidence.",
+      mixedObservations,
+      "What does the rubric say about waveform evidence?"
     ),
     true
   );
