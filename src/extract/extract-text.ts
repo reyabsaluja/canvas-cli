@@ -15,6 +15,9 @@ const MAX_TEXT = 30000;
 const MAX_ZIP_TEXT = 50000; // Higher limit for zips since they contain multiple files
 const MAX_ZIP_FILE_TEXT = 30000; // Per-file limit inside zips
 const MAX_ZIP_DEPTH = 3;
+const MAX_ZIP_ENTRY_COUNT = 1000;
+const MAX_ZIP_ENTRY_BYTES = 50 * 1024 * 1024;
+const MAX_ZIP_TOTAL_BYTES = 250 * 1024 * 1024;
 
 const TEXTUAL_ZIP_EXTENSIONS = new Set([
   ".txt", ".md", ".csv", ".py", ".c", ".h", ".java", ".js",
@@ -136,6 +139,8 @@ export async function unpackZipToDirectory(
   const zip = await yauzl.open(zipPath);
   const results: ZipUnpackEntry[] = [];
   const resolvedDest = path.resolve(destDir);
+  let entryCount = 0;
+  let totalWritten = 0;
 
   try {
     for await (const entry of zip) {
@@ -155,23 +160,38 @@ export async function unpackZipToDirectory(
         continue;
       }
 
+      entryCount += 1;
+      if (entryCount > MAX_ZIP_ENTRY_COUNT) {
+        break;
+      }
+
+      const reportedSize = getZipEntrySize(entry);
+      if (
+        reportedSize > MAX_ZIP_ENTRY_BYTES ||
+        totalWritten >= MAX_ZIP_TOTAL_BYTES ||
+        (reportedSize > 0 && totalWritten + reportedSize > MAX_ZIP_TOTAL_BYTES)
+      ) {
+        continue;
+      }
+
       await fs.mkdir(path.dirname(targetPath), { recursive: true });
 
+      let writtenBytes = 0;
       try {
-        const stream = await entry.openReadStream();
-        const chunks: Buffer[] = [];
-        for await (const chunk of stream) {
-          chunks.push(chunk as Buffer);
-        }
-        await fs.writeFile(targetPath, Buffer.concat(chunks));
+        writtenBytes = await writeEntryToFile(
+          entry,
+          targetPath,
+          Math.min(MAX_ZIP_ENTRY_BYTES, MAX_ZIP_TOTAL_BYTES - totalWritten)
+        );
       } catch {
         continue;
       }
+      totalWritten += writtenBytes;
 
       results.push({
         entryName: normalized,
         absolutePath: targetPath,
-        size: Number(entry.uncompressedSize ?? 0),
+        size: writtenBytes,
       });
     }
   } finally {
@@ -206,13 +226,42 @@ async function extractZipSource(
   const entries: Array<{ name: string; size: number }> = [];
   const textContents: Array<{ name: string; content: string }> = [];
   let totalText = 0;
+  let entryCount = 0;
+  let totalReadBytes = 0;
+  const limitNotes: string[] = [];
 
   try {
     for await (const entry of zip) {
       // Skip directories
       if (entry.filename.endsWith("/")) continue;
 
-      entries.push({ name: entry.filename, size: entry.uncompressedSize });
+      entryCount += 1;
+      if (entryCount > MAX_ZIP_ENTRY_COUNT) {
+        limitNotes.push(
+          `Skipped remaining files after ${MAX_ZIP_ENTRY_COUNT} entries.`
+        );
+        break;
+      }
+
+      const entrySize = getZipEntrySize(entry);
+      entries.push({ name: entry.filename, size: entrySize });
+
+      if (entrySize > MAX_ZIP_ENTRY_BYTES) {
+        limitNotes.push(
+          `Skipped ${entry.filename}: entry exceeds ${formatZipSize(MAX_ZIP_ENTRY_BYTES)}.`
+        );
+        continue;
+      }
+
+      if (
+        totalReadBytes >= MAX_ZIP_TOTAL_BYTES ||
+        (entrySize > 0 && totalReadBytes + entrySize > MAX_ZIP_TOTAL_BYTES)
+      ) {
+        limitNotes.push(
+          `Skipped remaining readable files after ${formatZipSize(MAX_ZIP_TOTAL_BYTES)}.`
+        );
+        break;
+      }
 
       // Only extract text from readable files, stop if we have enough
       if (totalText >= MAX_ZIP_TEXT) continue;
@@ -224,7 +273,11 @@ async function extractZipSource(
 
       if (isTextFile) {
         try {
-          const buffer = await readEntryBuffer(entry);
+          const buffer = await readEntryBuffer(
+            entry,
+            MAX_ZIP_TOTAL_BYTES - totalReadBytes
+          );
+          totalReadBytes += buffer.length;
           let text = buffer.toString("utf-8");
           if (ext === ".html" || ext === ".htm") {
             text = htmlToText(text);
@@ -241,7 +294,11 @@ async function extractZipSource(
 
       if (isOfficeFile) {
         try {
-          const buffer = await readEntryBuffer(entry);
+          const buffer = await readEntryBuffer(
+            entry,
+            MAX_ZIP_TOTAL_BYTES - totalReadBytes
+          );
+          totalReadBytes += buffer.length;
           const text = await extractOfficeOpenXmlBuffer(buffer, entry.filename);
           if (text.trim().length > 0 && !text.startsWith("[")) {
             const truncated = text.slice(0, MAX_ZIP_FILE_TEXT);
@@ -255,7 +312,11 @@ async function extractZipSource(
 
       if (ext === ".pdf") {
         try {
-          const buffer = await readEntryBuffer(entry);
+          const buffer = await readEntryBuffer(
+            entry,
+            MAX_ZIP_TOTAL_BYTES - totalReadBytes
+          );
+          totalReadBytes += buffer.length;
           const origLog = console.log;
           console.log = () => {};
           try {
@@ -276,7 +337,11 @@ async function extractZipSource(
 
       if (isZipFile && depth < MAX_ZIP_DEPTH) {
         try {
-          const buffer = await readEntryBuffer(entry);
+          const buffer = await readEntryBuffer(
+            entry,
+            MAX_ZIP_TOTAL_BYTES - totalReadBytes
+          );
+          totalReadBytes += buffer.length;
           const text = await extractZipSource(buffer, entry.filename, depth + 1);
           if (text.trim().length > 0) {
             const truncated = text.slice(0, MAX_ZIP_FILE_TEXT);
@@ -300,8 +365,11 @@ async function extractZipSource(
   // List all files in the zip
   lines.push("Contents:");
   for (const e of entries) {
-    const size = e.size < 1024 ? `${e.size}B` : `${(e.size / 1024).toFixed(0)}KB`;
+    const size = formatZipSize(e.size);
     lines.push(`  ${e.name} (${size})`);
+  }
+  for (const note of limitNotes) {
+    lines.push(`  [${note}]`);
   }
 
   // Show extracted text content
@@ -394,14 +462,38 @@ async function readZipTextEntries(
     ? await yauzl.fromBuffer(zipSource)
     : await yauzl.open(zipSource);
   const entries = new Map<string, string>();
+  let entryCount = 0;
+  let totalReadBytes = 0;
 
   try {
     for await (const entry of zip) {
       const entryName = String(entry.filename ?? "");
-      if (entryName.endsWith("/") || !shouldRead(entryName)) {
+      if (entryName.endsWith("/")) {
         continue;
       }
-      const buffer = await readEntryBuffer(entry);
+      entryCount += 1;
+      if (entryCount > MAX_ZIP_ENTRY_COUNT) {
+        break;
+      }
+      if (!shouldRead(entryName)) {
+        continue;
+      }
+      const entrySize = getZipEntrySize(entry);
+      if (
+        entrySize > MAX_ZIP_ENTRY_BYTES ||
+        totalReadBytes >= MAX_ZIP_TOTAL_BYTES ||
+        (entrySize > 0 && totalReadBytes + entrySize > MAX_ZIP_TOTAL_BYTES)
+      ) {
+        continue;
+      }
+
+      let buffer: Buffer;
+      try {
+        buffer = await readEntryBuffer(entry, MAX_ZIP_TOTAL_BYTES - totalReadBytes);
+      } catch {
+        continue;
+      }
+      totalReadBytes += buffer.length;
       entries.set(entryName, buffer.toString("utf-8"));
     }
   } finally {
@@ -413,13 +505,77 @@ async function readZipTextEntries(
 
 async function readEntryBuffer(entry: {
   openReadStream: () => Promise<AsyncIterable<unknown>>;
-}): Promise<Buffer> {
+  uncompressedSize?: number;
+}, maxBytes = MAX_ZIP_ENTRY_BYTES): Promise<Buffer> {
+  const reportedSize = getZipEntrySize(entry);
+  const allowedBytes = Math.min(maxBytes, MAX_ZIP_ENTRY_BYTES);
+  if (reportedSize > allowedBytes) {
+    throw new Error(`ZIP entry exceeds ${formatZipSize(allowedBytes)}`);
+  }
   const stream = await entry.openReadStream();
   const chunks: Buffer[] = [];
+  let totalBytes = 0;
   for await (const chunk of stream) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+    totalBytes += buffer.length;
+    if (totalBytes > allowedBytes) {
+      throw new Error(`ZIP entry exceeds ${formatZipSize(allowedBytes)}`);
+    }
+    chunks.push(buffer);
   }
   return Buffer.concat(chunks);
+}
+
+async function writeEntryToFile(
+  entry: {
+    openReadStream: () => Promise<AsyncIterable<unknown>>;
+    uncompressedSize?: number;
+  },
+  targetPath: string,
+  maxBytes: number
+): Promise<number> {
+  const reportedSize = getZipEntrySize(entry);
+  const allowedBytes = Math.min(maxBytes, MAX_ZIP_ENTRY_BYTES);
+  if (reportedSize > allowedBytes) {
+    throw new Error(`ZIP entry exceeds ${formatZipSize(allowedBytes)}`);
+  }
+
+  const tmpPath = `${targetPath}.tmp-${process.pid}-${Date.now()}-${Math.random()
+    .toString(16)
+    .slice(2)}`;
+  const stream = await entry.openReadStream();
+  const handle = await fs.open(tmpPath, "w");
+  let totalBytes = 0;
+
+  try {
+    for await (const chunk of stream) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+      totalBytes += buffer.length;
+      if (totalBytes > allowedBytes) {
+        throw new Error(`ZIP entry exceeds ${formatZipSize(allowedBytes)}`);
+      }
+      await handle.write(buffer);
+    }
+  } catch (error) {
+    await handle.close().catch(() => {});
+    await fs.rm(tmpPath, { force: true });
+    throw error;
+  }
+
+  await handle.close();
+  await fs.rename(tmpPath, targetPath);
+  return totalBytes;
+}
+
+function getZipEntrySize(entry: { uncompressedSize?: number }): number {
+  const size = Number(entry.uncompressedSize ?? 0);
+  return Number.isFinite(size) && size > 0 ? size : 0;
+}
+
+function formatZipSize(size: number): string {
+  if (size < 1024) return `${size}B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(0)}KB`;
+  return `${(size / (1024 * 1024)).toFixed(0)}MB`;
 }
 
 function renderDocxEntries(

@@ -3,7 +3,11 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { extractFileText } from "../src/extract/extract-text.js";
+import { crc32, deflateRawSync } from "node:zlib";
+import {
+  extractFileText,
+  unpackZipToDirectory,
+} from "../src/extract/extract-text.js";
 import { buildZipBuffer } from "./helpers/build-zip.js";
 
 async function withTempDir(
@@ -15,6 +19,62 @@ async function withTempDir(
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }
+}
+
+function buildDeflatedZipEntry(
+  name: string,
+  uncompressedContent: Buffer
+): Buffer {
+  const nameBytes = Buffer.from(name, "utf-8");
+  const compressedContent = deflateRawSync(uncompressedContent, { level: 9 });
+  const checksum = crc32(uncompressedContent);
+
+  const localHeader = Buffer.alloc(30);
+  localHeader.writeUInt32LE(0x04034b50, 0);
+  localHeader.writeUInt16LE(20, 4);
+  localHeader.writeUInt16LE(0, 6);
+  localHeader.writeUInt16LE(8, 8);
+  localHeader.writeUInt16LE(0, 10);
+  localHeader.writeUInt16LE(0, 12);
+  localHeader.writeUInt32LE(checksum, 14);
+  localHeader.writeUInt32LE(compressedContent.length, 18);
+  localHeader.writeUInt32LE(uncompressedContent.length, 22);
+  localHeader.writeUInt16LE(nameBytes.length, 26);
+  localHeader.writeUInt16LE(0, 28);
+
+  const centralHeader = Buffer.alloc(46);
+  centralHeader.writeUInt32LE(0x02014b50, 0);
+  centralHeader.writeUInt16LE(20, 4);
+  centralHeader.writeUInt16LE(20, 6);
+  centralHeader.writeUInt16LE(0, 8);
+  centralHeader.writeUInt16LE(8, 10);
+  centralHeader.writeUInt16LE(0, 12);
+  centralHeader.writeUInt16LE(0, 14);
+  centralHeader.writeUInt32LE(checksum, 16);
+  centralHeader.writeUInt32LE(compressedContent.length, 20);
+  centralHeader.writeUInt32LE(uncompressedContent.length, 24);
+  centralHeader.writeUInt16LE(nameBytes.length, 28);
+  centralHeader.writeUInt16LE(0, 30);
+  centralHeader.writeUInt16LE(0, 32);
+  centralHeader.writeUInt16LE(0, 34);
+  centralHeader.writeUInt16LE(0, 36);
+  centralHeader.writeUInt32LE(0, 38);
+  centralHeader.writeUInt32LE(0, 42);
+
+  const centralDirectory = Buffer.concat([centralHeader, nameBytes]);
+  const localContents = Buffer.concat([localHeader, nameBytes, compressedContent]);
+
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(0, 4);
+  eocd.writeUInt16LE(0, 6);
+  eocd.writeUInt16LE(1, 8);
+  eocd.writeUInt16LE(1, 10);
+  eocd.writeUInt32LE(centralDirectory.length, 12);
+  eocd.writeUInt32LE(localContents.length, 16);
+  eocd.writeUInt16LE(0, 20);
+
+  return Buffer.concat([localContents, centralDirectory, eocd]);
 }
 
 test("extractFileText extracts searchable text from PowerPoint slides and notes", async () => {
@@ -361,5 +421,29 @@ test("extractFileText extracts searchable text from zip files inside zips", asyn
     assert.match(text, /ZIP: resources\/rubric-pack\.zip \(1 files\)/);
     assert.match(text, /--- specs\/lab-rubric\.md ---/);
     assert.match(text, /Nested archive says timing diagrams are required\./);
+  });
+});
+
+test("extractFileText and unpackZipToDirectory skip oversized zip entries", async () => {
+  await withTempDir(async (tempDir) => {
+    const oversizedZipPath = path.join(tempDir, "oversized.zip");
+    const oversizedZip = buildDeflatedZipEntry(
+      "huge.txt",
+      Buffer.alloc(64 * 1024 * 1024, "a")
+    );
+    await fs.writeFile(oversizedZipPath, oversizedZip);
+
+    const text = await extractFileText(oversizedZipPath, "oversized.zip");
+
+    assert.match(text, /huge\.txt \(64MB\)/);
+    assert.match(text, /Skipped huge\.txt: entry exceeds 50MB/);
+    assert.doesNotMatch(text, /--- huge\.txt ---/);
+
+    const unpackedDir = path.join(tempDir, "oversized.unpacked");
+    await fs.mkdir(unpackedDir);
+    const unpacked = await unpackZipToDirectory(oversizedZipPath, unpackedDir);
+
+    assert.deepEqual(unpacked, []);
+    assert.deepEqual(await fs.readdir(unpackedDir), []);
   });
 });
