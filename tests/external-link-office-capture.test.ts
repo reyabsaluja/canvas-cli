@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import http from "node:http";
+import type { Socket } from "node:net";
 import test from "node:test";
 import { captureExternalCourseLinks } from "../src/ingest/external-link-capture.js";
 import { buildZipBuffer } from "./helpers/build-zip.js";
@@ -56,6 +57,31 @@ function startServer(
       resolve({
         url: `http://127.0.0.1:${port}`,
         close: () => new Promise((r) => server.close(() => r())),
+      });
+    });
+  });
+}
+
+function startHangingServer(): Promise<{ url: string; close: () => Promise<void> }> {
+  return new Promise((resolve) => {
+    const sockets = new Set<Socket>();
+    const server = http.createServer(() => {
+      // Intentionally leave the request open until the caller aborts it.
+    });
+    server.on("connection", (socket) => {
+      sockets.add(socket);
+      socket.on("close", () => sockets.delete(socket));
+    });
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      resolve({
+        url: `http://127.0.0.1:${port}`,
+        close: () =>
+          new Promise((r) => {
+            for (const socket of sockets) socket.destroy();
+            server.close(() => r());
+          }),
       });
     });
   });
@@ -189,6 +215,43 @@ test("captureExternalCourseLinks falls back to metadata_only for corrupt Office 
 
     assert.equal(result.length, 1);
     assert.equal(result[0].entry.contentStatus, "metadata_only");
+  } finally {
+    await server.close();
+  }
+});
+
+test("captureExternalCourseLinks aborts slow external link fetches", async () => {
+  const server = await startHangingServer();
+  const controller = new AbortController();
+
+  try {
+    const pending = captureExternalCourseLinks({
+      courseId: 1,
+      courseHtmlUrl: null,
+      modules: [],
+      assignments: [
+        {
+          id: 30,
+          name: "Slow link",
+          html_url: "https://canvas.example.com/courses/1/assignments/30",
+          description: `<a href="${server.url}/never">Slow external resource</a>`,
+        } as any,
+      ],
+      quizzes: [],
+      calendarEvents: [],
+      frontPageBody: null,
+      fetchedPages: [],
+      syllabusBody: null,
+      announcementThreads: [],
+      discussionThreads: [],
+      config: { baseUrl: "https://canvas.example.com", accessToken: "tok" } as Config,
+      signal: controller.signal,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    controller.abort(new DOMException("Aborted", "AbortError"));
+
+    await assert.rejects(pending, { name: "AbortError" });
   } finally {
     await server.close();
   }

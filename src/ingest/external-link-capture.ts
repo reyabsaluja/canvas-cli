@@ -24,6 +24,7 @@ const pdfParse: (buffer: Buffer) => Promise<{ text: string }> = require("pdf-par
 const EXTERNAL_LINK_CAPTURE_CONCURRENCY = 4;
 const MAX_REDIRECTS = 6;
 const MAX_CAPTURED_TEXT = 30000;
+const EXTERNAL_LINK_REQUEST_TIMEOUT_MS = 30_000;
 
 interface ExternalLinkCandidate {
   url: string;
@@ -73,6 +74,7 @@ export async function captureExternalCourseLinks(options: {
   announcementThreads: RawDiscussionThread[];
   discussionThreads: RawDiscussionThread[];
   config: Config;
+  signal?: AbortSignal | null;
 }): Promise<CapturedExternalLink[]> {
   const canvasOrigin = getOrigin(options.config.baseUrl);
   const aggregated = new Map<string, AggregatedExternalLinkCandidate>();
@@ -303,9 +305,14 @@ export async function captureExternalCourseLinks(options: {
     async (candidate) => {
       return {
         candidate,
-        fetched: await fetchExternalLink(candidate.url, options.config),
+        fetched: await fetchExternalLink(
+          candidate.url,
+          options.config,
+          options.signal
+        ),
       };
-    }
+    },
+    options.signal
   );
 
   const deduped = new Map<
@@ -376,14 +383,18 @@ export async function captureExternalCourseLinks(options: {
 
 async function fetchExternalLink(
   url: string,
-  config: Config
+  config: Config,
+  signal?: AbortSignal | null
 ): Promise<ExternalLinkFetchResult> {
   let response: Response;
   let finalUrl: string;
 
   try {
-    ({ response, finalUrl } = await fetchWithControlledRedirects(url, config));
+    ({ response, finalUrl } = await fetchWithControlledRedirects(url, config, signal));
   } catch (error) {
+    if (signal?.aborted) {
+      throw signal.reason ?? new DOMException("Aborted", "AbortError");
+    }
     return {
       status: "failed",
       resolvedUrl: null,
@@ -407,7 +418,7 @@ async function fetchExternalLink(
     };
   }
 
-  const googleWorkspaceExport = await fetchGoogleWorkspaceExport(finalUrl);
+  const googleWorkspaceExport = await fetchGoogleWorkspaceExport(finalUrl, signal);
   if (googleWorkspaceExport) {
     return {
       status: googleWorkspaceExport.text.length > 0 ? "captured" : "metadata_only",
@@ -533,7 +544,8 @@ async function fetchExternalLink(
 }
 
 async function fetchGoogleWorkspaceExport(
-  url: string
+  url: string,
+  signal?: AbortSignal | null
 ): Promise<{
   contentType: string | null;
   pageTitle: string | null;
@@ -548,6 +560,7 @@ async function fetchGoogleWorkspaceExport(
   try {
     const response = await fetch(exportRequest.url, {
       redirect: "follow",
+      signal: buildExternalLinkFetchSignal(signal),
     });
     if (!response.ok) {
       return null;
@@ -574,6 +587,9 @@ async function fetchGoogleWorkspaceExport(
           : `The ${exportRequest.label} export was reachable, but it did not include readable text.`,
     };
   } catch {
+    if (signal?.aborted) {
+      throw signal.reason ?? new DOMException("Aborted", "AbortError");
+    }
     return null;
   }
 }
@@ -633,7 +649,8 @@ function buildGoogleWorkspaceExportRequest(
 
 async function fetchWithControlledRedirects(
   url: string,
-  config: Config
+  config: Config,
+  signal?: AbortSignal | null
 ): Promise<{ response: Response; finalUrl: string }> {
   const canvasOrigin = getOrigin(config.baseUrl);
   let currentUrl = url;
@@ -645,6 +662,7 @@ async function fetchWithControlledRedirects(
     const response = await fetch(currentUrl, {
       headers,
       redirect: "manual",
+      signal: buildExternalLinkFetchSignal(signal),
     });
     const redirectLocation = response.headers.get("location");
 
@@ -661,6 +679,13 @@ async function fetchWithControlledRedirects(
   }
 
   throw new Error("too many redirects");
+}
+
+function buildExternalLinkFetchSignal(
+  signal?: AbortSignal | null
+): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(EXTERNAL_LINK_REQUEST_TIMEOUT_MS);
+  return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 }
 
 function extractExternalLinksFromHtml(
