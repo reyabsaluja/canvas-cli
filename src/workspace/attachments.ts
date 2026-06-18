@@ -12,10 +12,11 @@ export interface LinkedFile {
 
 export function extractLinkedFileFromUrl(
   rawUrl: string,
-  title?: string | null
+  title?: string | null,
+  canvasBaseUrl?: string | null
 ): LinkedFile | null {
-  const cleanUrl = decodeEntities(rawUrl).trim();
-  if (!cleanUrl || !isCanvasFileUrl(cleanUrl)) {
+  const cleanUrl = resolveCanvasFileUrl(rawUrl, canvasBaseUrl);
+  if (!cleanUrl) {
     return null;
   }
 
@@ -31,7 +32,10 @@ export function extractLinkedFileFromUrl(
  * title attribute, but instructors can also paste plain /courses/:id/files/:id
  * links next to those richer anchors. Capture both forms in one pass.
  */
-export function extractLinkedFiles(descriptionHtml: string): LinkedFile[] {
+export function extractLinkedFiles(
+  descriptionHtml: string,
+  canvasBaseUrl?: string | null
+): LinkedFile[] {
   const files: LinkedFile[] = [];
   const seen = new Set<string>();
 
@@ -39,10 +43,10 @@ export function extractLinkedFiles(descriptionHtml: string): LinkedFile[] {
     rawUrl: string | null,
     title: string | null | undefined
   ): void => {
-    if (!rawUrl || !isCanvasFileUrl(rawUrl)) {
+    if (!rawUrl) {
       return;
     }
-    const linkedFile = extractLinkedFileFromUrl(rawUrl, title);
+    const linkedFile = extractLinkedFileFromUrl(rawUrl, title, canvasBaseUrl);
     if (!linkedFile) {
       return;
     }
@@ -64,7 +68,11 @@ export function extractLinkedFiles(descriptionHtml: string): LinkedFile[] {
     const className = extractAttr(attrs, "class") ?? "";
     const href = extractAttr(attrs, "href");
 
-    if (!href || (!isInstructureFileLink(className) && !isCanvasFileUrl(href))) {
+    if (
+      !href ||
+      (!isInstructureFileLink(className) &&
+        !isCanvasFileUrl(href, canvasBaseUrl))
+    ) {
       continue;
     }
 
@@ -129,8 +137,39 @@ function isInstructureFileLink(className: string): boolean {
   return className.split(/\s+/).includes("instructure_file_link");
 }
 
-function isCanvasFileUrl(url: string): boolean {
-  return /(?:\/courses\/\d+)?\/files\/\d+(?:\/|[?#]|$)/i.test(url);
+function isCanvasFileUrl(url: string, canvasBaseUrl?: string | null): boolean {
+  return resolveCanvasFileUrl(url, canvasBaseUrl) !== null;
+}
+
+function resolveCanvasFileUrl(
+  rawUrl: string,
+  canvasBaseUrl?: string | null
+): string | null {
+  const cleanUrl = decodeEntities(rawUrl).trim();
+  if (!cleanUrl) return null;
+
+  let parsed: URL;
+  let canvasOrigin: string;
+  try {
+    if (!canvasBaseUrl) return null;
+    const base = new URL(canvasBaseUrl);
+    canvasOrigin = base.origin;
+    parsed = new URL(cleanUrl, base);
+  } catch {
+    return null;
+  }
+
+  if (parsed.origin !== canvasOrigin) {
+    return null;
+  }
+  if (!/^https?:$/i.test(parsed.protocol)) {
+    return null;
+  }
+  if (!/(?:^|\/)(?:courses\/\d+\/)?files\/\d+(?:\/|$)/i.test(parsed.pathname)) {
+    return null;
+  }
+
+  return parsed.toString();
 }
 
 function extractLinkLabel(innerHtml: string): string | null {

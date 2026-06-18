@@ -43,13 +43,14 @@ export function normalizeCourseContent(raw: RawCourseContent): {
     syllabusBody: raw.courseDetail.syllabus_body ?? null,
     htmlUrl: raw.courseDetail.html_url ?? null,
   };
+  const canvasLinkBaseUrl = raw.courseDetail.html_url ?? null;
 
   // Canvas list endpoint may include description and detail fields as extra props
   const assignments: AssignmentIndexEntry[] = raw.assignments.map((a) => {
     const raw_any = a as any;
     const description: string | null = raw_any.description ?? null;
     const linkCount = description
-      ? extractLinkedFiles(description).length
+      ? extractLinkedFiles(description, canvasLinkBaseUrl).length
       : 0;
     return {
       id: a.id,
@@ -176,7 +177,7 @@ export function normalizeCourseContent(raw: RawCourseContent): {
       assignmentId: quiz.assignment_id ?? null,
       hasDescription: !!description,
       descriptionLinkCount: description
-        ? extractLinkedFiles(description).length
+        ? extractLinkedFiles(description, canvasLinkBaseUrl).length
         : 0,
     };
   });
@@ -197,7 +198,7 @@ export function normalizeCourseContent(raw: RawCourseContent): {
         workflowState: event.workflow_state ?? null,
         hasDescription: !!description,
         descriptionLinkCount: description
-          ? extractLinkedFiles(description).length
+          ? extractLinkedFiles(description, canvasLinkBaseUrl).length
           : 0,
       };
     }
@@ -214,7 +215,7 @@ export function normalizeCourseContent(raw: RawCourseContent): {
           if (typeof entry.message !== "string") {
             return count;
           }
-          return count + extractLinkedFiles(entry.message).length;
+          return count + extractLinkedFiles(entry.message, canvasLinkBaseUrl).length;
         },
         0
       );
@@ -230,7 +231,7 @@ export function normalizeCourseContent(raw: RawCourseContent): {
           announcement.message.length > 0,
         messageFileLinkCount:
           typeof announcement.message === "string"
-            ? extractLinkedFiles(announcement.message).length
+            ? extractLinkedFiles(announcement.message, canvasLinkBaseUrl).length
             : 0,
         threadEntryCount: thread?.entries.length ?? 0,
         participantCount: thread?.participantCount ?? 0,
@@ -248,7 +249,7 @@ export function normalizeCourseContent(raw: RawCourseContent): {
       if (typeof entry.message !== "string") {
         return count;
       }
-      return count + extractLinkedFiles(entry.message).length;
+      return count + extractLinkedFiles(entry.message, canvasLinkBaseUrl).length;
     }, 0);
 
     return {
@@ -263,7 +264,7 @@ export function normalizeCourseContent(raw: RawCourseContent): {
       participantCount: thread?.participantCount ?? 0,
       messageFileLinkCount:
         typeof topic.message === "string"
-          ? extractLinkedFiles(topic.message).length
+          ? extractLinkedFiles(topic.message, canvasLinkBaseUrl).length
           : 0,
       replyFileLinkCount,
     };

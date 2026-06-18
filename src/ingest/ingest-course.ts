@@ -117,6 +117,7 @@ export async function ingestCourse(
     files,
     heuristicAttachments,
     client,
+    config.baseUrl,
     signal
   );
 
@@ -130,7 +131,8 @@ export async function ingestCourse(
   // These have verifier tokens making them downloadable even when Files API is blocked
   const descriptionAttachments = selectDescriptionLinkedFiles(
     raw.assignments,
-    [...heuristicAttachments, ...moduleAttachments, ...assignmentAttachments]
+    [...heuristicAttachments, ...moduleAttachments, ...assignmentAttachments],
+    config.baseUrl
   );
 
   // Step 5d: Download files attached directly to announcements/discussions.
@@ -154,7 +156,8 @@ export async function ingestCourse(
       ...assignmentAttachments,
       ...descriptionAttachments,
       ...discussionAttachments,
-    ]
+    ],
+    config.baseUrl
   );
 
   // Step 5f: Download files linked in fetched Canvas pages, front page,
@@ -175,7 +178,8 @@ export async function ingestCourse(
       ...discussionAttachments,
       ...submissionCommentAttachments,
     ],
-    raw.quizQuestions
+    raw.quizQuestions,
+    config.baseUrl
   );
 
   const capturedExternalLinks = await captureExternalCourseLinks({
@@ -319,6 +323,7 @@ async function selectModuleFiles(
   files: FileIndexEntry[],
   alreadySelected: SelectedAttachment[],
   client: CanvasClient,
+  canvasBaseUrl: string,
   signal?: AbortSignal | null
 ): Promise<SelectedAttachment[]> {
   const selected: SelectedAttachment[] = [];
@@ -390,7 +395,7 @@ async function selectModuleFiles(
         continue;
       }
 
-      for (const linkedFile of extractModuleItemCanvasFileLinks(item)) {
+      for (const linkedFile of extractModuleItemCanvasFileLinks(item, canvasBaseUrl)) {
         addCandidate({
           modName: mod.name,
           itemTitle: item.title,
@@ -493,14 +498,15 @@ async function selectModuleFiles(
 }
 
 function extractModuleItemCanvasFileLinks(
-  item: ModuleIndexEntry["items"][number]
+  item: ModuleIndexEntry["items"][number],
+  canvasBaseUrl: string
 ): LinkedFile[] {
   const links: LinkedFile[] = [];
   const seen = new Set<string>();
 
   for (const rawUrl of [item.externalUrl, item.htmlUrl]) {
     if (!rawUrl) continue;
-    const linkedFile = extractLinkedFileFromUrl(rawUrl, item.title);
+    const linkedFile = extractLinkedFileFromUrl(rawUrl, item.title, canvasBaseUrl);
     if (!linkedFile) continue;
 
     const key =
@@ -563,7 +569,8 @@ function selectAssignmentAttachedFiles(
  */
 function selectDescriptionLinkedFiles(
   assignments: RawAssignmentRecord[],
-  alreadySelected: SelectedAttachment[]
+  alreadySelected: SelectedAttachment[],
+  canvasBaseUrl: string
 ): SelectedAttachment[] {
   const selected: SelectedAttachment[] = [];
   const tryMarkSelected = createAttachmentDeduper(alreadySelected);
@@ -571,7 +578,7 @@ function selectDescriptionLinkedFiles(
   for (const assignment of assignments) {
     const desc = (assignment as any).description;
     if (typeof desc === "string" && desc.trim().length > 0) {
-      const linked = extractLinkedFiles(desc);
+      const linked = extractLinkedFiles(desc, canvasBaseUrl);
       for (const file of linked) {
         if (!tryMarkSelected({ fileId: null, downloadUrl: file.downloadUrl })) {
           continue;
@@ -591,7 +598,7 @@ function selectDescriptionLinkedFiles(
     }
 
     for (const source of collectAssignmentRubricHtmlSources(assignment)) {
-      const linked = extractLinkedFiles(source.html);
+      const linked = extractLinkedFiles(source.html, canvasBaseUrl);
       for (const file of linked) {
         if (!tryMarkSelected({ fileId: null, downloadUrl: file.downloadUrl })) {
           continue;
@@ -734,7 +741,8 @@ function getCanvasAttachments(value: {
  */
 function selectSubmissionCommentFiles(
   assignments: RawAssignmentRecord[],
-  alreadySelected: SelectedAttachment[]
+  alreadySelected: SelectedAttachment[],
+  canvasBaseUrl: string
 ): SelectedAttachment[] {
   const selected: SelectedAttachment[] = [];
   const tryMarkSelected = createAttachmentDeduper(alreadySelected);
@@ -812,7 +820,7 @@ function selectSubmissionCommentFiles(
       for (const source of collectAssignmentSubmissionCommentHtmlSources({
         submission: { submission_comments: [comment] },
       })) {
-        const linked = extractLinkedFiles(source.html);
+        const linked = extractLinkedFiles(source.html, canvasBaseUrl);
         for (const file of linked) {
           addFile(
             assignment,
@@ -831,7 +839,7 @@ function selectSubmissionCommentFiles(
     }
 
     for (const source of collectAssignmentSubmissionRubricAssessmentHtmlSources(assignment)) {
-      const linked = extractLinkedFiles(source.html);
+      const linked = extractLinkedFiles(source.html, canvasBaseUrl);
       for (const file of linked) {
         addSelectedFeedbackFile(
           {
@@ -865,7 +873,8 @@ function selectHtmlLinkedFiles(
   announcementThreads: RawDiscussionThread[],
   discussionThreads: RawDiscussionThread[],
   alreadySelected: SelectedAttachment[],
-  quizQuestions?: Map<number, CanvasQuizQuestion[]>
+  quizQuestions?: Map<number, CanvasQuizQuestion[]>,
+  canvasBaseUrl?: string | null
 ): SelectedAttachment[] {
   const selected: SelectedAttachment[] = [];
   const tryMarkSelected = createAttachmentDeduper(alreadySelected);
@@ -972,7 +981,7 @@ function selectHtmlLinkedFiles(
   }
 
   for (const source of htmlSources) {
-    const linked = extractLinkedFiles(source.body);
+    const linked = extractLinkedFiles(source.body, canvasBaseUrl);
     for (const file of linked) {
       if (!tryMarkSelected({ fileId: null, downloadUrl: file.downloadUrl })) {
         continue;
