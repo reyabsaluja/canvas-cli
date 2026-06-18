@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync, execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -47,20 +48,37 @@ test("version check exits with code 1 and correct message on old Node", () => {
 });
 
 test("version check wrapper passes the version gate on supported Node", async () => {
-  const { code, stdout, stderr } = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
-    execFile("node", [wrapperPath, "--version"], { encoding: "utf-8" }, (err, stdout, stderr) => {
-      resolve({
-        code: err ? (err as any).code ?? 1 : 0,
-        stdout: stdout ?? "",
-        stderr: stderr ?? "",
+  const tempDir = mkdtempSync(join(tmpdir(), "canvas-cli-wrapper-"));
+  try {
+    const binDir = join(tempDir, "bin");
+    const distDir = join(tempDir, "dist");
+    mkdirSync(binDir);
+    mkdirSync(distDir);
+
+    const tempWrapperPath = join(binDir, "canvas-cli.js");
+    writeFileSync(tempWrapperPath, wrapperContent);
+    writeFileSync(
+      join(distDir, "cli.js"),
+      'if (process.argv.includes("--version")) console.log("0.0.0");\n'
+    );
+
+    const { code, stdout, stderr } = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+      execFile("node", [tempWrapperPath, "--version"], { encoding: "utf-8" }, (err, stdout, stderr) => {
+        resolve({
+          code: err ? (err as any).code ?? 1 : 0,
+          stdout: stdout ?? "",
+          stderr: stderr ?? "",
+        });
       });
     });
-  });
 
-  assert.ok(
-    !stderr.includes("canvas-cli requires Node.js 20 or later"),
-    "Should not fail the version gate on a supported Node version"
-  );
-  assert.strictEqual(code, 0, `CLI exited with code ${code}. stderr: ${stderr}`);
-  assert.match(stdout.trim(), /^\d+\.\d+\.\d+$/);
+    assert.ok(
+      !stderr.includes("canvas-cli requires Node.js 20 or later"),
+      "Should not fail the version gate on a supported Node version"
+    );
+    assert.strictEqual(code, 0, `CLI exited with code ${code}. stderr: ${stderr}`);
+    assert.match(stdout.trim(), /^\d+\.\d+\.\d+$/);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
 });

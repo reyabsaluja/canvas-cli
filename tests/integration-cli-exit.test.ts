@@ -6,7 +6,8 @@ import { createMockCanvasServer, startServer, stopServer } from "./helpers/mock-
 import { buildDefaultServerData } from "./helpers/fixtures.js";
 
 const execFileAsync = promisify(execFile);
-const CLI_PATH = new URL("../bin/canvas-cli.js", import.meta.url).pathname;
+const CLI_PATH = new URL("../src/cli.ts", import.meta.url).pathname;
+const CLI_ARGS = ["--import", "tsx", CLI_PATH];
 
 const baseEnv = {
   PATH: process.env.PATH,
@@ -23,7 +24,7 @@ test("integration: CLI exits with structured error output", async (t) => {
 
   await t.test("invalid token exits with code 1 and shows auth error", async () => {
     try {
-      await execFileAsync("node", [CLI_PATH, "ingest", "CS101"], {
+      await execFileAsync("node", [...CLI_ARGS, "ingest", "CS101"], {
         env: {
           ...baseEnv,
           CANVAS_BASE_URL: `http://127.0.0.1:${port}/api/v1`,
@@ -41,7 +42,7 @@ test("integration: CLI exits with structured error output", async (t) => {
 
   await t.test("missing config exits with code 2 and shows config error", async () => {
     try {
-      await execFileAsync("node", [CLI_PATH, "ingest", "CS101"], {
+      await execFileAsync("node", [...CLI_ARGS, "ingest", "CS101"], {
         env: {
           ...baseEnv,
           CANVAS_BASE_URL: "",

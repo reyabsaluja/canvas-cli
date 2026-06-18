@@ -120,7 +120,7 @@ test("global intro hides overdue and no-date assignments from Upcoming assignmen
   assert.doesNotMatch(content, /No Due Date Shell/);
 });
 
-test("course intro hides overdue shells from Upcoming work", () => {
+test("course intro omits upcoming work summaries", () => {
   const now = Date.now();
   const messages = buildCourseIntroMessages(
     {
@@ -143,8 +143,5 @@ test("course intro hides overdue shells from Upcoming work", () => {
     false
   );
 
-  const content = messages.map((message) => message.content).join("\n");
-  assert.match(content, /Upcoming work/);
-  assert.match(content, /Future Lab/);
-  assert.doesNotMatch(content, /Overdue Submission Shell/);
+  assert.deepEqual(messages, []);
 });

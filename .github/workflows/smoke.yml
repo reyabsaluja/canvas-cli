@@ -64,7 +64,7 @@ jobs:
         run: |
           # Disable errexit so the expected non-zero exit doesn't fail the step
           set +e
-          OUTPUT=$(canvas-cli courses 2>&1)
+          OUTPUT=$(canvas-cli ingest CS101 2>&1)
           CODE=$?
           set -e
           echo "$OUTPUT"
@@ -78,7 +78,7 @@ jobs:
         run: |
           # Exercises the npx resolution path users hit with `npx @reyabsaluja/canvas-cli`
           set +e
-          OUTPUT=$(npx --yes "./$TARBALL" courses 2>&1)
+          OUTPUT=$(npx --yes "./$TARBALL" ingest CS101 2>&1)
           CODE=$?
           set -e
           echo "$OUTPUT"
