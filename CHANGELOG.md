@@ -30,6 +30,9 @@ Initial release of `@reyabsaluja/canvas-cli`.
 - `/doctor` diagnostics for config, credentials, Canvas connectivity, and AI provider keys
 - `/login` from inside the TUI, and a first-run login prompt
 - Multi-provider AI via the Vercel AI SDK: Anthropic, OpenAI, Google Gemini, and AWS Bedrock (`AI_PROVIDER`, `AI_MODEL`, `AI_EFFORT`), with auto-detection from whichever API key is present and graceful degradation when no provider is configured
+- `AI_PROVIDER=copilot`: use a GitHub Copilot subscription (including Copilot Free and the student Copilot Pro) through the GitHub Copilot CLI, with no API key; default model `auto`, custom model IDs, and `AI_EFFORT` mapped to the CLI's `--effort`
+- `AI_PROVIDER=codex` (aliases `chatgpt`, `openai-codex`), **experimental**: use a ChatGPT plan through the OpenAI Codex CLI; default model `default` (your Codex config), custom model IDs, and `AI_EFFORT` mapped to `model_reasoning_effort`. OpenAI has not published terms that explicitly cover third-party tools on a ChatGPT plan; usage counts against the user's plan. Claude Pro/Max is intentionally not supported per Anthropic's Agent SDK terms
+- Local MCP tool bridge (`src/ai/mcp-bridge.ts`) that exposes each request's Canvas tools to the vendor CLI over localhost, so subscription providers get the same tools as API-key providers; the `login` wizard, `/model`, `status`, and `/doctor` understand subscription providers (CLI installed / signed-in checks, offer to run `copilot login` or `codex login`). No new npm dependencies; subscription providers are never auto-detected
 - Canvas API client with retries and exponential backoff, per-request timeouts, proactive rate-limit throttling (including `X-Request-Cost`), `Retry-After` parsing, and AbortSignal support
 - Structured error types with user-facing messages and exit codes; Node.js version check at startup
 - `--debug` diagnostic logging to stderr with automatic secret masking (also enabled by `DEBUG=canvas-cli`)
@@ -55,5 +58,6 @@ Initial release of `@reyabsaluja/canvas-cli`.
 - On macOS, a successful Keychain write no longer leaves a plaintext copy on disk; the file backend is used only when the Keychain is unavailable or `CANVAS_CLI_CREDENTIAL_BACKEND=file` is set
 - When `CANVAS_BASE_URL` comes from the environment, `CANVAS_ACCESS_TOKEN` must too — a stored token is never sent to an environment-supplied URL
 - Profile names are validated to prevent path traversal; plain-HTTP Canvas URLs are rejected; secrets are masked in debug output
+- Subscription CLIs (Copilot, Codex) run isolated: non-interactive, in an empty temporary directory, with their built-in shell, file, and web tools removed and denied (Codex `--ephemeral --sandbox read-only --ignore-user-config`; Copilot with custom instructions and built-in MCP servers disabled). The Canvas tool bridge binds to 127.0.0.1 only and requires a per-run bearer token; `OPENAI_API_KEY` is stripped from the Codex environment so the subscription path never falls back to API billing
 
 [Unreleased]: https://github.com/reyabsaluja/canvas-cli/commits/main

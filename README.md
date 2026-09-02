@@ -97,7 +97,7 @@ Your Canvas base URL is the root of your institution's Canvas site. Common forma
 
 ## AI Provider Setup (Optional)
 
-AI features require an API key from one supported provider. Only one provider is needed — pick whichever you prefer. All AI features are optional; core Canvas functionality works without any AI configuration.
+AI features need one supported provider — either an API key, or a GitHub Copilot / ChatGPT subscription used through its own CLI (see [Use your subscription instead of an API key](#use-your-subscription-instead-of-an-api-key)). Only one provider is needed — pick whichever you prefer. All AI features are optional; core Canvas functionality works without any AI configuration.
 
 The fastest way to set up AI is through the interactive login:
 
@@ -105,7 +105,7 @@ The fastest way to set up AI is through the interactive login:
 canvas-cli login
 ```
 
-Select "Configure AI provider" when prompted, choose your provider, and paste your API key. You can also change providers later with the `/model` command in the TUI.
+Select "Configure AI provider" when prompted, choose your provider, and paste your API key (or, for a subscription provider, sign in through its CLI). You can also change providers later with the `/model` command in the TUI.
 
 ### Which features require AI?
 
@@ -126,6 +126,8 @@ Select "Configure AI provider" when prompted, choose your provider, and paste yo
 | OpenAI | GPT-5.4 | Mid | General-purpose, fast responses |
 | Google / Gemini | Gemini 3.5 Flash | Low | Budget-friendly, fast |
 | AWS Bedrock | Claude Sonnet 4.6 | Mid | Teams already on AWS, no separate API key |
+| GitHub Copilot | `auto` (Copilot picks) | Subscription | Copilot Free, or the free Copilot Pro students get via GitHub Education — no API key |
+| ChatGPT via Codex (experimental) | `default` (your Codex config) | Subscription | An existing ChatGPT plan — no API key |
 
 **Typical usage costs ~$0.50–2/month** for a student using AI features a few times per week (check your provider's pricing page for current rates). Costs depend on the model you choose and how often you use AI features in the TUI (workspace creation, chat, `/quiz`, `/pdf`). Budget models (Gemini Flash, GPT-5.4 Mini) are significantly cheaper; premium models (Claude Opus, GPT-5.5) cost more but produce higher-quality analysis.
 
@@ -192,6 +194,49 @@ AWS_SECRET_ACCESS_KEY=...
 
 Optional Bedrock variables: `AWS_SESSION_TOKEN` (for temporary credentials) and `AWS_BEARER_TOKEN_BEDROCK` (for Bedrock bearer token auth).
 
+### Use your subscription instead of an API key
+
+If you already pay for (or get for free) GitHub Copilot or ChatGPT, canvas-cli can use that plan through the vendor's own CLI. No API key is involved: the CLI holds your login, and usage counts against your plan. You install the CLI yourself — canvas-cli adds no npm dependencies for this.
+
+**GitHub Copilot** — works with Copilot Free and with the free Copilot Pro that students get through [GitHub Education](https://education.github.com/).
+
+```bash
+npm install -g @github/copilot
+copilot login
+
+# In your .env file
+AI_PROVIDER=copilot
+```
+
+The default model is `auto` (Copilot picks). Any model ID the Copilot CLI accepts can be entered as a Custom model. `AI_EFFORT` levels map to the CLI's `--effort`.
+
+**ChatGPT via Codex** *(experimental)* — uses your ChatGPT plan through the OpenAI Codex CLI.
+
+```bash
+npm install -g @openai/codex
+codex login
+
+# In your .env file
+AI_PROVIDER=codex   # aliases: chatgpt, openai-codex
+```
+
+The default model is `default` (whatever your Codex config selects); enter a specific ID as a Custom model. `AI_EFFORT` maps to Codex's `model_reasoning_effort`.
+
+> **Experimental:** OpenAI has not published terms that explicitly cover third-party tools using a ChatGPT plan via the Codex CLI. This path relies on your own local `codex login`, and usage counts against your plan.
+
+> **What about Claude Pro/Max?** Deliberately not supported. Anthropic's Agent SDK documentation states that third-party developers may not offer claude.ai login or rate limits for their products unless previously approved. Claude models remain available with an [Anthropic API key](#setting-up-anthropic) or through [Bedrock](#setting-up-aws-bedrock).
+
+**How it works.** For each request, canvas-cli spawns the vendor CLI in non-interactive mode in an empty temporary directory, with the CLI's own tools (shell, file access, web fetch) removed and denied. The Canvas tools for that request are exposed over a localhost-only MCP server protected by a per-run bearer token, so tool execution still happens inside canvas-cli. Nothing is persisted by the CLI: Codex runs `--ephemeral` with a read-only sandbox, and Copilot runs with custom instructions and built-in MCP servers disabled.
+
+**Setup and status.** `canvas-cli login` lists GitHub Copilot and ChatGPT via Codex first; it checks that the CLI is installed, offers to run `copilot login` / `codex login`, then asks for a model and effort. `/model` in the TUI can switch to them too (`/model key` explains that these use the vendor login instead of a key). `canvas-cli status` reports "subscription via `copilot` CLI", and `/doctor` checks that the CLI is installed and (for Codex) signed in.
+
+**Good to know.**
+- Subscription providers are opt-in and never auto-detected — only `AI_PROVIDER` or the login wizard selects them. The API-key providers are unchanged.
+- Copilot streams tokens as they arrive; Codex delivers each message once it is complete.
+- The model list is not discoverable offline. To see which IDs your plan offers, run `copilot` or `codex` directly and use `/model` there.
+- The step limit that bounds API-key tool loops is not enforced on these backends.
+- On Copilot, a request larger than about 400 KB is rejected because the prompt is passed as a command-line argument — start a new chat with `/clear` or ask about fewer documents at once.
+
 ### Overriding the default model
 
 Each provider has a sensible default, but you can override it with `AI_MODEL`:
@@ -210,12 +255,14 @@ Available models per provider:
 | OpenAI | `gpt-5.5`, `gpt-5.4-pro`, `gpt-5.4`, `gpt-5.4-mini` |
 | Google | `gemini-3.5-flash`, `gemini-3.1-pro-preview`, `gemini-3-flash-preview`, `gemini-3.1-flash-lite`, `gemini-2.5-pro`, `gemini-2.5-flash` |
 | Bedrock | `us.anthropic.claude-opus-4-7`, `us.anthropic.claude-opus-4-6-v1`, `us.anthropic.claude-sonnet-4-6` |
+| GitHub Copilot | `auto`, or any model ID the `copilot` CLI accepts (Custom) |
+| ChatGPT via Codex | `default`, or any model ID the `codex` CLI accepts (Custom) |
 
 You can also set the model interactively with the `/model` command in the TUI, or rotate your API key with `/model key`.
 
 ### Thinking effort
 
-For providers that support extended thinking (Anthropic, OpenAI, Bedrock), you can control how much reasoning the model does:
+For providers that support extended thinking (Anthropic, OpenAI, Bedrock, Copilot, Codex), you can control how much reasoning the model does:
 
 ```bash
 AI_EFFORT=low       # fastest, cheapest — good for simple questions
@@ -224,11 +271,11 @@ AI_EFFORT=high      # more thorough analysis
 AI_EFFORT=max       # maximum reasoning — best for complex assignments
 ```
 
-Set interactively with `/model effort` in the TUI. Google/Gemini does not support effort levels.
+Set interactively with `/model effort` in the TUI. Google/Gemini does not support effort levels. On Copilot this becomes the CLI's `--effort`; on Codex it becomes `model_reasoning_effort`.
 
 ### Auto-detection fallback
 
-If you set an API key without specifying `AI_PROVIDER`, canvas-cli auto-detects the provider from whichever key is present (checking Anthropic, then OpenAI, then Google in that order). Bedrock is never auto-detected — you must set `AI_PROVIDER=bedrock` explicitly. Explicit `AI_PROVIDER` is recommended to avoid ambiguity if you have multiple keys set.
+If you set an API key without specifying `AI_PROVIDER`, canvas-cli auto-detects the provider from whichever key is present (checking Anthropic, then OpenAI, then Google in that order). Bedrock, Copilot, and Codex are never auto-detected — set `AI_PROVIDER` explicitly (or pick them in `canvas-cli login`). Explicit `AI_PROVIDER` is recommended to avoid ambiguity if you have multiple keys set.
 
 ## Troubleshooting
 
@@ -253,7 +300,8 @@ If you set an API key without specifying `AI_PROVIDER`, canvas-cli auto-detects 
 
 ### AI features not working
 
-- **No provider configured:** Run `canvas-cli login` and select "Configure AI provider" to set up an API key.
+- **No provider configured:** Run `canvas-cli login` and select "Configure AI provider" to set up an API key or a subscription provider.
+- **Copilot or Codex not working:** Run `/doctor` — it checks that the vendor CLI is installed and (for Codex) signed in. Install with `npm install -g @github/copilot` or `npm install -g @openai/codex`, then run `copilot login` or `codex login`.
 - **Invalid API key:** Verify your key is correct and has not been revoked. Test it directly with your provider's API.
 - **Rate limited:** If you see rate limit errors, wait a few minutes and retry. Consider using a provider with higher rate limits.
 - **Missing course ingestion:** Workspaces produce better results after running `canvas-cli ingest <course>` first. Without ingestion, the AI has less context to work with.
@@ -288,7 +336,7 @@ Use `--profile <name>` with `login`, `logout`, and `status` to keep separate Can
 | `CANVAS_BASE_URL` | Canvas API URL, used verbatim — include `/api/v1` |
 | `CANVAS_ACCESS_TOKEN` | Canvas access token |
 | `CANVAS_CLI_PROFILE` | Active profile name (default: `default`) |
-| `AI_PROVIDER` | `anthropic`, `openai`, `google` (or `gemini`), or `bedrock` |
+| `AI_PROVIDER` | `anthropic`, `openai`, `google` (or `gemini`), `bedrock`, `copilot` (GitHub Copilot subscription), or `codex` (ChatGPT plan via Codex, experimental; aliases `chatgpt`, `openai-codex`) |
 | `AI_MODEL` | Model ID override for the provider |
 | `AI_EFFORT` | `low`, `medium`, `high`, or `max` (ignored for Google) |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY` | Provider API keys |
@@ -340,6 +388,7 @@ Nothing is sent anywhere except the destinations listed below.
 |---|---|---|
 | Your Canvas instance | Canvas API token (in `Authorization` header) | Any command that fetches courses, assignments, or files |
 | AI provider (Anthropic, OpenAI, Google, or AWS Bedrock) | AI API key + prompt content (assignment text, course materials) | Only when using AI features (workspace creation, chat, Q&A in the TUI) |
+| GitHub Copilot or ChatGPT, via the `copilot` / `codex` CLI on your machine | Prompt content, sent by the CLI under its own login (no API key) | Only when `AI_PROVIDER=copilot` or `codex` and you use AI features; the Canvas tool bridge listens on localhost only |
 | External URLs linked in course content | HTTP request (no credentials) | During `canvas-cli ingest`, to capture linked documents (Google Docs, PDFs, etc.) |
 
 API keys are sent **only** to their respective providers — your Canvas token is never sent to an AI provider, and AI keys are never sent to Canvas. External link fetches during ingestion carry no authentication headers.

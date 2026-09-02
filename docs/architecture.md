@@ -43,12 +43,21 @@
 - `src/pdf/` renders `/pdf` exports, using LaTeX via Tectonic when available.
 - The TUI is the primary interface — all course browsing, assignment interaction, and AI features are accessed through it.
 
+### 6. AI provider backends
+
+- `src/ai/provider.ts` routes every model call. API-key providers (Anthropic, OpenAI, Google, Bedrock) go through the Vercel AI SDK; subscription providers (`copilot`, `codex`) take the CLI path and never touch the SDK.
+- `src/ai/cli-backend.ts` is the shared CLI plumbing: the `SUBSCRIPTION_PROVIDERS` table (binary, install/login hints, experimental flag), executable lookup, the JSONL child-process runner, the transcript prompt builder, scratch-directory creation, and CLI failure classification.
+- `src/ai/backends/` holds one driver per vendor CLI (`copilot.ts`, `codex.ts`) that builds the non-interactive command line, strips the CLI's own tools, and parses its event stream.
+- `src/ai/mcp-bridge.ts` is a minimal MCP server on `127.0.0.1` with a per-run bearer token; it exposes the current request's tools to the CLI while tool execution stays in-process.
+- `src/ai/subscription-status.ts` answers "is the CLI installed / signed in?" and runs the vendor's foreground `login`; used by `login`, `/model`, `status`, and `/doctor`.
+- `src/ai/errors.ts` defines `AIError` (kind, retry hint, setup hint) shared by both paths.
+
 ## Source Responsibility Map
 
 | Area | Responsibility |
 | --- | --- |
 | `src/agent/` | Agent run state, retrieval gating, observation relevance, verification |
-| `src/ai/` | AI provider setup, model catalog, prompting, context bundling, shared AI types |
+| `src/ai/` | AI provider setup and routing, model catalog, prompting, context bundling, shared AI types; `backends/`, `cli-backend.ts`, `mcp-bridge.ts`, and `subscription-status.ts` implement the subscription (vendor CLI) path |
 | `src/ask/` | Retrieval and answer generation for prepared workspaces |
 | `src/canvas/` | Canvas API client, retry and throttle policy, remote types |
 | `src/commands/` | Setup CLI entrypoints (`login`, `logout`, `status`, `ingest`, `clean`, `examples`) and TUI-invoked flows (`model`) |
