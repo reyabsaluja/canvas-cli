@@ -125,7 +125,8 @@ export type AttachmentSourceType =
   | "important_file"
   | "assignment_linked"
   | "module_linked"
-  | "page_linked";
+  | "page_linked"
+  | "course_file";
 
 export interface ZipAttachmentEntry {
   /** Path of the entry inside the zip, forward slashes, no leading slash. */
@@ -198,4 +199,53 @@ export interface IngestionResult {
   lectures: LectureIndexEntry[];
   ingestion: IngestionMeta;
   coursePath: string;
+}
+
+// ---------------------------------------------------------------------------
+// ADDITIVE: Files-tab crawl (src/ingest/attachment-selection.ts,
+// src/ingest/ingest-course.ts). Interface declarations below merge with the
+// ones above; nothing earlier in this file should be reordered.
+// ---------------------------------------------------------------------------
+
+/** A folder in the course Files area, with its path relative to the root. */
+export interface FolderIndexEntry {
+  id: number;
+  name: string;
+  /** Canvas full name, e.g. "course files/Lectures/Week 1". */
+  fullName: string;
+  /** Path relative to the course root folder, e.g. "Lectures/Week 1" ("" for root). */
+  path: string;
+  parentFolderId: number | null;
+  filesCount: number | null;
+}
+
+export interface FileIndexEntry {
+  /** Folder path relative to the course root (e.g. "Lectures/Week 1"), when the folder tree was readable. */
+  folderPath?: string | null;
+}
+
+/** How the Files-tab crawl went for one ingestion. */
+export interface CourseFilesCrawlSummary {
+  /** Folders visible in the course Files area. */
+  folders: number;
+  /** Files listed by the Files API. */
+  listed: number;
+  /** Files selected for download because nothing else had already claimed them. */
+  selected: number;
+  /** Files already downloaded via modules / syllabus heuristics / HTML links. */
+  alreadySelected: number;
+  /** Media, images, and other files with no extractable text. */
+  skippedUnsupported: number;
+  /** Files larger than the download limit. */
+  skippedTooLarge: number;
+  downloaded: number;
+  failed: number;
+}
+
+export interface IngestionMeta {
+  courseFiles?: CourseFilesCrawlSummary;
+}
+
+export interface IngestionResult {
+  folders?: FolderIndexEntry[];
 }

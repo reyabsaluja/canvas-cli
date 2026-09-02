@@ -2,13 +2,15 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { htmlToText } from "../format/html-to-text.js";
+import { extractOfficeText, isOfficeExtension } from "./office-text.js";
 
 const require = createRequire(import.meta.url);
 const pdfParse: (buffer: Buffer) => Promise<{ text: string }> = require("pdf-parse");
 
 /**
  * Shared text extraction utility used by ingestion, work agent, and chat agent.
- * Handles: PDF, TXT, MD, HTML, ZIP (extracts text from files inside the zip).
+ * Handles: PDF, TXT, MD, HTML, Office (DOCX/PPTX/XLSX), ZIP (extracts text
+ * from files inside the zip).
  */
 
 const MAX_TEXT = 30000;
@@ -61,6 +63,9 @@ export async function extractFileText(
       case ".zip":
         return await extractZip(filePath, filename);
       default:
+        if (isOfficeExtension(ext)) {
+          return await extractOffice(filePath, filename);
+        }
         return `[Binary file: ${filename} — cannot extract text]`;
     }
   } catch (err) {
@@ -190,6 +195,24 @@ export async function extractZip(
         }
       }
 
+      if (isOfficeExtension(ext)) {
+        try {
+          const stream = await entry.openReadStream();
+          const chunks: Buffer[] = [];
+          for await (const chunk of stream) {
+            chunks.push(chunk as Buffer);
+          }
+          const text = (await extractOfficeText(Buffer.concat(chunks), entry.filename)) ?? "";
+          if (text.trim().length > 0) {
+            const truncated = text.slice(0, MAX_ZIP_FILE_TEXT);
+            textContents.push({ name: entry.filename, content: truncated });
+            totalText += truncated.length;
+          }
+        } catch {
+          // Skip unreadable Office documents
+        }
+      }
+
       if (ext === ".pdf") {
         try {
           const stream = await entry.openReadStream();
@@ -256,6 +279,12 @@ async function extractPdf(filePath: string): Promise<string> {
   } finally {
     console.log = origLog;
   }
+}
+
+async function extractOffice(filePath: string, filename: string): Promise<string> {
+  const buffer = await fs.readFile(filePath);
+  const text = (await extractOfficeText(buffer, filename)) ?? "";
+  return text.slice(0, MAX_TEXT) || `[Could not extract text from ${filename}]`;
 }
 
 async function extractPlainText(filePath: string): Promise<string> {

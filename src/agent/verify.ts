@@ -34,6 +34,7 @@ export function verifyWorkspaceAnswer(
   );
   const sources = collectSources(
     input.question,
+    trimmedAnswer,
     input.observations,
     input.usedWorkup,
     input.loaded
@@ -151,6 +152,7 @@ function applyComparisonEvidenceConfidenceCap(
 
 function collectSources(
   question: string,
+  answer: string,
   observations: Observation[],
   usedWorkup: boolean,
   loaded: LoadedWorkspace
@@ -158,6 +160,15 @@ function collectSources(
   const resolved: AnswerSource[] = [];
   const seen = new Set<string>();
   const citationObservations = selectCitationObservations(question, observations);
+  const attributionText = answer.trim() || question.trim();
+  const pushSource = (source: AnswerSource): void => {
+    const key = `${source.kind}:${source.title}:${source.section ?? ""}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    resolved.push(source);
+  };
 
   for (const observation of citationObservations) {
     // Only successful tool observations count as evidence. Failed lookups like
@@ -167,12 +178,29 @@ function collectSources(
     }
     for (const artifact of observation.artifacts) {
       const section = normalizeSourceSection(artifact.sectionLabel);
-      const key = `${artifact.kind}:${artifact.title}:${section ?? ""}`;
-      if (seen.has(key)) {
-        continue;
+
+      // A full-document read has no section label of its own. Attribute the
+      // answer to the specific sections of the document that support it so
+      // the citation is "Lab4.pdf — Part 3: Interrupts", not just "Lab4.pdf".
+      if (
+        !section &&
+        observation.artifacts.length === 1 &&
+        isGroundedContentObservation(observation)
+      ) {
+        const attributed = attributeAnswerToSections(
+          attributionText,
+          observation.content ?? "",
+          artifact
+        );
+        if (attributed.length > 0) {
+          for (const source of attributed) {
+            pushSource(source);
+          }
+          continue;
+        }
       }
-      seen.add(key);
-      resolved.push({
+
+      pushSource({
         title: artifact.title,
         kind: artifact.kind,
         ...(section ? { section } : {}),
@@ -258,4 +286,354 @@ function normalizeSourceSection(value: string | null | undefined): string | null
     return null;
   }
   return normalized;
+}
+
+// ---------------------------------------------------------------------------
+// Section-level attribution for full-document reads.
+//
+// read_file / download_course_file observations carry the whole document but
+// no section label, so without this pass a fully grounded answer is cited as
+// just "Lab4.pdf". Here we split the read content into sections using the
+// same heading conventions the knowledge index uses (plus the numbered /
+// "Part N" / ALL-CAPS headings common in extracted assignment PDFs), score
+// each section against the *answer* text, and cite the sections that actually
+// support the answer, each with the sentence that supports it.
+// ---------------------------------------------------------------------------
+
+export interface DocumentSection {
+  /** Heading text, or null for un-headed preamble / unsectioned documents. */
+  label: string | null;
+  text: string;
+  /** Zero-based order of the section in the document. */
+  position: number;
+}
+
+export interface SupportingSection extends DocumentSection {
+  score: number;
+  matchedTokens: number;
+}
+
+const MAX_SUPPORTING_SECTIONS_PER_DOCUMENT = 3;
+const MIN_SECTION_TEXT_LENGTH = 30;
+const MAX_HEADING_LENGTH = 100;
+const MAX_HEADING_WORDS = 10;
+
+const HEADING_KEYWORD_PATTERN =
+  /^(?:part|section|task|question|problem|exercise|step|appendix|chapter|module|lab|milestone|phase|stage|week|unit)\s+[a-z0-9]+(?:\s*[:.\-–—]\s*.{0,80})?$/i;
+const NUMBERED_HEADING_PATTERN = /^(\d+(?:\.\d+)*)[.)]?\s+([A-Z][^\n]{1,90})$/;
+const ALL_CAPS_HEADING_PATTERN = /^[A-Z][A-Z0-9 &/:(),\-]{2,70}$/;
+const COLON_TITLE_PATTERN = /^[A-Z][A-Za-z0-9 ,&/()\-]{2,60}:$/;
+
+const ANSWER_SUPPORT_STOP_WORDS = new Set([
+  "about", "above", "after", "again", "against", "all", "also", "and", "any",
+  "are", "around", "assignment", "based", "because", "been", "before", "being",
+  "below", "between", "both", "but", "can", "could", "did", "does", "doing",
+  "done", "down", "during", "each", "either", "else", "for", "from", "further",
+  "had", "has", "have", "having", "here", "how", "into", "its", "just", "like",
+  "may", "might", "more", "most", "must", "need", "needs", "not", "off", "once",
+  "only", "other", "our", "out", "over", "own", "per", "same", "say", "says",
+  "see", "shall", "she", "should", "since", "some", "such", "than", "that",
+  "the", "their", "them", "then", "there", "these", "they", "this", "those",
+  "through", "too", "under", "until", "use", "used", "using", "very", "want",
+  "was", "well", "were", "what", "when", "where", "which", "while", "who",
+  "whom", "why", "will", "with", "would", "you", "your", "yours",
+]);
+
+export function splitDocumentIntoSections(content: string): DocumentSection[] {
+  const lines = content.replace(/\r\n?/g, "\n").split("\n");
+  const raw: Array<{ label: string | null; lines: string[] }> = [
+    { label: null, lines: [] },
+  ];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    const trimmed = line.trim();
+    if (trimmed === "[...truncated]") {
+      continue;
+    }
+
+    const underlineHeading = detectUnderlinedHeading(trimmed, lines[index + 1]);
+    if (underlineHeading) {
+      raw.push({ label: underlineHeading, lines: [] });
+      index += 1;
+      continue;
+    }
+
+    const heading = detectHeadingLabel(trimmed);
+    if (heading) {
+      raw.push({ label: heading, lines: [] });
+      continue;
+    }
+
+    raw[raw.length - 1]!.lines.push(line);
+  }
+
+  // Fold headings whose body is too short to stand alone (e.g. consecutive
+  // heading lines, or a numbered list item mistaken for a heading) into the
+  // section that follows, so every emitted section carries real evidence.
+  const merged: Array<{ label: string | null; text: string }> = [];
+  let pendingPrefix: string[] = [];
+  for (const entry of raw) {
+    const body = entry.lines.join("\n").trim();
+    const text = [...pendingPrefix, body].filter((part) => part.length > 0).join("\n");
+    if (text.length < MIN_SECTION_TEXT_LENGTH) {
+      pendingPrefix = [...pendingPrefix, entry.label ?? "", body].filter(
+        (part) => part.length > 0
+      );
+      continue;
+    }
+    pendingPrefix = [];
+    merged.push({ label: entry.label, text });
+  }
+  if (pendingPrefix.length > 0) {
+    const tail = pendingPrefix.join("\n").trim();
+    const last = merged[merged.length - 1];
+    if (last) {
+      last.text = `${last.text}\n${tail}`.trim();
+    } else if (tail.length > 0) {
+      merged.push({ label: null, text: tail });
+    }
+  }
+
+  return merged
+    .filter((section) => section.text.trim().length > 0)
+    .map((section, position) => ({
+      label: section.label,
+      text: section.text,
+      position,
+    }));
+}
+
+function detectUnderlinedHeading(
+  line: string,
+  nextLine: string | undefined
+): string | null {
+  if (!line || line.length > MAX_HEADING_LENGTH || !nextLine) {
+    return null;
+  }
+  const underline = nextLine.trim();
+  if (!/^(={3,}|-{3,})$/.test(underline)) {
+    return null;
+  }
+  if (countWords(line) > MAX_HEADING_WORDS || /[.;,]$/.test(line)) {
+    return null;
+  }
+  return normalizeHeadingLabel(line);
+}
+
+function detectHeadingLabel(line: string): string | null {
+  if (!line || line.length > MAX_HEADING_LENGTH) {
+    return null;
+  }
+
+  const markdown = line.match(/^#{1,6}\s+(.+?)\s*#*$/);
+  if (markdown) {
+    return normalizeHeadingLabel(markdown[1] ?? "");
+  }
+
+  const bold = line.match(/^\*\*(.+?)\*\*:?$/);
+  if (bold && countWords(bold[1] ?? "") <= MAX_HEADING_WORDS) {
+    return normalizeHeadingLabel(bold[1] ?? "");
+  }
+
+  if (/[.;,]$/.test(line)) {
+    return null;
+  }
+
+  if (HEADING_KEYWORD_PATTERN.test(line) && countWords(line) <= MAX_HEADING_WORDS + 2) {
+    return normalizeHeadingLabel(line);
+  }
+
+  const numbered = line.match(NUMBERED_HEADING_PATTERN);
+  if (numbered && countWords(numbered[2] ?? "") <= MAX_HEADING_WORDS) {
+    return normalizeHeadingLabel(line);
+  }
+
+  if (
+    ALL_CAPS_HEADING_PATTERN.test(line) &&
+    (line.match(/[A-Z]/g) ?? []).length >= 4 &&
+    countWords(line) <= MAX_HEADING_WORDS
+  ) {
+    return normalizeHeadingLabel(line);
+  }
+
+  if (COLON_TITLE_PATTERN.test(line) && countWords(line) <= 6) {
+    return normalizeHeadingLabel(line);
+  }
+
+  return null;
+}
+
+function normalizeHeadingLabel(value: string): string | null {
+  const cleaned = value
+    .replace(/[*_`]+/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/[:\s]+$/, "")
+    .trim();
+  if (!cleaned) {
+    return null;
+  }
+  return cleaned.length > 80 ? `${cleaned.slice(0, 77).trimEnd()}...` : cleaned;
+}
+
+function countWords(value: string): number {
+  return value.trim().split(/\s+/).filter(Boolean).length;
+}
+
+/**
+ * Rank a document's sections by how strongly they support the answer text and
+ * return the ones that carry the answer's claims, in document order.
+ */
+export function selectSupportingSections(
+  answer: string,
+  sections: DocumentSection[],
+  limit: number = MAX_SUPPORTING_SECTIONS_PER_DOCUMENT
+): SupportingSection[] {
+  const answerTokens = collectSupportTokens(answer);
+  if (answerTokens.size === 0 || sections.length === 0) {
+    return [];
+  }
+  const answerBigrams = collectSupportBigrams(answer);
+
+  const scored = sections
+    .map((section) => {
+      const { score, matchedTokens } = scoreSupport(
+        answerTokens,
+        answerBigrams,
+        section.text
+      );
+      return { ...section, score, matchedTokens };
+    })
+    .filter((section) => {
+      const minimumMatched = answerTokens.size === 1 ? 1 : 2;
+      return section.matchedTokens >= minimumMatched && section.score >= 3;
+    });
+
+  if (scored.length === 0) {
+    return [];
+  }
+
+  const best = Math.max(...scored.map((section) => section.score));
+  return scored
+    .filter((section) => section.score >= best * 0.35)
+    .sort((left, right) => right.score - left.score || left.position - right.position)
+    .slice(0, limit)
+    .sort((left, right) => left.position - right.position);
+}
+
+/**
+ * Pick the sentence in `text` that best supports the answer, trimmed to an
+ * excerpt. Falls back to the opening of the text when nothing overlaps.
+ */
+export function selectSupportingExcerpt(answer: string, text: string): string | null {
+  const answerTokens = collectSupportTokens(answer);
+  const answerBigrams = collectSupportBigrams(answer);
+  const sentences = text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((sentence) => sentence.replace(/\s+/g, " ").trim())
+    .filter((sentence) => sentence.length >= 20);
+
+  let bestSentence: string | null = null;
+  let bestScore = 0;
+  for (const sentence of sentences) {
+    const { score } = scoreSupport(answerTokens, answerBigrams, sentence);
+    if (score > bestScore) {
+      bestScore = score;
+      bestSentence = sentence;
+    }
+  }
+
+  return buildExcerpt(bestSentence ?? text);
+}
+
+/**
+ * Turn a full-document read into section-level answer sources. Returns an
+ * empty array when the document has headings but none of them support the
+ * answer, so callers can fall back to a document-level citation.
+ */
+export function attributeAnswerToSections(
+  answer: string,
+  content: string,
+  artifact: { title: string; kind: string; excerpt?: string | null }
+): AnswerSource[] {
+  const sections = splitDocumentIntoSections(content);
+  if (sections.length === 0) {
+    return [];
+  }
+
+  const supporting = selectSupportingSections(answer, sections);
+  if (supporting.length === 0) {
+    if (sections.length === 1) {
+      return [
+        {
+          title: artifact.title,
+          kind: artifact.kind,
+          excerpt: artifact.excerpt ?? buildExcerpt(content),
+        },
+      ];
+    }
+    return [];
+  }
+
+  return supporting.map((section) => ({
+    title: artifact.title,
+    kind: artifact.kind,
+    ...(section.label ? { section: section.label } : {}),
+    excerpt: selectSupportingExcerpt(answer, section.text),
+  }));
+}
+
+function scoreSupport(
+  answerTokens: Set<string>,
+  answerBigrams: Set<string>,
+  text: string
+): { score: number; matchedTokens: number } {
+  const tokens = tokenizeSupportText(text);
+  const tokenSet = new Set(tokens);
+  let score = 0;
+  let matchedTokens = 0;
+  for (const token of answerTokens) {
+    if (!tokenSet.has(token)) {
+      continue;
+    }
+    matchedTokens += 1;
+    // Identifiers, numbers, addresses and long technical words are far more
+    // discriminating than short common words.
+    score += /\d/.test(token) || token.length >= 7 ? 2 : 1;
+  }
+  if (answerBigrams.size > 0) {
+    const bigrams = new Set<string>();
+    for (let index = 0; index + 1 < tokens.length; index += 1) {
+      bigrams.add(`${tokens[index]} ${tokens[index + 1]}`);
+    }
+    for (const bigram of answerBigrams) {
+      if (bigrams.has(bigram)) {
+        score += 2;
+      }
+    }
+  }
+  return { score, matchedTokens };
+}
+
+function collectSupportTokens(text: string): Set<string> {
+  return new Set(tokenizeSupportText(text));
+}
+
+function collectSupportBigrams(text: string): Set<string> {
+  const tokens = tokenizeSupportText(text);
+  const bigrams = new Set<string>();
+  for (let index = 0; index + 1 < tokens.length; index += 1) {
+    bigrams.add(`${tokens[index]} ${tokens[index + 1]}`);
+  }
+  return bigrams;
+}
+
+function tokenizeSupportText(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(" ")
+    .filter(
+      (token) => token.length > 2 && !ANSWER_SUPPORT_STOP_WORDS.has(token)
+    );
 }

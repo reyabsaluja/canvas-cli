@@ -47,6 +47,9 @@ export interface EffortOptions {
 export const AI_PROVIDER_SETUP_HINT =
   "Set AI_PROVIDER to anthropic, openai, google/gemini, or bedrock with the matching API key, or to copilot/codex to use a GitHub Copilot or ChatGPT subscription through its CLI (see .env.example).";
 
+/** Default tool-call round trips per request. Generous on purpose; see CHAT_AGENT_MAX_STEPS. */
+export const DEFAULT_MAX_TOOL_STEPS = 30;
+
 const DEFAULT_RATE_LIMIT_RETRY_MS = 30_000;
 const DEFAULT_UNAVAILABLE_RETRY_MS = 15_000;
 
@@ -413,7 +416,7 @@ export async function generateWithTools(
     input: Record<string, unknown>
   ) => Promise<string>,
   onToolCall?: (name: string, input: Record<string, unknown>, result: string) => void,
-  maxSteps: number = 10
+  maxSteps: number = DEFAULT_MAX_TOOL_STEPS
 ): Promise<GenerateWithToolsResult> {
   debugAI(config.provider, config.model, "generateWithTools starting", {
     tools: toolDefs.map((t) => t.name),
@@ -485,7 +488,7 @@ export async function streamWithTools(
     onTextDelta?: (delta: string) => void;
     abortSignal?: AbortSignal;
   },
-  maxSteps: number = 10
+  maxSteps: number = DEFAULT_MAX_TOOL_STEPS
 ): Promise<string> {
   debugAI(config.provider, config.model, "streamWithTools starting", {
     tools: toolDefs.map((t) => t.name),

@@ -223,7 +223,7 @@ export async function registerDownloadedCourseAttachment(
     size: number | null;
     downloadUrl: string;
     reason: string;
-    sourceType: "module_linked" | "assignment_linked" | "important_file" | "syllabus_file";
+    sourceType: "module_linked" | "assignment_linked" | "important_file" | "syllabus_file" | "course_file";
   }
 ) : Promise<void> {
   if (!cache) return;

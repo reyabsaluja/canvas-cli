@@ -28,6 +28,7 @@ test("integration: ingest pipeline end-to-end with mock API", async (t) => {
     assert.equal(raw.assignments.length, 3);
     assert.equal(raw.modules.length, 2);
     assert.equal(raw.files.length, 2);
+    assert.equal(raw.folders.length, 4);
     assert.equal(raw.pages.length, 2);
   });
 
@@ -208,6 +209,7 @@ test("integration: ingest pipeline with partially unavailable API", async (t) =>
     assert.equal(raw.assignments.length, 1);
     assert.equal(raw.modules.length, 1);
     assert.equal(raw.files.length, 0);
+    assert.equal(raw.folders.length, 0);
     assert.equal(raw.pages.length, 0);
     assert.ok(raw.warnings.length > 0);
 

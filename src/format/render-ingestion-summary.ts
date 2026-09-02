@@ -36,6 +36,15 @@ export function renderIngestionSummary(result: IngestionResult): string {
   } else {
     lines.push(`  ${chalk.dim("-")} pages ${chalk.dim("(API not accessible)")}`);
   }
+  const courseFiles = result.ingestion.courseFiles;
+  if (courseFiles && courseFiles.selected > 0) {
+    const folderNote =
+      courseFiles.folders > 0 ? ` across ${courseFiles.folders} folders` : "";
+    lines.push(
+      `  ${chalk.dim("-")} ${courseFiles.selected} Files-tab documents crawled${folderNote}` +
+        (courseFiles.failed > 0 ? ` ${chalk.red(`(${courseFiles.failed} failed)`)}` : "")
+    );
+  }
   if ((result.announcements?.length ?? 0) > 0) {
     lines.push(
       `  ${chalk.dim("-")} ${result.announcements?.length ?? 0} announcements`
@@ -72,11 +81,15 @@ export function renderIngestionSummary(result: IngestionResult): string {
     lines.push(chalk.dim("No syllabus candidates detected"));
   }
 
-  // Attachments
-  const downloaded = result.attachments.filter((a) => a.status === "downloaded");
-  const skipped = result.attachments.filter((a) => a.status === "skipped");
-  const failed = result.attachments.filter((a) => a.status === "failed");
-  const hasAttachments = result.attachments.length > 0;
+  // Attachments. Files-tab crawl results are summarised on one line above;
+  // listing hundreds of them here would drown the targeted downloads.
+  const listedAttachments = result.attachments.filter(
+    (a) => a.sourceType !== "course_file"
+  );
+  const downloaded = listedAttachments.filter((a) => a.status === "downloaded");
+  const skipped = listedAttachments.filter((a) => a.status === "skipped");
+  const failed = listedAttachments.filter((a) => a.status === "failed");
+  const hasAttachments = listedAttachments.length > 0;
 
   if (hasAttachments) {
     lines.push("");

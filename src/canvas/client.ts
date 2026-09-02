@@ -21,6 +21,7 @@ import type {
   CanvasDiscussionTopicView,
   CanvasEnrollment,
   CanvasFile,
+  CanvasFolder,
   CanvasModule,
   CanvasModuleItem,
   CanvasPage,
@@ -225,8 +226,18 @@ export class CanvasClient {
    * Some institutions restrict student access to the files endpoint.
    */
   async getFilesSafe(courseId: number, signal?: AbortSignal | null): Promise<CanvasFile[]> {
-    const url = `${this.baseUrl}/courses/${courseId}/files?per_page=50`;
+    const url = `${this.baseUrl}/courses/${courseId}/files?per_page=100`;
     return this.fetchPaginatedSafe<CanvasFile>(url, signal);
+  }
+
+  /**
+   * Get the folder tree for a course's Files area. Returns empty array if the
+   * Files API is blocked. Folder paths let ingestion preserve the instructor's
+   * organisation (e.g. "Lectures/Week 3") for files that are not in any module.
+   */
+  async getFoldersSafe(courseId: number, signal?: AbortSignal | null): Promise<CanvasFolder[]> {
+    const url = `${this.baseUrl}/courses/${courseId}/folders?per_page=100`;
+    return this.fetchPaginatedSafe<CanvasFolder>(url, signal);
   }
 
   /**

@@ -71,12 +71,27 @@ export interface MockFile {
   folder_id: number | null;
 }
 
+export interface MockFolder {
+  id: number;
+  name: string;
+  full_name: string;
+  parent_folder_id: number | null;
+  files_count?: number;
+  folders_count?: number;
+}
+
 export interface MockServerData {
   courses: MockCourse[];
   assignments: Map<number, MockAssignment[]>;
   modules: Map<number, MockModule[]>;
   pages: Map<number, MockPage[]>;
   files: Map<number, MockFile[]>;
+  /** Folder tree served from GET /courses/:id/folders. */
+  folders?: Map<number, MockFolder[]>;
+  /** Bytes served from GET /files/:id/download (defaults to a short text body). */
+  fileContents?: Map<number, string>;
+  /** Any API path matching one of these returns 403, to simulate institution blocks. */
+  forbiddenPaths?: RegExp[];
   courseDetails: Map<number, { syllabus_body: string | null }>;
   pagePerPage?: number;
 }
@@ -144,6 +159,12 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
     }
 
     if (token === "forbidden-token") {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ errors: [{ message: "user not authorized" }] }));
+      return;
+    }
+
+    if (data.forbiddenPaths?.some((pattern) => pattern.test(path))) {
       res.writeHead(403, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ errors: [{ message: "user not authorized" }] }));
       return;
@@ -317,6 +338,47 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
       );
       res.writeHead(200, headers);
       res.end(body);
+      return;
+    }
+
+    // GET /courses/:id/folders
+    const foldersMatch = path.match(/^\/courses\/(\d+)\/folders$/);
+    if (foldersMatch && req.method === "GET") {
+      const courseId = parseInt(foldersMatch[1], 10);
+      const folders = data.folders?.get(courseId) ?? [];
+      const { body, headers } = paginatedResponse(
+        folders,
+        page,
+        effectivePerPage,
+        baseApiUrl,
+        `/courses/${courseId}/folders`
+      );
+      res.writeHead(200, headers);
+      res.end(body);
+      return;
+    }
+
+    // GET /files/:id/download (also reachable without the /api/v1 prefix)
+    const fileDownloadMatch = path.match(/^\/files\/(\d+)\/download$/);
+    if (fileDownloadMatch && req.method === "GET") {
+      const fileId = parseInt(fileDownloadMatch[1], 10);
+      let found: MockFile | undefined;
+      for (const files of data.files.values()) {
+        found = files.find((f) => f.id === fileId);
+        if (found) break;
+      }
+      if (!found) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ errors: [{ message: "not found" }] }));
+        return;
+      }
+      const content =
+        data.fileContents?.get(fileId) ?? `mock content of ${found.filename}\n`;
+      res.writeHead(200, {
+        "Content-Type": found.content_type,
+        "Content-Length": String(Buffer.byteLength(content)),
+      });
+      res.end(content);
       return;
     }
 

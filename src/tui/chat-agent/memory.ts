@@ -162,7 +162,9 @@ function buildToolRuntimeMemory(
     lines.push(nextStep);
   }
 
-  lines.push("Only call a tool if you still need new evidence beyond this memory.");
+  lines.push(
+    "Reuse this memory instead of repeating the same calls, and call tools for any evidence it does not already contain."
+  );
 
   const rendered = lines.join("\n");
   if (rendered.length <= MAX_TOOL_MEMORY_CHARS) {
