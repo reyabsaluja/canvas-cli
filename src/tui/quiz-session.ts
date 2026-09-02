@@ -6,7 +6,6 @@ import {
   wrapText,
   visibleWidth,
 } from "./screen.js";
-import { USER_ABORT_EXIT_CODE } from "./chat-shell-exit.js";
 import type { QuizQuestion, QuizResult, MCQuestion, TFQuestion, FillQuestion, FlashQuestion } from "./quiz-command.js";
 
 const B = {
@@ -18,6 +17,20 @@ const B = {
   yellow: chalk.hex("#e8a86d"),
   muted: chalk.hex("#808080"),
 };
+
+/**
+ * SGR mouse reports ("\x1b[<b;x;yM") must never count as an answer or a
+ * "press any key". Mouse tracking is disabled while the shell is paused, but
+ * a report can still be in flight, so key handlers ignore them explicitly.
+ */
+function isMouseEvent(key: string): boolean {
+  return key.startsWith("\x1b[<");
+}
+
+/** Ctrl-C aborts the quiz and returns to the shell, like aborting any other running command. */
+function isAbortKey(key: string): boolean {
+  return key === "\x03";
+}
 
 export async function runQuizSession(
   questions: QuizQuestion[],
@@ -40,7 +53,8 @@ export async function runQuizSession(
     }
 
     answers.push(result);
-    await showFeedback(q, result, stdin);
+    const feedback = await showFeedback(q, result, stdin);
+    if (feedback === "quit") break;
   }
 
   return { questions, answers, times };
@@ -65,8 +79,8 @@ function presentMC(q: MCQuestion, index: number, total: number, stdin: NodeJS.Re
     renderQuestionBox(q.stem, index, total, "MC", q.choices.map(c => `${c.label}) ${c.text}`));
 
     function onData(key: string) {
-      if (key === "\x03") { cleanup(); process.exit(USER_ABORT_EXIT_CODE); }
-      if (key === "\x1B" || key === "q") { cleanup(); resolve("quit"); return; }
+      if (isMouseEvent(key)) return;
+      if (isAbortKey(key) || key === "\x1B" || key === "q") { cleanup(); resolve("quit"); return; }
       if (key === "s") { cleanup(); resolve(false); return; }
       const lower = key.toLowerCase();
       if (["a", "b", "c", "d"].includes(lower) && q.choices.some(c => c.label === lower)) {
@@ -86,8 +100,8 @@ function presentTF(q: TFQuestion, index: number, total: number, stdin: NodeJS.Re
     renderQuestionBox(q.stem, index, total, "T/F", ["t) True", "f) False"]);
 
     function onData(key: string) {
-      if (key === "\x03") { cleanup(); process.exit(USER_ABORT_EXIT_CODE); }
-      if (key === "\x1B" || key === "q") { cleanup(); resolve("quit"); return; }
+      if (isMouseEvent(key)) return;
+      if (isAbortKey(key) || key === "\x1B" || key === "q") { cleanup(); resolve("quit"); return; }
       if (key === "s") { cleanup(); resolve(false); return; }
       const lower = key.toLowerCase();
       if (lower === "t") { cleanup(); resolve(q.answer === true); return; }
@@ -109,8 +123,8 @@ function presentFill(q: FillQuestion, index: number, total: number, stdin: NodeJ
     render();
 
     function onData(key: string) {
-      if (key === "\x03") { cleanup(); process.exit(USER_ABORT_EXIT_CODE); }
-      if (key === "\x1B" || (key === "q" && input === "")) { cleanup(); resolve("quit"); return; }
+      if (isMouseEvent(key)) return;
+      if (isAbortKey(key) || key === "\x1B" || (key === "q" && input === "")) { cleanup(); resolve("quit"); return; }
       if (key === "\r" || key === "\n") {
         cleanup();
         const trimmed = input.trim().toLowerCase();
@@ -141,8 +155,8 @@ function presentFlash(q: FlashQuestion, index: number, total: number, stdin: Nod
     let revealed = false;
 
     function onData(key: string) {
-      if (key === "\x03") { cleanup(); process.exit(USER_ABORT_EXIT_CODE); }
-      if (key === "\x1B" || key === "q") { cleanup(); resolve("quit"); return; }
+      if (isMouseEvent(key)) return;
+      if (isAbortKey(key) || key === "\x1B" || key === "q") { cleanup(); resolve("quit"); return; }
 
       if (!revealed && key === " ") {
         revealed = true;
@@ -226,7 +240,7 @@ function renderQuestionBox(
   buf.flush();
 }
 
-function showFeedback(q: QuizQuestion, correct: boolean, stdin: NodeJS.ReadStream): Promise<void> {
+function showFeedback(q: QuizQuestion, correct: boolean, stdin: NodeJS.ReadStream): Promise<"quit" | void> {
   return new Promise((resolve) => {
     const buf = createBuffer();
     clearScreen();
@@ -254,10 +268,10 @@ function showFeedback(q: QuizQuestion, correct: boolean, stdin: NodeJS.ReadStrea
     buf.push(`  ${B.dim("[press any key for next question]")}`);
     buf.flush();
 
-    function onData(_key: string) {
-      if (_key === "\x03") { cleanup(); process.exit(USER_ABORT_EXIT_CODE); }
+    function onData(key: string) {
+      if (isMouseEvent(key)) return;
       cleanup();
-      resolve();
+      resolve(isAbortKey(key) ? "quit" : undefined);
     }
 
     stdin.on("data", onData);

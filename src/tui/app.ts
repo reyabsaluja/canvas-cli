@@ -14,8 +14,8 @@ import type { AppScope } from "./chat-state.js";
 import { COMMANDS } from "./commands.js";
 import { createShellContext } from "./app-runtime.js";
 import { handleCommand } from "./app-commands.js";
-import type { ShellResult } from "./app-types.js";
-import { deleteChatSession, getChatSessionId } from "./chat-sessions.js";
+import type { ShellContext, ShellResult } from "./app-types.js";
+import { deleteChatSession, getChatSessionId, saveChatSession } from "./chat-sessions.js";
 import {
   ensureCourseIngested,
   normalizeScopeAfterCourseManagement,
@@ -71,9 +71,16 @@ export async function launchApp(): Promise<void> {
     await ensureCourseConfig(services);
 
     let scope: AppScope = { type: "global" };
+    // A system line to show at the top of the next shell session, e.g. when a
+    // full-screen view (announcements, pickers) failed before it could open.
+    let pendingNotice: string | null = null;
 
     while (true) {
       const shellContext = await createShellContext(services, scope);
+      if (pendingNotice) {
+        await postSessionNotice(shellContext.session, pendingNotice);
+        pendingNotice = null;
+      }
       const result = await runChatShell<ShellResult>({
         session: shellContext.session,
         runtime: shellContext.runtime,
@@ -135,29 +142,61 @@ export async function launchApp(): Promise<void> {
         continue;
       }
 
-      const nextScope = await resolveShellResult(
-        services,
-        scope,
-        shellContext.runtime.scope,
-        result
-      );
+      let nextScope: AppScope;
+      try {
+        nextScope = await resolveShellResult(
+          services,
+          scope,
+          shellContext.runtime.scope,
+          result,
+          (notice) => {
+            pendingNotice = notice;
+          }
+        );
 
-      if (
-        nextScope.type === "course" &&
-        (scope.type !== "course" || scope.courseId !== nextScope.courseId)
-      ) {
-        const course = getCourseById(services, nextScope.courseId);
-        if (!course) continue;
-        const ok = await ensureCourseIngested(services, course);
-        if (!ok) {
-          continue;
+        if (
+          nextScope.type === "course" &&
+          (scope.type !== "course" || scope.courseId !== nextScope.courseId)
+        ) {
+          const course = getCourseById(services, nextScope.courseId);
+          if (!course) continue;
+          const ok = await ensureCourseIngested(services, course);
+          if (!ok) {
+            continue;
+          }
         }
+      } catch (error) {
+        // A network failure in a full-screen view must not take down the TUI:
+        // reset the terminal and report it inside the shell instead.
+        showCursor();
+        clearScreen();
+        pendingNotice = `Error: ${describeError(error)}`;
+        continue;
       }
 
       scope = nextScope;
     }
   } finally {
     process.removeListener("SIGINT", handleSigint);
+  }
+}
+
+function describeError(error: unknown): string {
+  const classified = error instanceof CanvasCliError ? error : classifyError(error);
+  return classified.userMessage;
+}
+
+async function postSessionNotice(
+  session: ShellContext["session"],
+  notice: string
+): Promise<void> {
+  if (session.messages[session.messages.length - 1]?.content === notice) return;
+  session.messages.push({ role: "system", content: notice });
+  try {
+    await saveChatSession(session);
+  } catch {
+    // The shell persists the transcript on its next write; the in-memory
+    // message is what matters for display.
   }
 }
 
@@ -191,7 +230,8 @@ export async function resolveShellResult(
   services: AppServices,
   currentScope: AppScope,
   runtimeScope: AppScope,
-  result: ShellResult
+  result: ShellResult,
+  postNotice: (notice: string) => void = () => {}
 ): Promise<AppScope> {
   if (result.type === "scope") {
     return result.scope;
@@ -222,9 +262,15 @@ export async function resolveShellResult(
       ? [{ id: result.courseId, name: result.courseName }]
       : getDisplayCourses(services).map((c) => ({ id: c.id, name: c.name }));
     const isGlobal = result.courseId == null;
-    const items = isGlobal
-      ? await services.radar.getAllAnnouncementsMultiCourse(courses)
-      : await services.radar.getAllAnnouncements(result.courseId!, result.courseName!);
+    let items;
+    try {
+      items = isGlobal
+        ? await services.radar.getAllAnnouncementsMultiCourse(courses)
+        : await services.radar.getAllAnnouncements(result.courseId!, result.courseName!);
+    } catch (error) {
+      postNotice(`Couldn't reach Canvas to load announcements: ${describeError(error)}`);
+      return runtimeScope;
+    }
     await showAnnouncementsView(items, isGlobal ? "global" : "course", result.courseName, services.radar);
     return runtimeScope;
   }
