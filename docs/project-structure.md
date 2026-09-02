@@ -25,7 +25,12 @@ canvas-cli/
 ```text
 src/
 ├── agent/                 Shared agent run state, retrieval gating, observation and verification helpers
-├── ai/                    Provider setup, model catalog, prompt helpers, context bundling
+├── ai/                    Provider setup and routing, model catalog, prompt helpers, context bundling
+│   ├── backends/          Vendor CLI drivers for subscription providers (copilot.ts, codex.ts)
+│   ├── cli-backend.ts     Shared CLI plumbing: provider table, executable lookup, JSONL runner, transcript prompt
+│   ├── mcp-bridge.ts      Localhost MCP server (per-run bearer token) exposing a request's tools to the vendor CLI
+│   ├── subscription-status.ts  Installed / signed-in checks and foreground `<cli> login`
+│   └── errors.ts          AIError type shared by the AI SDK and CLI paths
 ├── ask/                   Workspace retrieval and grounded answer generation
 ├── canvas/                Canvas API client, retry, throttling, remote type definitions
 ├── commands/              CLI subcommand handlers (login, logout, status, ingest, clean, examples)
@@ -54,6 +59,7 @@ src/
 - Put reusable ranking, filtering, matching, and normalization in `src/domain/`.
 - Put cache-specific enrichment behavior in `src/enrich/`.
 - Put AI-only orchestration in `src/work/` or `src/ask/` depending on the user flow; put TUI chat tooling under `src/tui/chat-agent/`.
+- Put a new CLI-driven (subscription) AI provider in `src/ai/backends/` and register it in `src/ai/cli-backend.ts` and `src/ai/provider.ts`; API-key providers stay on the AI SDK path in `src/ai/provider.ts`.
 - Put rendering-only helpers in `src/format/`.
 - Route anything that touches the filesystem from untrusted names through `src/sanitize.ts`.
 - Use kebab-case for new files to keep the tree consistent.

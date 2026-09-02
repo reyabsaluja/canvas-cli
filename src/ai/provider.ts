@@ -6,8 +6,27 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { debugAI } from "../debug.js";
 import { ensureAICredentials } from "../config/load-credentials-to-env.js";
+import { AIError, type AIErrorKind } from "./errors.js";
+import { isSubscriptionProvider, type CliBackendRequest, type SubscriptionProvider } from "./cli-backend.js";
+import { runCodex } from "./backends/codex.js";
+import { runCopilot } from "./backends/copilot.js";
 
-export type AIProviderName = "anthropic" | "openai" | "google" | "bedrock";
+export { AIError, type AIErrorKind };
+export { isSubscriptionProvider, SUBSCRIPTION_PROVIDERS, type SubscriptionProvider } from "./cli-backend.js";
+
+/**
+ * API-key providers go through the Vercel AI SDK. "copilot" and "codex" are
+ * subscription providers: they drive the vendor CLI on the user's machine and
+ * never touch the AI SDK path.
+ */
+export type AIProviderName = "anthropic" | "openai" | "google" | "bedrock" | "copilot" | "codex";
+
+export type AIBackendKind = "sdk" | "cli";
+
+/** Which execution path a config uses. API-key providers always use the SDK path. */
+export function getBackendKind(config: Pick<AIProviderConfig, "provider">): AIBackendKind {
+  return isSubscriptionProvider(config.provider) ? "cli" : "sdk";
+}
 
 export type AIEffortLevel = "low" | "medium" | "high" | "max";
 
@@ -26,7 +45,7 @@ export interface EffortOptions {
 }
 
 export const AI_PROVIDER_SETUP_HINT =
-  "Set AI_PROVIDER to anthropic, openai, google/gemini, or bedrock and add the matching credentials to your .env file (see .env.example).";
+  "Set AI_PROVIDER to anthropic, openai, google/gemini, or bedrock with the matching API key, or to copilot/codex to use a GitHub Copilot or ChatGPT subscription through its CLI (see .env.example).";
 
 const DEFAULT_RATE_LIMIT_RETRY_MS = 30_000;
 const DEFAULT_UNAVAILABLE_RETRY_MS = 15_000;
@@ -36,6 +55,8 @@ const DEFAULT_MODEL_BY_PROVIDER: Record<AIProviderName, string> = {
   openai: "gpt-5.4",
   google: "gemini-3.5-flash",
   bedrock: "us.anthropic.claude-sonnet-4-6",
+  copilot: "auto",
+  codex: "default",
 };
 
 const MODEL_DISPLAY_NAMES: Record<string, string> = {
@@ -55,6 +76,8 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "gemini-3.1-flash-lite": "Gemini 3.1 Lite",
   "gemini-2.5-pro": "Gemini 2.5 Pro",
   "gemini-2.5-flash": "Gemini 2.5 Flash",
+  auto: "Copilot auto",
+  default: "Codex default",
 };
 
 export function formatModelName(modelId: string, effort?: AIEffortLevel): string {
@@ -111,6 +134,13 @@ function normalizeAIProvider(value: string | undefined): AIProviderName | null {
     case "aws-bedrock":
     case "amazon-bedrock":
       return "bedrock";
+    case "copilot":
+    case "github-copilot":
+      return "copilot";
+    case "codex":
+    case "chatgpt":
+    case "openai-codex":
+      return "codex";
     default:
       return null;
   }
@@ -135,7 +165,9 @@ function getExplicitAIConfig(
   provider: AIProviderName,
   modelOverride?: string
 ): AIProviderConfig | null {
-  if (provider === "bedrock") {
+  // Bedrock uses ambient AWS credentials; subscription providers use the
+  // vendor CLI's own login. Neither needs an API key here.
+  if (provider === "bedrock" || isSubscriptionProvider(provider)) {
     return buildAIConfig(provider, modelOverride);
   }
 
@@ -235,7 +267,40 @@ function getModel(config: AIProviderConfig) {
       });
       return bedrock(config.model);
     }
+    default:
+      throw new AIError(`Provider "${config.provider}" does not use the API path.`, "bad_request");
   }
+}
+
+/**
+ * Route a request to the subscription backend for the configured provider.
+ * The API-key path (getModel + AI SDK) is untouched by this.
+ */
+async function runSubscriptionBackend(
+  config: AIProviderConfig,
+  systemPrompt: string,
+  messages: Array<{ role: string; content: string }>,
+  toolDefs: ToolDefinition[],
+  executeTool: (name: string, input: Record<string, unknown>) => Promise<string>,
+  callbacks: {
+    onToolCall?: (name: string, input: Record<string, unknown>, result: string) => void;
+    onTextDelta?: (delta: string) => void;
+    abortSignal?: AbortSignal;
+  }
+): Promise<string> {
+  const request: CliBackendRequest = {
+    provider: config.provider as SubscriptionProvider,
+    model: config.model,
+    effort: config.effort,
+    systemPrompt,
+    messages,
+    tools: toolDefs,
+    executeTool,
+    onToolCall: callbacks.onToolCall,
+    onTextDelta: callbacks.onTextDelta,
+    abortSignal: callbacks.abortSignal,
+  };
+  return config.provider === "copilot" ? runCopilot(request) : runCodex(request);
 }
 
 /**
@@ -261,6 +326,22 @@ export async function callModel(
   const combinedSignal = signals.length > 0
     ? (signals.length === 1 ? signals[0]! : AbortSignal.any(signals))
     : undefined;
+
+  if (isSubscriptionProvider(config.provider)) {
+    const text = await runSubscriptionBackend(
+      config,
+      systemPrompt,
+      [{ role: "user", content: userMessage }],
+      [],
+      async () => "",
+      { onTextDelta: options?.onTextDelta, abortSignal: combinedSignal }
+    );
+    debugAI(config.provider, config.model, "callModel completed (cli)", {
+      durationMs: Date.now() - startTime,
+      responseLength: text.length,
+    });
+    return text;
+  }
 
   const effortOpts = getEffortOptions(config);
 
@@ -341,6 +422,17 @@ export async function generateWithTools(
   });
   const startTime = Date.now();
 
+  if (isSubscriptionProvider(config.provider)) {
+    const text = await runSubscriptionBackend(config, systemPrompt, messages, toolDefs, executeTool, {
+      onToolCall,
+    });
+    debugAI(config.provider, config.model, "generateWithTools completed (cli)", {
+      durationMs: Date.now() - startTime,
+      responseLength: text.length,
+    });
+    return { text, responseMessages: [{ role: "assistant", content: text }] };
+  }
+
   const aiTools: Record<string, any> = {};
   for (const t of toolDefs) {
     aiTools[t.name] = tool({
@@ -401,6 +493,16 @@ export async function streamWithTools(
     maxSteps,
   });
   const streamStartTime = Date.now();
+
+  if (isSubscriptionProvider(config.provider)) {
+    const text = await runSubscriptionBackend(config, systemPrompt, messages, toolDefs, executeTool, callbacks);
+    debugAI(config.provider, config.model, "streamWithTools completed (cli)", {
+      durationMs: Date.now() - streamStartTime,
+      responseLength: text.length,
+    });
+    return text;
+  }
+
   const STREAM_TEXT_FLUSH_MS = 16;
   const STREAM_TEXT_MAX_HOLD_MS = 40;
   const STREAM_TEXT_FORCE_FLUSH_CHARS = 64;
@@ -560,46 +662,8 @@ export async function streamWithTools(
   return fullText;
 }
 
-export type AIErrorKind =
-  | "rate_limit"
-  | "auth"
-  | "network"
-  | "model_not_found"
-  | "provider_unavailable"
-  | "bad_request"
-  | "unknown";
-
-export class AIError extends Error {
-  readonly kind: AIErrorKind;
-  readonly retryAfterMs: number | null;
-  readonly setupHint: string | null;
-
-  constructor(
-    message: string,
-    kind: AIErrorKind,
-    options?: { retryAfterMs?: number | null; setupHint?: string | null }
-  ) {
-    super(message);
-    this.name = "AIError";
-    this.kind = kind;
-    this.retryAfterMs = options?.retryAfterMs ?? null;
-    this.setupHint = options?.setupHint ?? null;
-  }
-
-  get userMessage(): string {
-    const parts = [this.message];
-    if (this.retryAfterMs !== null) {
-      const seconds = Math.ceil(this.retryAfterMs / 1000);
-      parts.push(`Try again in ~${seconds}s.`);
-    }
-    if (this.setupHint) {
-      parts.push(this.setupHint);
-    }
-    return parts.join(" ");
-  }
-}
-
 export function classifyAIError(error: unknown): AIError {
+  if (error instanceof AIError) return error;
   const apiError = findAPICallError(error);
   if (apiError) {
     const status = apiError.statusCode;
@@ -684,6 +748,7 @@ export function formatAIError(error: unknown): string {
 }
 
 export function isAIProviderError(error: unknown): boolean {
+  if (error instanceof AIError) return true;
   if (findAPICallError(error) !== null) return true;
   if (error instanceof Error) {
     if (error.message.includes("fetch failed") || error.message.includes("ECONNREFUSED")) {

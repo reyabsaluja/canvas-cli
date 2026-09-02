@@ -3,6 +3,7 @@ import { readStoredConfig, listProfiles } from "../config/store.js";
 import { loadCredential, getCredentialBackend } from "../config/credentials.js";
 import { getConfigDir } from "../config/paths.js";
 import { C } from "./login-picker.js";
+import { isSubscriptionProvider, SUBSCRIPTION_PROVIDERS } from "../ai/provider.js";
 
 interface StatusOptions {
   profile?: string;
@@ -26,7 +27,10 @@ export function statusCommand(options: StatusOptions = {}): void {
 
   if (stored?.aiProvider) {
     const model = stored.aiModel || "(default)";
-    console.log(`  ${label("AI Provider")}${C.success(stored.aiProvider)} ${C.dim(`(model: ${model})`)}`);
+    const viaCli = isSubscriptionProvider(stored.aiProvider)
+      ? ` ${C.dim(`· subscription via \`${SUBSCRIPTION_PROVIDERS[stored.aiProvider].binary}\` CLI`)}`
+      : "";
+    console.log(`  ${label("AI Provider")}${C.success(stored.aiProvider)} ${C.dim(`(model: ${model})`)}${viaCli}`);
   } else if (process.env.AI_PROVIDER) {
     console.log(`  ${label("AI Provider")}${C.success(process.env.AI_PROVIDER)} ${C.dim("(from env)")}`);
   } else {

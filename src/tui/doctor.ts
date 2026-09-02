@@ -1,5 +1,12 @@
 import { resolveRawConfig, resolveApiUrl } from "../config/env.js";
-import { getAIConfig, type AIProviderConfig, type AIProviderName } from "../ai/provider.js";
+import {
+  getAIConfig,
+  isSubscriptionProvider,
+  type AIProviderConfig,
+  type AIProviderName,
+  type SubscriptionProvider,
+} from "../ai/provider.js";
+import { checkSubscriptionCli } from "../ai/subscription-status.js";
 import { debug } from "../debug.js";
 
 export interface CheckResult {
@@ -156,15 +163,17 @@ async function checkCanvasConnectivity(config: { baseUrl: string; accessToken: s
   }
 }
 
+type ApiKeyProvider = Exclude<AIProviderName, SubscriptionProvider>;
+
 interface AIProviderCredentials {
-  provider: AIProviderName;
+  provider: ApiKeyProvider;
   key: string;
   secretKey?: string;
   region?: string;
 }
 
 // Keep envKey values in sync with src/config/load-credentials-to-env.ts
-const AI_ENDPOINTS: Record<AIProviderName, { url: string; headerKey: string; envKey: string }> = {
+const AI_ENDPOINTS: Record<ApiKeyProvider, { url: string; headerKey: string; envKey: string }> = {
   openai: {
     url: "https://api.openai.com/v1/models",
     headerKey: "Authorization",
@@ -188,6 +197,7 @@ const AI_ENDPOINTS: Record<AIProviderName, { url: string; headerKey: string; env
 };
 
 export function resolveAICredentials(provider: AIProviderName): AIProviderCredentials | null {
+  if (isSubscriptionProvider(provider)) return null;
   const ep = AI_ENDPOINTS[provider];
   const key = process.env[ep.envKey];
   if (!key) return null;
@@ -200,6 +210,7 @@ export function resolveAICredentials(provider: AIProviderName): AIProviderCreden
 }
 
 export function validateAIKeyFormat(provider: AIProviderName, key: string): CheckResult | null {
+  if (isSubscriptionProvider(provider)) return null;
   if (key !== key.trim()) {
     return {
       label: "AI key format",
@@ -428,7 +439,9 @@ export async function runDoctor(): Promise<string> {
       status: "pass",
       detail: `${aiConfig.provider} · ${aiConfig.model}${aiConfig.effort ? ` · effort: ${aiConfig.effort}` : ""}`,
     });
-    if (!aiCreds) {
+    if (isSubscriptionProvider(aiConfig.provider)) {
+      results.push(checkSubscriptionProvider(aiConfig.provider));
+    } else if (!aiCreds) {
       const envKey = AI_ENDPOINTS[aiConfig.provider].envKey;
       results.push({
         label: "AI provider",
@@ -444,6 +457,39 @@ export async function runDoctor(): Promise<string> {
   }
 
   return formatResults(profile, results);
+}
+
+export function checkSubscriptionProvider(provider: SubscriptionProvider): CheckResult {
+  const status = checkSubscriptionCli(provider);
+  if (!status.installed) {
+    return {
+      label: "AI provider",
+      status: "fail",
+      detail: `${status.displayName} CLI not installed (${status.detail})`,
+      fix: `${status.installHint} Then ${status.loginHint}`,
+    };
+  }
+  if (status.loggedIn === false) {
+    return {
+      label: "AI provider",
+      status: "fail",
+      detail: `${status.displayName} CLI is installed but not signed in`,
+      fix: status.loginHint,
+    };
+  }
+  if (status.loggedIn === "unknown") {
+    return {
+      label: "AI provider",
+      status: "warn",
+      detail: `${status.displayName} CLI found at ${status.path}; ${status.detail}`,
+      fix: `If the first chat fails with a sign-in error, ${status.loginHint.charAt(0).toLowerCase()}${status.loginHint.slice(1)}`,
+    };
+  }
+  return {
+    label: "AI provider",
+    status: "pass",
+    detail: `${status.displayName} CLI signed in (${status.detail})`,
+  };
 }
 
 export function formatResults(profile: string, results: CheckResult[]): string {

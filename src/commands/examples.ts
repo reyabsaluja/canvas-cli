@@ -5,6 +5,10 @@ Getting Started:
   $ canvas-cli login   Interactive setup wizard
   $ canvas-cli status  Verify everything is configured correctly
 
+AI Without an API Key:
+  $ npm i -g @github/copilot && copilot login  Then pick "GitHub Copilot" in canvas-cli login
+  $ AI_PROVIDER=copilot canvas-cli             Or set it in .env (codex = ChatGPT plan, experimental)
+
 Working with Courses:
   $ canvas-cli ingest CS101            Cache course content locally
   $ canvas-cli ingest CS101 --refresh  Force re-download of course content

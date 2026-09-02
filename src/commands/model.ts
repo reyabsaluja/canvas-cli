@@ -4,7 +4,8 @@ import { getAiKeyName, getCredentialKey } from "./login-providers.js";
 import { readStoredConfig, writeStoredConfig, defaultStoredConfig } from "../config/store.js";
 import { getActiveProfile } from "../config/env.js";
 import { loadCredential, storeCredential } from "../config/credentials.js";
-import type { AIEffortLevel } from "../ai/provider.js";
+import { isSubscriptionProvider, SUBSCRIPTION_PROVIDERS, type AIEffortLevel } from "../ai/provider.js";
+import { checkSubscriptionCli } from "../ai/subscription-status.js";
 import catalogJson from "../ai/models.json" with { type: "json" };
 
 const MODEL_CATALOG: Record<string, PickerOption[]> = Object.fromEntries(
@@ -38,6 +39,8 @@ const LOGO = [
 const LOGO_WIDTH = Math.max(...LOGO.map((l) => [...l].length));
 
 const PROVIDER_DISPLAY: Record<string, string> = {
+  copilot: "GitHub Copilot",
+  codex: "ChatGPT · Codex",
   anthropic: "Anthropic",
   openai: "OpenAI",
   google: "Google",
@@ -85,6 +88,12 @@ function clearScreen(): void {
 function buildModelGroups(): ModelGroup[] {
   const groups: ModelGroup[] = [];
 
+  if (MODEL_CATALOG["copilot"]) {
+    groups.push({ label: "GitHub Copilot", provider: "copilot", models: MODEL_CATALOG["copilot"] });
+  }
+  if (MODEL_CATALOG["codex"]) {
+    groups.push({ label: "ChatGPT · Codex (experimental)", provider: "codex", models: MODEL_CATALOG["codex"] });
+  }
   if (MODEL_CATALOG["openai"]) {
     groups.push({ label: "OpenAI", provider: "openai", models: MODEL_CATALOG["openai"] });
   }
@@ -246,6 +255,13 @@ async function modelKeySubcommand(): Promise<ModelResult> {
     clearScreen();
     printHeader();
 
+    if (isSubscriptionProvider(current.provider)) {
+      const binary = SUBSCRIPTION_PROVIDERS[current.provider].binary;
+      console.log(`  ${C.text(`${providerLabel} uses your own login, not an API key.`)}`);
+      console.log(`  ${C.dim(`Run \`${binary} login\` in your shell to sign in or switch accounts.`)}\n`);
+      return null;
+    }
+
     if (current.provider === "bedrock") {
       console.log(`  ${C.text("Rotate AWS credentials for")} ${C.white(providerLabel)}\n`);
 
@@ -310,7 +326,23 @@ async function modelFullFlow(): Promise<ModelResult> {
 
     const profile = getActiveProfile();
 
-    if (selectedProvider === "bedrock") {
+    if (isSubscriptionProvider(selectedProvider)) {
+      const status = checkSubscriptionCli(selectedProvider);
+      if (!status.installed) {
+        clearScreen();
+        printHeader();
+        console.log(`  ${C.error("✗")} ${C.text(`${status.displayName} CLI not found.`)}`);
+        console.log(`  ${C.dim(status.installHint)} ${C.dim(status.loginHint)}\n`);
+        return null;
+      }
+      if (status.loggedIn === false) {
+        clearScreen();
+        printHeader();
+        console.log(`  ${C.error("✗")} ${C.text(`${status.displayName} CLI is not signed in.`)}`);
+        console.log(`  ${C.dim(status.loginHint)}\n`);
+        return null;
+      }
+    } else if (selectedProvider === "bedrock") {
       const hasAccess = process.env.AWS_ACCESS_KEY_ID || loadCredential(profile, "aws-access-key");
       const hasSecret = process.env.AWS_SECRET_ACCESS_KEY || loadCredential(profile, "aws-secret-key");
       if (!hasAccess || !hasSecret) {
@@ -350,7 +382,13 @@ async function modelFullFlow(): Promise<ModelResult> {
 
     const modelOptions: PickerOption[] = [
       ...group.models,
-      { label: "Custom…", value: "__custom__", description: "enter model ID" },
+      {
+        label: "Custom…",
+        value: "__custom__",
+        description: isSubscriptionProvider(selectedProvider)
+          ? `model ID as accepted by ${SUBSCRIPTION_PROVIDERS[selectedProvider].binary}`
+          : "enter model ID",
+      },
     ];
     const selectedModel = await verticalPicker("Model", modelOptions);
     if (selectedModel === BACK || selectedModel === null) return null;

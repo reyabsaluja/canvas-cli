@@ -5,7 +5,13 @@ import { storeCredential, loadCredential } from "../config/credentials.js";
 import { getConfigDir } from "../config/paths.js";
 import { verticalPicker, BACK, C } from "./login-picker.js";
 import { promptLine, promptSecret, ESCAPED } from "./login-prompts.js";
-import { runBedrockSteps, runStandardProviderSteps, getCredentialKey } from "./login-providers.js";
+import {
+  runBedrockSteps,
+  runStandardProviderSteps,
+  runSubscriptionProviderSteps,
+  getCredentialKey,
+} from "./login-providers.js";
+import { isSubscriptionProvider } from "../ai/provider.js";
 
 interface LoginOptions {
   profile?: string;
@@ -183,14 +189,16 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
     } else if (step === Step.PROVIDER) {
       freshStep();
       console.log(`  ${C.whiteBold("3")} ${C.dim("·")} ${C.text("AI Provider")} ${C.dim("(optional)")}  ${ESC_HINT}`);
-      console.log(`  ${C.dim("Powers the 'ask' and 'work' commands.")}`);
+      console.log(`  ${C.dim("Powers chat, /quiz, /pdf and the other AI features.")}`);
       console.log(`  ${C.dim("Use ↑↓ to select, Enter to confirm, q/esc to go back.")}\n`);
 
       const result = await verticalPicker("Provider", [
-        { label: "OpenAI", value: "openai" },
-        { label: "Anthropic", value: "anthropic" },
-        { label: "Google (Gemini)", value: "google" },
-        { label: "AWS Bedrock", value: "bedrock" },
+        { label: "GitHub Copilot", value: "copilot", description: "your Copilot subscription, no API key" },
+        { label: "ChatGPT via Codex", value: "codex", description: "your ChatGPT plan, experimental" },
+        { label: "OpenAI", value: "openai", description: "API key" },
+        { label: "Anthropic", value: "anthropic", description: "API key" },
+        { label: "Google (Gemini)", value: "google", description: "API key" },
+        { label: "AWS Bedrock", value: "bedrock", description: "AWS credentials" },
         { label: "Skip", value: "" },
       ]);
 
@@ -224,6 +232,15 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
         awsSecretKey = bedrockResult.awsSecretKey;
         aiModel = bedrockResult.aiModel;
         aiEffort = bedrockResult.aiEffort;
+      } else if (isSubscriptionProvider(aiProvider)) {
+        const subResult = await runSubscriptionProviderSteps(aiProvider, freshStep);
+        if (subResult === ESCAPED) {
+          aiProvider = "";
+          step = Step.PROVIDER;
+          continue;
+        }
+        aiModel = subResult.aiModel;
+        aiEffort = subResult.aiEffort;
       } else {
         const stdResult = await runStandardProviderSteps(aiProvider, freshStep);
         if (stdResult === ESCAPED) {
@@ -282,7 +299,8 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
   console.log(`  ${C.dim("canvas")}    ${C.text(baseUrl)}`);
   if (finalProvider) {
     const modelStr = finalModel ? ` (${finalModel}${finalEffort ? `, ${finalEffort}` : ""})` : "";
-    console.log(`  ${C.dim("ai")}        ${C.text(finalProvider)}${modelStr}`);
+    const subTag = isSubscriptionProvider(finalProvider) ? C.dim(" · subscription") : "";
+    console.log(`  ${C.dim("ai")}        ${C.text(finalProvider)}${modelStr}${subTag}`);
   }
   console.log(`  ${C.dim("stored")}    ${C.muted(storageLabel)}`);
 
