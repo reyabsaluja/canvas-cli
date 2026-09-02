@@ -314,7 +314,15 @@ function charDisplayWidth(char: string): number {
     (code >= 0xff00 && code <= 0xff60) ||
     (code >= 0xffe0 && code <= 0xffe6) ||
     (code >= 0x2600 && code <= 0x26ff) ||
-    (code >= 0x1f000 && code <= 0x1faff)
+    (code >= 0x1f000 && code <= 0x1faff) ||
+    // Emoji-presentation symbols outside the blocks above (EAW = W)
+    code === 0x231a || code === 0x231b ||
+    (code >= 0x23e9 && code <= 0x23ec) || code === 0x23f0 || code === 0x23f3 ||
+    code === 0x25fd || code === 0x25fe ||
+    code === 0x2705 || code === 0x270a || code === 0x270b || code === 0x2728 ||
+    code === 0x274c || code === 0x274e || (code >= 0x2753 && code <= 0x2755) || code === 0x2757 ||
+    (code >= 0x2795 && code <= 0x2797) || code === 0x27b0 || code === 0x27bf ||
+    code === 0x2b1b || code === 0x2b1c || code === 0x2b50 || code === 0x2b55
   ) {
     return 2;
   }

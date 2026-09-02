@@ -5,7 +5,7 @@ import { readStoredConfig, writeStoredConfig, defaultStoredConfig } from "../con
 import { getActiveProfile } from "../config/env.js";
 import { loadCredential, storeCredential } from "../config/credentials.js";
 import type { AIEffortLevel } from "../ai/provider.js";
-import catalogJson from "../ai/models.json";
+import catalogJson from "../ai/models.json" with { type: "json" };
 
 const MODEL_CATALOG: Record<string, PickerOption[]> = Object.fromEntries(
   Object.entries(catalogJson).filter(([k]) => !k.startsWith("$") && !k.startsWith("_"))

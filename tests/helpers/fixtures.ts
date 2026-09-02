@@ -1,5 +1,12 @@
 import type { MockCourse, MockAssignment, MockModule, MockPage, MockFile, MockServerData } from "./mock-canvas-server.js";
 
+// All dates are relative to "now" so the fixtures never go stale: the two
+// CS courses are always in the current term and HIST303 is always finished.
+const DAY_MS = 24 * 60 * 60 * 1000;
+export function daysFromNow(days: number): string {
+  return new Date(Date.now() + days * DAY_MS).toISOString();
+}
+
 export const COURSES: MockCourse[] = [
   {
     id: 101,
@@ -7,9 +14,9 @@ export const COURSES: MockCourse[] = [
     course_code: "CS101",
     enrollment_term_id: 1,
     workflow_state: "available",
-    start_at: "2026-01-10T00:00:00Z",
-    end_at: "2026-05-30T00:00:00Z",
-    term: { id: 1, name: "Spring 2026", start_at: "2026-01-06T00:00:00Z", end_at: "2026-06-01T00:00:00Z" },
+    start_at: daysFromNow(-60),
+    end_at: daysFromNow(80),
+    term: { id: 1, name: "Spring 2026", start_at: daysFromNow(-64), end_at: daysFromNow(82) },
     enrollments: [{ enrollment_state: "active", type: "student" }],
   },
   {
@@ -18,9 +25,9 @@ export const COURSES: MockCourse[] = [
     course_code: "CS202",
     enrollment_term_id: 1,
     workflow_state: "available",
-    start_at: "2026-01-10T00:00:00Z",
-    end_at: "2026-05-30T00:00:00Z",
-    term: { id: 1, name: "Spring 2026", start_at: "2026-01-06T00:00:00Z", end_at: "2026-06-01T00:00:00Z" },
+    start_at: daysFromNow(-60),
+    end_at: daysFromNow(80),
+    term: { id: 1, name: "Spring 2026", start_at: daysFromNow(-64), end_at: daysFromNow(82) },
     enrollments: [{ enrollment_state: "active", type: "student" }],
   },
   {
@@ -29,9 +36,9 @@ export const COURSES: MockCourse[] = [
     course_code: "HIST303",
     enrollment_term_id: 0,
     workflow_state: "completed",
-    start_at: "2025-09-01T00:00:00Z",
-    end_at: "2025-12-15T00:00:00Z",
-    term: { id: 0, name: "Fall 2025", start_at: "2025-09-01T00:00:00Z", end_at: "2025-12-20T00:00:00Z" },
+    start_at: daysFromNow(-365),
+    end_at: daysFromNow(-260),
+    term: { id: 0, name: "Fall 2025", start_at: daysFromNow(-365), end_at: daysFromNow(-255) },
     enrollments: [{ enrollment_state: "completed", type: "student" }],
   },
 ];
@@ -40,7 +47,7 @@ export const CS101_ASSIGNMENTS: MockAssignment[] = [
   {
     id: 1001,
     name: "Lab 1: Hello World",
-    due_at: "2026-06-01T23:59:00Z",
+    due_at: daysFromNow(14),
     html_url: "https://canvas.example/courses/101/assignments/1001",
     course_id: 101,
     has_submitted_submissions: false,
@@ -60,7 +67,7 @@ export const CS101_ASSIGNMENTS: MockAssignment[] = [
   {
     id: 1002,
     name: "Lab 2: Variables and Types",
-    due_at: "2026-06-08T23:59:00Z",
+    due_at: daysFromNow(21),
     html_url: "https://canvas.example/courses/101/assignments/1002",
     course_id: 101,
     has_submitted_submissions: false,
@@ -80,7 +87,7 @@ export const CS101_ASSIGNMENTS: MockAssignment[] = [
   {
     id: 1003,
     name: "Midterm Exam",
-    due_at: "2026-03-15T14:00:00Z",
+    due_at: daysFromNow(-30),
     html_url: "https://canvas.example/courses/101/assignments/1003",
     course_id: 101,
     has_submitted_submissions: true,
@@ -89,7 +96,7 @@ export const CS101_ASSIGNMENTS: MockAssignment[] = [
     submission_types: ["online_quiz"],
     submission: {
       workflow_state: "graded",
-      submitted_at: "2026-03-15T13:55:00Z",
+      submitted_at: daysFromNow(-30),
       score: 87,
       grade: "87",
       attempt: 1,
@@ -103,7 +110,7 @@ export const CS202_ASSIGNMENTS: MockAssignment[] = [
   {
     id: 2001,
     name: "Problem Set 1: Linked Lists",
-    due_at: "2026-06-05T23:59:00Z",
+    due_at: daysFromNow(18),
     html_url: "https://canvas.example/courses/202/assignments/2001",
     course_id: 202,
     has_submitted_submissions: false,

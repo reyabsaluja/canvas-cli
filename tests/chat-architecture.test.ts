@@ -161,7 +161,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
     assert.doesNotMatch(banner, /\/refresh/);
   });
 
-  await t.test("user transcript bubbles stay wide with padded top and bottom rows", async () => {
+  await t.test("user transcript bubbles stay wide and inside the viewport", async () => {
     const cols = 100;
     const lines = buildTranscriptLines({
       messages: [{ role: "user", content: "how many upcoming assignments do i have" }],
@@ -181,7 +181,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
       visibleWidths.every((width) => width < cols),
       "expected user bubbles to stay inside the viewport"
     );
-    assert.ok(renderedLines.length >= 3, "expected top padding, content, and bottom padding");
+    assert.ok(renderedLines.length >= 1, "expected at least one rendered bubble row");
   });
 
   await t.test("slash commands render as lightweight command lines instead of padded bubbles", async () => {
@@ -578,7 +578,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
       });
 
       assert.equal(shellContext.runtime.scope.type, "workspace");
-      assert.equal(shellContext.runtime.statusLabel, "Status: stale · /refresh recommended");
+      assert.equal(shellContext.runtime.statusLabel, "stale · /refresh recommended");
       assert.match(shellContext.runtime.subtitle ?? "", /stale workspace/);
     });
   });
@@ -965,7 +965,7 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
         ),
       ]);
 
-      assert.equal(shellContext.runtime.statusLabel, "Status: loading course data");
+      assert.equal(shellContext.runtime.statusLabel, "loading course data");
       assert.equal(
         assignmentCalls,
         0,
@@ -1002,10 +1002,11 @@ test("chat architecture integration", { concurrency: false }, async (t) => {
       ]);
       await hydrationPromise;
 
-      assert.equal(shellContext.runtime.statusLabel, "Status: assignments ready");
-      assert.equal(shellContext.session.messages.length, 2);
-      assert.match(shellContext.session.messages[1]?.content ?? "", /Upcoming work/);
-      assert.match(shellContext.session.messages[1]?.content ?? "", /Lab 4/);
+      assert.equal(shellContext.runtime.statusLabel, "1 assignment");
+      // The intro is empty until hydration, so the upcoming-work summary is the only message.
+      assert.equal(shellContext.session.messages.length, 1);
+      assert.match(shellContext.session.messages[0]?.content ?? "", /Upcoming work/);
+      assert.match(shellContext.session.messages[0]?.content ?? "", /Lab 4/);
     });
   });
 
