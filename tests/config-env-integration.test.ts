@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 
 const tempDir = mkdtempSync(join(tmpdir(), "canvas-cli-env-test-"));
 process.env.XDG_CONFIG_HOME = tempDir;
+// Never touch the developer's real keychain from the test suite.
+process.env.CANVAS_CLI_CREDENTIAL_BACKEND = "file";
 
 // Save original env
 const originalEnv = { ...process.env };

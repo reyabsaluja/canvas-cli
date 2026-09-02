@@ -6,6 +6,7 @@ import type { CourseCache } from "../enrich/cache-loader.js";
 import type { ToolExecutionResult } from "../agent/observation.js";
 import type { InvestigationState } from "./types.js";
 import { extractFileText } from "../extract/extract-text.js";
+import { confineToDirectory, sanitizeFilename } from "../sanitize.js";
 
 /** Max text returned per document read. */
 const MAX_DOC_TEXT = 15000;
@@ -336,7 +337,10 @@ async function downloadModuleFile(
   // Save locally in the course cache
   const downloadDir = path.join(cache.coursePath, "attachments", "modules");
   await fs.mkdir(downloadDir, { recursive: true });
-  const localFilePath = path.join(downloadDir, fileMeta.display_name);
+  const localFilePath = confineToDirectory(
+    downloadDir,
+    sanitizeFilename(fileMeta.display_name)
+  );
   await fs.writeFile(localFilePath, buffer);
 
   // Extract text

@@ -42,7 +42,10 @@ interface RankedResource {
   matchedTokens: number;
 }
 
-type ResourceOpener = (resource: OpenableResource) => Promise<void>;
+type ResourceOpener = (
+  resource: OpenableResource,
+  options?: { allowedRoots?: string[] }
+) => Promise<void>;
 
 const OPEN_MISS_SUGGESTION_LIMIT = 5;
 const MIN_OPEN_MISS_SUGGESTION_SCORE = 90;
@@ -88,13 +91,16 @@ export async function handleOpenResourceQuery(
     };
   }
 
+  const allowedRoots = getAllowedOpenRoots(context);
+
   if (context.lastExportedPdfPath && isRecentExportQuery(trimmed)) {
     const recent = resources.find(
       (resource) => resource.target === context.lastExportedPdfPath
     );
     if (recent) {
       try {
-        await opener(recent);
+        assertOpenableTarget(recent, allowedRoots);
+        await opener(recent, { allowedRoots });
         return {
           status: "opened",
           resource: recent,
@@ -163,7 +169,8 @@ export async function handleOpenResourceQuery(
   }
 
   try {
-    await opener(resource);
+    assertOpenableTarget(resource, allowedRoots);
+    await opener(resource, { allowedRoots });
   } catch (error) {
     return {
       status: "missing",
@@ -591,9 +598,70 @@ export function resolveOpenableResource(
   return { status: "unique", resource: top.resource };
 }
 
+/**
+ * Directories from which local files may be opened for this context: the
+ * workspace, the course cache, and the export directories.
+ */
+export function getAllowedOpenRoots(context: OpenResourceContext): string[] {
+  const roots = new Set<string>();
+  if (context.loaded?.path) roots.add(path.resolve(context.loaded.path));
+  if (context.cache?.coursePath) roots.add(path.resolve(context.cache.coursePath));
+  for (const dir of getExportDirectories(context)) roots.add(path.resolve(dir));
+  if (context.lastExportedPdfPath) {
+    roots.add(path.dirname(path.resolve(context.lastExportedPdfPath)));
+  }
+  return Array.from(roots);
+}
+
+/**
+ * Reject targets the agent must never hand to the OS opener: only http(s)
+ * URLs, and only absolute file paths that resolve under an allowed root.
+ * Throws with a user-facing message otherwise.
+ */
+export function assertOpenableTarget(
+  resource: OpenableResource,
+  allowedRoots?: string[]
+): void {
+  if (resource.targetType === "url") {
+    let parsed: URL;
+    try {
+      parsed = new URL(resource.target);
+    } catch {
+      throw new Error(`Refusing to open malformed URL: ${resource.target}`);
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error(
+        `Refusing to open non-http(s) URL (${parsed.protocol.replace(/:$/, "")}): ${resource.target}`
+      );
+    }
+    return;
+  }
+
+  const target = resource.target;
+  if (!path.isAbsolute(target) || /^[a-z][a-z0-9+.-]*:/i.test(target)) {
+    throw new Error(`Refusing to open non-local target: ${target}`);
+  }
+  const resolved = path.resolve(target);
+  const roots = allowedRoots ?? [];
+  if (roots.length === 0) {
+    throw new Error(`Refusing to open ${target}: no allowed directories in this context`);
+  }
+  const inside = roots.some((root) => {
+    const base = path.resolve(root);
+    return resolved === base || resolved.startsWith(base + path.sep);
+  });
+  if (!inside) {
+    throw new Error(
+      `Refusing to open ${target}: it is outside the workspace, cache, and export directories`
+    );
+  }
+}
+
 export async function openResourceTarget(
-  resource: OpenableResource
+  resource: OpenableResource,
+  options?: { allowedRoots?: string[] }
 ): Promise<void> {
+  assertOpenableTarget(resource, options?.allowedRoots);
   const { command, args } = getOpenCommand(resource.target);
   await new Promise<void>((resolve, reject) => {
     const child = spawn(command, args, {

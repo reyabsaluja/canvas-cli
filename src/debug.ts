@@ -52,6 +52,7 @@ const SENSITIVE_URL_PARAM_PATTERNS = [
   /secret/i,
   /password/i,
   /credential/i,
+  /verifier/i,
 ];
 
 function isSensitiveParam(key: string): boolean {

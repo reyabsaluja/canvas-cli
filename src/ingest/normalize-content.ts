@@ -9,6 +9,7 @@ import type {
   DiscussionIndexEntry,
 } from "./types.js";
 import { extractLinkedFiles } from "../workspace/attachments.js";
+import { stripControlChars } from "../sanitize.js";
 
 /**
  * Normalize raw Canvas API responses into ingestion index types.
@@ -24,8 +25,8 @@ export function normalizeCourseContent(raw: RawCourseContent): {
 } {
   const courseMeta: CourseMetadata = {
     id: raw.courseDetail.id,
-    name: raw.courseDetail.name ?? "",
-    courseCode: raw.courseDetail.course_code ?? "",
+    name: stripControlChars(raw.courseDetail.name ?? ""),
+    courseCode: stripControlChars(raw.courseDetail.course_code ?? ""),
     termName: raw.courseDetail.term?.name ?? null,
     startAt: raw.courseDetail.start_at,
     endAt: raw.courseDetail.end_at,
@@ -42,7 +43,7 @@ export function normalizeCourseContent(raw: RawCourseContent): {
       : 0;
     return {
       id: a.id,
-      name: a.name,
+      name: stripControlChars(a.name),
       dueAt: a.due_at,
       unlockAt: raw_any.unlock_at ?? null,
       lockAt: raw_any.lock_at ?? null,
@@ -57,12 +58,12 @@ export function normalizeCourseContent(raw: RawCourseContent): {
 
   const modules: ModuleIndexEntry[] = raw.modules.map((m) => ({
     id: m.id,
-    name: m.name,
+    name: stripControlChars(m.name),
     position: m.position,
     itemCount: m.items.length,
     items: m.items.map((item) => ({
       id: item.id,
-      title: item.title,
+      title: stripControlChars(item.title),
       type: item.type,
       position: item.position,
       contentId: item.content_id ?? null,
@@ -74,8 +75,8 @@ export function normalizeCourseContent(raw: RawCourseContent): {
 
   const files: FileIndexEntry[] = raw.files.map((f) => ({
     id: f.id,
-    displayName: f.display_name,
-    filename: f.filename,
+    displayName: stripControlChars(f.display_name),
+    filename: stripControlChars(f.filename),
     contentType: f.content_type,
     size: f.size,
     url: f.url,
@@ -87,7 +88,7 @@ export function normalizeCourseContent(raw: RawCourseContent): {
   for (const page of raw.pages) {
     pagesById.set(page.url, {
       pageId: page.url,
-      title: page.title,
+      title: stripControlChars(page.title),
       htmlUrl: page.html_url,
       updatedAt: page.updated_at,
       hasBody: !!page.body,
@@ -99,7 +100,7 @@ export function normalizeCourseContent(raw: RawCourseContent): {
     const existing = pagesById.get(fetchedPage.slug);
     pagesById.set(fetchedPage.slug, {
       pageId: fetchedPage.slug,
-      title: existing?.title ?? fetchedPage.title,
+      title: existing?.title ?? stripControlChars(fetchedPage.title),
       htmlUrl:
         existing?.htmlUrl ??
         (courseHtmlUrl
@@ -115,7 +116,7 @@ export function normalizeCourseContent(raw: RawCourseContent): {
   const announcements: AnnouncementIndexEntry[] = raw.announcements.map(
     (announcement) => ({
       id: announcement.id,
-      title: announcement.title,
+      title: stripControlChars(announcement.title),
       postedAt: announcement.posted_at,
       htmlUrl: announcement.html_url,
       userName: announcement.user_name,
@@ -143,7 +144,7 @@ export function normalizeCourseContent(raw: RawCourseContent): {
 
     return {
       id: topic.id,
-      title: topic.title,
+      title: stripControlChars(topic.title),
       postedAt: topic.posted_at,
       lastReplyAt: topic.last_reply_at,
       htmlUrl: topic.html_url,

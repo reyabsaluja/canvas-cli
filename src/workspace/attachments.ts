@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Config } from "../config/env.js";
-import { sanitizeFilename, confineToDirectory } from "../sanitize.js";
+import { sanitizeFilename, confineToDirectory, isSameCanvasOrigin } from "../sanitize.js";
+import { fetchCanvasFile, readBodyWithLimit } from "../canvas/safe-download.js";
 
 export interface LinkedFile {
   title: string;
@@ -122,18 +123,22 @@ export async function downloadAttachments(
       // File doesn't exist, proceed with download
     }
 
+    // Only Canvas-hosted files are fetched; the bearer token must never be
+    // sent to a third-party host embedded in course HTML.
+    if (!isSameCanvasOrigin(file.downloadUrl, config.baseUrl)) {
+      failed.push(file.title);
+      continue;
+    }
+
     try {
-      const response = await fetch(file.downloadUrl, {
-        headers: { Authorization: `Bearer ${config.accessToken}` },
-        redirect: "follow",
-      });
+      const response = await fetchCanvasFile(file.downloadUrl, config);
 
       if (!response.ok) {
         failed.push(file.title);
         continue;
       }
 
-      const buffer = Buffer.from(await response.arrayBuffer());
+      const buffer = await readBodyWithLimit(response);
       await fs.writeFile(filePath, buffer);
       downloaded.push(file.title);
     } catch {

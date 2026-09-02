@@ -10,12 +10,13 @@ import type {
   Course,
 } from "./models.js";
 import { isCourseRelevant } from "./course-relevance.js";
+import { stripControlChars } from "../sanitize.js";
 
 export function normalizeCourse(raw: CanvasCourse): Course {
   return {
     id: raw.id,
-    name: raw.name ?? "",
-    courseCode: raw.course_code ?? "",
+    name: stripControlChars(raw.name ?? ""),
+    courseCode: stripControlChars(raw.course_code ?? ""),
     termName: raw.term?.name ?? null,
     publicDescription: raw.public_description?.trim() || null,
     isCurrent: isCourseRelevant(raw),
@@ -42,7 +43,7 @@ export function normalizeAssignment(
 ): Assignment {
   return {
     id: raw.id,
-    name: raw.name,
+    name: stripControlChars(raw.name),
     courseId: raw.course_id,
     courseName,
     dueAt: raw.due_at ? new Date(raw.due_at) : null,
@@ -75,8 +76,8 @@ export function normalizeAssignmentDetail(
     missing: raw.submission?.missing ?? false,
     attachments: (raw.attachments ?? []).map((a) => ({
       id: a.id,
-      displayName: a.display_name,
-      filename: a.filename,
+      displayName: stripControlChars(a.display_name),
+      filename: stripControlChars(a.filename),
       url: a.url,
       contentType: a.content_type,
       size: a.size,

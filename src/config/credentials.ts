@@ -1,9 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, mkdirSync, unlinkSync, existsSync, openSync, writeSync, closeSync, constants as fsConstants } from "node:fs";
+import { readFileSync, mkdirSync, unlinkSync, existsSync, openSync, writeSync, closeSync, chmodSync, constants as fsConstants } from "node:fs";
 import { join } from "node:path";
 import { platform } from "node:os";
 import { getConfigDir, validateProfileName } from "./paths.js";
-import { debug, warn } from "../debug.js";
+import { debug } from "../debug.js";
 
 const SERVICE_NAME = "canvas-cli";
 
@@ -16,7 +16,10 @@ export const ALL_CREDENTIAL_KEYS = [
   "aws-secret-key",
 ] as const;
 
+export type StorageBackend = "keychain" | "file";
+
 const cache = new Map<string, string | null>();
+const backendCache = new Map<string, StorageBackend | null>();
 
 function cacheKey(profile: string, key: string): string {
   return `${profile}\0${key}`;
@@ -30,15 +33,38 @@ function keychainAccount(profile: string, key: string): string {
   return `${profile}/${key}`;
 }
 
+/**
+ * Whether the OS keychain should be used. Only macOS has a supported secret
+ * store; `CANVAS_CLI_CREDENTIAL_BACKEND=file` forces the plaintext-file
+ * backend everywhere (used by tests and by users who prefer not to touch the
+ * keychain).
+ */
+export function keychainAvailable(): boolean {
+  if (process.env.CANVAS_CLI_CREDENTIAL_BACKEND === "file") return false;
+  return platform() === "darwin";
+}
+
 function writeCredentialFile(profile: string, key: string, value: string): void {
   const dir = join(getConfigDir(), "credentials");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const fd = openSync(credentialFilePath(profile, key), fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC, 0o600);
+  const filePath = credentialFilePath(profile, key);
+  const fd = openSync(filePath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC, 0o600);
   writeSync(fd, value);
   closeSync(fd);
+  // O_CREAT mode only applies to newly created files; tighten pre-existing ones too.
+  try {
+    chmodSync(filePath, 0o600);
+  } catch {}
 }
 
-export type StorageBackend = "keychain" | "file";
+function removeCredentialFile(profile: string, key: string): boolean {
+  const filePath = credentialFilePath(profile, key);
+  if (existsSync(filePath)) {
+    unlinkSync(filePath);
+    return true;
+  }
+  return false;
+}
 
 // macOS `security add-generic-password -w` requires the secret as a CLI arg,
 // making it momentarily visible in `ps`. This is a known limitation of the
@@ -49,7 +75,8 @@ export function storeCredential(profile: string, key: string, value: string): St
   if (value.includes("\0")) {
     throw new Error(`Credential value for "${key}" contains a null byte`);
   }
-  if (platform() === "darwin") {
+  const ck = cacheKey(profile, key);
+  if (keychainAvailable()) {
     try {
       const account = keychainAccount(profile, key);
       try {
@@ -68,12 +95,16 @@ export function storeCredential(profile: string, key: string, value: string): St
         }
       }
       debug("config", `Stored credential in keychain: ${key} (profile: ${profile})`);
-      cache.set(cacheKey(profile, key), value);
+      cache.set(ck, value);
+      backendCache.set(ck, "keychain");
+      // The keychain is the single source of truth: remove any stale plaintext
+      // copy left behind by an earlier file-backend write so the "stored in
+      // macOS Keychain" claim is accurate.
       try {
-        writeCredentialFile(profile, key, value);
-      } catch (err) {
-        warn("config", `Failed to write credential backup file: ${err instanceof Error ? err.message : err}`);
-      }
+        if (removeCredentialFile(profile, key)) {
+          debug("config", `Removed stale plaintext credential file for ${key}`);
+        }
+      } catch {}
       return "keychain";
     } catch {
       debug("config", "Keychain storage failed, falling back to file");
@@ -83,7 +114,8 @@ export function storeCredential(profile: string, key: string, value: string): St
   // Fallback: plaintext file with 0600 permissions. On non-macOS systems there
   // is no OS-level secret store; a compromised user session can read these.
   writeCredentialFile(profile, key, value);
-  cache.set(cacheKey(profile, key), value);
+  cache.set(ck, value);
+  backendCache.set(ck, "file");
   debug("config", `Stored credential in file: ${credentialFilePath(profile, key)}`);
   return "file";
 }
@@ -96,8 +128,9 @@ export function loadCredential(profile: string, key: string): string | null {
   }
 
   let value: string | null = null;
+  let backend: StorageBackend | null = null;
 
-  if (platform() === "darwin") {
+  if (keychainAvailable()) {
     try {
       const result = execFileSync(
         "security",
@@ -108,15 +141,7 @@ export function loadCredential(profile: string, key: string): string | null {
       if (trimmed) {
         debug("config", `Loaded credential from keychain: ${key} (profile: ${profile})`);
         value = trimmed;
-        // Side-effect: lazily create a file backup so the app works if keychain becomes unavailable
-        if (!existsSync(credentialFilePath(profile, key))) {
-          try {
-            writeCredentialFile(profile, key, trimmed);
-            debug("config", `Created file backup for keychain credential: ${key}`);
-          } catch (err) {
-            debug("config", `Failed to write credential backup file: ${err instanceof Error ? err.message : err}`);
-          }
-        }
+        backend = "keychain";
       }
     } catch {
       // Not found in keychain, try file fallback
@@ -127,6 +152,7 @@ export function loadCredential(profile: string, key: string): string | null {
     const filePath = credentialFilePath(profile, key);
     try {
       value = readFileSync(filePath, "utf-8").trim();
+      backend = "file";
       debug("config", `Loaded credential from file: ${key} (profile: ${profile})`);
     } catch {
       value = null;
@@ -134,27 +160,39 @@ export function loadCredential(profile: string, key: string): string | null {
   }
 
   cache.set(ck, value);
+  backendCache.set(ck, value ? backend : null);
   return value;
+}
+
+/**
+ * Report where a credential is actually stored, or null when it is absent.
+ * Use this (not the platform) when telling the user how their secret is kept.
+ */
+export function getCredentialBackend(profile: string, key: string): StorageBackend | null {
+  const ck = cacheKey(profile, key);
+  if (!backendCache.has(ck)) {
+    loadCredential(profile, key);
+  }
+  return backendCache.get(ck) ?? null;
 }
 
 export function deleteCredential(profile: string, key: string): boolean {
   validateProfileName(profile);
   let deleted = false;
 
-  if (platform() === "darwin") {
+  if (keychainAvailable()) {
     try {
       execFileSync("security", ["delete-generic-password", "-s", SERVICE_NAME, "-a", keychainAccount(profile, key)], { stdio: "ignore" });
       deleted = true;
     } catch {}
   }
 
-  const filePath = credentialFilePath(profile, key);
-  if (existsSync(filePath)) {
-    unlinkSync(filePath);
+  if (removeCredentialFile(profile, key)) {
     deleted = true;
   }
 
   cache.delete(cacheKey(profile, key));
+  backendCache.delete(cacheKey(profile, key));
 
   if (deleted) {
     debug("config", `Deleted credential: ${key} (profile: ${profile})`);
@@ -170,4 +208,5 @@ export function deleteAllCredentials(profile: string): void {
 
 export function clearCredentialCache(): void {
   cache.clear();
+  backendCache.clear();
 }

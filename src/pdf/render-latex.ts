@@ -317,12 +317,15 @@ export async function compileLatex(
         await execFileAsync(compiler, [
           "-interaction=nonstopmode",
           "-halt-on-error",
+          "-no-shell-escape",
           `-output-directory=${dir}`,
           texPath,
         ], {
           cwd: dir,
           timeout: 30_000,
           signal: options?.signal,
+          // Model-generated LaTeX must not read arbitrary files or run shell commands.
+          env: { ...process.env, openin_any: "p" },
         });
       }
     }
