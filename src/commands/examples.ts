@@ -20,7 +20,13 @@ Managing Multiple Accounts:
   $ canvas-cli status --profile work   Check work account status
   $ export CANVAS_CLI_PROFILE=work     Switch active profile
 
+Cleaning Up:
+  $ canvas-cli clean        Remove cached courses, sessions, and chat history
+  $ canvas-cli clean --all  Also remove stored credentials and config
+  $ canvas-cli clean -y     Skip the confirmation prompt
+
 Debugging:
   $ canvas-cli --debug ingest CS101  Show verbose debug output
-  $ canvas-cli status                Check if credentials are valid`);
+  $ canvas-cli status                Check if credentials are valid
+  $ canvas-cli --version             Print the installed version`);
 }
