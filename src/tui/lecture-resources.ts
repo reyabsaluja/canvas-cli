@@ -289,7 +289,7 @@ export async function handleLectureQuery(
   }
 
   try {
-    await opener(resolved.resource);
+    await opener(resolved.resource, { allowedRoots: [cache.coursePath] });
   } catch (error) {
     return {
       status: "missing",

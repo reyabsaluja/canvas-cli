@@ -10,6 +10,7 @@ import {
 } from "../errors.js";
 import { debug, debugApiRequest, debugApiResponse, maskUrl } from "../debug.js";
 import { fetchWithRetry, type RetryOptions, RateLimitThrottle } from "./retry.js";
+import { isSameCanvasOrigin } from "../sanitize.js";
 import type {
   CanvasAssignment,
   CanvasAssignmentDetail,
@@ -80,6 +81,11 @@ export class CanvasClient {
       results.push(...data);
 
       nextUrl = this.parseNextLink(response.headers.get("link"));
+      if (nextUrl && !isSameCanvasOrigin(nextUrl, this.baseUrl)) {
+        // Never follow pagination (and send the bearer token) off the Canvas origin.
+        debug("api", `Stopping pagination: next link is off-origin: ${maskUrl(nextUrl)}`);
+        nextUrl = null;
+      }
     }
 
     return results;

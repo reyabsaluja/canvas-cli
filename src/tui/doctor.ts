@@ -366,8 +366,10 @@ export async function runDoctor(): Promise<string> {
       results.push({
         label: "Canvas token",
         status: "fail",
-        detail: "No token found in credential store or CANVAS_ACCESS_TOKEN env var",
-        fix: "Run `canvas-cli login` to set up your access token, or set CANVAS_ACCESS_TOKEN in your environment.",
+        detail: raw.credentialError?.message ?? "No token found in credential store or CANVAS_ACCESS_TOKEN env var",
+        fix:
+          (raw.credentialError as { recoveryHint?: string | null } | undefined)?.recoveryHint ??
+          "Run `canvas-cli login` to set up your access token, or set CANVAS_ACCESS_TOKEN in your environment.",
       });
     } else {
       const tokenSource = process.env.CANVAS_ACCESS_TOKEN ? " (from env)" : "";

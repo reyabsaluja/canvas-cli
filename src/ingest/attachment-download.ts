@@ -3,8 +3,16 @@ import path from "node:path";
 import type { Config } from "../config/env.js";
 import type { DownloadedAttachmentEntry } from "./types.js";
 import type { SelectedAttachment } from "./attachment-selection.js";
-import { sanitizeFilename, sanitizeSubfolder, confineToDirectory } from "../sanitize.js";
+import {
+  sanitizeFilename,
+  sanitizeSubfolder,
+  confineToDirectory,
+  isSameCanvasOrigin,
+  stripQueryParam,
+} from "../sanitize.js";
 import { isAbortError } from "../errors.js";
+import { fetchCanvasFile, readBodyWithLimit } from "../canvas/safe-download.js";
+import { debug, maskUrl } from "../debug.js";
 
 /**
  * Download selected attachments into the course attachments directory.
@@ -41,84 +49,61 @@ export async function downloadSelectedAttachments(
     await fs.mkdir(subDir, { recursive: true });
 
     const filePath = confineToDirectory(subDir, safeFilename);
-    const localPath = path.relative(
-      path.dirname(attachmentsDir),
-      filePath
-    );
+    // One-time `verifier` tokens are only needed for the fetch itself; do not
+    // persist them in attachments.json.
+    const persistedDownloadUrl = stripQueryParam(attachment.downloadUrl, "verifier");
+    const makeEntry = (
+      status: DownloadedAttachmentEntry["status"],
+      size: number | null
+    ): DownloadedAttachmentEntry => ({
+      sourceType: attachment.sourceType,
+      canvasFileId: attachment.fileId,
+      originalFilename: attachment.filename,
+      localPath: `attachments/${safeSubfolder}/${safeFilename}`,
+      contentType: attachment.contentType,
+      size,
+      downloadUrl: persistedDownloadUrl,
+      reason: attachment.reason,
+      status,
+    });
 
     // Skip if already downloaded
     if (await fileExists(filePath)) {
-      results.push({
-        sourceType: attachment.sourceType,
-        canvasFileId: attachment.fileId,
-        originalFilename: attachment.filename,
-        localPath: `attachments/${safeSubfolder}/${safeFilename}`,
-        contentType: attachment.contentType,
-        size: attachment.size,
-        downloadUrl: attachment.downloadUrl,
-        reason: attachment.reason,
-        status: "skipped",
-      });
+      results.push(makeEntry("skipped", attachment.size));
+      onProgress?.(results.length, total);
+      continue;
+    }
+
+    // Never send the Canvas bearer token to a host other than the Canvas origin.
+    if (!isSameCanvasOrigin(attachment.downloadUrl, config.baseUrl)) {
+      debug("api", `Skipping off-origin attachment: ${maskUrl(attachment.downloadUrl)}`);
+      results.push(makeEntry("failed", attachment.size));
       onProgress?.(results.length, total);
       continue;
     }
 
     const tmpPath = filePath + ".tmp";
     try {
-      const response = await fetch(attachment.downloadUrl, {
-        headers: { Authorization: `Bearer ${config.accessToken}` },
-        redirect: "follow",
-        signal: signal ?? undefined,
-      });
+      const response = await fetchCanvasFile(attachment.downloadUrl, config, { signal });
 
       if (!response.ok) {
-        results.push({
-          sourceType: attachment.sourceType,
-          canvasFileId: attachment.fileId,
-          originalFilename: attachment.filename,
-          localPath: `attachments/${safeSubfolder}/${safeFilename}`,
-          contentType: attachment.contentType,
-          size: attachment.size,
-          downloadUrl: attachment.downloadUrl,
-          reason: attachment.reason,
-          status: "failed",
-        });
+        results.push(makeEntry("failed", attachment.size));
         onProgress?.(results.length, total);
         continue;
       }
 
-      const buffer = Buffer.from(await response.arrayBuffer());
+      const buffer = await readBodyWithLimit(response, undefined, { signal });
       await fs.writeFile(tmpPath, buffer);
       await fs.rename(tmpPath, filePath);
 
-      results.push({
-        sourceType: attachment.sourceType,
-        canvasFileId: attachment.fileId,
-        originalFilename: attachment.filename,
-        localPath: `attachments/${safeSubfolder}/${safeFilename}`,
-        contentType: attachment.contentType,
-        size: buffer.length,
-        downloadUrl: attachment.downloadUrl,
-        reason: attachment.reason,
-        status: "downloaded",
-      });
+      results.push(makeEntry("downloaded", buffer.length));
       onProgress?.(results.length, total);
     } catch (err) {
       await fs.rm(tmpPath, { force: true }).catch(() => {});
       if (isAbortError(err)) {
         throw err;
       }
-      results.push({
-        sourceType: attachment.sourceType,
-        canvasFileId: attachment.fileId,
-        originalFilename: attachment.filename,
-        localPath: `attachments/${safeSubfolder}/${safeFilename}`,
-        contentType: attachment.contentType,
-        size: attachment.size,
-        downloadUrl: attachment.downloadUrl,
-        reason: attachment.reason,
-        status: "failed",
-      });
+      results.push(makeEntry("failed", attachment.size));
       onProgress?.(results.length, total);
     }
   }

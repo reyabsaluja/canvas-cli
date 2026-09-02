@@ -1,4 +1,4 @@
-import { readFileSync, mkdirSync, unlinkSync, existsSync, readdirSync, openSync, writeSync, closeSync, constants as fsConstants } from "node:fs";
+import { readFileSync, mkdirSync, unlinkSync, existsSync, readdirSync, openSync, writeSync, closeSync, chmodSync, constants as fsConstants } from "node:fs";
 import { dirname } from "node:path";
 import { getConfigDir, getConfigFilePath, validateProfileName } from "./paths.js";
 import { debug } from "../debug.js";
@@ -35,6 +35,10 @@ export function writeStoredConfig(config: StoredConfig, profile: string = "defau
   const fd = openSync(filePath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC, 0o600);
   writeSync(fd, JSON.stringify(config, null, 2) + "\n");
   closeSync(fd);
+  // O_CREAT mode only applies to new files; tighten pre-existing looser files too.
+  try {
+    chmodSync(filePath, 0o600);
+  } catch {}
   debug("config", `Wrote config to ${filePath}`);
 }
 

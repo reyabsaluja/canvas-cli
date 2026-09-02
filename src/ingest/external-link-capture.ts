@@ -16,6 +16,7 @@ const pdfParse: (buffer: Buffer) => Promise<{ text: string }> = require("pdf-par
 const EXTERNAL_LINK_CAPTURE_CONCURRENCY = 4;
 const MAX_REDIRECTS = 6;
 const MAX_CAPTURED_TEXT = 30000;
+const EXTERNAL_FETCH_TIMEOUT_MS = 30_000;
 
 interface ExternalLinkCandidate {
   url: string;
@@ -394,6 +395,7 @@ async function fetchGoogleDocumentExport(
   try {
     const response = await fetch(exportUrl, {
       redirect: "follow",
+      signal: AbortSignal.timeout(EXTERNAL_FETCH_TIMEOUT_MS),
     });
     if (!response.ok) {
       return null;
@@ -450,6 +452,7 @@ async function fetchWithControlledRedirects(
     const response = await fetch(currentUrl, {
       headers,
       redirect: "manual",
+      signal: AbortSignal.timeout(EXTERNAL_FETCH_TIMEOUT_MS),
     });
     const redirectLocation = response.headers.get("location");
 

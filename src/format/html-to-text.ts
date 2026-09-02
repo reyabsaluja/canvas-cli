@@ -1,3 +1,5 @@
+import { stripControlChars } from "../sanitize.js";
+
 /**
  * Structure-aware HTML-to-text converter for ingested Canvas content.
  * Preserves the information retrieval cares about most: headings, numbered
@@ -325,7 +327,7 @@ function htmlFragmentToSingleLineText(
 }
 
 function normalizeOutput(text: string): string {
-  return text
+  return stripControlChars(text)
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n[ \t]+/g, "\n")
     .replace(/\n{3,}/g, "\n\n")

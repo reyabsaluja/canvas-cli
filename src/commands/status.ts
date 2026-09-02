@@ -1,7 +1,6 @@
-import { platform } from "node:os";
 import { getActiveProfile } from "../config/env.js";
 import { readStoredConfig, listProfiles } from "../config/store.js";
-import { loadCredential } from "../config/credentials.js";
+import { loadCredential, getCredentialBackend } from "../config/credentials.js";
 import { getConfigDir } from "../config/paths.js";
 import { C } from "./login-picker.js";
 
@@ -35,7 +34,14 @@ export function statusCommand(options: StatusOptions = {}): void {
   }
 
   console.log(`  ${label("Config Dir")}${C.dim(getConfigDir())}`);
-  const credBackend = platform() === "darwin" ? "macOS Keychain" : "file-based (plaintext, 0600)";
+  const backend = getCredentialBackend(profile, "canvas-token");
+  const credBackend = process.env.CANVAS_ACCESS_TOKEN
+    ? "environment (CANVAS_ACCESS_TOKEN)"
+    : backend === "keychain"
+      ? "macOS Keychain"
+      : backend === "file"
+        ? "file-based (plaintext, 0600)"
+        : "not stored";
   console.log(`  ${label("Credentials")}${C.dim(credBackend)}`);
 
   const profiles = listProfiles();

@@ -98,6 +98,65 @@ export function confineToDirectory(baseDir: string, untrustedPath: string): stri
 }
 
 /**
+ * True when `url` (absolute, or relative to `baseUrl`) has the same origin as
+ * the configured Canvas base URL. Used to decide whether the Canvas bearer
+ * token may be attached to a request. Returns false for unparseable input.
+ */
+export function isSameCanvasOrigin(url: string, baseUrl: string): boolean {
+  const resolved = resolveCanvasUrl(url, baseUrl);
+  if (!resolved) return false;
+  try {
+    return resolved.origin === new URL(baseUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve `url` against the Canvas base URL. Returns null when the result is
+ * not parseable or not http(s).
+ */
+export function resolveCanvasUrl(url: string, baseUrl: string): URL | null {
+  try {
+    const resolved = new URL(url, baseUrl);
+    if (resolved.protocol !== "http:" && resolved.protocol !== "https:") return null;
+    return resolved;
+  } catch {
+    return null;
+  }
+}
+
+/** Remove a single query parameter (e.g. a one-time `verifier`) from a URL string. */
+export function stripQueryParam(url: string, param: string): string {
+  try {
+    const parsed = new URL(url);
+    if (!parsed.searchParams.has(param)) return url;
+    parsed.searchParams.delete(param);
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+// ESC-initiated sequences: CSI (ESC [ ... final), OSC (ESC ] ... BEL|ST), and
+// two-byte ESC sequences. A trailing lone ESC is removed by the control-char pass.
+const ESC_SEQUENCE_PATTERN =
+  /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[@-Z\\-_])/g;
+// C0 controls except \t \n \r, plus DEL and C1 controls.
+const CONTROL_CHAR_PATTERN = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g;
+const HAS_CONTROL_CHAR = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/;
+
+/**
+ * Strip terminal control characters and escape sequences from untrusted text
+ * before it reaches stdout or persisted models. Keeps \t \n \r and all other
+ * unicode intact.
+ */
+export function stripControlChars(text: string): string {
+  if (!text || !HAS_CONTROL_CHAR.test(text)) return text;
+  return text.replace(ESC_SEQUENCE_PATTERN, "").replace(CONTROL_CHAR_PATTERN, "");
+}
+
+/**
  * Generate a filesystem-safe slug from arbitrary text.
  * Handles empty strings, all-special-char inputs, and Unicode.
  */

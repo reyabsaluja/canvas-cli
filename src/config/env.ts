@@ -33,7 +33,17 @@ export function resolveRawConfig(): ResolvedRawConfig {
   } catch (err) {
     credentialError = err instanceof Error ? err : new Error(String(err));
   }
-  const accessToken = envToken || storedToken || undefined;
+  let accessToken = envToken || storedToken || undefined;
+  if (envBaseUrl && !envToken && storedToken) {
+    // A CANVAS_BASE_URL from the environment (e.g. a .env in the cwd) must never
+    // be paired with the stored token: that would let any directory redirect the
+    // real credential to an attacker-controlled host.
+    accessToken = undefined;
+    credentialError = new ConfigError(
+      "CANVAS_BASE_URL is set in the environment, but the access token would come from the stored credential store.",
+      "Set CANVAS_ACCESS_TOKEN alongside CANVAS_BASE_URL, or unset CANVAS_BASE_URL (check for a .env file in the current directory) to use the stored login."
+    );
+  }
   const urlSource: ResolvedRawConfig["urlSource"] = envBaseUrl ? "env" : stored?.canvasBaseUrl ? "stored" : "none";
   return { baseUrl, accessToken, urlSource, profile, credentialError };
 }
@@ -69,6 +79,9 @@ export function loadConfig(): Config {
   }
 
   if (!accessToken) {
+    if (raw.credentialError instanceof ConfigError) {
+      throw raw.credentialError;
+    }
     if (raw.credentialError) {
       throw new ConfigError(
         `Failed to load credentials: ${raw.credentialError.message}`,

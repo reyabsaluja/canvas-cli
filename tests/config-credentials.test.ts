@@ -8,11 +8,15 @@ import { tmpdir, platform } from "node:os";
 // Set XDG_CONFIG_HOME to temp dir for file-based fallback testing
 const tempDir = mkdtempSync(join(tmpdir(), "canvas-cli-cred-test-"));
 process.env.XDG_CONFIG_HOME = tempDir;
+// Never touch the developer's real keychain from the test suite.
+process.env.CANVAS_CLI_CREDENTIAL_BACKEND = "file";
 
 const { storeCredential, loadCredential, deleteCredential, deleteAllCredentials } = await import("../src/config/credentials.js");
 const { getConfigDir } = await import("../src/config/paths.js");
 
 function keychainAvailable(): boolean {
+  // Opt-in only: set CANVAS_CLI_TEST_KEYCHAIN=1 to exercise the real keychain locally.
+  if (process.env.CANVAS_CLI_TEST_KEYCHAIN !== "1") return false;
   if (platform() !== "darwin") return false;
   if (process.env.CI) return false;
   try {

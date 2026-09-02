@@ -119,13 +119,12 @@ function paginatedResponse(
 }
 
 export function createMockCanvasServer(data: MockServerData): http.Server {
-  let baseApiUrl = "";
-
   const server = http.createServer((req, res) => {
-    if (!baseApiUrl) {
-      const port = (server.address() as { port: number })?.port ?? 0;
-      baseApiUrl = `http://localhost:${port}/api/v1`;
-    }
+    // Mirror the client's origin (Host header) in Link headers, like real Canvas
+    // does; the client refuses to follow pagination links to a different origin.
+    const port = (server.address() as { port: number })?.port ?? 0;
+    const host = req.headers.host || `localhost:${port}`;
+    const baseApiUrl = `http://${host}/api/v1`;
 
     const url = new URL(req.url ?? "/", `http://localhost`);
     const path = url.pathname.replace(/^\/api\/v1/, "");

@@ -14,6 +14,7 @@ const pdfParse: (buffer: Buffer) => Promise<{ text: string }> = require("pdf-par
 const MAX_TEXT = 30000;
 const MAX_ZIP_TEXT = 50000; // Higher limit for zips since they contain multiple files
 const MAX_ZIP_FILE_TEXT = 30000; // Per-file limit inside zips
+const MAX_ZIP_ENTRY_BYTES = 100 * 1024 * 1024; // Per-entry inflated size cap when unpacking
 
 const TEXTUAL_ZIP_EXTENSIONS = new Set([
   ".txt", ".md", ".csv", ".py", ".c", ".h", ".java", ".js",
@@ -100,14 +101,27 @@ export async function unpackZipToDirectory(
         continue;
       }
 
+      // Guard against zip bombs: skip entries that declare (or actually
+      // inflate to) more than the per-entry limit.
+      const declaredSize = Number(entry.uncompressedSize ?? 0);
+      if (declaredSize > MAX_ZIP_ENTRY_BYTES) continue;
+
       await fs.mkdir(path.dirname(targetPath), { recursive: true });
 
       try {
         const stream = await entry.openReadStream();
         const chunks: Buffer[] = [];
+        let total = 0;
+        let tooLarge = false;
         for await (const chunk of stream) {
+          total += (chunk as Buffer).length;
+          if (total > MAX_ZIP_ENTRY_BYTES) {
+            tooLarge = true;
+            break;
+          }
           chunks.push(chunk as Buffer);
         }
+        if (tooLarge) continue;
         await fs.writeFile(targetPath, Buffer.concat(chunks));
       } catch {
         continue;

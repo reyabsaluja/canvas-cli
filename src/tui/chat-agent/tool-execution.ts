@@ -34,6 +34,7 @@ import type {
   TurnToolExecutionResult,
 } from "./types.js";
 import { collectFailedReadArtifactIds } from "./verification.js";
+import { confineToDirectory, sanitizeFilename } from "../../sanitize.js";
 
 const MAX_DOC_TEXT = 30000;
 
@@ -554,7 +555,10 @@ async function downloadCourseFile(
   }
   const downloadDir = path.join(ctx.cache.coursePath, "attachments", "modules");
   await fs.mkdir(downloadDir, { recursive: true });
-  const localPath = path.join(downloadDir, fileMeta.display_name);
+  const localPath = confineToDirectory(
+    downloadDir,
+    sanitizeFilename(fileMeta.display_name)
+  );
   await fs.writeFile(localPath, buffer);
   const relativeLocalPath = path.relative(ctx.cache.coursePath, localPath);
   await registerDownloadedCourseAttachment(ctx.cache, {
