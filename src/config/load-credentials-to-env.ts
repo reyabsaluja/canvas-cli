@@ -48,7 +48,8 @@ export function loadStoredCredentialsToEnv(): void {
 /**
  * Loads AI provider API keys from the credential store (keychain/file) into
  * env vars. Called lazily on first AI provider use to avoid blocking keychain
- * access on commands that don't need AI (e.g. `courses`, `assignments`).
+ * access on commands that don't need AI (e.g. `ingest`, or the TUI before the
+ * first chat turn).
  */
 export function ensureAICredentials(): void {
   if (aiCredentialsLoaded) return;

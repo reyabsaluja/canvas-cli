@@ -10,6 +10,8 @@
 - Ingest course materials into a reusable local cache
 - AI-powered assignment workspaces with summaries, plans, and extracted artifacts
 - Grounded Q&A against workspace context
+- Timeline, grades, announcements, and discussion threads straight from Canvas (`/timeline`, `/grade`, `/announcements`, `/thread`)
+- Practice quizzes, lecture lookup, and PDF export with LaTeX rendering (`/quiz`, `/lecture`, `/pdf`)
 - Persistent chat sessions across global, course, and workspace scopes
 
 ## Installation
@@ -52,7 +54,7 @@ The login wizard walks you through:
 2. Pasting your Canvas API access token
 3. Optionally configuring an AI provider for smart features
 
-Credentials are stored securely — on macOS in your system Keychain, otherwise under `~/.config/canvas-cli/`. They are never written to your project directory.
+Credentials are stored securely. On macOS they go in your system Keychain with no plaintext copy on disk. Elsewhere — or when the Keychain is unavailable, or when `CANVAS_CLI_CREDENTIAL_BACKEND=file` is set — they are written to permission-restricted files under `~/.config/canvas-cli/credentials/` (respects `$XDG_CONFIG_HOME`). They are never written to your project directory.
 
 ### 2. Verify your connection
 
@@ -89,7 +91,7 @@ Your Canvas base URL is the root of your institution's Canvas site. Common forma
 - `https://your-school.instructure.com`
 - `https://learn.institution.edu`
 
-> **Note:** Do not include `/api/v1` in the base URL — canvas-cli adds this automatically.
+> **Note:** When entering the URL in `canvas-cli login`, leave off `/api/v1` — canvas-cli appends it for stored config. If you set `CANVAS_BASE_URL` in your environment or `.env` instead, the value is used verbatim, so include `/api/v1` there (e.g., `https://your-school.instructure.com/api/v1`). See [Environment variables](#environment-variables).
 
 > **Note:** Some institutions disable personal access tokens for students. If you don't see the "New Access Token" button, contact your institution's Canvas administrator.
 
@@ -111,8 +113,10 @@ Select "Configure AI provider" when prompted, choose your provider, and paste yo
 |---|---|---|
 | `canvas-cli ingest` | No | Downloads and caches locally |
 | TUI navigation and pickers | No | `/courses`, `/assignments`, `/recent`, etc. |
+| `/timeline`, `/grade`, `/announcements`, `/thread`, `/files`, `/modules` | No | Read from Canvas or the local cache |
 | TUI workspace creation | **Yes** | AI investigation agent |
 | TUI conversational mode | **Yes** | AI chat in all scopes |
+| `/quiz`, `/pdf` | **Yes** | Quiz generation and PDF content |
 
 ### Provider comparison
 
@@ -123,7 +127,7 @@ Select "Configure AI provider" when prompted, choose your provider, and paste yo
 | Google / Gemini | Gemini 3.5 Flash | Low | Budget-friendly, fast |
 | AWS Bedrock | Claude Sonnet 4.6 | Mid | Teams already on AWS, no separate API key |
 
-**Typical usage costs ~$0.50–2/month** for a student using AI features a few times per week (check your provider's pricing page for current rates). Costs depend on the model you choose and how often you use `work`, `ask`, and TUI chat. Budget models (Gemini Flash, GPT-5.4 Mini) are significantly cheaper; premium models (Claude Opus, GPT-5.5) cost more but produce higher-quality analysis.
+**Typical usage costs ~$0.50–2/month** for a student using AI features a few times per week (check your provider's pricing page for current rates). Costs depend on the model you choose and how often you use AI features in the TUI (workspace creation, chat, `/quiz`, `/pdf`). Budget models (Gemini Flash, GPT-5.4 Mini) are significantly cheaper; premium models (Claude Opus, GPT-5.5) cost more but produce higher-quality analysis.
 
 ### Setting up Anthropic
 
@@ -238,7 +242,7 @@ If you set an API key without specifying `AI_PROVIDER`, canvas-cli auto-detects 
 
 - **VPN required:** Many institutions require VPN access to reach Canvas. Connect to your school's VPN and retry.
 - **Firewall blocking:** Corporate or campus firewalls may block outbound HTTPS. Try from a different network.
-- **Wrong URL format:** The base URL should not include `/api/v1`, trailing slashes, or path segments beyond the domain. Correct: `https://canvas.school.edu`. Incorrect: `https://canvas.school.edu/api/v1/`.
+- **Wrong URL format:** With `canvas-cli login`, the base URL should be just the domain — no `/api/v1`, trailing slashes, or extra path segments (`https://canvas.school.edu`). With `CANVAS_BASE_URL` in the environment, the value is used as-is and must include `/api/v1` (`https://canvas.school.edu/api/v1`). Run `/doctor` in the TUI to check what canvas-cli resolved.
 - **DNS issues:** Verify you can reach the URL with `curl https://your-base-url/api/v1/users/self -H "Authorization: Bearer YOUR_TOKEN"`.
 
 ### "No courses found"
@@ -259,12 +263,41 @@ If you set an API key without specifying `AI_PROVIDER`, canvas-cli auto-detects 
 | Command | Purpose |
 | --- | --- |
 | `canvas-cli` | Launch the interactive TUI |
-| `canvas-cli login` | Set up Canvas credentials interactively |
-| `canvas-cli logout` | Remove stored credentials |
-| `canvas-cli status` | Show current configuration and connection status |
-| `canvas-cli ingest <course>` | Cache course materials locally |
-| `canvas-cli clean` | Remove local cached data (courses, sessions, chat history) |
+| `canvas-cli login [--profile <name>]` | Set up Canvas credentials (and optionally an AI provider) interactively |
+| `canvas-cli logout [--profile <name>]` | Remove stored credentials and configuration |
+| `canvas-cli status [--profile <name>]` | Show current configuration and connection status |
+| `canvas-cli ingest <course> [--refresh] [--json]` | Cache course materials locally |
+| `canvas-cli clean [-y]` | Remove local cached data (courses, sessions, chat history); `-y` skips the confirmation |
 | `canvas-cli clean --all` | Also remove global config and stored credentials |
+| `canvas-cli examples` | Print common workflows |
+| `canvas-cli --debug <command>` | Verbose diagnostic output to stderr (secrets masked) |
+| `canvas-cli --version` | Print the installed version |
+
+Run `canvas-cli <command> --help` for details on any command.
+
+### Profiles
+
+Use `--profile <name>` with `login`, `logout`, and `status` to keep separate Canvas accounts (e.g., `school` and `work`). Set `CANVAS_CLI_PROFILE=<name>` to make a profile active for the TUI and `ingest`. Profile names may contain letters, numbers, hyphens, and underscores.
+
+### Environment variables
+
+`canvas-cli login` is the recommended setup and stores everything under `~/.config/canvas-cli/`. Environment variables (or a `.env` file in the current directory) override stored config:
+
+| Variable | Purpose |
+|---|---|
+| `CANVAS_BASE_URL` | Canvas API URL, used verbatim — include `/api/v1` |
+| `CANVAS_ACCESS_TOKEN` | Canvas access token |
+| `CANVAS_CLI_PROFILE` | Active profile name (default: `default`) |
+| `AI_PROVIDER` | `anthropic`, `openai`, `google` (or `gemini`), or `bedrock` |
+| `AI_MODEL` | Model ID override for the provider |
+| `AI_EFFORT` | `low`, `medium`, `high`, or `max` (ignored for Google) |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY` | Provider API keys |
+| `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_BEARER_TOKEN_BEDROCK` | Bedrock credentials |
+| `DEBUG=canvas-cli` | Same as `--debug` |
+| `CANVAS_CLI_CREDENTIAL_BACKEND=file` | Store credentials in permission-restricted files instead of the macOS Keychain (mainly for tests and CI) |
+| `XDG_CONFIG_HOME` | Relocates the config directory from `~/.config` |
+
+> **Important:** If `CANVAS_BASE_URL` is set in the environment or `.env`, `CANVAS_ACCESS_TOKEN` must be set there too. A token saved by `canvas-cli login` is never combined with an environment-supplied URL, so a stray `.env` can't redirect your stored token to another host.
 
 ## Local State
 
@@ -282,7 +315,7 @@ Generated local state is stored under `.canvas-cli/` and ignored by git:
 | `canvas-cli ingest <course>` | Downloads course data into `.canvas-cli/courses/` |
 | `canvas-cli clean` | Removes the entire `.canvas-cli/` directory in the current project |
 | `canvas-cli clean --all` | Removes `.canvas-cli/` and `~/.config/canvas-cli/` (credentials + config) |
-| `npm uninstall -g canvas-cli` | Removes the CLI binary only — local `.canvas-cli/` directories and `~/.config/canvas-cli/` are **not** removed |
+| `npm uninstall -g @reyabsaluja/canvas-cli` | Removes the CLI binary only — local `.canvas-cli/` directories and `~/.config/canvas-cli/` are **not** removed |
 
 To fully uninstall, run `canvas-cli clean --all` before uninstalling the package.
 
@@ -296,7 +329,7 @@ All data canvas-cli creates lives in two locations:
 
 | Location | Contents |
 |---|---|
-| `~/.config/canvas-cli/` (respects `$XDG_CONFIG_HOME`; macOS uses Keychain) | Your Canvas token, AI provider API keys, and profile configuration |
+| `~/.config/canvas-cli/` (respects `$XDG_CONFIG_HOME`) | Profile configuration, plus your Canvas token and AI provider API keys when the file backend is in use. On macOS these secrets live in the Keychain instead and no plaintext copy is written unless the Keychain is unavailable or `CANVAS_CLI_CREDENTIAL_BACKEND=file` is set. |
 | `.canvas-cli/` (in your project directory) | Ingested course data, assignment workspaces, chat sessions, and extracted documents |
 
 Nothing is sent anywhere except the destinations listed below.
@@ -325,7 +358,7 @@ If analytics are ever added, they will be strictly opt-in with clear disclosure 
 git clone https://github.com/reyabsaluja/canvas-cli.git
 cd canvas-cli
 bun install
-cp .env.example .env   # fill in your Canvas URL, token, and optional AI key
+bun run dev login      # store credentials (or: cp .env.example .env and fill it in)
 bun run dev            # run from source
 ```
 
@@ -435,53 +468,63 @@ Type questions directly:
 
 ### Slash commands
 
+`/help` lists exactly what is available in the current scope. Type a partial command to get inline completion.
+
+Available in every scope:
+
+| Command | Description |
+|---|---|
+| `/manage-courses` | Add, remove, or rename configured courses |
+| `/open <query>` | Open a resource or file (shows a picker in course and workspace scope) |
+| `/copy [all \| last <N>]` | Copy the last response, the last N, or the whole transcript (Ctrl+Y also works) |
+| `/pdf <instructions>` | Generate a PDF from the chat context into `.canvas-cli/exports/` (alias `/make-pdf`) |
+| `/model [effort \| key]` | Switch AI provider/model; `effort` sets thinking effort, `key` rotates the API key |
+| `/doctor` | Diagnose configuration, credentials, and connectivity |
+| `/login` | Re-run the login setup |
+| `/clear` | Clear the current chat and reset context |
+| `/help` | Show available commands for this scope |
+| `/quit` | Exit canvas-cli (aliases `/exit`, `/q`) |
+
 Global scope:
 
 | Command | Description |
 |---|---|
 | `/courses` | Open the course picker |
-| `/manage-courses` | Add, remove, or rename configured courses |
 | `/recent` | Reopen a recent course or workspace |
-| `/open` | Jump straight to a course or recent item |
-| `/clear` | Clear the current chat and reset context |
-| `/home` | Stay in the global home session |
-| `/help` | Show available commands |
-| `/quit` | Exit canvas-cli |
+| `/timeline [week \| month \| semester \| next N days/weeks] [--all]` | ASCII Gantt view of upcoming work across courses |
+| `/grade [need <letter>] [<course>]` | Grade summary, per-course detail, and "what do I need" calculator |
+| `/announcements` | Browse announcements in a scrollable card view |
+| `/thread <id \| title>` | Read a discussion thread |
 
 Course scope:
 
 | Command | Description |
 |---|---|
 | `/assignments` | Open the assignment picker for the current course |
-| `/files` | Show cached files and downloads for the course |
-| `/modules` | Show course modules |
-| `/manage-courses` | Add, remove, or rename configured courses |
-| `/open` | Open an assignment or cached course resource |
-| `/clear` | Clear the current chat and reset context |
+| `/files` | List cached files and downloads for the course |
+| `/modules` | List course modules |
+| `/timeline`, `/grade`, `/announcements`, `/thread` | As in global scope, limited to the current course |
+| `/quiz [<count>] [easy \| medium \| hard] [flash] [<topic>]` | Practice quiz generated from course material |
+| `/lecture <query>` | Find and open lecture content (alias `/lec`) |
+| `/refresh` | Re-ingest the course data |
 | `/back` | Return to global scope |
-| `/home` | Return to global scope |
-| `/help` | Show course-scope commands |
-| `/quit` | Exit canvas-cli |
+| `/home` | Return to the global home session |
 
 Workspace scope:
 
 | Command | Description |
 |---|---|
 | `/overview` | Show assignment overview |
-| `/requirements` | Show deliverables and constraints |
+| `/requirements` | Show deliverables and constraints (alias `/reqs`) |
 | `/plan` | Show the action plan |
 | `/resources` | Show key resources |
 | `/evidence` | Show confirmed vs inferred sources |
 | `/status` | Show workspace status |
-| `/open` | Open a workspace or course resource by name |
+| `/quiz`, `/lecture` | As in course scope |
 | `@<resource>` | Attach a workspace file or cached attachment to your next prompt |
-| `/clear` | Clear the current chat and reset context |
 | `/refresh` | Refresh the workspace from the latest course cache |
-| `/manage-courses` | Add, remove, or rename configured courses |
 | `/back` | Return to the course session |
 | `/home` | Return to the global home session |
-| `/help` | Show workspace commands |
-| `/quit` | Exit canvas-cli |
 
 In course and workspace scope, `/open` shows a resource picker, and the assistant can also handle requests like `open lab 4 pdf` by calling the same opener tool.
 
@@ -569,8 +612,9 @@ canvas-cli ingest ece297 --json                       # machine-readable summary
 - `src/workspace/` owns workspace lifecycle orchestration, workspace creation, and persisted session files.
 - `src/work/` contains the bounded assignment investigation pipeline and synthesis logic.
 - `src/ingest/`, `src/enrich/`, and `src/knowledge/` handle local course caching, enrichment, and retrieval.
-- `src/commands/` keeps the setup CLI entrypoints (`login`, `logout`, `status`, `ingest`) and TUI-invoked flows (`model`).
-- `tests/` covers workspace lifecycle, chat grounding, and regression behavior.
+- `src/commands/` keeps the setup CLI entrypoints (`login`, `logout`, `status`, `ingest`, `clean`, `examples`) and TUI-invoked flows (`model`).
+- `src/agent/`, `src/pdf/`, `src/sanitize.ts`, and `src/debug.ts` hold agent run state, PDF/LaTeX rendering, filesystem/terminal sanitization, and masked debug logging.
+- `tests/` (and a few older files in `test/`) cover workspace lifecycle, chat grounding, config resolution, and regression behavior.
 - Source folders are organized by responsibility rather than by command surface alone.
 - New source files should use kebab-case names.
 - For the up-to-date detailed map, use [Project structure](docs/project-structure.md).

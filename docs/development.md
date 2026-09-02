@@ -2,15 +2,15 @@
 
 ## Prerequisites
 
-- Node.js with ESM support for the current toolchain
+- Node.js 20 or newer
 - Bun 1.3.11 or newer
-- Canvas API credentials in `.env`
+- Canvas API credentials: run `bun run dev login` (stored under `~/.config/canvas-cli/`), or set `CANVAS_BASE_URL` and `CANVAS_ACCESS_TOKEN` in `.env` as an alternative
 
 ## First-Time Setup
 
 ```bash
 bun install
-cp .env.example .env
+bun run dev login          # or: cp .env.example .env and fill it in
 ```
 
 ## Useful Commands

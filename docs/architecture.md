@@ -12,16 +12,18 @@
 
 ### 1. Entry and setup
 
-- `src/cli.ts` registers the setup commands (`login`, `logout`, `status`, `ingest`) and launches the TUI by default.
-- `src/commands/` contains thin command handlers for setup operations.
-- `src/canvas/` handles Canvas API communication.
+- `src/cli.ts` registers the setup commands (`login`, `logout`, `status`, `ingest`, `clean`, `examples`) and launches the TUI when run with no command.
+- `src/commands/` contains thin command handlers for setup operations, plus the TUI-invoked `/model` flow.
+- `src/config/` resolves the active profile, stored config, credentials (Keychain or file), and `.env` overrides.
+- `src/canvas/` handles Canvas API communication, including retries, throttling, and abort support.
 - `src/domain/` normalizes and resolves courses and assignments for user-facing workflows.
 
 ### 2. Course ingestion
 
 - `src/ingest/` fetches modules, files, pages, and assignments from Canvas.
-- The ingestion pipeline chooses relevant attachments, downloads local copies, and writes artifacts under `.canvas-cli/courses/`.
+- The ingestion pipeline chooses relevant attachments, downloads local copies, extracts text, and writes artifacts under `.canvas-cli/courses/`.
 - `src/enrich/` reads that stored data later to add deterministic context to assignment results.
+- `src/knowledge/` indexes cached artifacts so the TUI and agents can retrieve them by name or content.
 
 ### 3. Assignment workspace creation
 
@@ -36,26 +38,34 @@
 
 ### 5. Interactive terminal UI
 
-- `src/tui/` owns the interactive application, picker screens, workspace UI, and terminal input parsing.
+- `src/tui/` owns the interactive application: the chat shell, scope runtime, slash commands, pickers, and feature views (`/timeline`, `/grade`, `/quiz`, `/announcements`, `/thread`, `/lecture`, `/pdf`, `/doctor`).
+- `src/tui/chat-agent/` defines the chat agent's tools, prompt, memory, and verification; `src/agent/` holds run state and gating logic shared with the work pipeline.
+- `src/pdf/` renders `/pdf` exports, using LaTeX via Tectonic when available.
 - The TUI is the primary interface — all course browsing, assignment interaction, and AI features are accessed through it.
 
 ## Source Responsibility Map
 
 | Area | Responsibility |
 | --- | --- |
-| `src/ai/` | AI provider setup, prompting, parsing, and shared AI types |
+| `src/agent/` | Agent run state, retrieval gating, observation relevance, verification |
+| `src/ai/` | AI provider setup, model catalog, prompting, context bundling, shared AI types |
 | `src/ask/` | Retrieval and answer generation for prepared workspaces |
-| `src/canvas/` | Canvas API client and remote types |
-| `src/commands/` | Setup CLI entrypoints (`login`, `logout`, `status`, `ingest`) and TUI-invoked flows (`model`) |
-| `src/config/` | Environment loading and runtime configuration |
+| `src/canvas/` | Canvas API client, retry and throttle policy, remote types |
+| `src/commands/` | Setup CLI entrypoints (`login`, `logout`, `status`, `ingest`, `clean`, `examples`) and TUI-invoked flows (`model`) |
+| `src/config/` | Environment loading, profiles, config store, credential storage |
 | `src/domain/` | Core models, matching, normalization, ranking, and resolution |
 | `src/enrich/` | Deterministic enrichment from cached course artifacts |
 | `src/extract/` | Text extraction utilities for downloaded documents |
 | `src/format/` | Rendering helpers for console and markdown output |
 | `src/ingest/` | Course ingestion, attachment selection, and storage |
-| `src/tui/` | Interactive terminal application and input handling |
+| `src/knowledge/` | Artifact index over cached course and workspace files |
+| `src/pdf/` | PDF generation and LaTeX rendering |
+| `src/tui/` | Interactive terminal application, slash commands, chat agent, views |
 | `src/work/` | AI-assisted investigation and workup synthesis |
-| `src/workspace/` | Workspace pathing, creation, and attachment helpers |
+| `src/workspace/` | Workspace pathing, creation, lifecycle, and attachment helpers |
+| `src/debug.ts` | `--debug` logging with secret masking |
+| `src/errors.ts` | Structured error types and classification |
+| `src/sanitize.ts` | Filename, path, and terminal-output sanitization |
 
 ## Design Principles
 
@@ -63,3 +73,4 @@
 - Prefer deterministic data preparation before AI synthesis.
 - Treat `.canvas-cli/` as generated local state, not source-controlled content.
 - Keep the TUI isolated from Canvas-specific logic where possible so workflows stay testable.
+- Never write to disk from an untrusted name without going through `src/sanitize.ts`.

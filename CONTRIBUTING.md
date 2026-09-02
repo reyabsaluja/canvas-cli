@@ -4,10 +4,10 @@
 
 ```bash
 bun install
-cp .env.example .env
+bun run dev login      # guided setup; stores credentials in ~/.config/canvas-cli/
 ```
 
-Add your Canvas credentials to `.env`. If you want to use AI-assisted commands, also add one supported AI provider key.
+Alternatively, `cp .env.example .env` and set `CANVAS_BASE_URL` (including `/api/v1`) and `CANVAS_ACCESS_TOKEN` there. If you want to use AI features, also configure one supported AI provider during login or in `.env`.
 
 ## Common Commands
 

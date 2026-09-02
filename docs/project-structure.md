@@ -4,13 +4,18 @@
 
 ```text
 canvas-cli/
+├── .github/               CI and publish workflows
+├── bin/                   Node launcher for the published package
 ├── docs/                  Maintainer and contributor documentation
 ├── src/                   TypeScript source code
-├── test/                  Automated tests
-├── dist/                  Compiled output
-├── .canvas-cli/           Local runtime data and generated workspaces
+├── tests/                 Automated tests (primary location)
+├── test/                  A few older TUI regression tests
+├── dist/                  Compiled output (ignored)
+├── .canvas-cli/           Local runtime data and generated workspaces (ignored)
 ├── README.md              User-facing entry point
+├── CHANGELOG.md           Release notes
 ├── CONTRIBUTING.md        Contributor workflow and expectations
+├── RELEASING.md           Versioning and release process
 ├── package.json           Scripts and package metadata
 └── tsconfig.json          TypeScript compiler configuration
 ```
@@ -19,21 +24,27 @@ canvas-cli/
 
 ```text
 src/
-├── ai/                    Provider setup, prompt helpers, structured parsing
-├── ask/                   Workspace retrieval and answer generation
-├── canvas/                Canvas API client and remote type definitions
-├── commands/              CLI subcommand handlers
-├── config/                Environment loading
+├── agent/                 Shared agent run state, retrieval gating, observation and verification helpers
+├── ai/                    Provider setup, model catalog, prompt helpers, context bundling
+├── ask/                   Workspace retrieval and grounded answer generation
+├── canvas/                Canvas API client, retry, throttling, remote type definitions
+├── commands/              CLI subcommand handlers (login, logout, status, ingest, clean, examples)
+│                          and the TUI-invoked model picker (model.ts)
+├── config/                Environment loading, profiles, config store, credential storage
 ├── domain/                Shared domain models, matching, sorting, resolution
 ├── enrich/                Cache-backed assignment enrichment
 ├── extract/               Text extraction utilities
 ├── format/                Console and markdown rendering helpers
 ├── ingest/                Course ingestion pipeline
-├── tui/                   Interactive terminal app
+├── knowledge/             Artifact index over cached course and workspace files
+├── pdf/                   PDF generation, LaTeX rendering, and Tectonic setup
+├── tui/                   Interactive terminal app, slash commands, chat agent, views
 ├── work/                  Assignment investigation and workup synthesis
-├── workspace/             Local workspace creation and path helpers
+├── workspace/             Local workspace creation, lifecycle, and path helpers
 ├── cli.ts                 CLI entrypoint
-└── errors.ts              Shared error handling
+├── debug.ts               --debug logging with secret masking
+├── errors.ts              Shared error types and classification
+└── sanitize.ts            Filename, path, and terminal-output sanitization
 ```
 
 ## Placement Rules
@@ -42,17 +53,14 @@ src/
 - Put Canvas HTTP logic in `src/canvas/`.
 - Put reusable ranking, filtering, matching, and normalization in `src/domain/`.
 - Put cache-specific enrichment behavior in `src/enrich/`.
-- Put AI-only orchestration in `src/work/` or `src/ask/` depending on the user flow.
+- Put AI-only orchestration in `src/work/` or `src/ask/` depending on the user flow; put TUI chat tooling under `src/tui/chat-agent/`.
 - Put rendering-only helpers in `src/format/`.
+- Route anything that touches the filesystem from untrusted names through `src/sanitize.ts`.
 - Use kebab-case for new files to keep the tree consistent.
 
 ## Tests
 
-- Keep regression tests in `test/`.
+- Put new tests in `tests/`. The `test/` directory holds a handful of older TUI regression tests; both are picked up by `bun run test`.
+- Shared fixtures and the mock Canvas server live in `tests/helpers/`.
 - Add tests for parsing, formatting, and other logic that can run without live Canvas credentials.
-- Favor tests around boundary-heavy code such as TUI input parsing and workspace generation helpers.
-
-## Tooling Notes
-
-- Treat `.agents/`, `.claude/`, and `skills-lock.json` as local development tooling for this repo.
-- Keep them out of git unless you intentionally decide to standardize and support a shared skill workflow for all contributors.
+- Favor tests around boundary-heavy code such as TUI input parsing, config resolution, and workspace generation helpers.

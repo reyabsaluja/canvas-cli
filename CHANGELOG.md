@@ -7,35 +7,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+Initial release of `@reyabsaluja/canvas-cli`.
+
 ### Added
 
-- `prepublishOnly` script to prevent broken publishes
-- End-to-end smoke tests for npx installation flow
+- Interactive TUI (`canvas-cli` with no arguments) with three scopes — global, course, and workspace — and a persistent chat session per scope under `.canvas-cli/chat-sessions/`
+- AI chat agent with tools for reading cached course material, downloaded attachments, and zip archives on demand; streaming responses, Esc to interrupt, typing while streaming, and `@<resource>` pins to attach files to a prompt
+- Assignment workspaces: automatic ingestion and AI investigation on first open, producing `assignment.md`, `plan.md`, `notes.md`, `workup.json`, and extracted text; `/overview`, `/requirements`, `/plan`, `/resources`, `/evidence`, `/status`, `/refresh`, and stale-workspace detection
+- Setup commands: `login` (guided wizard with provider and model pickers), `logout`, `status`, `ingest <course> [--refresh] [--json]`, `clean [--all] [-y]`, and `examples`, plus global `--debug` and `-V/--version`
+- Named profiles (`--profile`, `CANVAS_CLI_PROFILE`) for multiple Canvas accounts
+- Credential storage in the macOS Keychain, with a permission-restricted file fallback under `~/.config/canvas-cli/credentials/` on other platforms (`XDG_CONFIG_HOME` respected)
+- Course ingestion into `.canvas-cli/courses/`: modules, pages, files, assignments, syllabus detection, attachment download and text extraction, lecture discovery, and external-link capture, with progress indicators and graceful Ctrl+C/SIGTERM handling
+- Pickers for `/courses`, `/recent`, `/assignments`, `/open`, and `/manage-courses`; `/files` and `/modules` views
+- `/timeline` ASCII Gantt view of upcoming work (week, month, semester, next N days/weeks, `--all`)
+- `/grade` with per-course summary, detail view, and a "need <letter>" calculator
+- `/quiz` practice quizzes (count, difficulty, flashcard mode, topic) generated from course material
+- `/announcements` scrollable card view and `/thread` discussion reader
+- `/lecture` (alias `/lec`) lecture lookup with retrieval-augmented answers
+- `/pdf` (alias `/make-pdf`) export of chat context to `.canvas-cli/exports/`, rendered with LaTeX via Tectonic when available (offers to install it)
+- `/copy` (and Ctrl+Y) to copy the last response, the last N, or the whole transcript
+- `/model` picker for switching provider and model at runtime, with `/model effort` and `/model key` subcommands and custom model IDs; friendly model names in the picker and header
+- `/doctor` diagnostics for config, credentials, Canvas connectivity, and AI provider keys
+- `/login` from inside the TUI, and a first-run login prompt
+- Multi-provider AI via the Vercel AI SDK: Anthropic, OpenAI, Google Gemini, and AWS Bedrock (`AI_PROVIDER`, `AI_MODEL`, `AI_EFFORT`), with auto-detection from whichever API key is present and graceful degradation when no provider is configured
+- Canvas API client with retries and exponential backoff, per-request timeouts, proactive rate-limit throttling (including `X-Request-Cost`), `Retry-After` parsing, and AbortSignal support
+- Structured error types with user-facing messages and exit codes; Node.js version check at startup
+- `--debug` diagnostic logging to stderr with automatic secret masking (also enabled by `DEBUG=canvas-cli`)
+- CI workflow (typecheck, test, build, audit), npm publish workflow with provenance, `prepublishOnly` gate, and an end-to-end npx smoke test
 
 ### Changed
 
-- **Breaking:** Removed non-interactive CLI commands (`courses`, `assignments`, `show assignment`, `do`, `work`, `ask`). The TUI is now the sole interactive interface. Setup commands (`login`, `logout`, `status`, `ingest`) remain.
-- Scoped npm package name to `@reyabsaluja/canvas-cli`
-- Excluded source maps and declarations from published package
+- The TUI is the sole interactive interface. There are no non-interactive `courses`, `assignments`, `show`, `do`, `work`, `ask`, `grades`, or `submit` commands.
+- Package published under the scoped name `@reyabsaluja/canvas-cli`; source maps and declarations are excluded from the tarball
 
 ### Fixed
 
-- Missing pdfkit dependencies breaking CI build
-- Generic fallback hint in TUI connect error handler
-- Rate-limited endpoints now skipped gracefully in paginated fetches
-- Network error detection improvements (undici `fetch failed`, cause chain)
+- Endpoints that are rate-limited or blocked for students (Files, Pages) are skipped with a warning instead of aborting ingestion
+- Network failures from undici (`fetch failed` with an error cause) are classified as network errors with a useful hint
+- Assignments with a null score are treated as ungraded in `/grade`
+- Streamed output is preserved on Ctrl+C instead of wiping the conversation; rendering race between the spinner and the chat shell resolved
 
-## [0.1.0] - 2026-03-17
+### Security
 
-### Added
+- File downloads send the Canvas token only to the configured Canvas origin (same-origin check)
+- Agent-initiated downloads are confined to the workspace directory; filenames and path segments are sanitized against traversal
+- Control characters are stripped from text before it reaches the terminal
+- On macOS, a successful Keychain write no longer leaves a plaintext copy on disk; the file backend is used only when the Keychain is unavailable or `CANVAS_CLI_CREDENTIAL_BACKEND=file` is set
+- When `CANVAS_BASE_URL` comes from the environment, `CANVAS_ACCESS_TOKEN` must too — a stored token is never sent to an environment-supplied URL
+- Profile names are validated to prevent path traversal; plain-HTTP Canvas URLs are rejected; secrets are masked in debug output
 
-- Initial CLI scaffolding with Commander.js
-- Canvas LMS API integration (courses, assignments, submissions, grades)
-- AI-powered commands via Anthropic, OpenAI, Google, and Amazon Bedrock
-- PDF ingestion and generation support
-- `--version` flag
-- CI pipeline with typecheck, test, and build
-- Automated npm publish workflow with provenance
-
-[Unreleased]: https://github.com/reyabsaluja/canvas-cli/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/reyabsaluja/canvas-cli/releases/tag/v0.1.0
+[Unreleased]: https://github.com/reyabsaluja/canvas-cli/commits/main

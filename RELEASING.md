@@ -14,8 +14,8 @@ canvas-cli follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.ht
 
 While in the `0.x` range, minor versions may include breaking changes. The stability bar for 1.0 is:
 
-1. Core commands (`courses`, `assignments`, `grades`, `submit`) are stable
-2. Configuration format (`.env` + `~/.canvas-cli/`) is finalized
+1. Setup commands (`login`, `logout`, `status`, `ingest`, `clean`) and the TUI slash-command surface are stable
+2. Configuration format (`~/.config/canvas-cli/` config and credential storage, plus `.env` overrides) is finalized
 3. At least one full academic term of real-world usage without major regressions
 4. No open issues tagged `breaking` or `pre-launch`
 
