@@ -195,3 +195,16 @@ export interface CanvasDiscussionTopicView {
   view: CanvasDiscussionEntry[];
   new_entries: CanvasDiscussionEntry[];
 }
+
+/** A folder in a course's Files area (GET /courses/:id/folders). */
+export interface CanvasFolder {
+  id: number;
+  name: string;
+  /** Full path from the root, e.g. "course files/Lectures/Week 1". */
+  full_name: string;
+  parent_folder_id: number | null;
+  files_count?: number | null;
+  folders_count?: number | null;
+  hidden?: boolean | null;
+  locked?: boolean | null;
+}

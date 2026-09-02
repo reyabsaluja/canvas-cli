@@ -6,6 +6,7 @@ import type {
   CanvasModule,
   CanvasModuleItem,
   CanvasFile,
+  CanvasFolder,
   CanvasPage,
   CanvasDiscussionEntry,
   CanvasDiscussionTopic,
@@ -27,6 +28,8 @@ export interface RawCourseContent {
   assignments: RawAssignmentRecord[];
   modules: Array<CanvasModule & { items: CanvasModuleItem[] }>;
   files: CanvasFile[];
+  /** Folder tree of the course Files area (empty when the Files API is blocked). */
+  folders: CanvasFolder[];
   pages: CanvasPage[];
   announcements: CanvasDiscussionTopic[];
   discussions: CanvasDiscussionTopic[];
@@ -87,9 +90,13 @@ export async function fetchCourseContent(
       signal?: AbortSignal | null
     ) => Promise<CanvasDiscussionTopicView | null>;
   }).getDiscussionTopicViewSafe;
+  const folderFetcher = (client as CanvasClient & {
+    getFoldersSafe?: (courseId: number, signal?: AbortSignal | null) => Promise<CanvasFolder[]>;
+  }).getFoldersSafe;
   const [
     rawModules,
     files,
+    folders,
     pages,
     announcements,
     discussions,
@@ -99,6 +106,9 @@ export async function fetchCourseContent(
     await Promise.all([
       client.getModulesSafe(courseId, signal),
       client.getFilesSafe(courseId, signal),
+      folderFetcher
+        ? folderFetcher.call(client, courseId, signal)
+        : Promise.resolve([]),
       client.getPagesSafe(courseId, signal),
       announcementFetcher
         ? announcementFetcher.call(client, courseId, undefined, signal)
@@ -267,6 +277,7 @@ export async function fetchCourseContent(
     assignments,
     modules,
     files,
+    folders,
     pages,
     announcements,
     discussions,

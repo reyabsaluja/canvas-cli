@@ -1,4 +1,4 @@
-import type { MockCourse, MockAssignment, MockModule, MockPage, MockFile, MockServerData } from "./mock-canvas-server.js";
+import type { MockCourse, MockAssignment, MockModule, MockPage, MockFile, MockFolder, MockServerData } from "./mock-canvas-server.js";
 
 // All dates are relative to "now" so the fixtures never go stale: the two
 // CS courses are always in the current term and HIST303 is always finished.
@@ -195,6 +195,13 @@ export const CS101_FILES: MockFile[] = [
   },
 ];
 
+export const CS101_FOLDERS: MockFolder[] = [
+  { id: 1, name: "course files", full_name: "course files", parent_folder_id: null, files_count: 1, folders_count: 2 },
+  { id: 2, name: "Labs", full_name: "course files/Labs", parent_folder_id: 1, files_count: 1, folders_count: 0 },
+  { id: 3, name: "Lectures", full_name: "course files/Lectures", parent_folder_id: 1, files_count: 0, folders_count: 1 },
+  { id: 4, name: "Week 3", full_name: "course files/Lectures/Week 3", parent_folder_id: 3, files_count: 0, folders_count: 0 },
+];
+
 export function buildDefaultServerData(): MockServerData {
   return {
     courses: COURSES,
@@ -205,6 +212,7 @@ export function buildDefaultServerData(): MockServerData {
     modules: new Map([[101, CS101_MODULES]]),
     pages: new Map([[101, CS101_PAGES]]),
     files: new Map([[101, CS101_FILES]]),
+    folders: new Map([[101, CS101_FOLDERS]]),
     courseDetails: new Map([
       [101, { syllabus_body: "<p>CS101 course syllabus content here.</p>" }],
       [202, { syllabus_body: null }],

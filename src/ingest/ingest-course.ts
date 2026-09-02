@@ -3,6 +3,7 @@ import type { Config } from "../config/env.js";
 import type { Course } from "../domain/models.js";
 import type {
   IngestionResult,
+  IngestionMeta,
   ModuleIndexEntry,
   FileIndexEntry,
   DownloadedAttachmentEntry,
@@ -19,7 +20,11 @@ import {
 import { mapWithConcurrency } from "./concurrency.js";
 import { normalizeCourseContent } from "./normalize-content.js";
 import { identifySyllabusCandidates } from "./syllabus-heuristics.js";
-import { selectAttachments } from "./attachment-selection.js";
+import {
+  selectAttachments,
+  selectCourseFiles,
+  buildFolderIndex,
+} from "./attachment-selection.js";
 import { downloadSelectedAttachments } from "./attachment-download.js";
 import { discoverLectures } from "./lecture-discovery.js";
 import { captureExternalCourseLinks } from "./external-link-capture.js";
@@ -37,6 +42,7 @@ const MODULE_FILE_METADATA_CONCURRENCY = 4;
  * 3. Identify syllabus candidates via title heuristics
  * 4. Select targeted attachments for download (syllabus + important files)
  * 5. Select ALL module-linked files for download (instructor-curated content)
+ * 5d. Crawl the Files tab: every remaining readable document, folder-aware
  * 6. Download all selected attachments
  * 7. Write all artifacts to local course directory
  */
@@ -132,11 +138,28 @@ export async function ingestCourse(
   });
   const externalLinks = capturedExternalLinks.map((capture) => capture.entry);
 
+  // Step 5d: Crawl the Files tab. Anything readable that no other selector
+  // claimed (lecture decks, readings, handouts sitting in folders) is
+  // downloaded with its folder path preserved.
+  const folders = buildFolderIndex(raw.folders);
+  const folderPathById = new Map(folders.map((folder) => [folder.id, folder.path]));
+  for (const file of files) {
+    file.folderPath =
+      file.folderId !== null ? (folderPathById.get(file.folderId) ?? null) : null;
+  }
+  const courseFileSelection = selectCourseFiles(files, folders, [
+    ...heuristicAttachments,
+    ...moduleAttachments,
+    ...descriptionAttachments,
+    ...htmlLinkedAttachments,
+  ]);
+
   const allSelected = [
     ...heuristicAttachments,
     ...moduleAttachments,
     ...descriptionAttachments,
     ...htmlLinkedAttachments,
+    ...courseFileSelection.selected,
   ];
 
   // Step 6: Download all attachments
@@ -158,7 +181,8 @@ export async function ingestCourse(
     pages,
     raw.frontPageBody,
     raw.fetchedPages,
-    courseMeta.syllabusBody
+    courseMeta.syllabusBody,
+    files
   );
 
   // Step 8: Build ingestion metadata
@@ -166,7 +190,11 @@ export async function ingestCourse(
   const skipped = attachmentResults.filter((a) => a.status === "skipped");
   const failed = attachmentResults.filter((a) => a.status === "failed");
 
-  const ingestion = {
+  const courseFileResults = attachmentResults.filter(
+    (a) => a.sourceType === "course_file"
+  );
+
+  const ingestion: IngestionMeta = {
     version: 1,
     ingestedAt: new Date().toISOString(),
     courseId: course.id,
@@ -184,6 +212,11 @@ export async function ingestCourse(
       attachmentsDownloaded: downloaded.length,
       attachmentsSkipped: skipped.length,
       attachmentsFailed: failed.length,
+    },
+    courseFiles: {
+      ...courseFileSelection.summary,
+      downloaded: courseFileResults.filter((a) => a.status !== "failed").length,
+      failed: courseFileResults.filter((a) => a.status === "failed").length,
     },
   };
 
@@ -225,6 +258,7 @@ export async function ingestCourse(
     lectures,
     ingestion,
     coursePath,
+    folders,
   };
 }
 

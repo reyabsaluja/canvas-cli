@@ -1,9 +1,19 @@
 import type { WorkspaceAnswer } from "../ask/types.js";
 import type { Observation, ToolExecutionResult } from "../agent/observation.js";
+import { buildStepReflectionNote } from "../agent/observation.js";
+import { isGroundedContentObservation } from "../agent/observation-relevance.js";
+import { questionNeedsMultipleSources } from "../agent/question-intent.js";
 import { appendObservation } from "../agent/run-state.js";
 import { decideWorkspaceRetrieval } from "../agent/retrieval-gate.js";
 import { verifyWorkspaceAnswer } from "../agent/verify.js";
 import { streamWithTools, type ToolDefinition } from "../ai/provider.js";
+
+/**
+ * Tool-call round trips allowed per chat turn. Deliberately generous: in real
+ * use, letting the agent keep looking produces better answers than cutting
+ * it off, and each extra step is cheap next to a wrong answer.
+ */
+export const CHAT_AGENT_MAX_STEPS = 30;
 import {
   buildToolPromptMessages,
   trimConversationEntries,
@@ -30,6 +40,7 @@ import type {
   ChatAgentExtraContext,
   ToolCallEvent,
   ToolLoopRunResult,
+  TurnToolCache,
 } from "./chat-agent/types.js";
 import {
   finalizeAnswerText,
@@ -53,7 +64,7 @@ export async function runChatAgent(
   onTextDelta?: (delta: string) => void,
   abortSignal?: AbortSignal
 ): Promise<WorkspaceAnswer> {
-  const systemPrompt = buildSystemPrompt(ctx);
+  const systemPrompt = buildSystemPrompt(ctx, { maxSteps: CHAT_AGENT_MAX_STEPS });
   const availableTools = buildChatTools(ctx);
 
   const observationStart = ctx.runState.observations.length;
@@ -70,8 +81,25 @@ export async function runChatAgent(
   let usedWorkup = false;
 
   if (retrievalDecision.action === "answer_from_workup") {
-    usedWorkup = true;
-    fullText = await answerWithoutTools(ctx, systemPrompt, question, [], onTextDelta, abortSignal);
+    // The workup explicitly covers this question, but it is a summary. Run the
+    // tool loop anyway so the model can confirm against the source documents;
+    // if it answers straight from the workup, verification grounds on that.
+    ({
+      fullText,
+      supportingObservations,
+      verificationObservations,
+    } = await runToolLoopTurn(
+      ctx,
+      systemPrompt,
+      availableTools,
+      question,
+      onToolCall,
+      onTextDelta,
+      observationStart,
+      [],
+      abortSignal
+    ));
+    usedWorkup = verificationObservations.length === 0;
   } else if (retrievalDecision.action === "answer_from_memory") {
     supportingObservations = selectArtifactSupportObservations(
       ctx.runState.observations,
@@ -209,6 +237,14 @@ async function runToolLoopTurn(
   );
   let fullText = "";
   let toolLoopError: unknown = null;
+  const executeTool = createTurnToolExecutor({
+    ctx,
+    question,
+    observationStart,
+    turnToolCache,
+    pendingToolResults,
+    maxSteps: CHAT_AGENT_MAX_STEPS,
+  });
 
   try {
     fullText = await streamWithTools(
@@ -216,14 +252,7 @@ async function runToolLoopTurn(
       systemPrompt,
       promptMessages,
       toolDefs,
-      async (name, input) => {
-        const execution = await executeToolCallForTurn(turnToolCache, name, input, ctx);
-        pendingToolResults.push(execution.result);
-        if (!execution.deduped) {
-          appendObservation(ctx.runState, execution.result.observation);
-        }
-        return execution.result.modelText;
-      },
+      executeTool,
       {
         onToolCall: (name, input, toolResult) => {
           const { action, target, color } = mapToolCall(name, input);
@@ -240,7 +269,7 @@ async function runToolLoopTurn(
         onTextDelta,
         abortSignal,
       },
-      10
+      CHAT_AGENT_MAX_STEPS
     );
   } catch (error) {
     toolLoopError = error;
@@ -310,6 +339,58 @@ async function runToolLoopTurn(
     fullText,
     supportingObservations,
     verificationObservations,
+  };
+}
+
+export interface TurnToolExecutorOptions {
+  ctx: ChatAgentContext;
+  question: string;
+  /** Index into ctx.runState.observations where this turn's observations begin. */
+  observationStart: number;
+  turnToolCache: TurnToolCache;
+  /** Results are pushed here in call order so the UI callback can pair them. */
+  pendingToolResults: ToolExecutionResult[];
+  maxSteps?: number;
+  /** Injectable for tests; defaults to the real tool runner. */
+  execute?: typeof executeToolCallForTurn;
+}
+
+/**
+ * Build the executeTool callback for one chat turn.
+ *
+ * Besides running the tool, it records the observation and appends a
+ * model-facing reflection footer to every result: the step budget, what kind
+ * of evidence just arrived, and what a sensible next move is. The footer is
+ * only in the text returned to the model; the UI and run-state see the raw
+ * result.
+ */
+export function createTurnToolExecutor(
+  options: TurnToolExecutorOptions
+): (name: string, input: Record<string, unknown>) => Promise<string> {
+  const execute = options.execute ?? executeToolCallForTurn;
+  const maxSteps = options.maxSteps ?? CHAT_AGENT_MAX_STEPS;
+  const needsMultipleSources = questionNeedsMultipleSources(options.question);
+  let step = 0;
+
+  return async (name, input) => {
+    step += 1;
+    const execution = await execute(options.turnToolCache, name, input, options.ctx);
+    options.pendingToolResults.push(execution.result);
+    if (!execution.deduped) {
+      appendObservation(options.ctx.runState, execution.result.observation);
+    }
+    const groundedReadCount = options.ctx.runState.observations
+      .slice(options.observationStart)
+      .filter((observation) => isGroundedContentObservation(observation)).length;
+    const note = buildStepReflectionNote({
+      step,
+      maxSteps,
+      observation: execution.result.observation,
+      deduped: execution.deduped,
+      groundedReadCount,
+      needsMultipleSources,
+    });
+    return `${execution.result.modelText}\n\n${note}`;
   };
 }
 

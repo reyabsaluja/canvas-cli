@@ -34,6 +34,7 @@ import type {
   TurnToolExecutionResult,
 } from "./types.js";
 import { collectFailedReadArtifactIds } from "./verification.js";
+import { splitDocumentIntoSections } from "../../agent/verify.js";
 import { confineToDirectory, sanitizeFilename } from "../../sanitize.js";
 
 const MAX_DOC_TEXT = 30000;
@@ -153,7 +154,7 @@ export async function readArtifactForGate(
           artifacts: [toArtifactRef(artifact.artifact)],
           content: artifact.content,
         },
-        modelText: artifact.content,
+        modelText: buildReadModelText(toArtifactRef(artifact.artifact), artifact.content),
         uiText: artifact.content,
       };
     case "missing_text": {
@@ -332,7 +333,10 @@ async function readFile(
         artifacts: reusedObservation.artifacts,
         content: reusedObservation.content,
       },
-      modelText: reusedObservation.content ?? "",
+      modelText: buildReadModelText(
+        reusedObservation.artifacts[0],
+        reusedObservation.content ?? ""
+      ),
       uiText: reusedObservation.content ?? "",
     };
   }
@@ -353,7 +357,7 @@ async function readFile(
           artifacts: [toArtifactRef(artifact.artifact)],
           content: artifact.content,
         },
-        modelText: artifact.content,
+        modelText: buildReadModelText(toArtifactRef(artifact.artifact), artifact.content),
         uiText: artifact.content,
       };
     case "empty_query":
@@ -607,7 +611,7 @@ async function downloadCourseFile(
         artifacts: [artifactRef],
         content: extracted,
       },
-      modelText: extracted,
+      modelText: buildReadModelText(artifactRef, extracted),
       uiText: extracted,
     };
   }
@@ -835,6 +839,43 @@ function normalizeToolInput(value: unknown): string {
   return String(value ?? "");
 }
 
+const MAX_OUTLINE_LABELS = 24;
+
+/**
+ * Frame a full-document read for the model: name the source and list its
+ * section headings so the model can cite the specific section it draws from
+ * ("Lab4.pdf — Part 3: Interrupts") instead of just the document title. The
+ * UI keeps the raw content; only the model-facing text is framed.
+ */
+export function buildReadModelText(
+  artifact: Pick<ArtifactRef, "title" | "kind"> | undefined,
+  content: string
+): string {
+  if (!artifact || content.trim().length === 0) {
+    return content;
+  }
+
+  const labels = splitDocumentIntoSections(content)
+    .map((section) => section.label)
+    .filter((label): label is string => Boolean(label));
+  const header = [`[Source: ${artifact.title} (${artifact.kind})]`];
+  if (labels.length >= 2) {
+    const shown = labels.slice(0, MAX_OUTLINE_LABELS);
+    const overflow = labels.length - shown.length;
+    header.push(
+      `Sections in this document: ${shown.join(" | ")}${overflow > 0 ? ` | ... and ${overflow} more` : ""}.`
+    );
+    header.push(
+      `When you quote or paraphrase this document, name the section you drew from (e.g. "${artifact.title} — ${shown[0]}") so the student can find it.`
+    );
+  } else {
+    header.push(
+      `When you quote or paraphrase this document, attribute it to "${artifact.title}".`
+    );
+  }
+  return `${header.join("\n")}\n---\n${content}`;
+}
+
 function normalizeSourceSectionLabel(value: string | null | undefined): string | null {
   const normalized = (value ?? "").trim();
   if (
@@ -922,7 +963,10 @@ async function recoverMissingAttachmentRead(
         ],
         content: extracted,
       },
-      modelText: extracted,
+      modelText: buildReadModelText(
+        createCourseAttachmentArtifactRef(localPath, artifact.title, extracted),
+        extracted
+      ),
       uiText: extracted,
     };
   }
@@ -975,7 +1019,10 @@ async function reuseCachedAttachmentContent(
         artifacts: [toArtifactRef(cachedRead.artifact)],
         content: cachedRead.content,
       },
-      modelText: cachedRead.content,
+      modelText: buildReadModelText(
+        toArtifactRef(cachedRead.artifact),
+        cachedRead.content
+      ),
       uiText: cachedRead.content,
     };
   }
@@ -1004,7 +1051,10 @@ async function reuseCachedAttachmentContent(
         ],
         content: extracted,
       },
-      modelText: extracted,
+      modelText: buildReadModelText(
+        createCourseAttachmentArtifactRef(localPath, originalFilename, extracted),
+        extracted
+      ),
       uiText: extracted,
     };
   }

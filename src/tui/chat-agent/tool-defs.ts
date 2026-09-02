@@ -4,7 +4,7 @@ import type { ChatAgentContext } from "./types.js";
 const SEARCH_WORKSPACE_TOOL: ToolDefinition = {
   name: "search_workspace",
   description:
-    "Discovery-only search across the workspace and ingested course knowledge. Returns relevant snippets and source names, not the full document text. Use it to find the best source, then call read_file for exact wording, requirements, quotes, or detailed answers. For compare, changed, or conflict questions, use search to identify the best two candidate sources before concluding.",
+    "Discovery-only search across the workspace and ingested course knowledge: the assignment's instruction documents, extracted PDFs, plan, and ingested course documents. It does NOT cover announcements or discussion threads (use list_announcements for those). Best first tool when you do not know which document holds the answer. Returns relevant snippets and source names, not the full document text. Use it to find the best source, then call read_file for exact wording, requirements, quotes, or detailed answers. If the results look weak, reword or broaden the query once before switching to search_course or list_files. For compare, changed, or conflict questions, use search to identify the best two candidate sources before concluding.",
   parameters: {
     type: "object",
     properties: {
@@ -17,7 +17,7 @@ const SEARCH_WORKSPACE_TOOL: ToolDefinition = {
 const READ_FILE_TOOL: ToolDefinition = {
   name: "read_file",
   description:
-    "Read the full extracted text of a specific workspace or course artifact. This is the grounding tool to use after search when you need exact details, requirements, or citations. Supports PDFs, text, HTML, and ZIP-backed extracted files. For compare, changed, or conflict questions, read each relevant source before deciding whether they agree.",
+    "Read the full extracted text of a specific workspace or course artifact. This is the grounding tool to use after search when you need exact details, requirements, or citations, and the default first tool when the instruction document is already listed in your context. Supports PDFs, text, HTML, and ZIP-backed extracted files. Returns up to about 30,000 characters; very long documents are cut off at the end, so if the section you need is missing, say so instead of assuming it does not exist. Read every document that could hold part of the answer: the instruction document and the rubric or grading page are usually both needed. For compare, changed, or conflict questions, read each relevant source before deciding whether they agree.",
   parameters: {
     type: "object",
     properties: {
@@ -34,7 +34,7 @@ const READ_FILE_TOOL: ToolDefinition = {
 const LIST_FILES_TOOL: ToolDefinition = {
   name: "list_files",
   description:
-    "List all available files in the workspace and course cache (extracted docs, downloaded attachments, workspace files). Use this after a failed or ambiguous read/open, or when a search came up empty and you need the exact filename or title before calling read_file or open_resource again.",
+    "List all available files in the workspace and course cache (extracted docs, downloaded attachments, workspace files). Use this after a failed or ambiguous read/open, or when a search came up empty and you need the exact filename or title before calling read_file or open_resource again. Also useful before the first read when the documents listed in your context do not obviously contain what the question needs.",
   parameters: {
     type: "object",
     properties: {},
@@ -45,7 +45,7 @@ const LIST_FILES_TOOL: ToolDefinition = {
 const SEARCH_COURSE_TOOL: ToolDefinition = {
   name: "search_course",
   description:
-    "Discovery-only search of the course cache — modules, pages, assignments, announcements, discussions, attachments, and file index entries. Returns candidate matches, not full document text. After finding the right item, use read_file for readable artifacts or download_course_file for undownloaded course files. For compare, changed, or conflict questions, identify the best two course sources before concluding.",
+    "Discovery-only search of the course cache — modules, pages, assignments, announcements, discussions, attachments, and file index entries. Broader than search_workspace: use it when the answer is likely on a course page, in a module, in the syllabus, or in a file that is not part of this workspace, and as the next step when search_workspace found nothing useful. Returns candidate matches, not full document text. After finding the right item, use read_file for readable artifacts or download_course_file for undownloaded course files. For compare, changed, or conflict questions, identify the best two course sources before concluding.",
   parameters: {
     type: "object",
     properties: {
@@ -62,7 +62,7 @@ const SEARCH_COURSE_TOOL: ToolDefinition = {
 const DOWNLOAD_COURSE_FILE_TOOL: ToolDefinition = {
   name: "download_course_file",
   description:
-    "Download a file from the Canvas course by module item title. Use when you find a file via search_course that hasn't been downloaded yet.",
+    "Download a file from the Canvas course by module item title and return its extracted text, so it doubles as a read. Use when you find a file via search_course that hasn't been downloaded yet.",
   parameters: {
     type: "object",
     properties: {
@@ -123,7 +123,7 @@ const OPEN_LECTURE_TOOL: ToolDefinition = {
 const LIST_ANNOUNCEMENTS_TOOL: ToolDefinition = {
   name: "list_announcements",
   description:
-    "List announcements and discussion topics for this course. Optionally filter by type and search by keyword. Use when the student asks about announcements, discussions, posts, or what's new in the course.",
+    "List announcements and discussion topics for this course. Optionally filter by type and search by keyword. Use when the student asks about announcements, discussions, posts, or what's new in the course, and whenever the question is about a deadline change, extension, clarification, correction, or 'did the professor say anything about...'. Returns titles and IDs only, not the post text: follow up with read_thread on the matching item to read what was actually said.",
   parameters: {
     type: "object",
     properties: {
@@ -144,7 +144,7 @@ const LIST_ANNOUNCEMENTS_TOOL: ToolDefinition = {
 const READ_THREAD_TOOL: ToolDefinition = {
   name: "read_thread",
   description:
-    "Read a full discussion or announcement thread including all replies. Identify the thread by numeric topic ID or partial title. Use after list_announcements surfaces a candidate, or when the student references a specific post or announcement.",
+    "Read a full discussion or announcement thread including all replies. This is the grounding tool for announcements and discussions: the full post text, not a summary. Identify the thread by numeric topic ID or partial title. Use after list_announcements surfaces a candidate, or when the student references a specific post or announcement.",
   parameters: {
     type: "object",
     properties: {

@@ -338,8 +338,7 @@ export function searchArtifacts(
     limit?: number;
   }
 ): RankedArtifact[] {
-  const normalizedQuery = normalizeText(query);
-  const queryTokens = tokenize(normalizedQuery);
+  const { tokens: queryTokens, phrases } = analyzeSearchQuery(query);
   if (queryTokens.length === 0) return [];
 
   const allowedKinds = options?.kinds ? new Set(options.kinds) : null;
@@ -355,10 +354,10 @@ export function searchArtifacts(
     let score = 0;
     let matchedTokens = 0;
 
-    if (titleNormalized.includes(normalizedQuery)) {
+    if (phrases.some((phrase) => titleNormalized.includes(phrase))) {
       score += 25;
     }
-    if (artifact.searchText.includes(normalizedQuery)) {
+    if (phrases.some((phrase) => artifact.searchText.includes(phrase))) {
       score += 10;
     }
 
@@ -400,8 +399,7 @@ export function searchArtifactSections(
     limit?: number;
   }
 ): RankedArtifactSection[] {
-  const normalizedQuery = normalizeText(query);
-  const queryTokens = tokenize(normalizedQuery);
+  const { tokens: queryTokens, phrases } = analyzeSearchQuery(query);
   if (queryTokens.length === 0) return [];
 
   const allowedKinds = options?.kinds ? new Set(options.kinds) : null;
@@ -440,10 +438,13 @@ export function searchArtifactSections(
       let matchedSectionLabelTokens = 0;
       let matchedSourceLabelTokens = 0;
 
-      if (hasSpecificSectionLabel && sectionLabel.includes(normalizedQuery)) {
+      if (
+        hasSpecificSectionLabel &&
+        phrases.some((phrase) => sectionLabel.includes(phrase))
+      ) {
         score += 14;
       }
-      if (sourceLabel.includes(normalizedQuery)) {
+      if (phrases.some((phrase) => sourceLabel.includes(phrase))) {
         score += 6;
       }
 
@@ -1275,7 +1276,7 @@ function splitMarkdownIntoSections(
   };
 
   for (const line of lines) {
-    const headingMatch = line.match(/^#{1,3}\s+(.+)/);
+    const headingMatch = line.match(/^#{1,4}\s+(.+)/);
     if (headingMatch) {
       flush();
       currentSection = headingMatch[1] ?? "Top";
@@ -1465,10 +1466,130 @@ function isSpecificSectionLabel(value: string): boolean {
   return normalized.length > 0 && normalized !== "full text" && normalized !== "top";
 }
 
+/**
+ * Words that carry no retrieval signal on their own: articles, pronouns,
+ * auxiliaries, and the scaffolding of a natural-language question
+ * ("what should I ...", "explain ...", "tell me about ..."). They are dropped
+ * from queries only; indexed text keeps every token so exact-phrase and label
+ * matching still work.
+ */
+const QUERY_STOP_WORDS = new Set([
+  "a", "an", "the", "and", "or", "but", "if", "then", "so", "of", "to", "in",
+  "on", "at", "by", "for", "from", "with", "without", "about", "into", "onto",
+  "over", "under", "as", "is", "are", "was", "were", "be", "been", "being",
+  "am", "do", "does", "did", "done", "have", "has", "had", "having", "can",
+  "could", "should", "would", "will", "shall", "may", "might", "must", "not",
+  "no", "nor", "it", "its", "this", "that", "these", "those", "there", "here",
+  "i", "me", "my", "mine", "we", "us", "our", "ours", "you", "your", "yours",
+  "he", "she", "they", "them", "their", "his", "her", "him", "who", "whom",
+  "whose", "what", "which", "when", "where", "why", "how", "any", "some",
+  "all", "each", "every", "either", "neither", "both", "few", "more", "most",
+  "much", "many", "such", "than", "too", "very", "just", "also", "only",
+  "ever", "never", "always", "again", "further", "once", "own", "same",
+  "other", "another", "please", "tell", "explain", "describe", "say", "says",
+  "said", "give", "show", "need", "needs", "want", "wants", "know", "knows",
+  "mean", "means", "still", "yet", "already", "like", "get", "got", "let",
+  "lets", "vs", "versus", "regarding", "something", "anything", "everything",
+  "thing", "things", "well", "really", "actually", "exactly", "sure",
+]);
+
+interface SearchQueryAnalysis {
+  /** Stemmed content tokens used for token/TF-IDF matching. */
+  tokens: string[];
+  /**
+   * Phrases to try for substring matches against titles, labels, and bodies:
+   * the raw normalized query first, then the query with scaffolding words
+   * removed ("what is the late policy" -> "late policy").
+   */
+  phrases: string[];
+}
+
+export function analyzeSearchQuery(query: string): SearchQueryAnalysis {
+  const normalizedQuery = normalizeText(query);
+  const rawWords = normalizedQuery
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length > 0);
+  const contentWords = rawWords.filter((word) => !QUERY_STOP_WORDS.has(word));
+  const contentPhrase = contentWords.join(" ");
+
+  const contentTokens = contentWords
+    .filter((word) => word.length >= 2)
+    .map(stemSearchToken);
+  // A query made only of scaffolding ("what is it?") still needs to match
+  // something, so fall back to the full token list in that case.
+  const tokens = contentTokens.length > 0 ? contentTokens : tokenize(normalizedQuery);
+
+  const phrases = [normalizedQuery, contentPhrase].filter(
+    (phrase, position, list) =>
+      phrase.length > 0 && list.indexOf(phrase) === position
+  );
+
+  return { tokens, phrases };
+}
+
 function tokenize(value: string): string[] {
   return normalizeText(value)
     .split(/[^a-z0-9]+/)
-    .filter((token) => token.length >= 2);
+    .filter((token) => token.length >= 2)
+    .map(stemSearchToken);
+}
+
+/**
+ * Conservative English stemmer so plural and inflected forms match their base
+ * form ("hazards"/"hazard", "graded"/"grading"/"grade", "policies"/"policy").
+ * It is applied identically to indexed text and queries, so the only
+ * requirement is consistency rather than linguistic accuracy. Tokens with
+ * digits (lab4, 2026) are left untouched.
+ */
+export function stemSearchToken(token: string): string {
+  if (token.length < 4 || /\d/.test(token)) {
+    return token;
+  }
+
+  let stem = token;
+
+  if (stem.endsWith("ies") && stem.length > 4) {
+    stem = `${stem.slice(0, -3)}y`;
+  } else if (stem.endsWith("sses")) {
+    stem = stem.slice(0, -2);
+  } else if (
+    stem.endsWith("ss") ||
+    stem.endsWith("us") ||
+    stem.endsWith("is")
+  ) {
+    // class, syllabus, analysis: not plurals.
+  } else if (stem.endsWith("es") && /(?:[sxz]|[cs]h)es$/.test(stem)) {
+    stem = stem.slice(0, -2);
+  } else if (stem.endsWith("s")) {
+    stem = stem.slice(0, -1);
+  }
+
+  if (stem.endsWith("ing") && stem.length - 3 >= 4) {
+    stem = undoubleFinalConsonant(stem.slice(0, -3));
+  } else if (stem.endsWith("ed") && stem.length - 2 >= 4) {
+    stem = undoubleFinalConsonant(stem.slice(0, -2));
+  } else if (stem.endsWith("ly") && stem.length - 2 >= 4) {
+    stem = stem.slice(0, -2);
+  }
+
+  if (stem.endsWith("e") && stem.length >= 5) {
+    stem = stem.slice(0, -1);
+  }
+
+  return stem;
+}
+
+function undoubleFinalConsonant(value: string): string {
+  const last = value.at(-1);
+  const previous = value.at(-2);
+  if (
+    last &&
+    last === previous &&
+    !/[aeiouls]/.test(last)
+  ) {
+    return value.slice(0, -1);
+  }
+  return value;
 }
 
 function hashKey(prefix: string, value: string): string {

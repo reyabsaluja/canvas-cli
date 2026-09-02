@@ -2,6 +2,7 @@ import type {
   ModuleIndexEntry,
   PageIndexEntry,
   LectureIndexEntry,
+  FileIndexEntry,
 } from "./types.js";
 import { decodeEntities } from "../format/html-to-text.js";
 
@@ -178,7 +179,8 @@ export function discoverLectures(
   pages: PageIndexEntry[],
   frontPageBody: string | null,
   fetchedPages: Array<{ slug: string; title: string; body: string }>,
-  syllabusBody: string | null
+  syllabusBody: string | null,
+  files: FileIndexEntry[] = []
 ): LectureIndexEntry[] {
   const entries: LectureIndexEntry[] = [];
   const seenKeys = new Set<string>();
@@ -264,6 +266,30 @@ export function discoverLectures(
       contentType: "page",
       source: "page index",
       lectureNumber: extractLectureNumber(page.title),
+    });
+  }
+
+  // 6. Files-tab documents: lecture-like filenames anywhere, plus every
+  //    slide/video file inside a lecture-like folder (e.g. "Lectures/Week 3").
+  for (const file of files) {
+    const folderPath = file.folderPath ?? "";
+    const folderIsLecture =
+      folderPath.length > 0 &&
+      folderPath.split("/").some((segment) => isLectureLikeTitle(segment));
+    const name = file.displayName || file.filename;
+    const fileIsLecture = isLectureLikeTitle(name) || extractLectureNumber(name) !== null;
+    if (!fileIsLecture && !folderIsLecture) continue;
+    if (!file.url) continue;
+
+    const contentType = classifyContentType(file.url, name);
+    if (!fileIsLecture && contentType !== "slides" && contentType !== "video") continue;
+
+    push({
+      title: decodeEntities(name),
+      url: file.url,
+      contentType,
+      source: folderPath.length > 0 ? `files: ${folderPath}` : "files",
+      lectureNumber: extractLectureNumber(name) ?? extractLectureNumber(folderPath),
     });
   }
 
