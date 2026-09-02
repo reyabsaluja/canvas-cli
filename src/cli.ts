@@ -147,9 +147,10 @@ Examples:
 program
   .command("tui", { isDefault: true, hidden: true })
   .description("Launch interactive TUI")
-  .action(() => {
+  .action(async () => {
     debug("general", "launching interactive TUI");
-    import("./tui/app.js").then(({ launchApp }) => launchApp());
+    const { launchApp } = await import("./tui/app.js");
+    await launchApp();
   });
 
 program.parseAsync().catch((err: unknown) => {

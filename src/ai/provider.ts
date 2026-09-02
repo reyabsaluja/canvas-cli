@@ -269,7 +269,7 @@ export async function callModel(
       model: getModel(config),
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
-      ...(options.maxTokens != null ? { maxTokens: options.maxTokens } : {}),
+      ...(options.maxTokens != null ? { maxOutputTokens: options.maxTokens } : {}),
       ...(combinedSignal ? { abortSignal: combinedSignal } : {}),
       ...effortOpts,
     });
@@ -289,7 +289,7 @@ export async function callModel(
     model: getModel(config),
     system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
-    ...(options?.maxTokens != null ? { maxTokens: options.maxTokens } : {}),
+    ...(options?.maxTokens != null ? { maxOutputTokens: options.maxTokens } : {}),
     ...(combinedSignal ? { abortSignal: combinedSignal } : {}),
     ...effortOpts,
   });

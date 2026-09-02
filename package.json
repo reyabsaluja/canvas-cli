@@ -43,7 +43,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf dist",
-    "check": "bun run typecheck && bun run test && bun run build",
+    "check": "bun run typecheck && bun run build && bun run test",
     "dev": "bun run src/cli.ts",
     "start": "node dist/cli.js",
     "test": "node --import tsx --test test/*.test.ts tests/*.test.ts",
