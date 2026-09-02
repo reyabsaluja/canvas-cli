@@ -1,6 +1,14 @@
 import { spawn } from "node:child_process";
 import chalk from "chalk";
-import { C, clearScreen, getTermSize, hideCursor, stripAnsi } from "./screen.js";
+import {
+  C,
+  clearScreen,
+  disableMouseTracking,
+  enableMouseTracking,
+  getTermSize,
+  hideCursor,
+  stripAnsi,
+} from "./screen.js";
 import { formatAIError } from "../ai/provider.js";
 import type { Observation } from "../agent/observation.js";
 import { executeMakePdf } from "./pdf-command.js";
@@ -39,7 +47,11 @@ import {
   resetChatShellRenderCache,
 } from "./chat-shell-render.js";
 import { ChatShellPersistence } from "./chat-shell-persistence.js";
-import { enterChatShell, leaveChatShell } from "./chat-shell-terminal.js";
+import {
+  enterChatShell,
+  installShellCrashHandlers,
+  leaveChatShell,
+} from "./chat-shell-terminal.js";
 import { copyToClipboard } from "./clipboard.js";
 import {
   formatConversationForCopy,
@@ -624,10 +636,13 @@ export async function runChatShell<TExit>(
     }
   }
 
+  let removeCrashHandlers: () => void = () => {};
+
   async function cleanup(
     stdin: NodeJS.ReadStream,
     onData: (data: string) => void
   ): Promise<string | null> {
+    removeCrashHandlers();
     if (renderTimer) {
       clearTimeout(renderTimer);
       renderTimer = null;
@@ -647,6 +662,7 @@ export async function runChatShell<TExit>(
   }
 
   const stdin = enterChatShell(render);
+  removeCrashHandlers = installShellCrashHandlers(stdin, () => persistence.flush());
 
   return new Promise((resolve) => {
     const keyQueue = createSerialTaskQueue();
@@ -1305,8 +1321,12 @@ export async function runChatShell<TExit>(
           processingAbort = null;
           currentSpinnerLine = "";
           stdin.removeListener("data", onData);
+          // Paused commands (e.g. /quiz) read raw keystrokes themselves; mouse
+          // reports would otherwise arrive as bogus key presses.
+          disableMouseTracking();
         },
         resumeShell: () => {
+          enableMouseTracking();
           hideCursor();
           clearScreen();
           resetChatShellRenderCache();

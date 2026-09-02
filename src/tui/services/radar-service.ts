@@ -84,11 +84,22 @@ export class RadarService {
   ): Promise<RadarItem[]> {
     if (courses.length === 0) return [];
 
-    const results = await Promise.all(
+    // One unreachable course must not hide the others; only surface the
+    // failure when every course failed (e.g. Canvas is unreachable).
+    const results = await Promise.allSettled(
       courses.map((course) => this.getAllAnnouncements(course.id, course.name))
     );
+    const fulfilled = results.filter(
+      (r): r is PromiseFulfilledResult<RadarItem[]> => r.status === "fulfilled"
+    );
+    if (fulfilled.length === 0) {
+      const first = results[0];
+      throw first && first.status === "rejected"
+        ? first.reason
+        : new Error("Failed to load announcements");
+    }
 
-    return sortRadarItems(results.flat());
+    return sortRadarItems(fulfilled.flatMap((r) => r.value));
   }
 
   async getRadarItemsMultiCourse(
