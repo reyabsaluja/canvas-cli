@@ -31,6 +31,9 @@ export function renderIngestionSummary(result: IngestionResult): string {
   } else {
     lines.push(`  ${chalk.dim("-")} files ${chalk.dim("(API not accessible)")}`);
   }
+  if ((c.externalTools ?? 0) > 0) {
+    lines.push(`  ${chalk.dim("-")} ${c.externalTools} external tools ${chalk.dim("(Piazza, Zoom, Ed, ... from course navigation)")}`);
+  }
   if ((c.quizzes ?? 0) > 0) {
     lines.push(`  ${chalk.dim("-")} ${c.quizzes} quizzes ${chalk.dim("(instructions, time limits, attempts)")}`);
   }
