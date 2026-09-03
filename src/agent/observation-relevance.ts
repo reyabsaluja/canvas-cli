@@ -1,4 +1,5 @@
 import type { Observation } from "./observation.js";
+import { stemSearchToken } from "../knowledge/artifact-index.js";
 
 const OBSERVATION_RELEVANCE_STOP_WORDS = new Set([
   "about",
@@ -69,8 +70,21 @@ export function scoreObservationRelevance(
     haystack.includes(normalizedQuestion) || titleText.includes(normalizedQuestion);
   let score = fullPhraseMatch ? 14 : 0;
   let matchedTokens = 0;
+  // A question word that names one of the document's headings ("graded" vs
+  // "## Grading") is a strong signal on its own, even when the rest of the
+  // question ("Lab 4", "how") appears nowhere in the read.
+  const headingTokens = tokenizeObservationRelevanceText(
+    normalizeObservationRelevanceText(collectHeadingText(observation.content ?? ""))
+  );
+  let headingMatched = false;
 
   for (const token of questionTokens) {
+    if (headingTokens.some((heading) => heading === token || heading.startsWith(token))) {
+      score += 8;
+      matchedTokens += 1;
+      headingMatched = true;
+      continue;
+    }
     if (titleText.includes(token)) {
       score += 8;
       matchedTokens += 1;
@@ -101,12 +115,22 @@ export function scoreObservationRelevance(
       return 0;
     }
     const minimumMatchedTokens = questionTokens.length === 1 ? 1 : 2;
-    if (matchedTokens < minimumMatchedTokens) {
+    if (matchedTokens < minimumMatchedTokens && !headingMatched) {
       return 0;
     }
   }
 
   return score;
+}
+
+/** Markdown heading lines (and "Page N"/section labels) from read content. */
+function collectHeadingText(content: string): string {
+  const headings: string[] = [];
+  for (const line of content.split("\n")) {
+    const match = line.match(/^\s{0,3}#{1,4}\s+(.+?)\s*$/);
+    if (match?.[1]) headings.push(match[1]);
+  }
+  return headings.join(" ");
 }
 
 function normalizeObservationRelevanceText(value: string): string {
@@ -127,5 +151,12 @@ function tokenizeObservationRelevanceText(value: string): string[] {
         (token) =>
           token.length > 2 && !OBSERVATION_RELEVANCE_STOP_WORDS.has(token)
       )
+      // Matching below is substring-based, so a stem ("grad") also hits the
+      // inflected forms in the haystack ("graded", "grading"). Without this a
+      // read of "## Grading" scored 0 for "how is it graded".
+      .map((token) => {
+        const stem = stemSearchToken(token);
+        return stem.length >= 3 ? stem : token;
+      })
   )];
 }
