@@ -37,7 +37,25 @@ import { collectFailedReadArtifactIds } from "./verification.js";
 import { splitDocumentIntoSections } from "../../agent/verify.js";
 import { confineToDirectory, sanitizeFilename } from "../../sanitize.js";
 
-const MAX_DOC_TEXT = 30000;
+/**
+ * Characters handed to the model for a whole-document read. PDF sidecars can
+ * run to 400k chars, so a whole read is a window onto the start of the
+ * document; the cut-off note names the sections that were left out and the
+ * model reaches them with `section` / `offset` on the next read_file call.
+ * Never lower this: the read window is the model's only view of the source.
+ */
+export const MAX_DOC_TEXT = 120000;
+
+/** Characters returned for a single section read (a whole page is far smaller). */
+const MAX_SECTION_TEXT = MAX_DOC_TEXT;
+
+/** Read-window controls parsed from a read_file call. */
+export interface DocumentReadRequest {
+  /** Section heading or page reference ("Page 57", "57", "Part 3: ...") to isolate. */
+  section?: string | null;
+  /** Zero-based char offset to start the window at (whole-document reads only). */
+  offset?: number | null;
+}
 
 async function executeToolCallDetailed(
   name: string,
@@ -48,7 +66,7 @@ async function executeToolCallDetailed(
     case "search_workspace":
       return await searchWorkspace(input.query as string, ctx);
     case "read_file":
-      return readFile(input.filename as string, ctx);
+      return readFile(input.filename as string, ctx, parseDocumentReadRequest(input));
     case "list_files":
       return listFiles(ctx);
     case "search_course":
@@ -142,21 +160,16 @@ export async function readArtifactForGate(
     ctx.loaded,
     ctx.cache,
     artifactId,
-    MAX_DOC_TEXT
+    Number.MAX_SAFE_INTEGER
   );
   switch (artifact.status) {
     case "ok":
-      return {
-        observation: {
-          tool: "read_file",
-          status: "ok",
-          summary: `Read ${artifact.artifact.title}.`,
-          artifacts: [toArtifactRef(artifact.artifact)],
-          content: artifact.content,
-        },
-        modelText: buildReadModelText(toArtifactRef(artifact.artifact), artifact.content),
-        uiText: artifact.content,
-      };
+      return buildDocumentReadResult(
+        "read_file",
+        toArtifactRef(artifact.artifact),
+        artifact.content,
+        {}
+      );
     case "missing_text": {
       const recovered = await recoverMissingAttachmentRead(
         artifact.artifact,
@@ -303,9 +316,10 @@ function preferViableSearchMatches<T extends { artifact: ArtifactRecord }>(
 
 async function readFile(
   filename: string,
-  ctx: ChatAgentContext
+  ctx: ChatAgentContext,
+  request: DocumentReadRequest = {}
 ): Promise<ToolExecutionResult> {
-  const trimmedFilename = filename.trim();
+  const trimmedFilename = (filename ?? "").trim();
   if (!trimmedFilename) {
     return {
       observation: {
@@ -319,10 +333,12 @@ async function readFile(
     };
   }
 
-  const reusedObservation = findReusableReadObservation(
-    trimmedFilename,
-    ctx.runState.observations
-  );
+  // A section or offset read is a different window onto the document than an
+  // earlier whole-document read (which may have been cut off before the
+  // requested section), so it always goes back to the source text.
+  const reusedObservation = isWindowedReadRequest(request)
+    ? null
+    : findReusableReadObservation(trimmedFilename, ctx.runState.observations);
   if (reusedObservation) {
     const title = reusedObservation.artifacts[0]?.title ?? trimmedFilename;
     return {
@@ -345,21 +361,16 @@ async function readFile(
     ctx.loaded,
     ctx.cache,
     trimmedFilename,
-    MAX_DOC_TEXT
+    Number.MAX_SAFE_INTEGER
   );
   switch (artifact.status) {
     case "ok":
-      return {
-        observation: {
-          tool: "read_file",
-          status: "ok",
-          summary: `Read ${artifact.artifact.title}.`,
-          artifacts: [toArtifactRef(artifact.artifact)],
-          content: artifact.content,
-        },
-        modelText: buildReadModelText(toArtifactRef(artifact.artifact), artifact.content),
-        uiText: artifact.content,
-      };
+      return buildDocumentReadResult(
+        "read_file",
+        toArtifactRef(artifact.artifact),
+        artifact.content,
+        request
+      );
     case "empty_query":
       return {
         observation: {
@@ -839,34 +850,383 @@ function normalizeToolInput(value: unknown): string {
   return String(value ?? "");
 }
 
-const MAX_OUTLINE_LABELS = 24;
+/**
+ * Outline entries shown after page runs have been compressed ("Page 1–60"
+ * counts as one). Page-numbered decks therefore always list every page; only
+ * documents with many distinct headings overflow, and those name how to reach
+ * the rest.
+ */
+const MAX_OUTLINE_LABELS = 80;
+
+const PAGE_LABEL_PATTERN = /^page\s+(\d+)$/i;
+const SECTION_REQUEST_PAGE_PATTERN =
+  /^(?:page|pages|pg\.?|p\.?|slide|slides)?\s*(\d+)\b/i;
+const SECTION_REQUEST_STOP_WORDS = new Set([
+  "a", "an", "and", "of", "on", "or", "section", "the", "to",
+]);
+
+/** One window onto a document: the text handed to the model plus its framing. */
+export interface DocumentReadView {
+  content: string;
+  /** Label of the isolated section, or null for whole-document / offset reads. */
+  sectionLabel: string | null;
+  /** Every section label in the full document, in order. */
+  labels: string[];
+  /** Zero-based index of the isolated section among `labels`. */
+  sectionIndex: number | null;
+  /** Section labels that fall entirely after the window (whole-document reads). */
+  omittedLabels: string[];
+  /** Label the window was cut off inside, when it ends mid-section. */
+  cutOffInside: string | null;
+  /** Requested section that matched nothing, when the read fell back to the whole document. */
+  unmatchedSection: string | null;
+  /** Char offset the window starts at (null unless an offset read). */
+  offset: number | null;
+  /** Char offset where the rest of the document continues, when cut off. */
+  nextOffset: number | null;
+  totalLength: number;
+  truncated: boolean;
+}
+
+export function parseDocumentReadRequest(
+  input: Record<string, unknown>
+): DocumentReadRequest {
+  const section =
+    typeof input.section === "string" && input.section.trim().length > 0
+      ? input.section.trim()
+      : typeof input.section === "number" && Number.isFinite(input.section)
+        ? String(input.section)
+        : typeof input.page === "number" && Number.isFinite(input.page)
+          ? `Page ${input.page}`
+          : typeof input.page === "string" && input.page.trim().length > 0
+            ? input.page.trim()
+            : null;
+  const rawOffset =
+    typeof input.offset === "number"
+      ? input.offset
+      : typeof input.offset === "string" && input.offset.trim().length > 0
+        ? Number(input.offset)
+        : null;
+  const offset =
+    rawOffset !== null && Number.isFinite(rawOffset) && rawOffset > 0
+      ? Math.floor(rawOffset)
+      : null;
+  return { section, offset };
+}
+
+function isWindowedReadRequest(request: DocumentReadRequest): boolean {
+  return Boolean(request.section) || (request.offset ?? 0) > 0;
+}
 
 /**
- * Frame a full-document read for the model: name the source and list its
- * section headings so the model can cite the specific section it draws from
- * ("Lab4.pdf — Part 3: Interrupts") instead of just the document title. The
- * UI keeps the raw content; only the model-facing text is framed.
+ * Choose the part of a document a read returns. Section reads isolate one
+ * heading (fuzzy, case-insensitive, page numbers accepted) using the same
+ * splitter answer verification cites with, so the label in the artifact ref
+ * is exactly the label a citation will carry. Whole-document reads are cut at
+ * `maxChars` and record which sections fell outside the window.
+ */
+export function buildDocumentReadView(
+  content: string,
+  request: DocumentReadRequest = {},
+  maxChars: number = MAX_DOC_TEXT
+): DocumentReadView {
+  const sections = splitDocumentIntoSections(content);
+  const labels = sections
+    .map((section) => section.label)
+    .filter((label): label is string => Boolean(label));
+  const base: DocumentReadView = {
+    content,
+    sectionLabel: null,
+    labels,
+    sectionIndex: null,
+    omittedLabels: [],
+    cutOffInside: null,
+    unmatchedSection: null,
+    offset: null,
+    nextOffset: null,
+    totalLength: content.length,
+    truncated: false,
+  };
+
+  const requestedSection = request.section?.trim() ?? "";
+  if (requestedSection) {
+    const matchIndex = resolveSectionRequest(requestedSection, labels);
+    if (matchIndex !== null) {
+      const label = labels[matchIndex]!;
+      const section = sections.find((entry) => entry.label === label)!;
+      const body = `${label}\n${section.text}`;
+      const truncated = body.length > MAX_SECTION_TEXT;
+      return {
+        ...base,
+        content: truncated
+          ? `${body.slice(0, MAX_SECTION_TEXT)}\n[...truncated]`
+          : body,
+        sectionLabel: label,
+        sectionIndex: matchIndex,
+        truncated,
+      };
+    }
+    base.unmatchedSection = requestedSection;
+  }
+
+  const offset =
+    request.offset && request.offset > 0 && request.offset < content.length
+      ? request.offset
+      : null;
+  const start = offset ?? 0;
+  const windowed = content.slice(start, start + maxChars);
+  const truncated = start + windowed.length < content.length;
+  const windowLabels = truncated
+    ? splitDocumentIntoSections(windowed)
+        .map((section) => section.label)
+        .filter((label): label is string => Boolean(label))
+    : labels;
+
+  let omittedLabels: string[] = [];
+  let cutOffInside: string | null = null;
+  if (truncated) {
+    const lastShown = windowLabels[windowLabels.length - 1] ?? null;
+    const lastShownIndex = lastShown ? labels.lastIndexOf(lastShown) : -1;
+    if (lastShownIndex >= 0) {
+      cutOffInside = lastShown;
+      omittedLabels = labels.slice(lastShownIndex + 1);
+    } else {
+      omittedLabels = labels.slice(offset === null ? 0 : labels.length);
+    }
+  }
+
+  return {
+    ...base,
+    content: truncated ? `${windowed}\n[...truncated]` : windowed,
+    omittedLabels,
+    cutOffInside,
+    offset,
+    nextOffset: truncated ? start + windowed.length : null,
+    truncated,
+  };
+}
+
+function normalizeSectionRequest(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[*_`#]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s:.\-–—]+|[\s:.\-–—]+$/g, "")
+    .trim();
+}
+
+function tokenizeSectionRequest(value: string): string[] {
+  return normalizeSectionRequest(value)
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length > 0 && !SECTION_REQUEST_STOP_WORDS.has(token));
+}
+
+/**
+ * Resolve a section reference against the document's labels. Accepts the
+ * exact label, a page reference in any of the usual spellings ("57",
+ * "page 57", "p. 57", "Page 57 (Part 2)"), a keyword + number ("Part 3"), a
+ * fragment of the heading, or most of its words. Returns the label index.
+ */
+export function resolveSectionRequest(
+  requested: string,
+  labels: string[]
+): number | null {
+  const query = normalizeSectionRequest(requested);
+  if (!query || labels.length === 0) {
+    return null;
+  }
+  const normalizedLabels = labels.map((label) => normalizeSectionRequest(label));
+
+  const exact = normalizedLabels.indexOf(query);
+  if (exact >= 0) {
+    return exact;
+  }
+
+  const pageMatch = query.match(SECTION_REQUEST_PAGE_PATTERN);
+  if (pageMatch) {
+    const number = pageMatch[1]!;
+    const explicitPage = /^(?:page|pages|pg\.?|p\.?|slide|slides)\s*\d+/i.test(query);
+    const pageIndex = normalizedLabels.findIndex(
+      (label) => label === `page ${number}`
+    );
+    if (pageIndex >= 0) {
+      return pageIndex;
+    }
+    const pagePrefixIndex = normalizedLabels.findIndex((label) =>
+      new RegExp(`^page ${number}(?![0-9])`).test(label)
+    );
+    if (pagePrefixIndex >= 0) {
+      return pagePrefixIndex;
+    }
+    if (explicitPage) {
+      return null;
+    }
+    // "3" on a heading-based document: "Part 3", "Section 3", "3. Title", "3 Title".
+    const keywordIndex = normalizedLabels.findIndex((label) =>
+      new RegExp(`^(?:[a-z]+ )?${number}(?![0-9.])`).test(label)
+    );
+    if (keywordIndex >= 0 && /^\d+$/.test(query)) {
+      return keywordIndex;
+    }
+  }
+
+  const queryTokens = tokenizeSectionRequest(query);
+  if (queryTokens.length === 0) {
+    return null;
+  }
+
+  // Heading fragment: the shortest label that contains the whole request.
+  let containing: number | null = null;
+  normalizedLabels.forEach((label, index) => {
+    if (!label.includes(query)) {
+      return;
+    }
+    if (containing === null || label.length < normalizedLabels[containing]!.length) {
+      containing = index;
+    }
+  });
+  if (containing !== null) {
+    return containing;
+  }
+
+  // Word overlap: every request word present, else most of them.
+  let best: { index: number; ratio: number } | null = null;
+  normalizedLabels.forEach((label, index) => {
+    const labelTokens = new Set(tokenizeSectionRequest(label));
+    if (labelTokens.size === 0) {
+      return;
+    }
+    const matched = queryTokens.filter((token) => labelTokens.has(token)).length;
+    const ratio = matched / queryTokens.length;
+    if (ratio >= 0.6 && (best === null || ratio > best.ratio)) {
+      best = { index, ratio };
+    }
+  });
+  return best ? (best as { index: number }).index : null;
+}
+
+/**
+ * Collapse consecutive page labels into ranges: ["Page 1", "Page 2", "Page 3",
+ * "Appendix A", "Page 9"] → ["Page 1–3", "Appendix A", "Page 9"].
+ */
+export function compressSectionLabels(labels: string[]): string[] {
+  const compressed: string[] = [];
+  let runStart: number | null = null;
+  let runEnd: number | null = null;
+
+  const flush = (): void => {
+    if (runStart === null || runEnd === null) {
+      return;
+    }
+    compressed.push(
+      runStart === runEnd ? `Page ${runStart}` : `Page ${runStart}–${runEnd}`
+    );
+    runStart = null;
+    runEnd = null;
+  };
+
+  for (const label of labels) {
+    const page = label.match(PAGE_LABEL_PATTERN);
+    const number = page ? Number(page[1]) : null;
+    if (number !== null && runEnd !== null && number === runEnd + 1) {
+      runEnd = number;
+      continue;
+    }
+    flush();
+    if (number !== null) {
+      runStart = number;
+      runEnd = number;
+      continue;
+    }
+    compressed.push(label);
+  }
+  flush();
+  return compressed;
+}
+
+function formatCharCount(value: number): string {
+  return value.toLocaleString("en-US");
+}
+
+/**
+ * Frame a document read for the model: name the source (and the isolated
+ * section, if any), list the section outline so the model can target its
+ * next read and cite the specific section it draws from ("Lab4.pdf — Part 3:
+ * Interrupts"), and spell out what fell outside the window. The UI keeps the
+ * raw content; only the model-facing text is framed.
  */
 export function buildReadModelText(
   artifact: Pick<ArtifactRef, "title" | "kind"> | undefined,
-  content: string
+  content: string,
+  view?: DocumentReadView
 ): string {
   if (!artifact || content.trim().length === 0) {
     return content;
   }
 
-  const labels = splitDocumentIntoSections(content)
-    .map((section) => section.label)
-    .filter((label): label is string => Boolean(label));
-  const header = [`[Source: ${artifact.title} (${artifact.kind})]`];
-  if (labels.length >= 2) {
-    const shown = labels.slice(0, MAX_OUTLINE_LABELS);
-    const overflow = labels.length - shown.length;
+  const resolved =
+    view ?? buildDocumentReadView(content, {}, Number.MAX_SAFE_INTEGER);
+  const labels = resolved.labels;
+  const sourceLabel = resolved.sectionLabel
+    ? `[Source: ${artifact.title} (${artifact.kind}) — ${resolved.sectionLabel}]`
+    : `[Source: ${artifact.title} (${artifact.kind})]`;
+  const header = [sourceLabel];
+
+  if (resolved.unmatchedSection) {
     header.push(
-      `Sections in this document: ${shown.join(" | ")}${overflow > 0 ? ` | ... and ${overflow} more` : ""}.`
+      `No section matching "${resolved.unmatchedSection}" in this document; showing the document from the start instead. Pick one of the sections listed below and call read_file again with it as section.`
     );
+  }
+
+  const outline = compressSectionLabels(labels);
+  if (labels.length >= 2) {
+    const shown = outline.slice(0, MAX_OUTLINE_LABELS);
+    const overflow = outline.length - shown.length;
     header.push(
-      `When you quote or paraphrase this document, name the section you drew from (e.g. "${artifact.title} — ${shown[0]}") so the student can find it.`
+      `Sections in this document: ${shown.join(" | ")}${overflow > 0 ? ` | ... and ${overflow} more (call read_file with section to open any of them)` : ""}.`
+    );
+  }
+
+  if (resolved.sectionLabel) {
+    const index = resolved.sectionIndex ?? labels.indexOf(resolved.sectionLabel);
+    const previous = index > 0 ? labels[index - 1] : null;
+    const next = index >= 0 && index + 1 < labels.length ? labels[index + 1] : null;
+    const neighbours = [
+      previous ? `previous: "${previous}"` : null,
+      next ? `next: "${next}"` : null,
+    ].filter((part): part is string => Boolean(part));
+    header.push(
+      `Showing only the section "${resolved.sectionLabel}"${index >= 0 ? ` (${index + 1} of ${labels.length})` : ""}${neighbours.length > 0 ? `; ${neighbours.join(", ")}` : ""}. Call read_file again with a different section to read another part, or without section for the document from the start.`
+    );
+    if (resolved.truncated) {
+      header.push(
+        `This section alone is longer than ${formatCharCount(MAX_SECTION_TEXT)} characters and was cut off at the end.`
+      );
+    }
+  } else if (resolved.offset !== null) {
+    const end = resolved.offset + resolved.content.replace(/\n\[\.\.\.truncated\]$/, "").length;
+    header.push(
+      `Showing characters ${formatCharCount(resolved.offset)}–${formatCharCount(end)} of ${formatCharCount(resolved.totalLength)} (offset ${resolved.offset}).${resolved.nextOffset !== null ? ` The document continues; call read_file with offset ${resolved.nextOffset} for the next window, or with section to jump to a heading.` : " This window reaches the end of the document."}`
+    );
+  } else if (resolved.truncated) {
+    const omitted = compressSectionLabels(resolved.omittedLabels);
+    const firstOmitted = resolved.omittedLabels[0] ?? null;
+    const reach = firstOmitted
+      ? `Call read_file with section "${firstOmitted}" (or any section named above) to read the rest, or with offset ${resolved.nextOffset} to continue from the cut-off.`
+      : `Call read_file with offset ${resolved.nextOffset} to continue from the cut-off, or with section to jump to a heading.`;
+    header.push(
+      `This read shows the first ${formatCharCount(resolved.nextOffset ?? resolved.content.length)} of ${formatCharCount(resolved.totalLength)} characters${resolved.cutOffInside ? ` and is cut off inside "${resolved.cutOffInside}"` : ""}. Not included in this read: ${omitted.length > 0 ? omitted.join(" | ") : "the remainder of the document"}. ${reach}`
+    );
+  }
+
+  if (labels.length >= 2) {
+    const example = resolved.sectionLabel ?? labels[0]!;
+    header.push(
+      `When you quote or paraphrase this document, name the section you drew from (e.g. "${artifact.title} — ${example}") so the student can find it.`
+    );
+  } else if (resolved.sectionLabel) {
+    header.push(
+      `When you quote or paraphrase this document, attribute it to "${artifact.title} — ${resolved.sectionLabel}".`
     );
   } else {
     header.push(
@@ -874,6 +1234,46 @@ export function buildReadModelText(
     );
   }
   return `${header.join("\n")}\n---\n${content}`;
+}
+
+/**
+ * Build the tool result for a document read: the observation carries the
+ * windowed text and, for section reads, a section-level artifact ref so the
+ * citation is "deck.pdf — Page 57" without any re-attribution pass.
+ */
+function buildDocumentReadResult(
+  tool: "read_file" | "download_course_file",
+  artifact: ArtifactRef,
+  content: string,
+  request: DocumentReadRequest,
+  summary?: string
+): ToolExecutionResult {
+  const view = buildDocumentReadView(content, request);
+  const ref: ArtifactRef = view.sectionLabel
+    ? {
+        ...artifact,
+        excerpt: buildArtifactExcerpt(view.content) ?? artifact.excerpt ?? null,
+        sectionLabel: view.sectionLabel,
+      }
+    : artifact;
+  const resolvedSummary =
+    summary ??
+    (view.sectionLabel
+      ? `Read ${artifact.title} — ${view.sectionLabel}.`
+      : view.offset !== null
+        ? `Read ${artifact.title} from offset ${view.offset}.`
+        : `Read ${artifact.title}.`);
+  return {
+    observation: {
+      tool,
+      status: "ok",
+      summary: resolvedSummary,
+      artifacts: [ref],
+      content: view.content,
+    },
+    modelText: buildReadModelText(ref, view.content, view),
+    uiText: view.content,
+  };
 }
 
 function normalizeSourceSectionLabel(value: string | null | undefined): string | null {
@@ -953,22 +1353,13 @@ async function recoverMissingAttachmentRead(
     localPath
   );
   if (extracted) {
-    return {
-      observation: {
-        tool,
-        status: "ok",
-        summary: `Recovered text from local attachment ${artifact.title}.`,
-        artifacts: [
-          createCourseAttachmentArtifactRef(localPath, artifact.title, extracted),
-        ],
-        content: extracted,
-      },
-      modelText: buildReadModelText(
-        createCourseAttachmentArtifactRef(localPath, artifact.title, extracted),
-        extracted
-      ),
-      uiText: extracted,
-    };
+    return buildDocumentReadResult(
+      tool,
+      createCourseAttachmentArtifactRef(localPath, artifact.title, extracted),
+      extracted,
+      {},
+      `Recovered text from local attachment ${artifact.title}.`
+    );
   }
 
   if (unpackedEntries.length > 0) {
@@ -1008,23 +1399,16 @@ async function reuseCachedAttachmentContent(
     loaded,
     cache,
     cachedArtifactId,
-    MAX_DOC_TEXT
+    Number.MAX_SAFE_INTEGER
   );
   if (cachedRead.status === "ok") {
-    return {
-      observation: {
-        tool: "download_course_file",
-        status: "ok",
-        summary: `Reused cached text for ${cachedRead.artifact.title}.`,
-        artifacts: [toArtifactRef(cachedRead.artifact)],
-        content: cachedRead.content,
-      },
-      modelText: buildReadModelText(
-        toArtifactRef(cachedRead.artifact),
-        cachedRead.content
-      ),
-      uiText: cachedRead.content,
-    };
+    return buildDocumentReadResult(
+      "download_course_file",
+      toArtifactRef(cachedRead.artifact),
+      cachedRead.content,
+      {},
+      `Reused cached text for ${cachedRead.artifact.title}.`
+    );
   }
 
   const cachedAttachment =
@@ -1041,22 +1425,13 @@ async function reuseCachedAttachmentContent(
 
   const extracted = await readExtractedSidecar(coursePath, localPath);
   if (extracted) {
-    return {
-      observation: {
-        tool: "download_course_file",
-        status: "ok",
-        summary: `Recovered text from previously downloaded ${originalFilename}.`,
-        artifacts: [
-          createCourseAttachmentArtifactRef(localPath, originalFilename, extracted),
-        ],
-        content: extracted,
-      },
-      modelText: buildReadModelText(
-        createCourseAttachmentArtifactRef(localPath, originalFilename, extracted),
-        extracted
-      ),
-      uiText: extracted,
-    };
+    return buildDocumentReadResult(
+      "download_course_file",
+      createCourseAttachmentArtifactRef(localPath, originalFilename, extracted),
+      extracted,
+      {},
+      `Recovered text from previously downloaded ${originalFilename}.`
+    );
   }
 
   if (unpackedEntries.length > 0) {
@@ -1146,6 +1521,12 @@ function findReusableReadObservation(
       continue;
     }
 
+    // A section/offset read is only a window onto the document; it must not
+    // stand in for a whole-document read.
+    if (isPartialReadObservation(observation)) {
+      continue;
+    }
+
     const matches = observation.artifacts.some(
       (artifact) => scoreFileLookupMatch(filename, artifact.title) > 0
     );
@@ -1156,6 +1537,14 @@ function findReusableReadObservation(
   }
 
   return null;
+}
+
+function isPartialReadObservation(observation: {
+  artifacts: ArtifactRef[];
+}): boolean {
+  return observation.artifacts.some((artifact) =>
+    Boolean(artifact.sectionLabel)
+  );
 }
 
 function buildSemanticTurnToolAliasKeys(
@@ -1328,6 +1717,11 @@ function getSemanticReuseTarget(
 ): string | null {
   switch (name) {
     case "read_file":
+      // Windowed reads (section / offset) are never satisfied by a reused
+      // whole-document result, which may have been cut off before the window.
+      if (isWindowedReadRequest(parseDocumentReadRequest(input))) {
+        return null;
+      }
       return typeof input.filename === "string" ? input.filename.trim() : null;
     case "download_course_file":
       return typeof input.title === "string" ? input.title.trim() : null;
@@ -1340,7 +1734,10 @@ function isSemanticReuseCandidate(
   requestedTool: string,
   candidate: ToolExecutionResult
 ): boolean {
-  if (!isGroundedContentObservation(candidate.observation)) {
+  if (
+    !isGroundedContentObservation(candidate.observation) ||
+    isPartialReadObservation(candidate.observation)
+  ) {
     return false;
   }
 

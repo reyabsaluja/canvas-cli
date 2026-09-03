@@ -39,7 +39,7 @@ export const INVESTIGATION_TOOLS: ToolDefinition[] = [
   {
     name: "read_document",
     description:
-      "Read and extract text from a downloaded course file by filename. Supports PDFs, text files, HTML, and markdown. The file must have been downloaded during ingestion. Use list_downloaded_files first to see available files. If the file you need isn't downloaded, use download_module_file instead.",
+      "Read and extract text from a downloaded course file by filename. Supports PDFs, text files, HTML, and markdown. The file must have been downloaded during ingestion. Use list_downloaded_files first to see available files. If the file you need isn't downloaded, use download_module_file instead. Returns up to about 60,000 characters; PDF pages appear as '## Page N' headings, and a longer document ends with a note naming the pages that were not included.",
     parameters: {
       type: "object" as const,
       properties: {

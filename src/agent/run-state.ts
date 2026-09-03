@@ -369,6 +369,12 @@ function collectRememberedArtifactIds(observations: Observation[]): string[] {
       continue;
     }
     for (const artifact of observation.artifacts) {
+      // A section read ("Page 57") is a window onto the document, not the
+      // document: it must not make the retrieval gate treat the artifact as
+      // already read and answer a question about another page from memory.
+      if (artifact.sectionLabel) {
+        continue;
+      }
       if (!remembered.includes(artifact.artifactId)) {
         remembered.push(artifact.artifactId);
       }

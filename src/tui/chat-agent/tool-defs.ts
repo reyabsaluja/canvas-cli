@@ -17,7 +17,7 @@ const SEARCH_WORKSPACE_TOOL: ToolDefinition = {
 const READ_FILE_TOOL: ToolDefinition = {
   name: "read_file",
   description:
-    "Read the full extracted text of a specific workspace or course artifact. This is the grounding tool to use after search when you need exact details, requirements, or citations, and the default first tool when the instruction document is already listed in your context. Supports PDFs, text, HTML, and ZIP-backed extracted files. Returns up to about 30,000 characters; very long documents are cut off at the end, so if the section you need is missing, say so instead of assuming it does not exist. Read every document that could hold part of the answer: the instruction document and the rubric or grading page are usually both needed. For compare, changed, or conflict questions, read each relevant source before deciding whether they agree.",
+    "Read the extracted text of a specific workspace or course artifact. This is the grounding tool to use after search when you need exact details, requirements, or citations, and the default first tool when the instruction document is already listed in your context. Supports PDFs, text, HTML, and ZIP-backed extracted files. Every result starts with the document's section outline (PDF pages appear as 'Page N'). Without a section, it returns the document from the start, up to about 120,000 characters; a longer document ends with a note naming the sections that were not included. To read one section or page, pass section (a heading label or page reference such as 'Page 57', '57', or 'Part 3'); to continue past a cut-off, pass the offset the note gives you. When a search result cites a section like 'Page 57: ...', read that section directly rather than the whole document. Read every document that could hold part of the answer: the instruction document and the rubric or grading page are usually both needed. For compare, changed, or conflict questions, read each relevant source before deciding whether they agree.",
   parameters: {
     type: "object",
     properties: {
@@ -25,6 +25,16 @@ const READ_FILE_TOOL: ToolDefinition = {
         type: "string",
         description:
           "Filename to read (e.g. 'lab4.pdf', 'assignment.md', 'lab4.zip')",
+      },
+      section: {
+        type: "string",
+        description:
+          "Optional. A section heading or page reference from the document outline or a search result, e.g. 'Page 57', '57', 'Part 3: Interrupts', or a fragment of the heading (case-insensitive). Returns just that section in full.",
+      },
+      offset: {
+        type: "integer",
+        description:
+          "Optional. Character offset to start the read window at, for continuing a long document past its cut-off (use the offset named in the previous read's note). Ignored when section is given.",
       },
     },
     required: ["filename"],
