@@ -188,3 +188,25 @@ test("over-budget PDFs are cut on a page boundary with a note naming the omitted
   const body = text.slice(0, text.indexOf("[Text truncated"));
   assert.match(body.trim(), /detail\.$/);
 });
+
+test("image-only pages inside a text PDF keep their page heading with an explicit note", async () => {
+  const doc = new PDFDocument({ size: "LETTER", margin: 50, autoFirstPage: false });
+  const chunks: Buffer[] = [];
+  const done = new Promise<Buffer>((resolve) => {
+    doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+  });
+  doc.addPage().fontSize(12).text("Slide one: topic marker T1X.");
+  doc.addPage().rect(50, 50, 200, 200).stroke(); // diagram-only slide
+  doc.addPage().fontSize(12).text("Slide three: topic marker T3X.");
+  doc.end();
+
+  const text = await extractPdfText(await done);
+  assert.match(text, /^## Page 1$/m);
+  assert.match(text, /^## Page 2$/m, "the image-only page must keep its heading");
+  assert.match(text, /^## Page 3$/m);
+  assert.ok(text.includes("[No extractable text on this page"), "image-only page carries the note");
+  const labels = splitDocumentIntoSections(text).map((section) => section.label);
+  assert.ok(labels.includes("Page 2"), "the note gives the page enough body to stay a section of its own");
+  assert.ok(text.indexOf("T1X") < text.indexOf("## Page 2") && text.indexOf("## Page 2") < text.indexOf("T3X"));
+});
