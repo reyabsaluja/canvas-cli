@@ -1,18 +1,39 @@
 import type { CourseCache } from "../enrich/cache-loader.js";
 import {
+  buildMatchExcerpt,
   formatArtifactLabel,
   loadArtifactIndex,
   readArtifactContent,
   searchArtifacts,
+  searchArtifactSections,
+  type ArtifactIndex,
   type ArtifactKind,
   type ArtifactRecord,
+  type ArtifactSection,
   type RankedArtifact,
 } from "../knowledge/artifact-index.js";
+
+/**
+ * The best-matching passage inside a matched course document: which section
+ * it came from (a "Page 57" heading, a "Late policy" heading, ...) and an
+ * excerpt centred on the query terms rather than the document's first line.
+ */
+export interface CoursePassage {
+  sectionId: string;
+  /** Section heading, or null for unlabelled sections (full text / top). */
+  section: string | null;
+  excerpt: string;
+  score: number;
+}
 
 export interface CourseArtifactMatch {
   artifact: ArtifactRecord;
   score: number;
+  passage: CoursePassage | null;
 }
+
+const PASSAGE_EXCERPT_LENGTH = 240;
+const GENERIC_SECTION_LABELS = new Set(["full text", "top", "summary", "metadata"]);
 
 export type CourseArtifactSearchResult =
   | {
@@ -57,13 +78,86 @@ export async function searchCourseArtifacts(
   }
 
   const index = await loadArtifactIndex({ cache });
+  const kinds = options?.kinds ?? COURSE_ARTIFACT_KINDS;
+  const limit = options?.limit ?? 8;
+  // Over-fetch so that dropping Files-tab duplicates below cannot leave the
+  // caller with fewer than `limit` distinct documents.
   const results = searchArtifacts(index, trimmed, {
     scope: "course",
-    kinds: options?.kinds ?? COURSE_ARTIFACT_KINDS,
-    limit: options?.limit ?? 8,
+    kinds,
+    limit: limit * 2,
   });
 
-  return results.map(mapCourseArtifactMatch);
+  const deduped = dropExtractedFileDuplicates(index, results);
+  const bestSections = findBestSectionsByArtifact(index, trimmed, kinds);
+
+  return deduped
+    .slice(0, limit)
+    .map((result) =>
+      mapCourseArtifactMatch(result, trimmed, bestSections.get(result.artifact.id))
+    );
+}
+
+/**
+ * A file crawled from the Files tab and also downloaded as an attachment is
+ * indexed twice: once as a bare `file` entry (name, type, size) and once as
+ * the `attachment` that carries the extracted text. Only the attachment is
+ * readable, so when both exist the bare entry is noise that sends the model
+ * to download_course_file for a file it can already read_file.
+ */
+function dropExtractedFileDuplicates(
+  index: ArtifactIndex,
+  results: RankedArtifact[]
+): RankedArtifact[] {
+  const extractedFileIds = new Set<number>();
+  for (const artifact of index.artifacts) {
+    if (artifact.scope !== "course" || artifact.kind !== "attachment") continue;
+    if (artifact.metadata.status !== "downloaded") continue;
+    const canvasFileId = artifact.metadata.canvasFileId;
+    if (typeof canvasFileId === "number") {
+      extractedFileIds.add(canvasFileId);
+    }
+  }
+  if (extractedFileIds.size === 0) {
+    return results;
+  }
+  return results.filter((result) => {
+    if (result.artifact.kind !== "file") return true;
+    const fileId = result.artifact.metadata.fileId;
+    return !(typeof fileId === "number" && extractedFileIds.has(fileId));
+  });
+}
+
+function findBestSectionsByArtifact(
+  index: ArtifactIndex,
+  query: string,
+  kinds: ArtifactKind[]
+): Map<string, { section: ArtifactSection; score: number }> {
+  const best = new Map<string, { section: ArtifactSection; score: number }>();
+  const ranked = searchArtifactSections(index, query, { scope: "course", kinds });
+  for (const entry of ranked) {
+    if (!best.has(entry.section.artifactId)) {
+      best.set(entry.section.artifactId, entry);
+    }
+  }
+  return best;
+}
+
+function buildCoursePassage(
+  query: string,
+  hit: { section: ArtifactSection; score: number } | undefined
+): CoursePassage | null {
+  if (!hit) return null;
+  const label = hit.section.section.trim();
+  return {
+    sectionId: hit.section.id,
+    section:
+      label.length > 0 && !GENERIC_SECTION_LABELS.has(label.toLowerCase())
+        ? label
+        : null,
+    excerpt: buildMatchExcerpt(hit.section.text, query, PASSAGE_EXCERPT_LENGTH),
+    score: hit.score,
+  };
 }
 
 export async function searchCourseKnowledge(
@@ -151,10 +245,7 @@ export function renderCourseArtifactSearchResult(
       return `No course material matched "${query}".`;
     case "ok":
       return result.matches
-        .map(({ artifact }) => {
-          const summary = artifact.excerpt ? ` — ${artifact.excerpt}` : "";
-          return `${formatArtifactLabel(artifact)}${summary}`;
-        })
+        .map((match) => formatCourseArtifactMatchLine(match))
         .join("\n");
     default:
       return `No course material matched "${query}".`;
@@ -182,10 +273,33 @@ export function renderCourseDocumentLookupResult(
   }
 }
 
-function mapCourseArtifactMatch(result: RankedArtifact): CourseArtifactMatch {
+/**
+ * One search-result line as the model sees it:
+ * `[attachment] lecture-notes.pdf — Page 57: ...the MESI protocol keeps...`.
+ * Falls back to the document head when no passage matched.
+ */
+export function formatCourseArtifactMatchLine(
+  match: Pick<CourseArtifactMatch, "artifact" | "passage">
+): string {
+  const label = formatArtifactLabel(match.artifact);
+  const passage = match.passage;
+  if (passage && passage.excerpt.length > 0) {
+    const prefix = passage.section ? `${passage.section}: ` : "";
+    return `${label} — ${prefix}${passage.excerpt}`;
+  }
+  const summary = match.artifact.excerpt ? ` — ${match.artifact.excerpt}` : "";
+  return `${label}${summary}`;
+}
+
+function mapCourseArtifactMatch(
+  result: RankedArtifact,
+  query: string,
+  bestSection: { section: ArtifactSection; score: number } | undefined
+): CourseArtifactMatch {
   return {
     artifact: result.artifact,
     score: result.score,
+    passage: buildCoursePassage(query, bestSection),
   };
 }
 
