@@ -965,6 +965,20 @@ export function buildDocumentReadView(
         truncated,
       };
     }
+    const raw = findRawHeadingSection(content, requestedSection);
+    if (raw) {
+      const body = raw.text
+        ? `${raw.label}\n${raw.text}`
+        : `${raw.label}\n[This section has no extractable text; the page is probably an image, diagram, or scan.]`;
+      const truncated = body.length > MAX_SECTION_TEXT;
+      return {
+        ...base,
+        content: truncated ? `${body.slice(0, MAX_SECTION_TEXT)}\n[...truncated]` : body,
+        sectionLabel: raw.label,
+        sectionIndex: null,
+        truncated,
+      };
+    }
     base.unmatchedSection = requestedSection;
   }
 
@@ -1003,6 +1017,46 @@ export function buildDocumentReadView(
     nextOffset: truncated ? start + windowed.length : null,
     truncated,
   };
+}
+
+/**
+ * Last-resort section lookup straight from the markdown headings. The section
+ * splitter folds tiny sections (an image-only PDF page, a heading with no
+ * body) into their neighbour, so "Page 12" can vanish from the label list even
+ * though "## Page 12" is right there in the text. Returns the heading's own
+ * body, up to the next heading of any level.
+ */
+export function findRawHeadingSection(
+  content: string,
+  requested: string
+): { label: string; text: string } | null {
+  const query = normalizeSectionRequest(requested);
+  if (!query) return null;
+  const headingPattern = /^#{1,4}[ \t]+(.+?)[ \t]*$/gm;
+  const headings: Array<{ label: string; start: number; bodyStart: number }> = [];
+  let match: RegExpExecArray | null;
+  while ((match = headingPattern.exec(content)) !== null) {
+    headings.push({
+      label: match[1]!.trim(),
+      start: match.index,
+      bodyStart: match.index + match[0].length,
+    });
+  }
+  if (headings.length === 0) return null;
+
+  const normalized = headings.map((heading) => normalizeSectionRequest(heading.label));
+  const pageNumber = query.match(/^(?:page|pg|p)?\.?\s*(\d+)$/)?.[1] ?? null;
+  let index = -1;
+  if (pageNumber) {
+    index = normalized.findIndex((label) => label.match(/^page (\d+)\b/)?.[1] === pageNumber);
+  }
+  if (index < 0) index = normalized.findIndex((label) => label === query);
+  if (index < 0) index = normalized.findIndex((label) => label.includes(query));
+  if (index < 0) return null;
+
+  const heading = headings[index]!;
+  const end = index + 1 < headings.length ? headings[index + 1]!.start : content.length;
+  return { label: heading.label, text: content.slice(heading.bodyStart, end).trim() };
 }
 
 function normalizeSectionRequest(value: string): string {
