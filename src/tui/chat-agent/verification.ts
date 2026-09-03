@@ -282,10 +282,22 @@ export function selectArtifactSupportObservations(
   return selected;
 }
 
-export function finalizeAnswerText(answer: string, missing: string[]): string {
+/**
+ * Final answer text for the turn. When the loop produced nothing, say so and,
+ * if the caller passes the verification's `checkedSources` trail, name what
+ * was checked so the student knows how far the search went.
+ */
+export function finalizeAnswerText(
+  answer: string,
+  missing: string[],
+  checkedSources?: string | null
+): string {
   const trimmed = answer.trim();
   if (!trimmed) {
-    return "I wasn't able to find a clear answer.";
+    const trail = checkedSources?.trim();
+    return trail
+      ? `I wasn't able to find a clear answer after checking: ${trail}.`
+      : "I wasn't able to find a clear answer.";
   }
   return trimmed;
 }

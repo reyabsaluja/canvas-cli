@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **ground**
+Next area: **discover**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -28,7 +28,7 @@ Next area: **ground**
 - extract: file-link `title` hints dropped when anchor text is generic; zip summary text still capped at 30k/file, 50k total; image-only PDF pages leave no page marker (no OCR / "page N is an image" hint)
 - retrieve: no synonym expansion (due/deadline, rubric/grading); artifact-level scoring is presence-only so long docs win ties (`CoursePassage.score` is available as a tie-break); `list_files` still shows both the `[file]` and `[attachment]` entries for downloaded Files-tab files
 - retrieve: retrieval gate answers from memory when `readArtifactIds` contains the artifact even if that whole read was cut off before the asked-about page; record truncation on the ArtifactRef and let the gate re-read with `section` when the question names a page/heading outside the remembered window
-- ground: no "not found after checking X, Y, Z" answer path (`finalizeAnswerText` ignores the observation trail); `/ask` prompt still caps answers at 2-4 sentences; workups silently prefer Canvas over the syllabus on due-date conflicts instead of surfacing them; numeric-claim check only covers digit-bearing tokens (spelled-out numbers, weekday inferences like "Friday" are not checked) and only against the current turn's verification observations, so a figure remembered from an earlier turn's read is reported as unconfirmed
+- ground: workups silently prefer Canvas over the syllabus on due-date conflicts instead of surfacing them; numeric-claim check only covers digit-bearing tokens (spelled-out numbers, weekday inferences like "Friday" are not checked) and only against the current turn's verification observations, so a figure remembered from an earlier turn's read is reported as unconfirmed
 
 ## Done
 
@@ -46,3 +46,4 @@ Next area: **ground**
 - 2026-09-03 extract: HTML tables keep colspan/rowspan/nested tables/captions and row-header keys, `<dl>` lists render as term: definition lines; announcement and discussion extracts list the files attached to the post and its replies (agent stalled twice on the long gate; caller ran the full gate: 836/836)
 - 2026-09-03 retrieve: search_workspace previews are a 2,400-char window centred on the matching passage instead of the first 2,000 chars (two agents stalled because the Mac slept; caller finished it). Still open from this lap: gate answers from a truncated memory (backlog item kept)
 - 2026-09-03 reason: read_file section lookup falls back to a raw "## Page N"/heading scan when the splitter folded the section away (image-only pages get an explicit "no extractable text" note); accepts "p. 12", "12", heading fragments (agent stalled twice from Mac sleep; caller finished it; truncated-memory gate item still open)
+- 2026-09-03 ground: not-found answers name what was checked ("Not found after checking: Lab4.pdf (read in full); course search for \"penalty\" (no matches); rubric.pdf (could not read)") via verification.checkedSources + finalizeAnswerText trail; /ask prompt no longer caps answers at 2-4 sentences; prompt tells the agent to list checked sources in not-found answers

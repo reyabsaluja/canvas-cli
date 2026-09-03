@@ -14,6 +14,14 @@ export interface VerificationResult {
   sources: AnswerSource[];
   missing: string[];
   note: string | null;
+  /**
+   * Human-readable trail of what the turn actually checked ("Lab4.pdf (read in
+   * full); course search for "late policy" (no matches)"), or null when no
+   * source was consulted. Always populated so callers can attach it to
+   * not-found answers; `note` already carries it when the answer says the
+   * information was not found.
+   */
+  checkedSources: string | null;
 }
 
 export interface VerifyWorkspaceAnswerInput {
@@ -100,22 +108,35 @@ export function verifyWorkspaceAnswer(
     expectsComparisonEvidence,
     hasEnoughComparisonSources,
   });
-  const note =
+  // A "not found" answer is only as honest as the search behind it. When the
+  // answer says the information is missing, tell the student exactly which
+  // sources were read and which searches came back empty, so "not specified"
+  // after reading the handout, the syllabus and the announcements reads very
+  // differently from "not specified" after one failed search.
+  const checkedSources = formatCheckedSourcesNote(
+    collectCheckedSources(input.observations)
+  );
+  const notFoundNote =
+    trimmedAnswer && checkedSources && answerLooksLikeNotFound(trimmedAnswer)
+      ? `Not found after checking: ${checkedSources}.`
+      : null;
+  const unsupportedNote =
     unsupportedClaims.length > 0
-      ? [
-          buildUnsupportedClaimsNote(unsupportedClaims, sources),
-          baseNote,
-        ]
-          .filter((part): part is string => Boolean(part))
-          .join(" ")
-      : baseNote;
+      ? buildUnsupportedClaimsNote(unsupportedClaims, sources)
+      : null;
+  // The trail replaces the generic "tentative, no citable source" note: for a
+  // not-found answer the trail *is* the support.
+  const note = [unsupportedNote, notFoundNote ?? baseNote]
+    .filter((part): part is string => Boolean(part))
+    .join(" ");
 
   return {
     ok: missing.length === 0,
     confidence,
     sources,
     missing,
-    note,
+    note: note.length > 0 ? note : null,
+    checkedSources,
   };
 }
 
@@ -823,4 +844,180 @@ function describeClaim(token: string, normalizedAnswer: string): string {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// ---------------------------------------------------------------------------
+// Checked-sources trail.
+//
+// "I couldn't find a late policy" means nothing unless the student knows what
+// was looked at. This turns the turn's observations into a compact list of
+// what was read, what was searched (and whether it matched), and what could
+// not be read, so a not-found answer can say "after checking X, Y, Z".
+// ---------------------------------------------------------------------------
+
+export type CheckedSourceKind =
+  | "read"
+  | "search"
+  | "announcements"
+  | "thread"
+  | "failed_read";
+
+export interface CheckedSource {
+  kind: CheckedSourceKind;
+  /** Ready-to-print fragment, e.g. `course search for "late policy" (no matches)`. */
+  label: string;
+}
+
+const MAX_CHECKED_SOURCES_IN_NOTE = 10;
+const READ_TOOL_NAMES = new Set(["read_file", "download_course_file"]);
+const SEARCH_TOOL_NAMES = new Set(["search_workspace", "search_course"]);
+const TRUNCATION_MARKER_PATTERN = /\[\.\.\.truncated\]|\[\.\.\. ?cut off/i;
+
+const NOT_FOUND_ANSWER_PATTERNS: RegExp[] = [
+  // "couldn't find", "does not mention", "was unable to locate", "never states"
+  /\b(?:could\s*n[o']t|can\s*n[o']t|did\s*n[o']t|do(?:es)?\s*n[o']t|was\s*n[o']t|were\s*n[o']t|unable to|not able to|never)\s+(?:\w+\s+){0,3}?(?:find|locate|see|mention|state|specify|specifies|list|include|contain|say|give|provide|confirm|address|cover)\b/i,
+  // "is not specified", "aren't mentioned anywhere"
+  /\b(?:is|are|was|were)\s*n[o']t\s+(?:\w+\s+)?(?:specified|mentioned|stated|listed|given|provided|found|available|included|documented|covered|addressed)\b/i,
+  // "no mention of", "there is no information about"
+  /\bno\s+(?:\w+\s+){0,2}?(?:mention|information|details?|reference|indication|record|sign)\b/i,
+  // "none of the sources I read state a penalty"
+  /\bnone of the\s+(?:\w+\s+){0,3}?(?:mention|state|specify|list|include|say|give|provide|cover)/i,
+  // "not specified", "not mentioned in the handout"
+  /\bnot\s+(?:specified|mentioned|stated|listed|documented|covered|addressed|found)\b/i,
+];
+
+/** True when the answer tells the student the information could not be found. */
+export function answerLooksLikeNotFound(answer: string): boolean {
+  const trimmed = answer.trim();
+  if (!trimmed) {
+    return false;
+  }
+  return NOT_FOUND_ANSWER_PATTERNS.some((pattern) => pattern.test(trimmed));
+}
+
+/**
+ * Reduce an observation trail to the sources that were actually consulted,
+ * in order, deduped. Action-only tools (list_files, open_resource, ...) and
+ * within-turn cache hits do not add entries.
+ */
+export function collectCheckedSources(observations: Observation[]): CheckedSource[] {
+  const checked: CheckedSource[] = [];
+  const seen = new Set<string>();
+  const push = (entry: CheckedSource): void => {
+    const key = `${entry.kind}:${entry.label.toLowerCase()}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    checked.push(entry);
+  };
+
+  for (const observation of observations) {
+    if (READ_TOOL_NAMES.has(observation.tool)) {
+      if (observation.status === "ok") {
+        const grounded = isGroundedContentObservation(observation);
+        const truncated =
+          grounded && TRUNCATION_MARKER_PATTERN.test(observation.content ?? "");
+        for (const artifact of observation.artifacts) {
+          const section = normalizeSourceSection(artifact.sectionLabel);
+          const title = section ? `${artifact.title} — ${section}` : artifact.title;
+          const how = section
+            ? "read"
+            : truncated
+              ? "read, cut off"
+              : grounded
+                ? "read in full"
+                : "read";
+          push({ kind: "read", label: `${title} (${how})` });
+        }
+        continue;
+      }
+      const title =
+        observation.artifacts[0]?.title ?? extractQuotedFragment(observation.summary);
+      if (title) {
+        push({
+          kind: "failed_read",
+          label: `${title} (could not read: ${describeReadFailure(observation.status)})`,
+        });
+      }
+      continue;
+    }
+
+    if (SEARCH_TOOL_NAMES.has(observation.tool)) {
+      const query = extractQuotedFragment(observation.summary);
+      if (!query) {
+        continue;
+      }
+      const scope = observation.tool === "search_course" ? "course" : "workspace";
+      const outcome =
+        observation.status === "ok"
+          ? describeMatchCount(observation)
+          : observation.status === "error"
+            ? "search failed"
+            : "no matches";
+      push({ kind: "search", label: `${scope} search for "${query}" (${outcome})` });
+      continue;
+    }
+
+    if (observation.tool === "list_announcements" && observation.status === "ok") {
+      const query = extractQuotedFragment(observation.summary);
+      push({
+        kind: "announcements",
+        label: query ? `the announcements matching "${query}"` : "the announcements",
+      });
+      continue;
+    }
+
+    if (observation.tool === "read_thread") {
+      const topic = extractQuotedFragment(observation.summary);
+      if (observation.status === "ok") {
+        push({
+          kind: "thread",
+          label: topic ? `the discussion thread "${topic}"` : "the discussion thread",
+        });
+      } else if (topic) {
+        push({
+          kind: "failed_read",
+          label: `discussion thread "${topic}" (not found)`,
+        });
+      }
+    }
+  }
+
+  return checked;
+}
+
+/** Join a trail into one printable fragment, or null when nothing was checked. */
+export function formatCheckedSourcesNote(checked: CheckedSource[]): string | null {
+  if (checked.length === 0) {
+    return null;
+  }
+  const shown = checked.slice(0, MAX_CHECKED_SOURCES_IN_NOTE);
+  const more = checked.length - shown.length;
+  const joined = shown.map((entry) => entry.label).join("; ");
+  return more > 0 ? `${joined}; and ${more} more` : joined;
+}
+
+function describeReadFailure(status: Observation["status"]): string {
+  switch (status) {
+    case "missing_text":
+      return "no extracted text";
+    case "not_found":
+      return "not found";
+    default:
+      return "error";
+  }
+}
+
+function describeMatchCount(observation: Observation): string {
+  const fromSummary = observation.summary.match(/\bFound (\d+)\b/i);
+  const count = fromSummary
+    ? Number.parseInt(fromSummary[1]!, 10)
+    : observation.artifacts.length;
+  return `${count} match${count === 1 ? "" : "es"}`;
+}
+
+function extractQuotedFragment(text: string): string | null {
+  const match = text.match(/"([^"]+)"/);
+  return match?.[1]?.trim() || null;
 }
