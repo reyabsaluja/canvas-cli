@@ -4,11 +4,16 @@ import type { ChatAgentContext } from "./types.js";
 const SEARCH_WORKSPACE_TOOL: ToolDefinition = {
   name: "search_workspace",
   description:
-    "Discovery-only search across the workspace and ingested course knowledge: the assignment's instruction documents, extracted PDFs, plan, and ingested course documents. It does NOT cover announcements or discussion threads (use list_announcements for those). Best first tool when you do not know which document holds the answer. Returns relevant snippets and source names, not the full document text. Use it to find the best source, then call read_file for exact wording, requirements, quotes, or detailed answers. If the results look weak, reword or broaden the query once before switching to search_course or list_files. For compare, changed, or conflict questions, use search to identify the best two candidate sources before concluding.",
+    "Discovery-only search across the workspace and ingested course knowledge: the assignment's instruction documents, extracted PDFs, plan, and ingested course documents. It does NOT cover announcements or discussion threads (use list_announcements for those). Best first tool when you do not know which document holds the answer. Returns relevant snippets and source names, not the full document text. Use it to find the best source, then call read_file for exact wording, requirements, quotes, or detailed answers. If the results look weak, reword or broaden the query once before switching to search_course or list_files. For compare, changed, or conflict questions, use search to identify the best two candidate sources before concluding. Pass limit to see more candidates when the first page looks thin.",
   parameters: {
     type: "object",
     properties: {
       query: { type: "string", description: "Search query" },
+      limit: {
+        type: "integer",
+        description:
+          "Optional. How many matches to return (1-20, default 8). Raise it when the first pass looks thin or the question spans several documents; more candidates cost little and a missed source costs the answer.",
+      },
     },
     required: ["query"],
   },
@@ -63,6 +68,11 @@ const SEARCH_COURSE_TOOL: ToolDefinition = {
         type: "string",
         description:
           "Search keyword to match against module names, item titles, and file names",
+      },
+      limit: {
+        type: "integer",
+        description:
+          "Optional. How many matches to return (1-20, default 8). Raise it when the first pass looks thin or the question spans several documents; more candidates cost little and a missed source costs the answer.",
       },
     },
     required: ["query"],

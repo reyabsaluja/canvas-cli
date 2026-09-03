@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **reason**
+Next area: **ground**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -59,3 +59,4 @@ Next area: **reason**
 - 2026-09-03 discover: external tools from course navigation (/tabs: Piazza, Ed, Zoom, Gradescope, recordings platforms, ...) captured as a "Course tools and external links" page with purpose hints and launch links; count in ingestion.json and summary; hidden/internal tabs skipped; 403 degrades to none (caller did it directly)
 - 2026-09-03 extract: zip summary caps raised 30k/file → 120k and 50k total → 400k to match direct reads, with an explicit "N more characters omitted" note instead of a silent cut (caller did it directly)
 - 2026-09-03 retrieve: course search blends the best section's length-normalised score into document ranking (0.5 weight, capped) so a focused page outranks a long syllabus that merely mentions every query word; checked list_files: bare file entries were never listed (backlog claim removed) (caller did it directly)
+- 2026-09-03 reason: search_workspace and search_course take a `limit` (1-20) so the agent can widen a thin first pass; workspace default raised 5 → 8 matches, course default 8 (caller did it directly)
