@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **ground**
+Next area: **discover**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -27,7 +27,7 @@ Next area: **ground**
 - discover: quizzes (`/quizzes`) not fetched; course tabs / external tool links not recorded
 - extract: file-link `title` hints dropped when anchor text is generic; zip summary text still capped at 30k/file, 50k total; no OCR for scanned PDFs
 - retrieve: no synonym expansion (due/deadline, rubric/grading); artifact-level scoring is presence-only so long docs win ties (`CoursePassage.score` is available as a tie-break); `list_files` still shows both the `[file]` and `[attachment]` entries for downloaded Files-tab files
-- ground: workups silently prefer Canvas over the syllabus on due-date conflicts instead of surfacing them; numeric-claim check only covers digit-bearing tokens (spelled-out numbers, weekday inferences like "Friday" are not checked) and only against the current turn's verification observations, so a figure remembered from an earlier turn's read is reported as unconfirmed
+- ground: workups silently prefer Canvas over the syllabus on due-date conflicts instead of surfacing them; numeric-claim check only covers digit-bearing tokens (spelled-out numbers, weekday inferences like "Friday" are not checked); a date's bare day number is matched by any unrelated number in the evidence ("March 20" passes because "style 20 marks" exists), so date claims should be checked as month+day pairs; the base note can say "matched search evidence, not a full document read" even when a read was made this turn
 
 ## Done
 
@@ -50,3 +50,4 @@ Next area: **ground**
 - 2026-09-03 extract: image-only PDF pages keep their "## Page N" heading with an explicit "no extractable text" note, so every page stays addressable and citable; fully image-only PDFs still report the unreadable marker (caller did it directly)
 - 2026-09-03 retrieve: cut-off whole reads record their omitted section labels on the ArtifactRef; when a question names a page/heading the read never included ("page 57", "p. 12", "Part 4", "grading rubric") the gate issues a section read instead of answering from truncated memory (caller did it directly)
 - 2026-09-03 reason: prompt and reflection footer teach a figure check (every date/time/%/value must come from a result read this turn, else read the section first); the footer names the sections a cut-off read omitted and the section: call to fetch them (caller did it directly)
+- 2026-09-03 ground: the numeric-claim check also accepts figures supported by earlier turns' grounded reads (priorObservations), so a correctly remembered due date is no longer flagged as unconfirmed; citations and confidence still use this turn's evidence only (caller did it directly)
