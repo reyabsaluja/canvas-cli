@@ -231,6 +231,29 @@ export interface CanvasDiscussionTopicView {
 }
 
 /** A folder in a course's Files area (GET /courses/:id/folders). */
+/** A classic or New Quiz as listed by GET /courses/:id/quizzes. */
+export interface CanvasQuiz {
+  id: number;
+  title: string;
+  html_url?: string | null;
+  /** Instructions HTML shown before the quiz starts. */
+  description?: string | null;
+  quiz_type?: "practice_quiz" | "assignment" | "graded_survey" | "survey" | string | null;
+  /** Minutes, or null for no limit. */
+  time_limit?: number | null;
+  /** -1 means unlimited. */
+  allowed_attempts?: number | null;
+  points_possible?: number | null;
+  question_count?: number | null;
+  due_at?: string | null;
+  unlock_at?: string | null;
+  lock_at?: string | null;
+  published?: boolean | null;
+  shuffle_answers?: boolean | null;
+  show_correct_answers?: boolean | null;
+  one_question_at_a_time?: boolean | null;
+}
+
 export interface CanvasFolder {
   id: number;
   name: string;

@@ -59,7 +59,10 @@ test("integration: ingest pipeline end-to-end with mock API", async (t) => {
     assert.equal(normalized.files.length, 2);
     assert.equal(normalized.files[0].displayName, "syllabus.pdf");
 
-    assert.equal(normalized.pages.length, 2);
+    // Quizzes ride through the page pipeline as "Quiz: ..." pages.
+    const regularPages = normalized.pages.filter((page) => !page.title.startsWith("Quiz: "));
+    assert.equal(regularPages.length, 2);
+    assert.equal(normalized.pages.length - regularPages.length, 2);
     assert.equal(normalized.pages[0].title, "Welcome to CS101");
   });
 

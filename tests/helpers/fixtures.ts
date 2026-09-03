@@ -1,4 +1,4 @@
-import type { MockCourse, MockAssignment, MockModule, MockPage, MockFile, MockFolder, MockAttachment, MockDiscussionTopic, MockServerData } from "./mock-canvas-server.js";
+import type { MockCourse, MockAssignment, MockModule, MockQuiz, MockPage, MockFile, MockFolder, MockAttachment, MockDiscussionTopic, MockServerData } from "./mock-canvas-server.js";
 
 // All dates are relative to "now" so the fixtures never go stale: the two
 // CS courses are always in the current term and HIST303 is always finished.
@@ -150,6 +150,35 @@ export const CS101_MODULES: MockModule[] = [
     items: [
       { id: 102, title: "Variables Lecture Notes", type: "Page", position: 1, page_url: "variables-lecture" },
     ],
+  },
+];
+
+export const CS101_QUIZZES: MockQuiz[] = [
+  {
+    id: 9001,
+    title: "Week 3 Practice Quiz",
+    html_url: "https://canvas.example/courses/101/quizzes/9001",
+    description: "<p>Practice the loop questions before the midterm. <strong>Bring the formula sheet.</strong></p>",
+    quiz_type: "practice_quiz",
+    time_limit: 20,
+    allowed_attempts: -1,
+    points_possible: 0,
+    question_count: 8,
+    due_at: null,
+    published: true,
+  },
+  {
+    id: 9002,
+    title: "Midterm Quiz",
+    html_url: "https://canvas.example/courses/101/quizzes/9002",
+    description: "<p>Closed book. Calculators allowed.</p>",
+    quiz_type: "assignment",
+    time_limit: 50,
+    allowed_attempts: 1,
+    points_possible: 40,
+    question_count: 25,
+    due_at: daysFromNow(10),
+    published: true,
   },
 ];
 
@@ -337,6 +366,7 @@ export function buildDefaultServerData(): MockServerData {
     ]),
     modules: new Map([[101, CS101_MODULES]]),
     pages: new Map([[101, CS101_PAGES]]),
+    quizzes: new Map([[101, CS101_QUIZZES]]),
     files: new Map([[101, CS101_FILES]]),
     folders: new Map([[101, CS101_FOLDERS]]),
     discussions: new Map([[101, CS101_DISCUSSIONS]]),

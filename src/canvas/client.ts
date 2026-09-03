@@ -26,6 +26,7 @@ import type {
   CanvasModule,
   CanvasModuleItem,
   CanvasPage,
+  CanvasQuiz,
 } from "./types.js";
 
 export class CanvasClient {
@@ -236,6 +237,12 @@ export class CanvasClient {
    * Files API is blocked. Folder paths let ingestion preserve the instructor's
    * organisation (e.g. "Lectures/Week 3") for files that are not in any module.
    */
+  /** Quizzes (instructions, time limit, attempts). Empty when the Quizzes API is blocked. */
+  async getQuizzesSafe(courseId: number, signal?: AbortSignal | null): Promise<CanvasQuiz[]> {
+    const url = `${this.baseUrl}/courses/${courseId}/quizzes?per_page=100`;
+    return this.fetchPaginatedSafe<CanvasQuiz>(url, signal);
+  }
+
   async getFoldersSafe(courseId: number, signal?: AbortSignal | null): Promise<CanvasFolder[]> {
     const url = `${this.baseUrl}/courses/${courseId}/folders?per_page=100`;
     return this.fetchPaginatedSafe<CanvasFolder>(url, signal);

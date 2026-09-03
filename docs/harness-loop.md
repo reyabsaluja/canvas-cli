@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **discover**
+Next area: **extract**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -24,7 +24,7 @@ Next area: **discover**
 
 ## Backlog (known gaps, pick from here first if still open)
 
-- discover: quizzes (`/quizzes`) not fetched; course tabs / external tool links not recorded
+- discover: course tabs / external tool links not recorded
 - extract: file-link `title` hints dropped when anchor text is generic; zip summary text still capped at 30k/file, 50k total; no OCR for scanned PDFs
 - retrieve: no synonym expansion (due/deadline, rubric/grading); artifact-level scoring is presence-only so long docs win ties (`CoursePassage.score` is available as a tie-break); `list_files` still shows both the `[file]` and `[attachment]` entries for downloaded Files-tab files
 - ground: workups silently prefer Canvas over the syllabus on due-date conflicts instead of surfacing them; numeric-claim check only covers digit-bearing tokens (spelled-out numbers, weekday inferences like "Friday" are not checked); a date's bare day number is matched by any unrelated number in the evidence ("March 20" passes because "style 20 marks" exists), so date claims should be checked as month+day pairs; the base note can say "matched search evidence, not a full document read" even when a read was made this turn
@@ -51,3 +51,4 @@ Next area: **discover**
 - 2026-09-03 retrieve: cut-off whole reads record their omitted section labels on the ArtifactRef; when a question names a page/heading the read never included ("page 57", "p. 12", "Part 4", "grading rubric") the gate issues a section read instead of answering from truncated memory (caller did it directly)
 - 2026-09-03 reason: prompt and reflection footer teach a figure check (every date/time/%/value must come from a result read this turn, else read the section first); the footer names the sections a cut-off read omitted and the section: call to fetch them (caller did it directly)
 - 2026-09-03 ground: the numeric-claim check also accepts figures supported by earlier turns' grounded reads (priorObservations), so a correctly remembered due date is no longer flagged as unconfirmed; citations and confidence still use this turn's evidence only (caller did it directly)
+- 2026-09-03 discover: quizzes (classic + New Quizzes, incl. practice quizzes and surveys) fetched from /quizzes and stored as pages ("Quiz: <title>") with type, due/lock dates, time limit, attempts, points, question count and instructions; count in ingestion.json and summary; 403 degrades to none (caller did it directly)
