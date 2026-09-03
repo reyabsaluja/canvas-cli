@@ -262,6 +262,7 @@ export async function ingestCourse(
       syllabusCandidates: syllabusCandidates.length,
       lectures: lectures.length,
       quizzes: raw.quizzes.length,
+      externalTools: raw.tabs.filter((tab) => tab.type === "external" && !tab.hidden).length,
       attachmentsDownloaded: downloaded.length,
       attachmentsSkipped: skipped.length,
       attachmentsFailed: failed.length,

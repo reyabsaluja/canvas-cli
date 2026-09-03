@@ -134,6 +134,16 @@ export interface MockQuiz {
   published?: boolean;
 }
 
+export interface MockTab {
+  id: string;
+  label: string;
+  html_url?: string;
+  full_url?: string;
+  type?: string;
+  hidden?: boolean;
+  position?: number;
+}
+
 export interface MockServerData {
   courses: MockCourse[];
   assignments: Map<number, MockAssignment[]>;
@@ -144,6 +154,8 @@ export interface MockServerData {
   folders?: Map<number, MockFolder[]>;
   /** Quizzes served from GET /courses/:id/quizzes. */
   quizzes?: Map<number, MockQuiz[]>;
+  /** Navigation tabs served from GET /courses/:id/tabs. */
+  tabs?: Map<number, MockTab[]>;
   /** Bytes served from GET /files/:id/download (defaults to a short text body). */
   fileContents?: Map<number, string>;
   /** Any API path matching one of these returns 403, to simulate institution blocks. */
@@ -402,6 +414,17 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
         baseApiUrl,
         `/courses/${courseId}/modules/${moduleId}/items`
       );
+      res.writeHead(200, headers);
+      res.end(body);
+      return;
+    }
+
+    // GET /courses/:id/tabs
+    const tabsMatch = path.match(/^\/courses\/(\d+)\/tabs$/);
+    if (tabsMatch && req.method === "GET") {
+      const courseId = parseInt(tabsMatch[1], 10);
+      const tabs = data.tabs?.get(courseId) ?? [];
+      const { body, headers } = paginatedResponse(tabs, page, effectivePerPage, baseApiUrl, `/courses/${courseId}/tabs`);
       res.writeHead(200, headers);
       res.end(body);
       return;

@@ -7,6 +7,7 @@ import type {
   CanvasModuleItem,
   CanvasFile,
   CanvasQuiz,
+  CanvasTab,
   CanvasFolder,
   CanvasPage,
   CanvasDiscussionEntry,
@@ -48,6 +49,8 @@ export interface RawCourseContent {
   fetchedPages: Array<{ slug: string; title: string; body: string }>;
   /** Quizzes (classic + New Quizzes) as listed by the Quizzes API; empty when blocked. */
   quizzes: CanvasQuiz[];
+  /** Course navigation tabs; external tools (Piazza, Zoom, Ed, ...) are captured as a page. */
+  tabs: CanvasTab[];
   warnings: string[];
 }
 
@@ -251,6 +254,18 @@ export async function fetchCourseContent(
     rememberFetchedPage(`quiz-${quiz.id}`, `Quiz: ${quiz.title}`, buildQuizPageBody(quiz));
   }
 
+  // Course navigation: external tools (Piazza, Ed, Zoom, Gradescope, ...) are
+  // often the only place a course names where questions, office hours or
+  // recordings live. Capture them as a "Course tools" page.
+  const getTabsSafe = (client as {
+    getTabsSafe?: (courseId: number, signal?: AbortSignal | null) => Promise<CanvasTab[]>;
+  }).getTabsSafe;
+  const tabs = getTabsSafe ? await getTabsSafe.call(client, courseId, signal) : [];
+  const toolsBody = buildCourseToolsPageBody(tabs);
+  if (toolsBody) {
+    rememberFetchedPage("course-tools", "Course tools and external links", toolsBody);
+  }
+
   while (pendingSlugs.length > 0) {
     if (signal?.aborted) {
       throw signal.reason ?? new DOMException("Aborted", "AbortError");
@@ -288,8 +303,41 @@ export async function fetchCourseContent(
     frontPageBody,
     fetchedPages: Array.from(fetchedPagesBySlug.values()),
     quizzes,
+    tabs,
     warnings,
   };
+}
+
+const TOOL_HINTS: Array<[RegExp, string]> = [
+  [/piazza/i, "Q&A forum: ask and search course questions here"],
+  [/\bed\b|edstem/i, "Q&A forum: ask and search course questions here"],
+  [/zoom/i, "live sessions and office hours (video)"],
+  [/gradescope|crowdmark/i, "assignment submission and grading"],
+  [/panopto|kaltura|echo360|yuja|mediasite|studio/i, "lecture recordings"],
+  [/github|gitlab|bitbucket/i, "code hosting"],
+  [/turnitin/i, "plagiarism checking for submissions"],
+  [/pearson|mcgraw|wiley|cengage|zybook|mylab|mastering/i, "publisher platform for textbook work"],
+  [/slack|discord|teams/i, "chat with the class"],
+  [/perusall|hypothes/i, "collaborative reading"],
+  [/top hat|tophat|iclicker|poll/i, "in-class polling"],
+];
+
+/** Externally hosted course tools as a page, or null when there are none. Exported for tests. */
+export function buildCourseToolsPageBody(tabs: CanvasTab[]): string | null {
+  const external = tabs
+    .filter((tab) => tab.type === "external" && !tab.hidden)
+    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  if (external.length === 0) return null;
+  const items = external.map((tab) => {
+    const url = tab.full_url ?? tab.html_url ?? "";
+    const hint = TOOL_HINTS.find(([pattern]) => pattern.test(`${tab.label} ${url}`))?.[1];
+    const link = url ? ` — <a href="${url}">${url}</a>` : "";
+    return `<li><strong>${tab.label}</strong>${hint ? ` (${hint})` : ""}${link}</li>`;
+  });
+  return (
+    "<p>External tools linked from this course's navigation. These are where the course sends students for things Canvas itself does not host.</p>" +
+    `<ul>${items.join("")}</ul>`
+  );
 }
 
 function describeAttempts(value: number | null | undefined): string {

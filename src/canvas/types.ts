@@ -231,6 +231,19 @@ export interface CanvasDiscussionTopicView {
 }
 
 /** A folder in a course's Files area (GET /courses/:id/folders). */
+/** A course navigation tab from GET /courses/:id/tabs (external tools show as type "external"). */
+export interface CanvasTab {
+  id: string;
+  label: string;
+  html_url?: string | null;
+  /** Launch URL for external tools (LTI), e.g. Piazza, Zoom, Ed. */
+  full_url?: string | null;
+  type?: "internal" | "external" | string | null;
+  hidden?: boolean | null;
+  visibility?: string | null;
+  position?: number | null;
+}
+
 /** A classic or New Quiz as listed by GET /courses/:id/quizzes. */
 export interface CanvasQuiz {
   id: number;

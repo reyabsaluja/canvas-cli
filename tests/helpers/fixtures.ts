@@ -1,4 +1,4 @@
-import type { MockCourse, MockAssignment, MockModule, MockQuiz, MockPage, MockFile, MockFolder, MockAttachment, MockDiscussionTopic, MockServerData } from "./mock-canvas-server.js";
+import type { MockCourse, MockAssignment, MockModule, MockQuiz, MockTab, MockPage, MockFile, MockFolder, MockAttachment, MockDiscussionTopic, MockServerData } from "./mock-canvas-server.js";
 
 // All dates are relative to "now" so the fixtures never go stale: the two
 // CS courses are always in the current term and HIST303 is always finished.
@@ -151,6 +151,13 @@ export const CS101_MODULES: MockModule[] = [
       { id: 102, title: "Variables Lecture Notes", type: "Page", position: 1, page_url: "variables-lecture" },
     ],
   },
+];
+
+export const CS101_TABS: MockTab[] = [
+  { id: "home", label: "Home", html_url: "/courses/101", type: "internal", position: 1 },
+  { id: "context_external_tool_77", label: "Piazza", html_url: "/courses/101/external_tools/77", full_url: "https://canvas.example/courses/101/external_tools/77", type: "external", position: 5 },
+  { id: "context_external_tool_78", label: "Zoom", html_url: "/courses/101/external_tools/78", full_url: "https://canvas.example/courses/101/external_tools/78", type: "external", position: 6 },
+  { id: "context_external_tool_79", label: "Old tool", html_url: "/courses/101/external_tools/79", full_url: "https://canvas.example/courses/101/external_tools/79", type: "external", hidden: true, position: 7 },
 ];
 
 export const CS101_QUIZZES: MockQuiz[] = [
@@ -367,6 +374,7 @@ export function buildDefaultServerData(): MockServerData {
     modules: new Map([[101, CS101_MODULES]]),
     pages: new Map([[101, CS101_PAGES]]),
     quizzes: new Map([[101, CS101_QUIZZES]]),
+    tabs: new Map([[101, CS101_TABS]]),
     files: new Map([[101, CS101_FILES]]),
     folders: new Map([[101, CS101_FOLDERS]]),
     discussions: new Map([[101, CS101_DISCUSSIONS]]),

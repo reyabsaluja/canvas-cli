@@ -181,6 +181,8 @@ export interface IngestionMeta {
     lectures: number;
     /** Quizzes captured as pages (instructions, time limit, attempts). */
     quizzes?: number;
+    /** External tools (LTI tabs such as Piazza, Zoom, Ed) captured on the course-tools page. */
+    externalTools?: number;
     attachmentsDownloaded: number;
     attachmentsSkipped: number;
     attachmentsFailed: number;
