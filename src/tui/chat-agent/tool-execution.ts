@@ -64,13 +64,13 @@ async function executeToolCallDetailed(
 ): Promise<ToolExecutionResult> {
   switch (name) {
     case "search_workspace":
-      return await searchWorkspace(input.query as string, ctx);
+      return await searchWorkspace(input.query as string, ctx, parseSearchLimit(input.limit));
     case "read_file":
       return readFile(input.filename as string, ctx, parseDocumentReadRequest(input));
     case "list_files":
       return listFiles(ctx);
     case "search_course":
-      return await searchCourse(input.query as string, ctx);
+      return await searchCourse(input.query as string, ctx, parseSearchLimit(input.limit));
     case "download_course_file":
       return downloadCourseFile(input.title as string, ctx);
     case "open_resource":
@@ -208,12 +208,23 @@ export async function readArtifactForGate(
   }
 }
 
+/** Default and ceiling for search result counts; the model may raise the count with `limit`. */
+export const DEFAULT_SEARCH_LIMIT = 8;
+export const MAX_SEARCH_LIMIT = 20;
+
+export function parseSearchLimit(value: unknown): number {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number.parseInt(value, 10) : NaN;
+  if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_SEARCH_LIMIT;
+  return Math.min(Math.floor(parsed), MAX_SEARCH_LIMIT);
+}
+
 async function searchWorkspace(
   query: string,
-  ctx: ChatAgentContext
+  ctx: ChatAgentContext,
+  limit: number = DEFAULT_SEARCH_LIMIT
 ): Promise<ToolExecutionResult> {
   const relevant = preferViableSearchMatches(
-    await searchWorkspaceKnowledge(ctx.loaded, ctx.cache, query, 5),
+    await searchWorkspaceKnowledge(ctx.loaded, ctx.cache, query, limit),
     collectFailedReadArtifactIds(ctx.runState.observations)
   );
   if (relevant.length === 0) {
@@ -256,9 +267,10 @@ async function searchWorkspace(
 
 async function searchCourse(
   query: string,
-  ctx: ChatAgentContext
+  ctx: ChatAgentContext,
+  limit: number = DEFAULT_SEARCH_LIMIT
 ): Promise<ToolExecutionResult> {
-  const result = await searchCourseKnowledge(ctx.cache, query);
+  const result = await searchCourseKnowledge(ctx.cache, query, { limit });
   const failedArtifactIds = collectFailedReadArtifactIds(ctx.runState.observations);
   const filteredResult =
     result.status === "ok"
