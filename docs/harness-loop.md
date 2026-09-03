@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **reason**
+Next area: **ground**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -49,3 +49,4 @@ Next area: **reason**
 - 2026-09-03 discover: embedded recordings (iframe/video/audio/embed/Canvas media anchors on YouTube, Panopto, Kaltura, Echo360, Zoom, Loom, Google, Canvas Studio) in pages, syllabus, announcements, discussions and assignment descriptions become video lecture entries with title, host and lecture number (agent stalled from Mac sleep; caller finished it)
 - 2026-09-03 extract: image-only PDF pages keep their "## Page N" heading with an explicit "no extractable text" note, so every page stays addressable and citable; fully image-only PDFs still report the unreadable marker (caller did it directly)
 - 2026-09-03 retrieve: cut-off whole reads record their omitted section labels on the ArtifactRef; when a question names a page/heading the read never included ("page 57", "p. 12", "Part 4", "grading rubric") the gate issues a section read instead of answering from truncated memory (caller did it directly)
+- 2026-09-03 reason: prompt and reflection footer teach a figure check (every date/time/%/value must come from a result read this turn, else read the section first); the footer names the sections a cut-off read omitted and the section: call to fetch them (caller did it directly)
