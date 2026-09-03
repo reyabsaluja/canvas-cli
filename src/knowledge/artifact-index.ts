@@ -1572,9 +1572,20 @@ export function buildMatchExcerpt(
   }
 
   const clusterLength = best.last - best.first;
-  const padding = Math.max(0, Math.floor((maxLength - clusterLength) / 2));
+  // The answer usually follows its keyword ("Late policy: 10% per day"), so
+  // give the window more room after the cluster than before it.
+  const spare = Math.max(0, maxLength - clusterLength);
+  const padding = Math.floor(spare * 0.3);
   let start = Math.max(0, best.first - padding);
   let end = Math.min(cleaned.length, start + maxLength);
+  // Always keep some text after the last keyword hit, even when the cluster
+  // itself fills the window: that is where "Late policy: 10% per day" lives.
+  const tailRoom = Math.min(240, Math.floor(maxLength * 0.25));
+  const wantedEnd = Math.min(cleaned.length, best.last + tailRoom);
+  if (wantedEnd > end) {
+    end = wantedEnd;
+    start = Math.max(0, end - maxLength);
+  }
   if (end - start < maxLength) {
     start = Math.max(0, end - maxLength);
   }
