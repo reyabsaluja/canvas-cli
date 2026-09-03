@@ -41,8 +41,20 @@ export function htmlToText(
         return label;
       }
       const resolvedHref = resolveHref(href, options?.baseUrl ?? null);
-      if (!label) return resolvedHref;
+      // Canvas file links often read "click here" while the real filename sits
+      // in title= (the editor puts it there); surface it so a search for the
+      // handout finds the page that links it.
+      const hint = anchorNameHint(attrs);
+      if (!label) return hint ? `${hint} (${resolvedHref})` : resolvedHref;
       if (label === resolvedHref) return resolvedHref;
+      if (hint && hint.toLowerCase() !== label.toLowerCase()) {
+        if (GENERIC_LINK_TEXT.test(label)) {
+          return `${hint} (${resolvedHref})`;
+        }
+        if (looksLikeFilename(hint) && !label.toLowerCase().includes(hint.toLowerCase())) {
+          return `${label} [${hint}] (${resolvedHref})`;
+        }
+      }
       return `${label} (${resolvedHref})`;
     }
   );
@@ -575,6 +587,25 @@ function extractAttr(attrs: string, attr: string): string | null {
 
 function stripTags(html: string): string {
   return html.replace(/<[^>]*>/g, "");
+}
+
+/** Anchor text that says nothing about the target. */
+const GENERIC_LINK_TEXT =
+  /^(?:here|click here|this|this link|this file|link|download|download here|pdf|file|the file|attached|attachment|see here|open|view|read more|more|>+|→|\.\.\.)$/i;
+
+function looksLikeFilename(value: string): boolean {
+  return /\.[a-z0-9]{2,5}$/i.test(value.trim());
+}
+
+/** The best human-readable name an anchor carries besides its visible text. */
+function anchorNameHint(attrs: string): string | null {
+  for (const name of ["title", "aria-label", "data-filename", "download"]) {
+    const value = extractAttr(attrs, name);
+    if (value && value.trim().length >= 3 && !/^https?:\/\//i.test(value.trim())) {
+      return value.trim();
+    }
+  }
+  return null;
 }
 
 function resolveHref(href: string, baseUrl: string | null): string {
