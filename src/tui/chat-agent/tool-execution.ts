@@ -288,11 +288,15 @@ async function searchCourse(
       tool: "search_course",
       status: "ok",
       summary: `Found ${filteredResult.matches.length} course matches for "${query}".`,
-      artifacts: filteredResult.matches.map(({ artifact }) => ({
+      // Cite the matched passage, not the document head, so a search hit on
+      // "Page 57" or "Late Penalty" can be attributed to that section.
+      artifacts: filteredResult.matches.map(({ artifact, passage }) => ({
         artifactId: artifact.id,
         title: artifact.title,
         kind: artifact.kind,
-        excerpt: artifact.excerpt,
+        excerpt: passage?.excerpt || artifact.excerpt,
+        ...(passage ? { sectionIds: [passage.sectionId] } : {}),
+        sectionLabel: normalizeSourceSectionLabel(passage?.section),
       })),
     },
     modelText: `${uiText}\n${buildCourseSearchGuidance(filteredResult.matches, Boolean(ctx.client))}`,
@@ -606,25 +610,20 @@ async function downloadCourseFile(
     relativeLocalPath
   );
   if (extracted) {
-    const artifactRef = createCourseAttachmentArtifactRef(
-      relativeLocalPath,
-      fileMeta.display_name,
-      extracted
+    // Same windowed view as read_file: 120k cap, section outline, cut-off note.
+    return buildDocumentReadResult(
+      "download_course_file",
+      createCourseAttachmentArtifactRef(
+        relativeLocalPath,
+        fileMeta.display_name,
+        extracted
+      ),
+      extracted,
+      {},
+      unpackedEntries.length > 0
+        ? `Downloaded, extracted, and unpacked ${fileMeta.display_name} (${unpackedEntries.length} inner files).`
+        : `Downloaded and extracted ${fileMeta.display_name}.`
     );
-    return {
-      observation: {
-        tool: "download_course_file",
-        status: "ok",
-        summary:
-          unpackedEntries.length > 0
-            ? `Downloaded, extracted, and unpacked ${fileMeta.display_name} (${unpackedEntries.length} inner files).`
-            : `Downloaded and extracted ${fileMeta.display_name}.`,
-        artifacts: [artifactRef],
-        content: extracted,
-      },
-      modelText: buildReadModelText(artifactRef, extracted),
-      uiText: extracted,
-    };
   }
 
   if (unpackedEntries.length > 0) {

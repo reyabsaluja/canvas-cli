@@ -1,5 +1,9 @@
 import type { ContentChunk, WorkspaceAnswer } from "./types.js";
 import { callModel, type AIProviderConfig } from "../ai/provider.js";
+import {
+  buildUnsupportedClaimsNote,
+  findUnsupportedAnswerClaims,
+} from "../agent/verify.js";
 
 const SYSTEM_PROMPT = `You are an assignment workspace assistant. You answer questions about a specific assignment using only the workspace context provided to you.
 
@@ -116,11 +120,28 @@ export function parseWorkspaceAnswerResponse(
 
   const sources = resolveSources(context, sourceIds, obj.sources, fallbackSources);
 
-  const confidence = ["high", "medium", "low"].includes(
+  const reportedConfidence = ["high", "medium", "low"].includes(
     obj.confidence as string
   )
     ? (obj.confidence as "high" | "medium" | "low")
     : "medium";
+
+  // The model grades its own confidence; check its figures against the
+  // context it was given before passing that grade on to the student.
+  const evidenceText = context
+    .map((chunk) => [chunk.section, chunk.excerpt ?? "", chunk.text].join("\n"))
+    .join("\n");
+  const unsupportedClaims = findUnsupportedAnswerClaims(
+    [answer, ...bulletPoints].join("\n"),
+    evidenceText,
+    question
+  );
+  const confidence =
+    unsupportedClaims.length > 0
+      ? reportedConfidence === "high"
+        ? "medium"
+        : "low"
+      : reportedConfidence;
 
   return {
     question,
@@ -128,7 +149,10 @@ export function parseWorkspaceAnswerResponse(
     bulletPoints,
     sources,
     confidence,
-    verificationNote: null,
+    verificationNote:
+      unsupportedClaims.length > 0
+        ? buildUnsupportedClaimsNote(unsupportedClaims, sources)
+        : null,
   };
 }
 

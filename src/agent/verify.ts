@@ -69,12 +69,28 @@ export function verifyWorkspaceAnswer(
         ? "low"
         : "medium"
       : "low";
-  const confidence = applyComparisonEvidenceConfidenceCap(baseConfidence, {
-    expectsComparisonEvidence,
-    hasEnoughComparisonSources,
-    hasDirectReadInEvidence,
-  });
-  const note = buildVerificationNote({
+  const comparisonCappedConfidence = applyComparisonEvidenceConfidenceCap(
+    baseConfidence,
+    {
+      expectsComparisonEvidence,
+      hasEnoughComparisonSources,
+      hasDirectReadInEvidence,
+    }
+  );
+
+  // Relevance says the evidence is *about* the question; it does not say the
+  // answer's figures came from it. A read of Lab4.pdf that says "March 27"
+  // must not back an answer that says "March 20" at high confidence.
+  const evidenceText = collectEvidenceText(input.observations);
+  const unsupportedClaims = evidenceText
+    ? findUnsupportedAnswerClaims(trimmedAnswer, evidenceText, input.question)
+    : [];
+  const confidence =
+    unsupportedClaims.length > 0
+      ? lowerConfidence(comparisonCappedConfidence)
+      : comparisonCappedConfidence;
+
+  const baseNote = buildVerificationNote({
     missing,
     sources,
     usedWorkup: input.usedWorkup,
@@ -84,6 +100,15 @@ export function verifyWorkspaceAnswer(
     expectsComparisonEvidence,
     hasEnoughComparisonSources,
   });
+  const note =
+    unsupportedClaims.length > 0
+      ? [
+          buildUnsupportedClaimsNote(unsupportedClaims, sources),
+          baseNote,
+        ]
+          .filter((part): part is string => Boolean(part))
+          .join(" ")
+      : baseNote;
 
   return {
     ok: missing.length === 0,
@@ -92,6 +117,52 @@ export function verifyWorkspaceAnswer(
     missing,
     note,
   };
+}
+
+function lowerConfidence(
+  confidence: "high" | "medium" | "low"
+): "high" | "medium" | "low" {
+  return confidence === "high" ? "medium" : "low";
+}
+
+/** Everything a successful observation actually showed the model. */
+function collectEvidenceText(observations: Observation[]): string {
+  const parts: string[] = [];
+  for (const observation of observations) {
+    if (observation.status !== "ok") {
+      continue;
+    }
+    if (typeof observation.content === "string") {
+      parts.push(observation.content);
+    }
+    for (const artifact of observation.artifacts) {
+      if (artifact.excerpt) {
+        parts.push(artifact.excerpt);
+      }
+      if (artifact.sectionLabel) {
+        parts.push(artifact.sectionLabel);
+      }
+    }
+    if (observation.content === undefined && observation.summary) {
+      parts.push(observation.summary);
+    }
+  }
+  return parts.join("\n").trim();
+}
+
+export function buildUnsupportedClaimsNote(
+  claims: string[],
+  sources: AnswerSource[]
+): string {
+  const shown = claims.slice(0, MAX_UNSUPPORTED_CLAIMS_IN_NOTE);
+  const more = claims.length - shown.length;
+  const listed = `${shown.map((claim) => `"${claim}"`).join(", ")}${more > 0 ? ` and ${more} more` : ""}`;
+  const titles = [...new Set(sources.map((source) => source.title))].slice(0, 2);
+  const where =
+    titles.length > 0
+      ? `Check ${titles.join(" and ")} before relying on them.`
+      : "Check the original document before relying on them.";
+  return `This answer includes details I could not confirm in the sources I read (${listed}). ${where}`;
 }
 
 function buildVerificationNote(input: {
@@ -636,4 +707,120 @@ function tokenizeSupportText(text: string): string[] {
     .filter(
       (token) => token.length > 2 && !ANSWER_SUPPORT_STOP_WORDS.has(token)
     );
+}
+
+// ---------------------------------------------------------------------------
+// Answer-support check.
+//
+// Numbers are where a confidently worded wrong answer hurts a student most: a
+// due date, a time, a penalty, a register address. Every digit-bearing token
+// in the answer must appear somewhere in the evidence the answer was verified
+// against (in any common spelling: "27th", "200,000,000", "10 percent"),
+// unless the question itself introduced it. Anything else is an unsupported
+// claim and is surfaced to the student instead of silently trusted.
+// ---------------------------------------------------------------------------
+
+const MAX_UNSUPPORTED_CLAIMS_IN_NOTE = 3;
+const LIST_MARKER_PATTERN = /^[ \t]*(?:[-*+]\s+)?\d{1,3}[.)](?=\s)/gm;
+const THOUSANDS_SEPARATOR_PATTERN = /(\d),(?=\d{3}(?!\d))/g;
+const ORDINAL_SUFFIX_PATTERN = /(\d)(?:st|nd|rd|th)\b/gi;
+const NUMERIC_CLAIM_PATTERN = /\b0x[0-9a-f]+\b|\b\d+(?:[.:]\d+)*\b/gi;
+const CLAIM_LEADING_WORDS =
+  "jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december|week|lab|page|part|section|chapter|question|room";
+const CLAIM_TRAILING_WORDS =
+  "am|pm|a\\.m\\.|p\\.m\\.|percent|points?|pts|marks?|days?|weeks?|hours?|hrs?|minutes?|mins?|seconds?|mhz|khz|ghz|ms|kb|mb|gb|pages?|words?";
+
+/**
+ * Return the digit-bearing claims in `answer` that never appear in
+ * `evidenceText`, each rendered with a little context ("March 20", "15%",
+ * "11:59 PM") so a note can show the student exactly what to double-check.
+ */
+export function findUnsupportedAnswerClaims(
+  answer: string,
+  evidenceText: string,
+  question: string = ""
+): string[] {
+  const normalizedAnswer = normalizeClaimText(answer);
+  const answerTokens = extractNumericClaimTokens(normalizedAnswer);
+  if (answerTokens.length === 0) {
+    return [];
+  }
+
+  const evidenceTokens = collectNumericEvidenceTokens(evidenceText);
+  const questionTokens = new Set(extractNumericClaimTokens(normalizeClaimText(question)));
+
+  const unsupported: string[] = [];
+  const seen = new Set<string>();
+  for (const token of answerTokens) {
+    if (seen.has(token) || questionTokens.has(token)) {
+      continue;
+    }
+    seen.add(token);
+    if (isClaimTokenSupported(token, evidenceTokens)) {
+      continue;
+    }
+    unsupported.push(describeClaim(token, normalizedAnswer));
+  }
+  return unsupported;
+}
+
+function normalizeClaimText(text: string): string {
+  return text
+    .replace(/\r\n?/g, "\n")
+    .replace(LIST_MARKER_PATTERN, " ")
+    .replace(THOUSANDS_SEPARATOR_PATTERN, "$1")
+    .replace(ORDINAL_SUFFIX_PATTERN, "$1");
+}
+
+function extractNumericClaimTokens(normalizedText: string): string[] {
+  const tokens: string[] = [];
+  for (const match of normalizedText.matchAll(NUMERIC_CLAIM_PATTERN)) {
+    const token = match[0].toLowerCase();
+    // Bare single digits ("3 parts", "step 2") are too ambiguous to check.
+    if (token.length < 2) {
+      continue;
+    }
+    tokens.push(token);
+  }
+  return tokens;
+}
+
+function collectNumericEvidenceTokens(evidenceText: string): Set<string> {
+  const tokens = new Set<string>();
+  for (const match of normalizeClaimText(evidenceText).matchAll(NUMERIC_CLAIM_PATTERN)) {
+    const token = match[0].toLowerCase();
+    tokens.add(token);
+    for (const part of token.split(/[.:]/)) {
+      tokens.add(part);
+    }
+  }
+  return tokens;
+}
+
+function isClaimTokenSupported(token: string, evidenceTokens: Set<string>): boolean {
+  if (evidenceTokens.has(token)) {
+    return true;
+  }
+  if (/[.:]/.test(token)) {
+    return token.split(/[.:]/).every((part) => evidenceTokens.has(part));
+  }
+  return false;
+}
+
+function describeClaim(token: string, normalizedAnswer: string): string {
+  const pattern = new RegExp(
+    `(?:\\b(${CLAIM_LEADING_WORDS})\\.?\\s+)?(${escapeRegExp(token)})(?![\\d.:])(?:(%)|\\s?(${CLAIM_TRAILING_WORDS})\\b)?`,
+    "i"
+  );
+  const match = normalizedAnswer.match(pattern);
+  if (!match) {
+    return token;
+  }
+  const leading = match[1] ? `${match[1]} ` : "";
+  const trailing = match[3] ? "%" : match[4] ? ` ${match[4]}` : "";
+  return `${leading}${match[2] ?? token}${trailing}`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
