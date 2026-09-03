@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **ground**
+Next area: **discover**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -27,7 +27,7 @@ Next area: **ground**
 - discover: (backlog empty; candidates: assignment `attachments` field never consumed; module item completion requirements / prerequisites not recorded; assignment group weights and grade posting policy)
 - extract: no OCR for scanned PDFs
 - retrieve: (backlog empty; candidates: section previews for search_course hits could show two passages when a document matches in several places; recency signal for announcements/discussions)
-- ground: workups silently prefer Canvas over the syllabus on due-date conflicts instead of surfacing them; numeric-claim check only covers digit-bearing tokens (spelled-out numbers, weekday inferences like "Friday" are not checked); the base note can say "matched search evidence, not a full document read" even when a read was made this turn
+- ground: workups silently prefer Canvas over the syllabus on due-date conflicts instead of surfacing them; numeric-claim check only covers digit-bearing tokens (spelled-out numbers, weekday inferences like "Friday" are not checked)
 
 ## Done
 
@@ -60,3 +60,4 @@ Next area: **ground**
 - 2026-09-03 extract: zip summary caps raised 30k/file → 120k and 50k total → 400k to match direct reads, with an explicit "N more characters omitted" note instead of a silent cut (caller did it directly)
 - 2026-09-03 retrieve: course search blends the best section's length-normalised score into document ranking (0.5 weight, capped) so a focused page outranks a long syllabus that merely mentions every query word; checked list_files: bare file entries were never listed (backlog claim removed) (caller did it directly)
 - 2026-09-03 reason: search_workspace and search_course take a `limit` (1-20) so the agent can widen a thin first pass; workspace default raised 5 → 8 matches, course default 8 (caller did it directly)
+- 2026-09-03 ground: observation relevance stems question words and treats a match on a document heading as strong on its own ("how is Lab 4 graded" now matches a read of "## Grading"), so reads that answer the question count as grounded evidence (high confidence, no "search evidence" note) across verification, memory reuse and the gate (caller did it directly)
