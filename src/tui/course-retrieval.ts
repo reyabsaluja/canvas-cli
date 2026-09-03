@@ -91,12 +91,35 @@ export async function searchCourseArtifacts(
   const deduped = dropExtractedFileDuplicates(index, results);
   const bestSections = findBestSectionsByArtifact(index, trimmed, kinds);
 
-  return deduped
+  // Document-level scores are presence-based, so a long syllabus that
+  // mentions every query word once ties with the page that is actually about
+  // the topic. Blend in the best section's length-normalised score so the
+  // focused document wins the tie.
+  const reranked = deduped
+    .map((result) => ({
+      result,
+      blended:
+        result.score +
+        PASSAGE_RERANK_WEIGHT *
+          Math.min(bestSections.get(result.artifact.id)?.score ?? 0, PASSAGE_RERANK_CAP),
+    }))
+    .sort((a, b) => {
+      if (b.blended !== a.blended) return b.blended - a.blended;
+      return a.result.artifact.title.localeCompare(b.result.artifact.title);
+    })
+    .map((entry) => entry.result);
+
+  return reranked
     .slice(0, limit)
     .map((result) =>
       mapCourseArtifactMatch(result, trimmed, bestSections.get(result.artifact.id))
     );
 }
+
+/** How much the best passage's score counts toward document ranking. */
+const PASSAGE_RERANK_WEIGHT = 0.5;
+/** Cap so one very dense section cannot outrank a strong title/phrase match. */
+const PASSAGE_RERANK_CAP = 24;
 
 /**
  * A file crawled from the Files tab and also downloaded as an attachment is
