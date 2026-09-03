@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **ground**
+Next area: **discover**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -27,7 +27,7 @@ Next area: **ground**
 - discover: course tabs / external tool links not recorded
 - extract: zip summary text still capped at 30k/file, 50k total; no OCR for scanned PDFs
 - retrieve: artifact-level scoring is presence-only so long docs win ties (`CoursePassage.score` is available as a tie-break); `list_files` still shows both the `[file]` and `[attachment]` entries for downloaded Files-tab files
-- ground: workups silently prefer Canvas over the syllabus on due-date conflicts instead of surfacing them; numeric-claim check only covers digit-bearing tokens (spelled-out numbers, weekday inferences like "Friday" are not checked); a date's bare day number is matched by any unrelated number in the evidence ("March 20" passes because "style 20 marks" exists), so date claims should be checked as month+day pairs; the base note can say "matched search evidence, not a full document read" even when a read was made this turn
+- ground: workups silently prefer Canvas over the syllabus on due-date conflicts instead of surfacing them; numeric-claim check only covers digit-bearing tokens (spelled-out numbers, weekday inferences like "Friday" are not checked); the base note can say "matched search evidence, not a full document read" even when a read was made this turn
 
 ## Done
 
@@ -55,3 +55,4 @@ Next area: **ground**
 - 2026-09-03 extract: links whose visible text is generic ("here", "download", "this link") now render the filename from title/aria-label/download attributes, and descriptive labels gain the filename in brackets, so a search for the handout finds the page that links it (caller did it directly)
 - 2026-09-03 retrieve: workspace extracted files are now split on their markdown headings ("## Page N", DOCX/PPTX headings) like course documents instead of paragraph chunks, so page/heading sections are searchable and citable inside workspaces; plus course-vocabulary synonym expansion in both scorers (due/deadline, rubric/grading/marking, late/penalty, submit/upload, exam/midterm, lecture/slides, ...) at 0.6 weight so direct matches still win (caller did it directly)
 - 2026-09-03 reason: cross-turn tool memory grew from 2.4k/220-char head slices to 12k/1.2k details centred on the current question (buildMatchExcerpt, whose window now always keeps text after the last keyword hit, where answers live), and each remembered read states the section it covered and, for cut-off reads, the sections not read with the section: call to fetch them (caller did it directly)
+- 2026-09-03 ground: date claims are checked as month+day pairs in any common spelling ("March 20", "Mar. 20, 2026", "20 March", "3/20"), so a wrong due date is flagged even when its day number appears elsewhere in the evidence (caller did it directly)
