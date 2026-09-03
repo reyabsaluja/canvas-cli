@@ -22,6 +22,126 @@ const VIDEO_URL_PATTERNS =
 
 const LINK_REGEX_GLOBAL = /<a\s[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
 
+/** Hosts and paths that mean "this embed is a recording/media object". */
+const MEDIA_URL_PATTERNS =
+  /youtu\.?be|vimeo\.com|panopto|kaltura|echo360|mediasite|zoom\.(?:us|com)\/rec|loom\.com|drive\.google\.com|docs\.google\.com\/presentation|\/media_objects(?:_iframe)?\/|\/media_attachments_iframe\/|instructuremedia\.com|canvasstudio|\.(?:mp4|webm|m4v|mov|mp3|m4a)(?:[?#]|$)/i;
+
+const MEDIA_HOST_LABELS: Array<[RegExp, string]> = [
+  [/youtu\.?be/i, "YouTube"],
+  [/vimeo/i, "Vimeo"],
+  [/panopto/i, "Panopto"],
+  [/kaltura/i, "Kaltura"],
+  [/echo360/i, "Echo360"],
+  [/mediasite/i, "Mediasite"],
+  [/zoom\./i, "Zoom recording"],
+  [/loom\.com/i, "Loom"],
+  [/docs\.google\.com\/presentation/i, "Google Slides"],
+  [/drive\.google\.com/i, "Google Drive"],
+  [/media_objects|media_attachments|instructuremedia|canvasstudio/i, "Canvas media"],
+];
+
+function mediaHostLabel(url: string): string {
+  for (const [pattern, label] of MEDIA_HOST_LABELS) {
+    if (pattern.test(url)) return label;
+  }
+  try {
+    return new URL(url, "https://canvas.invalid").hostname.replace(/^www\./, "") || "embedded media";
+  } catch {
+    return "embedded media";
+  }
+}
+
+function readAttr(tag: string, name: string): string | null {
+  const match = tag.match(new RegExp(`\\b${name}\\s*=\\s*"([^"]*)"`, "i")) ??
+    tag.match(new RegExp(`\\b${name}\\s*=\\s*'([^']*)'`, "i"));
+  return match?.[1] ? decodeEntities(match[1]).trim() : null;
+}
+
+function normalizeEmbedUrl(src: string): string | null {
+  const trimmed = src.trim();
+  if (!trimmed || /^(javascript|data|about):/i.test(trimmed)) return null;
+  if (trimmed.startsWith("//")) return `https:${trimmed}`;
+  return trimmed;
+}
+
+/**
+ * Embedded recordings and media players. Pages, announcements and
+ * assignments routinely hold the lecture video as an <iframe> (YouTube,
+ * Panopto, Kaltura, Canvas Studio) or a <video>/<audio> element rather than a
+ * link, so without this "where is the lecture 5 recording?" has nothing to
+ * find. Exported for tests.
+ */
+export function extractEmbeddedMedia(
+  html: string,
+  source: string,
+  contextTitle: string
+): LectureIndexEntry[] {
+  const entries: LectureIndexEntry[] = [];
+  const seen = new Set<string>();
+  const contextNumber = extractLectureNumber(contextTitle);
+
+  const push = (url: string | null, title: string | null, forceMedia: boolean): void => {
+    const normalized = url ? normalizeEmbedUrl(url) : null;
+    if (!normalized) return;
+    // "embed"/"player" alone is not enough (Google Calendar embeds, maps); it
+    // must sit on a media host or next to a media-ish word.
+    const looksLikeMedia =
+      MEDIA_URL_PATTERNS.test(normalized) ||
+      (/embed|player/i.test(normalized) && /video|media|watch|rec(ording)?|lecture|stream/i.test(normalized));
+    if (!forceMedia && !looksLikeMedia) return;
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    const host = mediaHostLabel(normalized);
+    const cleanTitle = title && title.length >= 3 ? title : null;
+    const finalTitle = cleanTitle ?? `${contextTitle} — ${host} recording`;
+    entries.push({
+      title: finalTitle,
+      url: normalized,
+      contentType: "video",
+      source,
+      lectureNumber: extractLectureNumber(finalTitle) ?? contextNumber,
+      topic: cleanTitle ? undefined : contextTitle,
+    });
+  };
+
+  const iframePattern = /<iframe\b[^>]*>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = iframePattern.exec(html)) !== null) {
+    const tag = match[0];
+    push(readAttr(tag, "src") ?? readAttr(tag, "data-src"), readAttr(tag, "title") ?? readAttr(tag, "aria-label"), false);
+  }
+
+  const mediaElementPattern = /<(video|audio)\b([^>]*)>([\s\S]*?)<\/\1>|<(video|audio)\b([^>]*)\/?>/gi;
+  while ((match = mediaElementPattern.exec(html)) !== null) {
+    const attrs = match[2] ?? match[5] ?? "";
+    const inner = match[3] ?? "";
+    const tag = `<${match[1] ?? match[4]} ${attrs}>`;
+    const title = readAttr(tag, "title") ?? readAttr(tag, "aria-label") ?? readAttr(tag, "data-title");
+    const direct = readAttr(tag, "src");
+    if (direct) push(direct, title, true);
+    const sourcePattern = /<source\b[^>]*>/gi;
+    let sourceMatch: RegExpExecArray | null;
+    while ((sourceMatch = sourcePattern.exec(inner)) !== null) {
+      push(readAttr(sourceMatch[0], "src"), title, true);
+    }
+  }
+
+  const embedPattern = /<embed\b[^>]*>/gi;
+  while ((match = embedPattern.exec(html)) !== null) {
+    push(readAttr(match[0], "src"), readAttr(match[0], "title"), false);
+  }
+
+  // Canvas media anchors (Studio / media comments) look like plain links.
+  const mediaAnchorPattern = /<a\b[^>]*class="[^"]*instructure_(?:video|audio)_link[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
+  while ((match = mediaAnchorPattern.exec(html)) !== null) {
+    const tag = match[0].slice(0, match[0].indexOf(">") + 1);
+    const text = decodeEntities(match[1]!.replace(/<[^>]*>/g, "").trim());
+    push(readAttr(tag, "href"), text || readAttr(tag, "title"), true);
+  }
+
+  return entries;
+}
+
 function extractLectureNumber(text: string): number | null {
   for (const pattern of LECTURE_NUMBER_PATTERNS) {
     const match = text.match(pattern);
@@ -180,7 +300,9 @@ export function discoverLectures(
   frontPageBody: string | null,
   fetchedPages: Array<{ slug: string; title: string; body: string }>,
   syllabusBody: string | null,
-  files: FileIndexEntry[] = []
+  files: FileIndexEntry[] = [],
+  /** Other HTML bodies worth scanning for embedded recordings (announcements, assignments, discussions). */
+  extraHtml: Array<{ title: string; body: string; source: string }> = []
 ): LectureIndexEntry[] {
   const entries: LectureIndexEntry[] = [];
   const seenKeys = new Set<string>();
@@ -219,6 +341,22 @@ export function discoverLectures(
         lectureNumber: extractLectureNumber(item.title) ?? extractLectureNumber(mod.name),
       });
     }
+  }
+
+  // 1b. Embedded recordings/media players anywhere we hold HTML. Done before
+  //     the link scans so an iframe's own title wins over a nearby link.
+  if (frontPageBody) {
+    for (const entry of extractEmbeddedMedia(frontPageBody, "front page", "Front page")) push(entry);
+  }
+  if (syllabusBody) {
+    for (const entry of extractEmbeddedMedia(syllabusBody, "syllabus", "Syllabus")) push(entry);
+  }
+  for (const page of fetchedPages) {
+    for (const entry of extractEmbeddedMedia(page.body, `page: ${page.title}`, page.title)) push(entry);
+  }
+  for (const extra of extraHtml) {
+    if (!extra.body) continue;
+    for (const entry of extractEmbeddedMedia(extra.body, extra.source, extra.title)) push(entry);
   }
 
   // 2. Front page links — skip links to Canvas pages since those are fetched

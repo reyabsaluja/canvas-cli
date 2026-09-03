@@ -204,13 +204,33 @@ export async function ingestCourse(
   );
 
   // Step 7: Discover lectures from module items, front page, and fetched pages
+  // Announcements, discussion posts and assignment descriptions often hold the
+  // recording as an embedded player rather than a link; scan them too.
+  const embeddedMediaSources = [
+    ...raw.announcements.map((topic) => ({
+      title: topic.title,
+      body: topic.message ?? "",
+      source: `announcement: ${topic.title}`,
+    })),
+    ...raw.discussions.map((topic) => ({
+      title: topic.title,
+      body: topic.message ?? "",
+      source: `discussion: ${topic.title}`,
+    })),
+    ...raw.assignments.map((assignment) => ({
+      title: assignment.name,
+      body: assignment.description ?? "",
+      source: `assignment: ${assignment.name}`,
+    })),
+  ];
   const lectures = discoverLectures(
     modules,
     pages,
     raw.frontPageBody,
     raw.fetchedPages,
     courseMeta.syllabusBody,
-    files
+    files,
+    embeddedMediaSources
   );
 
   // Step 8: Build ingestion metadata
