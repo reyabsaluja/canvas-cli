@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **extract**
+Next area: **retrieve**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -25,7 +25,7 @@ Next area: **extract**
 ## Backlog (known gaps, pick from here first if still open)
 
 - discover: quizzes (`/quizzes`) not fetched; course tabs / external tool links not recorded
-- extract: file-link `title` hints dropped when anchor text is generic; zip summary text still capped at 30k/file, 50k total; image-only PDF pages leave no page marker (no OCR / "page N is an image" hint)
+- extract: file-link `title` hints dropped when anchor text is generic; zip summary text still capped at 30k/file, 50k total; no OCR for scanned PDFs
 - retrieve: no synonym expansion (due/deadline, rubric/grading); artifact-level scoring is presence-only so long docs win ties (`CoursePassage.score` is available as a tie-break); `list_files` still shows both the `[file]` and `[attachment]` entries for downloaded Files-tab files
 - retrieve: retrieval gate answers from memory when `readArtifactIds` contains the artifact even if that whole read was cut off before the asked-about page; record truncation on the ArtifactRef and let the gate re-read with `section` when the question names a page/heading outside the remembered window
 - ground: workups silently prefer Canvas over the syllabus on due-date conflicts instead of surfacing them; numeric-claim check only covers digit-bearing tokens (spelled-out numbers, weekday inferences like "Friday" are not checked) and only against the current turn's verification observations, so a figure remembered from an earlier turn's read is reported as unconfirmed
@@ -48,3 +48,4 @@ Next area: **extract**
 - 2026-09-03 reason: read_file section lookup falls back to a raw "## Page N"/heading scan when the splitter folded the section away (image-only pages get an explicit "no extractable text" note); accepts "p. 12", "12", heading fragments (agent stalled twice from Mac sleep; caller finished it; truncated-memory gate item still open)
 - 2026-09-03 ground: not-found answers name what was checked ("Not found after checking: Lab4.pdf (read in full); course search for \"penalty\" (no matches); rubric.pdf (could not read)") via verification.checkedSources + finalizeAnswerText trail; /ask prompt no longer caps answers at 2-4 sentences; prompt tells the agent to list checked sources in not-found answers
 - 2026-09-03 discover: embedded recordings (iframe/video/audio/embed/Canvas media anchors on YouTube, Panopto, Kaltura, Echo360, Zoom, Loom, Google, Canvas Studio) in pages, syllabus, announcements, discussions and assignment descriptions become video lecture entries with title, host and lecture number (agent stalled from Mac sleep; caller finished it)
+- 2026-09-03 extract: image-only PDF pages keep their "## Page N" heading with an explicit "no extractable text" note, so every page stays addressable and citable; fully image-only PDFs still report the unreadable marker (caller did it directly)

@@ -297,6 +297,9 @@ async function extractPdf(filePath: string): Promise<string> {
 
 /** Heading used to mark page boundaries in multi-page PDF text. */
 export const PDF_PAGE_HEADING_PREFIX = "## Page ";
+/** Body written for a page with no extractable text (scan, diagram, image-only slide). */
+export const PDF_IMAGE_PAGE_NOTE =
+  "[No extractable text on this page; it is probably an image, diagram or scanned slide.]";
 
 /**
  * Extract the text of a PDF, page by page.
@@ -339,12 +342,20 @@ export async function extractPdfText(
   }
 
   const blocks: Array<{ pageNumber: number; text: string }> = [];
-  for (const [pageNumber, rawText] of [...pages.entries()].sort((a, b) => a[0] - b[0])) {
-    const text = rawText.trim();
-    if (text.length === 0) continue;
-    blocks.push({ pageNumber, text });
+  let textPages = 0;
+  const lastPage = Math.max(pageCount, ...pages.keys(), 0);
+  for (let pageNumber = 1; pageNumber <= lastPage; pageNumber += 1) {
+    const text = (pages.get(pageNumber) ?? "").trim();
+    if (text.length > 0) {
+      textPages += 1;
+      blocks.push({ pageNumber, text });
+    } else {
+      // Keep a marker for image-only pages so every page stays addressable
+      // ("read page 12") and the model knows the gap is a scan, not a cut.
+      blocks.push({ pageNumber, text: PDF_IMAGE_PAGE_NOTE });
+    }
   }
-  if (blocks.length === 0) {
+  if (textPages === 0) {
     return "";
   }
 
