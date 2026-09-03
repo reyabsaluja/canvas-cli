@@ -17,6 +17,7 @@ import type {
   CanvasAssignmentGroup,
   CanvasCourse,
   CanvasCourseDetail,
+  CanvasDiscussionEntry,
   CanvasDiscussionTopic,
   CanvasDiscussionTopicView,
   CanvasEnrollment,
@@ -341,6 +342,40 @@ export class CanvasClient {
     } catch (err) {
       if (isAbortError(err)) throw err;
       return null;
+    }
+  }
+
+  /**
+   * Top-level entries of a discussion topic, each with up to 10 inline
+   * `recent_replies` and a `has_more_replies` flag. Used when the materialised
+   * /view is unavailable (403, or 503 while Canvas builds it). Returns [] on
+   * access errors.
+   */
+  async getDiscussionEntriesSafe(
+    courseId: number,
+    topicId: number,
+    signal?: AbortSignal | null
+  ): Promise<CanvasDiscussionEntry[]> {
+    const url = `${this.baseUrl}/courses/${courseId}/discussion_topics/${topicId}/entries?per_page=50`;
+    return this.fetchPaginatedSafe<CanvasDiscussionEntry>(url, signal);
+  }
+
+  /**
+   * Every reply beneath a top-level entry (paginated), for entries whose inline
+   * reply list was truncated. Returns [] when the entry cannot be read.
+   */
+  async getDiscussionEntryRepliesSafe(
+    courseId: number,
+    topicId: number,
+    entryId: number,
+    signal?: AbortSignal | null
+  ): Promise<CanvasDiscussionEntry[]> {
+    try {
+      const url = `${this.baseUrl}/courses/${courseId}/discussion_topics/${topicId}/entries/${entryId}/replies?per_page=50`;
+      return await this.fetchPaginated<CanvasDiscussionEntry>(url, signal);
+    } catch (err) {
+      if (isAbortError(err)) throw err;
+      return [];
     }
   }
 

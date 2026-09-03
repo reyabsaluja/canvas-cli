@@ -1,4 +1,4 @@
-import type { MockCourse, MockAssignment, MockModule, MockPage, MockFile, MockFolder, MockServerData } from "./mock-canvas-server.js";
+import type { MockCourse, MockAssignment, MockModule, MockPage, MockFile, MockFolder, MockDiscussionTopic, MockServerData } from "./mock-canvas-server.js";
 
 // All dates are relative to "now" so the fixtures never go stale: the two
 // CS courses are always in the current term and HIST303 is always finished.
@@ -202,6 +202,81 @@ export const CS101_FOLDERS: MockFolder[] = [
   { id: 4, name: "Week 3", full_name: "course files/Lectures/Week 3", parent_folder_id: 3, files_count: 0, folders_count: 0 },
 ];
 
+/**
+ * A threaded Q&A discussion. The answers students actually need (the TA's
+ * "no Makefile" reply, the "C11" reply) are nested replies, and the second
+ * thread has more replies than GET .../entries lists inline.
+ */
+export const CS101_DISCUSSIONS: MockDiscussionTopic[] = [
+  {
+    id: 7001,
+    title: "Lab 1 Q&A",
+    message: "<p>Post your Lab 1 questions here.</p>",
+    posted_at: daysFromNow(-10),
+    last_reply_at: daysFromNow(-3),
+    user_name: "Prof. Grace",
+    html_url: "https://canvas.example/courses/101/discussion_topics/7001",
+    discussion_type: "threaded",
+    entries: [
+      {
+        id: 71,
+        user_id: 11,
+        user_name: "Student One",
+        message: "<p>Does Lab 1 need a Makefile?</p>",
+        created_at: daysFromNow(-9),
+        replies: [
+          {
+            id: 72,
+            user_id: 2,
+            user_name: "TA Linus",
+            message: "<p>No Makefile needed: submit hello.c only; we compile with gcc -Wall.</p>",
+            created_at: daysFromNow(-8),
+            replies: [
+              {
+                id: 73,
+                user_id: 11,
+                user_name: "Student One",
+                message: "<p>Thanks!</p>",
+                created_at: daysFromNow(-7),
+              },
+            ],
+          },
+        ],
+      },
+      {
+        id: 74,
+        user_id: 12,
+        user_name: "Student Two",
+        message: "<p>Which C standard should we use?</p>",
+        created_at: daysFromNow(-6),
+        replies: [
+          {
+            id: 75,
+            user_id: 2,
+            user_name: "TA Linus",
+            message: "<p>Use C11 for every lab.</p>",
+            created_at: daysFromNow(-5),
+          },
+          {
+            id: 76,
+            user_id: 13,
+            user_name: "Student Three",
+            message: "<p>Is gnu11 acceptable?</p>",
+            created_at: daysFromNow(-4),
+          },
+          {
+            id: 77,
+            user_id: 1,
+            user_name: "Prof. Grace",
+            message: "<p>Yes, gnu11 is fine; avoid VLAs in graded code.</p>",
+            created_at: daysFromNow(-3),
+          },
+        ],
+      },
+    ],
+  },
+];
+
 export function buildDefaultServerData(): MockServerData {
   return {
     courses: COURSES,
@@ -213,6 +288,7 @@ export function buildDefaultServerData(): MockServerData {
     pages: new Map([[101, CS101_PAGES]]),
     files: new Map([[101, CS101_FILES]]),
     folders: new Map([[101, CS101_FOLDERS]]),
+    discussions: new Map([[101, CS101_DISCUSSIONS]]),
     courseDetails: new Map([
       [101, { syllabus_body: "<p>CS101 course syllabus content here.</p>" }],
       [202, { syllabus_body: null }],

@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **discover**
+Next area: **extract**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -24,7 +24,7 @@ Next area: **discover**
 
 ## Backlog (known gaps, pick from here first if still open)
 
-- discover: embedded `<iframe>` media (YouTube/Panopto/Kaltura/Studio) in pages and announcements is dropped; quizzes (`/quizzes`) not fetched; discussion replies with `has_more_replies` not paged; course tabs / external tool links not recorded
+- discover: embedded `<iframe>` media (YouTube/Panopto/Kaltura/Studio) in pages and announcements is dropped; quizzes (`/quizzes`) not fetched; discussion/announcement topic `attachments[]` (files attached to the post, not linked in HTML) not downloaded; course tabs / external tool links not recorded
 - extract: PDF text capped at 30k chars with no page markers; HTML nested tables and `colspan` headers flattened; `<dl>` lists lost; file-link `title` hints dropped when anchor text is generic
 - retrieve: `search_course` excerpt is the first 140 chars rather than the matching passage; section previews truncated at 2000 chars; no synonym expansion (due/deadline, rubric/grading); flat scoring favours long syllabi
 - reason: `read_file` needs an `offset`/`section` parameter to read past the 30k cutoff
@@ -37,3 +37,4 @@ Next area: **discover**
 - 2026-09-02 retrieve: query stop-word stripping + conservative stemming on every search path; sections split on up to 4 heading levels
 - 2026-09-02 reason: plan → investigate → reflect → decide loop with visible step budget (30), per-result reflection footer, sharper tool descriptions, workup-covered questions still get tools
 - 2026-09-02 ground: section-level, answer-attributed citations for full-document reads; read results framed with their section outline
+- 2026-09-02 discover: threaded discussion replies captured in thread order (nested /view replies, participant names, /entries fallback, has_more_replies paged), reply counts in summary

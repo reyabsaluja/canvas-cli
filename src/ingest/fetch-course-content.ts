@@ -16,8 +16,15 @@ import { mapWithConcurrency } from "./concurrency.js";
 
 export interface RawDiscussionThread {
   topic: CanvasDiscussionTopic;
+  /**
+   * Every entry in the thread, nested replies included, in thread order
+   * (each reply directly after the entry it answers, siblings oldest first).
+   * `user_name` is resolved from the view's participants when the API omits it.
+   */
   entries: CanvasDiscussionEntry[];
   participantCount: number;
+  /** Replies fetched through GET .../entries/:id/replies because the inline list was truncated. */
+  repliesPaged?: number;
 }
 
 export type RawAssignmentRecord = CanvasAssignment &
@@ -44,6 +51,7 @@ export interface RawCourseContent {
 const MODULE_ITEMS_CONCURRENCY = 4;
 const PAGE_BODY_CONCURRENCY = 4;
 const DISCUSSION_VIEW_CONCURRENCY = 4;
+const DISCUSSION_REPLY_PAGING_CONCURRENCY = 4;
 const ASSIGNMENT_DETAIL_CONCURRENCY = 4;
 
 /**
@@ -83,13 +91,6 @@ export async function fetchCourseContent(
   const discussionFetcher = (client as CanvasClient & {
     getDiscussionTopicsSafe?: (courseId: number, signal?: AbortSignal | null) => Promise<CanvasDiscussionTopic[]>;
   }).getDiscussionTopicsSafe;
-  const discussionViewFetcher = (client as CanvasClient & {
-    getDiscussionTopicViewSafe?: (
-      courseId: number,
-      topicId: number,
-      signal?: AbortSignal | null
-    ) => Promise<CanvasDiscussionTopicView | null>;
-  }).getDiscussionTopicViewSafe;
   const folderFetcher = (client as CanvasClient & {
     getFoldersSafe?: (courseId: number, signal?: AbortSignal | null) => Promise<CanvasFolder[]>;
   }).getFoldersSafe;
@@ -159,25 +160,12 @@ export async function fetchCourseContent(
     frontPageBody = frontPage.body;
   }
 
-  const discussionThreads = discussionViewFetcher
-    ? await mapWithConcurrency(
-        discussions,
-        DISCUSSION_VIEW_CONCURRENCY,
-        async (topic) => {
-          const view = await discussionViewFetcher.call(client, courseId, topic.id, signal);
-          return {
-            topic,
-            entries: flattenDiscussionEntries(view),
-            participantCount: view?.participants.length ?? 0,
-          };
-        },
-        signal
-      )
-    : discussions.map((topic) => ({
-        topic,
-        entries: [],
-        participantCount: 0,
-      }));
+  const discussionThreads = await mapWithConcurrency(
+    discussions,
+    DISCUSSION_VIEW_CONCURRENCY,
+    (topic) => collectDiscussionThread(client, courseId, topic, signal),
+    signal
+  );
 
   const seenSlugs = new Set<string>();
   const pendingSlugs: string[] = [];
@@ -348,35 +336,230 @@ function extractCanvasPageSlugs(html: string, courseId: number): string[] {
   return slugs;
 }
 
-function flattenDiscussionEntries(
-  view: CanvasDiscussionTopicView | null
-): CanvasDiscussionEntry[] {
-  if (!view) {
-    return [];
+interface DiscussionThreadNode {
+  entry: CanvasDiscussionEntry;
+  children: DiscussionThreadNode[];
+}
+
+type DiscussionClient = CanvasClient & {
+  getDiscussionTopicViewSafe?: (
+    courseId: number,
+    topicId: number,
+    signal?: AbortSignal | null
+  ) => Promise<CanvasDiscussionTopicView | null>;
+  getDiscussionEntriesSafe?: (
+    courseId: number,
+    topicId: number,
+    signal?: AbortSignal | null
+  ) => Promise<CanvasDiscussionEntry[]>;
+  getDiscussionEntryRepliesSafe?: (
+    courseId: number,
+    topicId: number,
+    entryId: number,
+    signal?: AbortSignal | null
+  ) => Promise<CanvasDiscussionEntry[]>;
+};
+
+/**
+ * Capture the full reply tree of one discussion topic.
+ *
+ * Prefers GET .../view (one request, every entry, threaded children nested
+ * under `replies`, authors in `participants`). When the view is unavailable
+ * (403, or 503 while Canvas materialises it) falls back to GET .../entries,
+ * whose inline `recent_replies` stop at 10 — any entry flagged
+ * `has_more_replies` then has its complete reply list paged in. Deleted
+ * tombstones are skipped while their children are kept. Everything degrades
+ * to an empty thread rather than failing the ingest.
+ */
+export async function collectDiscussionThread(
+  client: CanvasClient,
+  courseId: number,
+  topic: CanvasDiscussionTopic,
+  signal?: AbortSignal | null
+): Promise<RawDiscussionThread> {
+  const fetchers = client as DiscussionClient;
+  const empty: RawDiscussionThread = {
+    topic,
+    entries: [],
+    participantCount: 0,
+    repliesPaged: 0,
+  };
+
+  const view = fetchers.getDiscussionTopicViewSafe
+    ? await fetchers.getDiscussionTopicViewSafe.call(client, courseId, topic.id, signal)
+    : null;
+
+  const namesByUserId = new Map<number, string>();
+  const nodesById = new Map<number, DiscussionThreadNode>();
+  let roots: DiscussionThreadNode[];
+
+  if (view) {
+    for (const participant of view.participants ?? []) {
+      if (participant.display_name) {
+        namesByUserId.set(participant.id, participant.display_name);
+      }
+    }
+    roots = buildDiscussionTree(view.view ?? [], nodesById);
+    attachFlatEntries(view.new_entries ?? [], roots, nodesById, null);
+  } else if (fetchers.getDiscussionEntriesSafe) {
+    const topLevel = await fetchers.getDiscussionEntriesSafe.call(
+      client,
+      courseId,
+      topic.id,
+      signal
+    );
+    if (topLevel.length === 0) {
+      return empty;
+    }
+    roots = buildDiscussionTree(topLevel, nodesById);
+  } else {
+    return empty;
   }
 
-  const flattened: CanvasDiscussionEntry[] = [];
-  const seen = new Set<number>();
+  let repliesPaged = 0;
+  if (fetchers.getDiscussionEntryRepliesSafe) {
+    const truncated = Array.from(nodesById.values()).filter(
+      (node) => node.entry.has_more_replies === true
+    );
+    const pagedReplies = await mapWithConcurrency(
+      truncated,
+      DISCUSSION_REPLY_PAGING_CONCURRENCY,
+      async (node) => ({
+        node,
+        replies: await fetchers.getDiscussionEntryRepliesSafe!.call(
+          client,
+          courseId,
+          topic.id,
+          node.entry.id,
+          signal
+        ),
+      }),
+      signal
+    );
+    for (const { node, replies } of pagedReplies) {
+      if (replies.length === 0) continue;
+      repliesPaged += replies.length;
+      attachFlatEntries(replies, roots, nodesById, node);
+    }
+  }
 
-  const visit = (entry: CanvasDiscussionEntry): void => {
-    if (seen.has(entry.id)) {
+  const entries: CanvasDiscussionEntry[] = [];
+  const visit = (node: DiscussionThreadNode): void => {
+    const { entry } = node;
+    const isTombstone = entry.deleted === true && !entry.message;
+    if (!isTombstone) {
+      entries.push({
+        ...entry,
+        user_name: entry.user_name ?? namesByUserId.get(entry.user_id) ?? null,
+        replies: undefined,
+        recent_replies: undefined,
+      });
+    }
+    for (const child of sortByCreatedAt(node.children)) {
+      visit(child);
+    }
+  };
+  for (const root of sortByCreatedAt(roots)) {
+    visit(root);
+  }
+
+  const participantCount = view
+    ? Math.max(
+        view.participants?.length ?? 0,
+        new Set(entries.map((entry) => entry.user_id)).size
+      )
+    : new Set(entries.map((entry) => entry.user_id)).size;
+
+  return { topic, entries, participantCount, repliesPaged };
+}
+
+/**
+ * Turn a nested entry list (`replies` from /view, `recent_replies` from
+ * /entries) into a tree, registering every node by id.
+ */
+function buildDiscussionTree(
+  entries: CanvasDiscussionEntry[],
+  nodesById: Map<number, DiscussionThreadNode>
+): DiscussionThreadNode[] {
+  const roots: DiscussionThreadNode[] = [];
+
+  const visit = (
+    entry: CanvasDiscussionEntry,
+    parent: DiscussionThreadNode | null
+  ): void => {
+    if (nodesById.has(entry.id)) {
       return;
     }
-    seen.add(entry.id);
-    flattened.push(entry);
-    for (const reply of entry.recent_replies ?? []) {
-      visit(reply);
+    const node: DiscussionThreadNode = { entry, children: [] };
+    nodesById.set(entry.id, node);
+    if (parent) {
+      parent.children.push(node);
+    } else {
+      roots.push(node);
+    }
+    for (const child of entry.replies ?? []) {
+      visit(child, node);
+    }
+    for (const child of entry.recent_replies ?? []) {
+      visit(child, node);
     }
   };
 
-  for (const entry of view.view ?? []) {
-    visit(entry);
+  for (const entry of entries) {
+    visit(entry, null);
   }
-  for (const entry of view.new_entries ?? []) {
-    visit(entry);
-  }
+  return roots;
+}
 
-  return flattened.sort((left, right) =>
-    left.created_at.localeCompare(right.created_at)
-  );
+/**
+ * Attach a flat list of entries (new_entries, or a paged reply list) under
+ * their `parent_id`. Parents are created before their children, so walking in
+ * creation order lets nested paged replies find their parent; anything whose
+ * parent is unknown lands under `fallbackParent` (or becomes a root).
+ */
+function attachFlatEntries(
+  entries: CanvasDiscussionEntry[],
+  roots: DiscussionThreadNode[],
+  nodesById: Map<number, DiscussionThreadNode>,
+  fallbackParent: DiscussionThreadNode | null
+): void {
+  for (const entry of sortEntriesByCreatedAt(entries)) {
+    if (nodesById.has(entry.id)) {
+      continue;
+    }
+    const node: DiscussionThreadNode = { entry, children: [] };
+    nodesById.set(entry.id, node);
+    const parent =
+      (entry.parent_id != null ? nodesById.get(entry.parent_id) : undefined) ??
+      fallbackParent;
+    if (parent && parent !== node) {
+      parent.children.push(node);
+    } else {
+      roots.push(node);
+    }
+    for (const child of entry.replies ?? []) {
+      attachFlatEntries([{ ...child, parent_id: entry.id }], roots, nodesById, node);
+    }
+    for (const child of entry.recent_replies ?? []) {
+      attachFlatEntries([{ ...child, parent_id: entry.id }], roots, nodesById, node);
+    }
+  }
+}
+
+function sortByCreatedAt(nodes: DiscussionThreadNode[]): DiscussionThreadNode[] {
+  return nodes
+    .slice()
+    .sort((left, right) =>
+      (left.entry.created_at ?? "").localeCompare(right.entry.created_at ?? "")
+    );
+}
+
+function sortEntriesByCreatedAt(
+  entries: CanvasDiscussionEntry[]
+): CanvasDiscussionEntry[] {
+  return entries
+    .slice()
+    .sort((left, right) =>
+      (left.created_at ?? "").localeCompare(right.created_at ?? "")
+    );
 }

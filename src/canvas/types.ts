@@ -175,15 +175,28 @@ export interface CanvasDiscussionTopic {
   locked: boolean;
 }
 
-/** A single entry (reply) within a discussion topic. */
+/**
+ * A single entry (reply) within a discussion topic.
+ *
+ * Two endpoints produce these with different shapes: GET .../view nests
+ * threaded children under `replies`, carries `parent_id` and `deleted`, and
+ * omits `user_name` (names live in the view's `participants`); GET .../entries
+ * and .../replies return `user_name` plus up to 10 `recent_replies` and set
+ * `has_more_replies` when the inline list is truncated.
+ */
 export interface CanvasDiscussionEntry {
   id: number;
   user_id: number;
-  user_name: string | null;
+  user_name?: string | null;
+  parent_id?: number | null;
   message: string | null;
   created_at: string;
   updated_at: string;
-  read_state: string;
+  read_state?: string;
+  /** Set on tombstones left behind when an entry was deleted (no message). */
+  deleted?: boolean;
+  /** Threaded children as returned by GET .../view. */
+  replies?: CanvasDiscussionEntry[];
   recent_replies?: CanvasDiscussionEntry[];
   has_more_replies?: boolean;
 }
