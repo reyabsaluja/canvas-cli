@@ -14,6 +14,7 @@ import {
   type ArtifactRecord,
   type ArtifactSection,
   type ArtifactScope,
+  buildMatchExcerpt,
 } from "../knowledge/artifact-index.js";
 
 export interface WorkspaceChatSearchMatch {
@@ -110,7 +111,7 @@ export async function searchWorkspaceKnowledge(
         section,
         score,
         header: buildSearchHeader(artifact, section),
-        preview: section.text.slice(0, 2000),
+        preview: buildSectionPreview(section.text, trimmed),
       };
     })
     .filter((match): match is WorkspaceChatSearchMatch => Boolean(match))
@@ -467,4 +468,27 @@ async function persistCourseAttachments(cache: CourseCache): Promise<void> {
   const content = JSON.stringify(cache.attachments, null, 2) + "\n";
   await fs.writeFile(tempPath, content, "utf-8");
   await fs.rename(tempPath, attachmentsPath);
+}
+
+/** Longest preview a search_workspace hit shows the model. Was a 2,000-char head slice. */
+const WORKSPACE_SECTION_PREVIEW_CHARS = 2400;
+
+/**
+ * Preview text for a matched section. Short sections are shown whole. Long
+ * sections used to be cut at the head, which hid matches deep in the
+ * section; now the window is centred on the best cluster of query terms.
+ * When the best window is the head anyway, the raw head is kept so line
+ * structure survives.
+ */
+export function buildSectionPreview(
+  text: string,
+  query: string,
+  maxLength: number = WORKSPACE_SECTION_PREVIEW_CHARS
+): string {
+  if (text.length <= maxLength) return text;
+  const excerpt = buildMatchExcerpt(text, query, maxLength);
+  if (!excerpt.startsWith("...")) {
+    return text.slice(0, maxLength);
+  }
+  return excerpt;
 }
