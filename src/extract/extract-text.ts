@@ -44,8 +44,12 @@ const pdfParse: (
  * 150-page lecture deck or a full textbook chapter must not lose its tail.
  */
 const MAX_TEXT = 400_000;
-const MAX_ZIP_TEXT = 50000; // Higher limit for zips since they contain multiple files
-const MAX_ZIP_FILE_TEXT = 30000; // Per-file limit inside zips
+// Zip summaries used to stop at 50k total / 30k per file, far below what a
+// single PDF now gets (400k); a lab handout inside lab4.zip was silently cut.
+// Inner files also get their own sidecars, so this text is the "read the zip"
+// view and should be as complete as a direct read.
+const MAX_ZIP_TEXT = 400_000;
+const MAX_ZIP_FILE_TEXT = 120_000;
 const MAX_ZIP_ENTRY_BYTES = 100 * 1024 * 1024; // Per-entry inflated size cap when unpacking
 
 const TEXTUAL_ZIP_EXTENSIONS = new Set([
@@ -216,7 +220,7 @@ export async function extractZip(
             text = htmlToText(text);
           }
           if (text.trim().length > 0) {
-            const truncated = text.slice(0, MAX_ZIP_FILE_TEXT);
+            const truncated = capZipEntryText(text, entry.filename);
             textContents.push({ name: entry.filename, content: truncated });
             totalText += truncated.length;
           }
@@ -234,7 +238,7 @@ export async function extractZip(
           }
           const text = (await extractOfficeText(Buffer.concat(chunks), entry.filename)) ?? "";
           if (text.trim().length > 0) {
-            const truncated = text.slice(0, MAX_ZIP_FILE_TEXT);
+            const truncated = capZipEntryText(text, entry.filename);
             textContents.push({ name: entry.filename, content: truncated });
             totalText += truncated.length;
           }
@@ -296,6 +300,13 @@ async function extractPdf(filePath: string): Promise<string> {
 }
 
 /** Heading used to mark page boundaries in multi-page PDF text. */
+/** Cap one zip entry's text, saying so instead of cutting silently. */
+function capZipEntryText(text: string, filename: string): string {
+  if (text.length <= MAX_ZIP_FILE_TEXT) return text;
+  const omitted = text.length - MAX_ZIP_FILE_TEXT;
+  return `${text.slice(0, MAX_ZIP_FILE_TEXT)}\n[Text truncated: ${omitted} more characters of ${filename} omitted; read the extracted file directly for the rest]`;
+}
+
 export const PDF_PAGE_HEADING_PREFIX = "## Page ";
 /** Body written for a page with no extractable text (scan, diagram, image-only slide). */
 export const PDF_IMAGE_PAGE_NOTE =
