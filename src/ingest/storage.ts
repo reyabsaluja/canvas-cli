@@ -13,7 +13,10 @@ import type {
   RawAssignmentRecord,
   RawDiscussionThread,
 } from "./fetch-course-content.js";
-import type { CanvasRubricCriterion } from "../canvas/types.js";
+import type {
+  CanvasRubricCriterion,
+  CanvasTopicAttachment,
+} from "../canvas/types.js";
 import type {
   CourseMetadata,
   AssignmentIndexEntry,
@@ -29,6 +32,7 @@ import type {
   IngestionMeta,
 } from "./types.js";
 import { htmlToText } from "../format/html-to-text.js";
+import { stripControlChars } from "../sanitize.js";
 import type { CapturedExternalLink } from "./external-link-capture.js";
 
 /**
@@ -58,6 +62,8 @@ export async function writeIngestionArtifacts(
     message: string | null;
     posted_at: string | null;
     html_url?: string | null;
+    /** Files attached to the post itself (not linked from `message`). */
+    attachments?: CanvasTopicAttachment[] | null;
   }>,
   rawDiscussionThreads?: RawDiscussionThread[],
   capturedExternalLinks?: CapturedExternalLink[]
@@ -153,19 +159,27 @@ export async function writeIngestionArtifacts(
     }
   }
 
+  const attachmentLookup = buildTopicAttachmentLookup(attachments);
+
   if (rawAnnouncements && rawAnnouncements.length > 0) {
     await fs.mkdir(path.join(coursePath, "extracted", "announcements"), {
       recursive: true,
     });
     for (const announcement of rawAnnouncements) {
-      if (!announcement.message) continue;
-      const postedAt = announcement.posted_at
-        ? `Posted: ${announcement.posted_at}\n\n`
-        : "";
+      const attachmentLine = formatTopicAttachmentsLine(
+        announcement.attachments,
+        attachmentLookup
+      );
+      if (!announcement.message && !attachmentLine) continue;
+      const header = [
+        announcement.posted_at ? `Posted: ${announcement.posted_at}` : "",
+        attachmentLine,
+      ].filter(Boolean);
+      const postedAt = header.length > 0 ? `${header.join("\n")}\n\n` : "";
       const content =
         `# ${announcement.title}\n\n` +
         postedAt +
-        `${htmlToText(announcement.message, {
+        `${htmlToText(announcement.message ?? "", {
           baseUrl: announcement.html_url ?? courseMeta.htmlUrl,
         })}\n`;
       await writeAtomic(
@@ -182,7 +196,7 @@ export async function writeIngestionArtifacts(
     for (const thread of rawDiscussionThreads) {
       await writeAtomic(
         getExtractedDiscussionPath(coursePath, thread.topic.id),
-        formatDiscussionThreadText(thread)
+        formatDiscussionThreadText(thread, attachmentLookup)
       );
     }
   }
@@ -340,7 +354,74 @@ function formatPointLabel(points: number | null | undefined): string | null {
   return `${points} ${points === 1 ? "point" : "points"}`;
 }
 
-function formatDiscussionThreadText(thread: RawDiscussionThread): string {
+/**
+ * Where a post's attached files ended up on disk, keyed by Canvas file id and
+ * by download URL (minus one-time query tokens), so an "Attachments:" line can
+ * point a search hit on the post at the extracted file.
+ */
+export interface TopicAttachmentLookup {
+  byFileId: Map<number, DownloadedAttachmentEntry>;
+  byUrl: Map<string, DownloadedAttachmentEntry>;
+}
+
+export function buildTopicAttachmentLookup(
+  attachments: DownloadedAttachmentEntry[]
+): TopicAttachmentLookup {
+  const lookup: TopicAttachmentLookup = { byFileId: new Map(), byUrl: new Map() };
+  for (const attachment of attachments) {
+    if (typeof attachment.canvasFileId === "number") {
+      lookup.byFileId.set(attachment.canvasFileId, attachment);
+    }
+    lookup.byUrl.set(stripUrlQuery(attachment.downloadUrl), attachment);
+  }
+  return lookup;
+}
+
+function stripUrlQuery(url: string): string {
+  const index = url.indexOf("?");
+  return index === -1 ? url : url.slice(0, index);
+}
+
+function topicAttachmentName(attachment: CanvasTopicAttachment): string {
+  return stripControlChars(
+    attachment.display_name || attachment.filename || `file-${attachment.id}`
+  );
+}
+
+/**
+ * "name (attachments/announcements/name.pdf)" for files on disk, with a note
+ * for files that failed or were never downloaded so the name is still searchable.
+ */
+export function describeTopicAttachment(
+  attachment: CanvasTopicAttachment,
+  lookup: TopicAttachmentLookup
+): string {
+  const name = topicAttachmentName(attachment);
+  const entry =
+    lookup.byFileId.get(attachment.id) ??
+    (typeof attachment.url === "string"
+      ? lookup.byUrl.get(stripUrlQuery(attachment.url))
+      : undefined);
+  if (!entry) return `${name} (not downloaded)`;
+  if (entry.status === "failed") return `${name} (download failed)`;
+  return `${name} (${entry.localPath})`;
+}
+
+function formatTopicAttachmentsLine(
+  attachments: CanvasTopicAttachment[] | null | undefined,
+  lookup: TopicAttachmentLookup,
+  label = "Attachments"
+): string {
+  const described = (attachments ?? [])
+    .filter((attachment): attachment is CanvasTopicAttachment => !!attachment)
+    .map((attachment) => describeTopicAttachment(attachment, lookup));
+  return described.length > 0 ? `${label}: ${described.join("; ")}` : "";
+}
+
+function formatDiscussionThreadText(
+  thread: RawDiscussionThread,
+  attachmentLookup: TopicAttachmentLookup = buildTopicAttachmentLookup([])
+): string {
   const lines = [`# ${thread.topic.title}`, ""];
 
   if (thread.topic.posted_at) {
@@ -355,6 +436,11 @@ function formatDiscussionThreadText(thread: RawDiscussionThread): string {
   lines.push(`Participants: ${thread.participantCount}`);
   lines.push(`Replies captured: ${thread.entries.length}`);
   lines.push(`Canvas URL: ${thread.topic.html_url}`);
+  const topicAttachments = formatTopicAttachmentsLine(
+    thread.topic.attachments,
+    attachmentLookup
+  );
+  if (topicAttachments) lines.push(topicAttachments);
   lines.push("");
   lines.push("## Topic");
   lines.push("");
@@ -380,6 +466,13 @@ function formatDiscussionThreadText(thread: RawDiscussionThread): string {
       ].filter((part) => typeof part === "string" && part.length > 0);
       lines.push(`### ${headingParts.join(" — ")}`);
       lines.push("");
+      const replyAttachment = entry.attachment
+        ? formatTopicAttachmentsLine([entry.attachment], attachmentLookup, "Attachment")
+        : "";
+      if (replyAttachment) {
+        lines.push(replyAttachment);
+        lines.push("");
+      }
       if (entry.message && entry.message.trim().length > 0) {
         lines.push(
           htmlToText(entry.message, { baseUrl: thread.topic.html_url }) ||

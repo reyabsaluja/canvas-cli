@@ -14,6 +14,7 @@ export function htmlToText(
   text = stripCommentsScriptsAndStyles(text);
   text = replaceFigures(text, options);
   text = replaceTables(text, options);
+  text = replaceDefinitionLists(text, options);
   text = replaceLists(text, options);
   text = replaceMedia(text, options);
 
@@ -90,56 +91,276 @@ function replaceTables(
   html: string,
   options?: { baseUrl?: string | null }
 ): string {
-  return html.replace(/<table\b[^>]*>([\s\S]*?)<\/table>/gi, (_match, inner) => {
-    const rendered = renderTable(inner, options);
-    return rendered ? `\n${rendered}\n` : "\n";
-  });
+  // Innermost tables first, so a table nested inside a cell is rendered to
+  // text before the outer table reads that cell.
+  const tablePattern = /<table\b[^>]*>((?:(?!<table\b)[\s\S])*?)<\/table>/gi;
+  let current = html;
+  let previous: string;
+
+  do {
+    previous = current;
+    current = current.replace(tablePattern, (_match, inner) => {
+      const rendered = renderTable(String(inner), options);
+      return rendered ? `\n${rendered}\n` : "\n";
+    });
+  } while (current !== previous);
+
+  return current;
+}
+
+interface TableCell {
+  isHeader: boolean;
+  text: string;
+  colspan: number;
+  rowspan: number;
+}
+
+/** A cell as placed on the table grid; spanned positions share one object. */
+interface PlacedCell extends TableCell {
+  row: number;
+  col: number;
 }
 
 function renderTable(
   tableHtml: string,
   options?: { baseUrl?: string | null }
 ): string {
-  const rowMatches = [...tableHtml.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)];
+  const captionMatch = tableHtml.match(/<caption\b[^>]*>([\s\S]*?)<\/caption>/i);
+  const caption = captionMatch
+    ? htmlFragmentToSingleLineText(captionMatch[1] ?? "", options)
+    : "";
+  const body = tableHtml.replace(/<caption\b[^>]*>[\s\S]*?<\/caption>/gi, "");
+
+  const rowMatches = [...body.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)];
   if (rowMatches.length === 0) {
-    return htmlFragmentToText(tableHtml, options);
+    const fallback = htmlFragmentToText(body, options);
+    if (!fallback) return caption ? `Table: ${caption}` : "";
+    return caption ? `Table: ${caption}\n${fallback}` : fallback;
   }
 
-  const rows = rowMatches.map((match) => {
-    const rowHtml = match[1] ?? "";
-    const cells = [...rowHtml.matchAll(/<(td|th)\b[^>]*>([\s\S]*?)<\/\1>/gi)].map(
+  const rows: TableCell[][] = rowMatches.map((match) =>
+    [...(match[1] ?? "").matchAll(/<(td|th)\b([^>]*)>([\s\S]*?)<\/\1>/gi)].map(
       (cellMatch) => ({
         isHeader: (cellMatch[1] ?? "").toLowerCase() === "th",
-        text: htmlFragmentToSingleLineText(cellMatch[2] ?? "", options),
+        text: htmlCellToSingleLineText(cellMatch[3] ?? "", options),
+        colspan: parseSpanAttr(cellMatch[2] ?? "", "colspan"),
+        rowspan: parseSpanAttr(cellMatch[2] ?? "", "rowspan"),
       })
-    );
-    return cells;
-  });
+    )
+  );
 
-  const headerRow =
-    rows.find((row) => row.some((cell) => cell.isHeader))?.map((cell) => cell.text) ??
-    null;
-  const dataRows = headerRow ? rows.slice(1) : rows;
+  const grid = placeTableCells(rows);
+  const width = grid.reduce((max, row) => Math.max(max, row.length), 0);
+  const title = caption ? `Table: ${caption}` : "Table:";
+  const lines = [title];
 
-  const lines = ["Table:"];
-  if (headerRow && dataRows.length > 0) {
-    for (const row of dataRows) {
-      const parts = row.map((cell, index) => {
-        const key = headerRow[index] || `Column ${index + 1}`;
-        return `${key}: ${cell.text || "—"}`;
-      });
-      lines.push(`- ${parts.join(" | ")}`);
+  // Header rows: the leading rows made only of <th> cells (a lone first row
+  // with any <th> still counts, matching how most hand-written tables look).
+  let headerRowCount = 0;
+  while (
+    headerRowCount < grid.length &&
+    gridRowCells(grid[headerRowCount] ?? []).length > 0 &&
+    gridRowCells(grid[headerRowCount] ?? []).every((cell) => cell.isHeader)
+  ) {
+    headerRowCount += 1;
+  }
+  // Row-header tables ("Instructor | Prof. Grace"): every row keys on its first cell.
+  const isRowHeaderTable =
+    headerRowCount === 0 &&
+    grid.length > 0 &&
+    grid.every((row) => {
+      const cells = gridRowCells(row);
+      return (
+        cells.length > 1 &&
+        cells[0]?.isHeader === true &&
+        cells.slice(1).every((cell) => !cell.isHeader)
+      );
+    });
+  if (
+    headerRowCount === 0 &&
+    !isRowHeaderTable &&
+    (grid[0] ?? []).some((cell) => cell?.isHeader)
+  ) {
+    headerRowCount = 1;
+  }
+  if (headerRowCount >= grid.length) {
+    headerRowCount = grid.length > 1 ? grid.length - 1 : 0;
+  }
+
+  if (headerRowCount > 0) {
+    const columnKeys: string[] = [];
+    for (let col = 0; col < width; col += 1) {
+      const parts: string[] = [];
+      for (let row = 0; row < headerRowCount; row += 1) {
+        const text = grid[row]?.[col]?.text ?? "";
+        if (text && parts[parts.length - 1] !== text) parts.push(text);
+      }
+      columnKeys.push(parts.join(" – ") || `Column ${col + 1}`);
+    }
+
+    for (let row = headerRowCount; row < grid.length; row += 1) {
+      const parts: string[] = [];
+      const seen = new Set<PlacedCell>();
+      for (let col = 0; col < width; col += 1) {
+        const cell = grid[row]?.[col];
+        if (!cell || seen.has(cell)) continue;
+        seen.add(cell);
+        const keys: string[] = [];
+        for (let span = col; span < width && grid[row]?.[span] === cell; span += 1) {
+          const key = columnKeys[span] ?? `Column ${span + 1}`;
+          if (!keys.includes(key)) keys.push(key);
+        }
+        parts.push(`${keys.join(" / ")}: ${cell.text || "—"}`);
+      }
+      if (parts.length > 0) lines.push(`- ${parts.join(" | ")}`);
+    }
+  } else if (isRowHeaderTable) {
+    for (const row of grid) {
+      const [key, ...values] = gridRowCells(row);
+      const rendered = values.map((cell) => cell.text).filter((text) => text.length > 0);
+      if (key?.text || rendered.length > 0) {
+        lines.push(`- ${key?.text || "—"}: ${rendered.join(" | ") || "—"}`);
+      }
     }
   } else {
-    for (const row of rows) {
-      const values = row.map((cell) => cell.text).filter((cell) => cell.length > 0);
-      if (values.length > 0) {
-        lines.push(`- ${values.join(" | ")}`);
-      }
+    for (const row of grid) {
+      const values = gridRowCells(row)
+        .map((cell) => cell.text)
+        .filter((text) => text.length > 0);
+      if (values.length > 0) lines.push(`- ${values.join(" | ")}`);
     }
   }
 
-  return lines.length > 1 ? lines.join("\n") : "";
+  return lines.length > 1 || caption ? lines.join("\n") : "";
+}
+
+/**
+ * Lay cells out on a grid honouring colspan/rowspan, so a "Week 1" cell that
+ * spans two rows is present on both and the columns below it stay aligned.
+ */
+function placeTableCells(rows: TableCell[][]): Array<Array<PlacedCell | undefined>> {
+  const grid: Array<Array<PlacedCell | undefined>> = [];
+  const ensureRow = (index: number): Array<PlacedCell | undefined> => {
+    while (grid.length <= index) grid.push([]);
+    return grid[index]!;
+  };
+
+  rows.forEach((cells, rowIndex) => {
+    const gridRow = ensureRow(rowIndex);
+    let col = 0;
+    for (const cell of cells) {
+      while (gridRow[col] !== undefined) col += 1;
+      const placed: PlacedCell = { ...cell, row: rowIndex, col };
+      const rowspan = Math.min(cell.rowspan, rows.length - rowIndex);
+      for (let r = 0; r < rowspan; r += 1) {
+        const target = ensureRow(rowIndex + r);
+        for (let c = 0; c < cell.colspan; c += 1) {
+          if (target[col + c] === undefined) target[col + c] = placed;
+        }
+      }
+      col += cell.colspan;
+    }
+  });
+
+  return grid;
+}
+
+/** Distinct cells of a grid row in column order (spans collapsed). */
+function gridRowCells(row: Array<PlacedCell | undefined>): PlacedCell[] {
+  const cells: PlacedCell[] = [];
+  for (const cell of row) {
+    if (cell && cells[cells.length - 1] !== cell && !cells.includes(cell)) cells.push(cell);
+  }
+  return cells;
+}
+
+function parseSpanAttr(attrs: string, attr: "colspan" | "rowspan"): number {
+  const parsed = Number.parseInt(extractAttr(attrs, attr) ?? "", 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return 1;
+  return Math.min(parsed, 100);
+}
+
+/**
+ * Cell text on one line. Lists and nested tables inside the cell keep their
+ * item boundaries ("Lab 1 | Due: Sep 12; Lab 2 | Due: Sep 26") instead of
+ * being run together with spaces.
+ */
+function htmlCellToSingleLineText(
+  html: string,
+  options?: { baseUrl?: string | null }
+): string {
+  const lines = htmlFragmentToText(html, options)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  let result = "";
+  for (const line of lines) {
+    const tableStart = line.match(/^Table:(?:\s+(.*))?$/);
+    if (tableStart) {
+      if (tableStart[1]) result += `${result ? " " : ""}${tableStart[1]}:`;
+      continue;
+    }
+    const item = line.match(/^(?:-|\d+\.)\s+(.*)$/);
+    if (item) {
+      result += `${result ? (result.endsWith(":") ? " " : "; ") : ""}${item[1]}`;
+      continue;
+    }
+    result += `${result ? " " : ""}${line}`;
+  }
+  return result.trim();
+}
+
+function replaceDefinitionLists(
+  html: string,
+  options?: { baseUrl?: string | null }
+): string {
+  const pattern = /<dl\b[^>]*>((?:(?!<dl\b)[\s\S])*?)<\/dl>/gi;
+  let current = html;
+  let previous: string;
+
+  do {
+    previous = current;
+    current = current.replace(pattern, (_match, inner) => {
+      const rendered = renderDefinitionList(String(inner), options);
+      return rendered ? `\n${rendered}\n` : "\n";
+    });
+  } while (current !== previous);
+
+  return current;
+}
+
+/** `<dt>`/`<dd>` pairs become "- term: definition" lines. */
+function renderDefinitionList(
+  inner: string,
+  options?: { baseUrl?: string | null }
+): string {
+  const lines: string[] = [];
+  let terms: string[] = [];
+  let definitions: string[] = [];
+
+  const flush = (): void => {
+    if (terms.length === 0 && definitions.length === 0) return;
+    const term = terms.join(" / ");
+    const definition = definitions.join("; ");
+    if (term && definition) lines.push(`- ${term}: ${definition}`);
+    else lines.push(`- ${term || definition}`);
+    terms = [];
+    definitions = [];
+  };
+
+  for (const match of inner.matchAll(/<(dt|dd)\b[^>]*>([\s\S]*?)<\/\1>/gi)) {
+    const text = htmlCellToSingleLineText(match[2] ?? "", options);
+    if ((match[1] ?? "").toLowerCase() === "dt") {
+      if (definitions.length > 0) flush();
+      if (text) terms.push(text);
+    } else if (text) {
+      definitions.push(text);
+    }
+  }
+  flush();
+
+  return lines.join("\n");
 }
 
 function replaceLists(
