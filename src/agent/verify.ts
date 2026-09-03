@@ -30,6 +30,13 @@ export interface VerifyWorkspaceAnswerInput {
   observations: Observation[];
   usedWorkup: boolean;
   loaded: LoadedWorkspace;
+  /**
+   * Grounded observations from earlier turns of the same conversation. The
+   * prompt tells the model not to re-read documents it already has, so a
+   * figure it correctly remembers from an earlier read counts as supported.
+   * Used only for the numeric-claim check, never for citations or confidence.
+   */
+  priorObservations?: Observation[];
 }
 
 export function verifyWorkspaceAnswer(
@@ -90,8 +97,14 @@ export function verifyWorkspaceAnswer(
   // answer's figures came from it. A read of Lab4.pdf that says "March 27"
   // must not back an answer that says "March 20" at high confidence.
   const evidenceText = collectEvidenceText(input.observations);
-  const unsupportedClaims = evidenceText
-    ? findUnsupportedAnswerClaims(trimmedAnswer, evidenceText, input.question)
+  const priorEvidenceText = input.priorObservations?.length
+    ? collectEvidenceText(
+        input.priorObservations.filter((observation) => !input.observations.includes(observation))
+      )
+    : "";
+  const claimEvidenceText = [evidenceText, priorEvidenceText].filter(Boolean).join("\n");
+  const unsupportedClaims = claimEvidenceText
+    ? findUnsupportedAnswerClaims(trimmedAnswer, claimEvidenceText, input.question)
     : [];
   const confidence =
     unsupportedClaims.length > 0

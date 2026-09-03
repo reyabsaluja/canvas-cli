@@ -195,6 +195,7 @@ export async function runChatAgent(
     observations: verificationObservations,
     usedWorkup,
     loaded: ctx.loaded,
+    priorObservations: ctx.runState.observations,
   });
   const finalAnswer = finalizeAnswerText(fullText, verification.missing, verification.checkedSources);
 
