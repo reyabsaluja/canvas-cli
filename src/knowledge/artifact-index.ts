@@ -338,7 +338,7 @@ export function searchArtifacts(
     limit?: number;
   }
 ): RankedArtifact[] {
-  const { tokens: queryTokens, phrases } = analyzeSearchQuery(query);
+  const { tokens: queryTokens, phrases, expansions } = analyzeSearchQuery(query);
   if (queryTokens.length === 0) return [];
 
   const allowedKinds = options?.kinds ? new Set(options.kinds) : null;
@@ -368,6 +368,15 @@ export function searchArtifacts(
       } else if (artifact.bodyTokens.includes(token)) {
         score += 3;
         matchedTokens += 1;
+      } else {
+        const synonyms = expansions.get(token) ?? [];
+        if (synonyms.some((synonym) => artifact.titleTokens.includes(synonym))) {
+          score += 8 * SYNONYM_MATCH_WEIGHT;
+          matchedTokens += 1;
+        } else if (synonyms.some((synonym) => artifact.bodyTokens.includes(synonym))) {
+          score += 3 * SYNONYM_MATCH_WEIGHT;
+          matchedTokens += 1;
+        }
       }
     }
 
@@ -399,8 +408,12 @@ export function searchArtifactSections(
     limit?: number;
   }
 ): RankedArtifactSection[] {
-  const { tokens: queryTokens, phrases } = analyzeSearchQuery(query);
+  const { tokens: queryTokens, phrases, expansions } = analyzeSearchQuery(query);
   if (queryTokens.length === 0) return [];
+  const scoringTokens = [
+    ...queryTokens,
+    ...[...expansions.values()].flat(),
+  ];
 
   const allowedKinds = options?.kinds ? new Set(options.kinds) : null;
   const sections = index.sections.filter((section) => {
@@ -413,7 +426,7 @@ export function searchArtifactSections(
   const df = new Map<string, number>();
   for (const section of sections) {
     const tokenSet = new Set(section.tokens);
-    for (const token of queryTokens) {
+    for (const token of scoringTokens) {
       if (tokenSet.has(token)) {
         df.set(token, (df.get(token) ?? 0) + 1);
       }
@@ -448,17 +461,7 @@ export function searchArtifactSections(
         score += 6;
       }
 
-      for (const token of queryTokens) {
-        if (hasSpecificSectionLabel && sectionLabelTokens.includes(token)) {
-          score += 4;
-          matchedSectionLabelTokens += 1;
-        }
-        if (sourceLabelTokens.includes(token)) {
-          score += 2;
-          matchedSourceLabelTokens += 1;
-        }
-        if (!tokenSet.has(token)) continue;
-
+      const bm25 = (token: string): number => {
         const termFrequency = section.tokens.filter(
           (candidate) => candidate === token
         ).length;
@@ -468,9 +471,46 @@ export function searchArtifactSections(
         );
         const normalization =
           1 - 0.75 + 0.75 * (section.text.length / averageLength);
-        score +=
+        return (
           inverseDocumentFrequency *
-          ((termFrequency * 2.5) / (termFrequency + 1.5 * normalization));
+          ((termFrequency * 2.5) / (termFrequency + 1.5 * normalization))
+        );
+      };
+
+      for (const token of queryTokens) {
+        const synonyms = expansions.get(token) ?? [];
+        const labelHit = hasSpecificSectionLabel && sectionLabelTokens.includes(token);
+        const labelSynonymHit =
+          !labelHit &&
+          hasSpecificSectionLabel &&
+          synonyms.some((synonym) => sectionLabelTokens.includes(synonym));
+        if (labelHit) {
+          score += 4;
+          matchedSectionLabelTokens += 1;
+        } else if (labelSynonymHit) {
+          score += 4 * SYNONYM_MATCH_WEIGHT;
+          matchedSectionLabelTokens += 1;
+        }
+        if (sourceLabelTokens.includes(token)) {
+          score += 2;
+          matchedSourceLabelTokens += 1;
+        } else if (synonyms.some((synonym) => sourceLabelTokens.includes(synonym))) {
+          score += 2 * SYNONYM_MATCH_WEIGHT;
+          matchedSourceLabelTokens += 1;
+        }
+
+        if (tokenSet.has(token)) {
+          score += bm25(token);
+          continue;
+        }
+        // No direct hit: the best synonym counts as a weaker match.
+        let bestSynonym = 0;
+        for (const synonym of synonyms) {
+          if (tokenSet.has(synonym)) {
+            bestSynonym = Math.max(bestSynonym, bm25(synonym));
+          }
+        }
+        score += bestSynonym * SYNONYM_MATCH_WEIGHT;
       }
 
       if (
@@ -990,21 +1030,32 @@ async function addWorkspaceArtifacts(
     const text = content ?? "";
     if (text.length === 0) continue;
 
-    if (text.length > 3000) {
-      const parts = splitByParagraphs(text, 2500);
-      for (let index = 0; index < parts.length; index += 1) {
-        registerSection(
-          createSectionFromText(
-            artifact,
-            `Part ${index + 1}`,
-            parts[index] ?? "",
-            artifact.scoreBoost
-          )
-        );
+    // Extracted documents carry markdown headings from extraction ("## Page 12",
+    // DOCX/PPTX headings, "## Deadlines"); split on them exactly like course
+    // documents so each heading is a searchable, citable section. Long
+    // heading-less text still falls back to paragraph parts.
+    const headingSections = buildCourseTextSections(
+      artifact,
+      text,
+      "Full text",
+      artifact.scoreBoost
+    );
+    if (headingSections.length > 1 || text.length <= 3000) {
+      for (const section of headingSections) {
+        registerSection(section);
       }
-    } else {
+      continue;
+    }
+
+    const parts = splitByParagraphs(text, 2500);
+    for (let index = 0; index < parts.length; index += 1) {
       registerSection(
-        createSectionFromText(artifact, "Full text", text, artifact.scoreBoost)
+        createSectionFromText(
+          artifact,
+          `Part ${index + 1}`,
+          parts[index] ?? "",
+          artifact.scoreBoost
+        )
       );
     }
   }
@@ -1587,6 +1638,12 @@ interface SearchQueryAnalysis {
   /** Stemmed content tokens used for token/TF-IDF matching. */
   tokens: string[];
   /**
+   * Course-vocabulary synonyms per query token (stemmed): "due" → ["deadline"],
+   * "rubric" → ["grading", "marking", ...]. A synonym hit counts as a weaker
+   * match so "when is it due" still finds the "Deadline" section.
+   */
+  expansions: Map<string, string[]>;
+  /**
    * Phrases to try for substring matches against titles, labels, and bodies:
    * the raw normalized query first, then the query with scaffolding words
    * removed ("what is the late policy" -> "late policy").
@@ -1614,8 +1671,59 @@ export function analyzeSearchQuery(query: string): SearchQueryAnalysis {
       phrase.length > 0 && list.indexOf(phrase) === position
   );
 
-  return { tokens, phrases };
+  const expansions = new Map<string, string[]>();
+  for (const token of tokens) {
+    const synonyms = QUERY_SYNONYMS.get(token);
+    if (synonyms) {
+      expansions.set(token, synonyms.filter((synonym) => !tokens.includes(synonym)));
+    }
+  }
+
+  return { tokens, phrases, expansions };
 }
+
+/** Weight of a match through a synonym relative to a direct token match. */
+export const SYNONYM_MATCH_WEIGHT = 0.6;
+
+/**
+ * Words students and instructors use interchangeably. Each group maps every
+ * member to the others (after stemming). Kept deliberately narrow: only
+ * course-logistics vocabulary where a miss is common and costly.
+ */
+const SYNONYM_GROUPS: string[][] = [
+  ["due", "deadline", "deadlines"],
+  ["rubric", "grading", "marking", "criteria", "breakdown"],
+  ["late", "penalty", "penalties", "extension", "extensions"],
+  ["submit", "submission", "submissions", "upload", "handin"],
+  ["exam", "midterm", "final", "test"],
+  ["quiz", "quizzes", "test"],
+  ["lecture", "lectures", "slides", "deck", "recording", "recordings"],
+  ["lab", "labs", "practical", "practicals"],
+  ["assignment", "assignments", "homework", "hw", "pset", "problemset"],
+  ["syllabus", "outline"],
+  ["textbook", "reading", "readings", "chapter"],
+  ["grade", "grades", "mark", "marks", "score", "weight", "weighting"],
+  ["policy", "policies", "rules"],
+  ["tutorial", "tutorials", "section", "recitation"],
+  ["office", "officehours"],
+  ["group", "team", "partner", "partners"],
+  ["plagiarism", "integrity", "collaboration"],
+];
+
+const QUERY_SYNONYMS: Map<string, string[]> = (() => {
+  const map = new Map<string, Set<string>>();
+  for (const group of SYNONYM_GROUPS) {
+    const stemmed = [...new Set(group.map((word) => stemSearchToken(word)))];
+    for (const word of stemmed) {
+      const set = map.get(word) ?? new Set<string>();
+      for (const other of stemmed) {
+        if (other !== word) set.add(other);
+      }
+      map.set(word, set);
+    }
+  }
+  return new Map([...map.entries()].map(([word, set]) => [word, [...set]]));
+})();
 
 function tokenize(value: string): string[] {
   return normalizeText(value)
