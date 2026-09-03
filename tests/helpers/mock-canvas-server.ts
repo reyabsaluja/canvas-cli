@@ -120,6 +120,20 @@ export interface MockDiscussionTopic {
   entries?: MockDiscussionEntry[];
 }
 
+export interface MockQuiz {
+  id: number;
+  title: string;
+  html_url?: string;
+  description?: string | null;
+  quiz_type?: string;
+  time_limit?: number | null;
+  allowed_attempts?: number;
+  points_possible?: number | null;
+  question_count?: number;
+  due_at?: string | null;
+  published?: boolean;
+}
+
 export interface MockServerData {
   courses: MockCourse[];
   assignments: Map<number, MockAssignment[]>;
@@ -128,6 +142,8 @@ export interface MockServerData {
   files: Map<number, MockFile[]>;
   /** Folder tree served from GET /courses/:id/folders. */
   folders?: Map<number, MockFolder[]>;
+  /** Quizzes served from GET /courses/:id/quizzes. */
+  quizzes?: Map<number, MockQuiz[]>;
   /** Bytes served from GET /files/:id/download (defaults to a short text body). */
   fileContents?: Map<number, string>;
   /** Any API path matching one of these returns 403, to simulate institution blocks. */
@@ -385,6 +401,23 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
         effectivePerPage,
         baseApiUrl,
         `/courses/${courseId}/modules/${moduleId}/items`
+      );
+      res.writeHead(200, headers);
+      res.end(body);
+      return;
+    }
+
+    // GET /courses/:id/quizzes
+    const quizzesMatch = path.match(/^\/courses\/(\d+)\/quizzes$/);
+    if (quizzesMatch && req.method === "GET") {
+      const courseId = parseInt(quizzesMatch[1], 10);
+      const quizzes = data.quizzes?.get(courseId) ?? [];
+      const { body, headers } = paginatedResponse(
+        quizzes,
+        page,
+        effectivePerPage,
+        baseApiUrl,
+        `/courses/${courseId}/quizzes`
       );
       res.writeHead(200, headers);
       res.end(body);

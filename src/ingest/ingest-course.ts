@@ -261,6 +261,7 @@ export async function ingestCourse(
       pages: pages.length,
       syllabusCandidates: syllabusCandidates.length,
       lectures: lectures.length,
+      quizzes: raw.quizzes.length,
       attachmentsDownloaded: downloaded.length,
       attachmentsSkipped: skipped.length,
       attachmentsFailed: failed.length,

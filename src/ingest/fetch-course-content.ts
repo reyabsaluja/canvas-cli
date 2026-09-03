@@ -6,6 +6,7 @@ import type {
   CanvasModule,
   CanvasModuleItem,
   CanvasFile,
+  CanvasQuiz,
   CanvasFolder,
   CanvasPage,
   CanvasDiscussionEntry,
@@ -45,6 +46,8 @@ export interface RawCourseContent {
   frontPageBody: string | null;
   /** Individual page bodies fetched from the Pages index and discovered same-course Canvas links. */
   fetchedPages: Array<{ slug: string; title: string; body: string }>;
+  /** Quizzes (classic + New Quizzes) as listed by the Quizzes API; empty when blocked. */
+  quizzes: CanvasQuiz[];
   warnings: string[];
 }
 
@@ -236,6 +239,18 @@ export async function fetchCourseContent(
     }
   }
 
+  // Quizzes: their instructions, time limit and attempt rules live only on
+  // the quiz object, and practice quizzes/surveys never appear as
+  // assignments. Store each as a page so it is extracted and indexed like one.
+  // Optional on the client so hand-rolled test doubles keep working.
+  const getQuizzesSafe = (client as {
+    getQuizzesSafe?: (courseId: number, signal?: AbortSignal | null) => Promise<CanvasQuiz[]>;
+  }).getQuizzesSafe;
+  const quizzes = getQuizzesSafe ? await getQuizzesSafe.call(client, courseId, signal) : [];
+  for (const quiz of quizzes) {
+    rememberFetchedPage(`quiz-${quiz.id}`, `Quiz: ${quiz.title}`, buildQuizPageBody(quiz));
+  }
+
   while (pendingSlugs.length > 0) {
     if (signal?.aborted) {
       throw signal.reason ?? new DOMException("Aborted", "AbortError");
@@ -272,8 +287,49 @@ export async function fetchCourseContent(
     discussionThreads,
     frontPageBody,
     fetchedPages: Array.from(fetchedPagesBySlug.values()),
+    quizzes,
     warnings,
   };
+}
+
+function describeAttempts(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "not stated";
+  if (value < 0) return "unlimited";
+  return `${value}`;
+}
+
+/** Render a quiz's rules and instructions as HTML for the page pipeline. Exported for tests. */
+export function buildQuizPageBody(quiz: CanvasQuiz): string {
+  const facts: string[] = [];
+  const type =
+    quiz.quiz_type === "practice_quiz"
+      ? "practice quiz (not graded)"
+      : quiz.quiz_type === "graded_survey"
+        ? "graded survey"
+        : quiz.quiz_type === "survey"
+          ? "survey (not graded)"
+          : "graded quiz";
+  facts.push(`<li>Type: ${type}</li>`);
+  if (quiz.due_at) facts.push(`<li>Due: ${quiz.due_at}</li>`);
+  if (quiz.unlock_at) facts.push(`<li>Available from: ${quiz.unlock_at}</li>`);
+  if (quiz.lock_at) facts.push(`<li>Locks at: ${quiz.lock_at}</li>`);
+  facts.push(`<li>Time limit: ${quiz.time_limit ? `${quiz.time_limit} minutes` : "none"}</li>`);
+  facts.push(`<li>Allowed attempts: ${describeAttempts(quiz.allowed_attempts)}</li>`);
+  if (quiz.points_possible !== null && quiz.points_possible !== undefined) {
+    facts.push(`<li>Points possible: ${quiz.points_possible}</li>`);
+  }
+  if (quiz.question_count !== null && quiz.question_count !== undefined) {
+    facts.push(`<li>Questions: ${quiz.question_count}</li>`);
+  }
+  if (quiz.shuffle_answers) facts.push("<li>Answers are shuffled</li>");
+  if (quiz.one_question_at_a_time) facts.push("<li>One question at a time</li>");
+  if (quiz.show_correct_answers === false) facts.push("<li>Correct answers are not shown afterwards</li>");
+  if (quiz.published === false) facts.push("<li>Not yet published</li>");
+  if (quiz.html_url) facts.push(`<li>Link: <a href="${quiz.html_url}">${quiz.html_url}</a></li>`);
+  const instructions = quiz.description?.trim()
+    ? `<h2>Instructions</h2>\n${quiz.description}`
+    : "<p>No instructions were provided.</p>";
+  return `<h2>Quiz details</h2>\n<ul>${facts.join("")}</ul>\n${instructions}`;
 }
 
 async function enrichAssignmentsWithDetails(

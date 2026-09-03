@@ -179,6 +179,8 @@ export interface IngestionMeta {
     pages: number;
     syllabusCandidates: number;
     lectures: number;
+    /** Quizzes captured as pages (instructions, time limit, attempts). */
+    quizzes?: number;
     attachmentsDownloaded: number;
     attachmentsSkipped: number;
     attachmentsFailed: number;
