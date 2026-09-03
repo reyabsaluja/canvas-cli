@@ -19,7 +19,7 @@ const MIN_MEMORY_REUSE_SCORE = 12;
 export type RetrievalDecision =
   | { action: "answer_from_workup"; reason: string }
   | { action: "answer_from_memory"; reason: string; sourceArtifactIds: string[] }
-  | { action: "read_artifact"; reason: string; artifactId: string }
+  | { action: "read_artifact"; reason: string; artifactId: string; section?: string }
   | { action: "let_model_decide"; reason: string };
 
 export interface RetrievalGateInput {
@@ -40,6 +40,18 @@ export async function decideWorkspaceRetrieval(
 
   if (shouldBypassGate(question)) {
     return { action: "let_model_decide", reason: "explicit_tool_request" };
+  }
+
+  // A cut-off whole read must not be reused to answer about a page or heading
+  // it never included; read that section instead.
+  const omitted = findRememberedReadMissingSection(question, input.runState);
+  if (omitted) {
+    return {
+      action: "read_artifact",
+      reason: "question_names_section_outside_truncated_read",
+      artifactId: omitted.artifactId,
+      section: omitted.section,
+    };
   }
 
   if (workupLikelyCoversQuestion(input.loaded, question)) {
@@ -231,6 +243,62 @@ function filterRetryableArtifactMatches<
   return matches.filter(
     (match) => !hasRecentFailedArtifactRead(runState, match.artifact.id)
   );
+}
+
+const SECTION_REFERENCE_PATTERN =
+  /\b(?:page|pages|pg|p\.|slide|slides|part|section|chapter|ch\.|step|week|lecture|lab|question|q)\s*#?\s*(\d{1,4})\b/gi;
+
+function normalizeLabelText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/**
+ * If a grounded, truncated read is in memory and the question refers to a
+ * page/heading that read omitted, return that artifact and section label.
+ * Exported for tests.
+ */
+export function findRememberedReadMissingSection(
+  question: string,
+  runState: RunState
+): { artifactId: string; section: string } | null {
+  const lowered = question.toLowerCase();
+  const normalizedQuestion = normalizeLabelText(question);
+  const numberRefs = new Map<string, Set<string>>();
+  let match: RegExpExecArray | null;
+  SECTION_REFERENCE_PATTERN.lastIndex = 0;
+  while ((match = SECTION_REFERENCE_PATTERN.exec(lowered)) !== null) {
+    const keyword = match[0].replace(/[\s#.]*\d+$/, "").replace(/\.$/, "").trim();
+    const set = numberRefs.get(keyword) ?? new Set<string>();
+    set.add(match[1]!);
+    numberRefs.set(keyword, set);
+  }
+
+  for (let index = runState.observations.length - 1; index >= 0; index -= 1) {
+    const observation = runState.observations[index]!;
+    if (!isGroundedContentObservation(observation)) continue;
+    for (const artifact of observation.artifacts) {
+      if (!artifact.truncated || !artifact.omittedLabels?.length) continue;
+      for (const label of artifact.omittedLabels) {
+        const normalized = normalizeLabelText(label);
+        if (!normalized) continue;
+        // "Page 57" / "Slide 57" / "Part 3" style labels vs. numeric references.
+        const labelMatch = normalized.match(/^([a-z]+)\s+(\d{1,4})\b/);
+        if (labelMatch) {
+          const keyword = labelMatch[1]!;
+          const number = labelMatch[2]!;
+          const aliases = keyword === "page" ? ["page", "pages", "pg", "p"] : [keyword];
+          if (aliases.some((alias) => numberRefs.get(alias)?.has(number))) {
+            return { artifactId: artifact.artifactId, section: label };
+          }
+        }
+        // Heading text mentioned in the question (needs enough substance to be deliberate).
+        if (normalized.length >= 8 && normalized.split(" ").length >= 2 && normalizedQuestion.includes(normalized)) {
+          return { artifactId: artifact.artifactId, section: label };
+        }
+      }
+    }
+  }
+  return null;
 }
 
 function selectReusableMemoryArtifactIds(

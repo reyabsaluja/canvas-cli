@@ -11,6 +11,10 @@ export interface ArtifactRef {
   excerpt?: string | null;
   sectionIds?: string[];
   sectionLabel?: string | null;
+  /** True when the read was cut off before the end of the document. */
+  truncated?: boolean;
+  /** Section labels the read did NOT include (only set on truncated reads). */
+  omittedLabels?: string[];
 }
 
 export interface Observation {
