@@ -115,7 +115,8 @@ export async function runChatAgent(
       abortSignal
     );
   } else if (retrievalDecision.action === "read_artifact") {
-    const toolResult = await readArtifactForGate(retrievalDecision.artifactId, ctx);
+    const gateReadRequest = retrievalDecision.section ? { section: retrievalDecision.section } : {};
+    const toolResult = await readArtifactForGate(retrievalDecision.artifactId, ctx, gateReadRequest);
     appendObservation(ctx.runState, toolResult.observation);
     supportingObservations = [toolResult.observation];
     verificationObservations = supportingObservations;
@@ -123,6 +124,7 @@ export async function runChatAgent(
       toolResult.observation.artifacts[0]?.title ?? retrievalDecision.artifactId;
     const { action, target } = mapToolCall("read_file", {
       filename: gateReadFilename,
+      ...gateReadRequest,
     });
     onToolCall({
       action,
@@ -153,7 +155,7 @@ export async function runChatAgent(
         [
           {
             name: "read_file",
-            input: { filename: gateReadFilename },
+            input: { filename: gateReadFilename, ...gateReadRequest },
             result: toolResult,
           },
         ],

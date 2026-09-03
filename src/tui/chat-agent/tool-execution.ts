@@ -154,7 +154,8 @@ export function seedTurnToolCacheEntry(
 
 export async function readArtifactForGate(
   artifactId: string,
-  ctx: ChatAgentContext
+  ctx: ChatAgentContext,
+  request: DocumentReadRequest = {}
 ): Promise<ToolExecutionResult> {
   const artifact = await readWorkspaceKnowledgeArtifactById(
     ctx.loaded,
@@ -168,7 +169,7 @@ export async function readArtifactForGate(
         "read_file",
         toArtifactRef(artifact.artifact),
         artifact.content,
-        {}
+        request
       );
     case "missing_text": {
       const recovered = await recoverMissingAttachmentRead(
@@ -1308,7 +1309,16 @@ function buildDocumentReadResult(
         excerpt: buildArtifactExcerpt(view.content) ?? artifact.excerpt ?? null,
         sectionLabel: view.sectionLabel,
       }
-    : artifact;
+    : view.truncated
+      ? {
+          ...artifact,
+          // Remember what a cut-off read did not cover, so a later question
+          // about an omitted page triggers a section read instead of an
+          // answer from truncated memory.
+          truncated: true,
+          omittedLabels: view.omittedLabels,
+        }
+      : artifact;
   const resolvedSummary =
     summary ??
     (view.sectionLabel
