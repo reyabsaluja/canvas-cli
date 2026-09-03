@@ -4,8 +4,14 @@ import type {
   AttachmentSourceType,
   CourseFilesCrawlSummary,
   FolderIndexEntry,
+  TopicAttachmentSummary,
 } from "./types.js";
-import type { CanvasFolder } from "../canvas/types.js";
+import type {
+  CanvasDiscussionEntry,
+  CanvasDiscussionTopic,
+  CanvasFolder,
+  CanvasTopicAttachment,
+} from "../canvas/types.js";
 import { DEFAULT_MAX_DOWNLOAD_BYTES } from "../canvas/safe-download.js";
 
 /**
@@ -284,6 +290,133 @@ export function selectCourseFiles(
     });
   }
   summary.selected = selected.length;
+
+  return { selected, summary };
+}
+
+// ---------------------------------------------------------------------------
+// Topic attachments
+//
+// Instructors often attach the actual handout to an announcement (the Canvas
+// "Attach" button) instead of linking it in the message body, and TAs attach
+// files to replies. Those files appear only in the topic's `attachments[]` /
+// the entry's `attachment` field, never as an <a> in the HTML, so the HTML
+// link selectors above cannot see them.
+// ---------------------------------------------------------------------------
+
+export interface TopicAttachmentSelection {
+  selected: SelectedAttachment[];
+  summary: Omit<TopicAttachmentSummary, "downloaded" | "failed">;
+}
+
+function attachmentContentType(attachment: CanvasTopicAttachment): string | null {
+  return attachment["content-type"] ?? attachment.content_type ?? null;
+}
+
+function attachmentName(attachment: CanvasTopicAttachment): string {
+  return (
+    attachment.display_name ||
+    attachment.filename ||
+    `file-${attachment.id}`
+  );
+}
+
+/**
+ * Select every file attached to an announcement, discussion post, or reply
+ * that no other selector has claimed. Announcement files land under
+ * attachments/announcements, discussion and reply files under
+ * attachments/discussions; the reason names the post so grounding can say
+ * where the file came from.
+ */
+export function selectTopicAttachments(
+  announcements: CanvasDiscussionTopic[],
+  discussionThreads: Array<{
+    topic: CanvasDiscussionTopic;
+    entries: CanvasDiscussionEntry[];
+  }>,
+  alreadySelected: SelectedAttachment[]
+): TopicAttachmentSelection {
+  const claimedIds = new Set<number>();
+  const claimedUrls = new Set<string>();
+  for (const attachment of alreadySelected) {
+    if (attachment.fileId !== null) claimedIds.add(attachment.fileId);
+    claimedUrls.add(attachment.downloadUrl);
+    const idFromUrl = attachment.downloadUrl.match(/\/files\/(\d+)/)?.[1];
+    if (idFromUrl) claimedIds.add(parseInt(idFromUrl, 10));
+  }
+
+  const summary: TopicAttachmentSelection["summary"] = {
+    announcements: 0,
+    discussions: 0,
+    replies: 0,
+    alreadySelected: 0,
+    skippedTooLarge: 0,
+  };
+  const selected: SelectedAttachment[] = [];
+
+  const consider = (
+    attachment: CanvasTopicAttachment | null | undefined,
+    kind: "announcements" | "discussions" | "replies",
+    subfolder: string,
+    reason: string
+  ): void => {
+    if (!attachment || typeof attachment.url !== "string" || attachment.url.length === 0) {
+      return;
+    }
+    if (claimedIds.has(attachment.id) || claimedUrls.has(attachment.url)) {
+      summary.alreadySelected += 1;
+      return;
+    }
+    if (typeof attachment.size === "number" && attachment.size > MAX_COURSE_FILE_BYTES) {
+      summary.skippedTooLarge += 1;
+      return;
+    }
+    claimedIds.add(attachment.id);
+    claimedUrls.add(attachment.url);
+    summary[kind] += 1;
+    selected.push({
+      sourceType: "page_linked",
+      fileId: attachment.id,
+      filename: attachmentName(attachment),
+      downloadUrl: attachment.url,
+      reason,
+      contentType: attachmentContentType(attachment),
+      size: typeof attachment.size === "number" ? attachment.size : null,
+      subfolder,
+    });
+  };
+
+  for (const announcement of announcements) {
+    for (const attachment of announcement.attachments ?? []) {
+      consider(
+        attachment,
+        "announcements",
+        "announcements",
+        `attached to announcement "${announcement.title}"`
+      );
+    }
+  }
+
+  for (const thread of discussionThreads) {
+    const { topic } = thread;
+    for (const attachment of topic.attachments ?? []) {
+      consider(
+        attachment,
+        "discussions",
+        "discussions",
+        `attached to discussion "${topic.title}"`
+      );
+    }
+    for (const entry of thread.entries) {
+      const author = entry.user_name ?? `User ${entry.user_id}`;
+      consider(
+        entry.attachment,
+        "replies",
+        "discussions",
+        `attached to reply by ${author} in "${topic.title}"`
+      );
+    }
+  }
 
   return { selected, summary };
 }

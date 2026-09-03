@@ -1,4 +1,4 @@
-import type { MockCourse, MockAssignment, MockModule, MockPage, MockFile, MockFolder, MockDiscussionTopic, MockServerData } from "./mock-canvas-server.js";
+import type { MockCourse, MockAssignment, MockModule, MockPage, MockFile, MockFolder, MockAttachment, MockDiscussionTopic, MockServerData } from "./mock-canvas-server.js";
 
 // All dates are relative to "now" so the fixtures never go stale: the two
 // CS courses are always in the current term and HIST303 is always finished.
@@ -276,6 +276,57 @@ export const CS101_DISCUSSIONS: MockDiscussionTopic[] = [
     ],
   },
 ];
+
+/**
+ * Files attached to posts (the Canvas "Attach" button on an announcement or
+ * reply). They are not linked from the message HTML, so only the topic's
+ * `attachments[]` / entry `attachment` fields reveal them. URLs point at
+ * canvas.example; rewrite them to the mock origin with
+ * `rewriteAttachmentUrls` before serving.
+ */
+export const CS101_MIDTERM_REVIEW_ATTACHMENT: MockAttachment = {
+  id: 5301,
+  display_name: "Midterm Review Guide.txt",
+  filename: "Midterm Review Guide.txt",
+  "content-type": "text/plain",
+  size: 96,
+  url: "https://canvas.example/files/5301/download?download_frd=1&verifier=abc",
+};
+
+export const CS101_REPLY_ATTACHMENT: MockAttachment = {
+  id: 5302,
+  display_name: "gnu11-flags.txt",
+  filename: "gnu11-flags.txt",
+  "content-type": "text/plain",
+  size: 40,
+  url: "https://canvas.example/files/5302/download?verifier=def",
+};
+
+/** An announcement whose handout exists only as a post attachment. */
+export const CS101_ANNOUNCEMENTS: MockDiscussionTopic[] = [
+  {
+    id: 7101,
+    title: "Midterm review session Thursday",
+    message: "<p>Review session Thursday 5pm in ENG 101. The study guide is attached.</p>",
+    posted_at: daysFromNow(-12),
+    last_reply_at: null,
+    user_name: "Prof. Grace",
+    html_url: "https://canvas.example/courses/101/discussion_topics/7101",
+    is_announcement: true,
+    discussion_type: "side_comment",
+    attachments: [CS101_MIDTERM_REVIEW_ATTACHMENT],
+  },
+];
+
+export function rewriteAttachmentUrls(
+  attachment: MockAttachment,
+  origin: string
+): MockAttachment {
+  return {
+    ...attachment,
+    url: attachment.url.replace(/^https:\/\/canvas\.example/, origin),
+  };
+}
 
 export function buildDefaultServerData(): MockServerData {
   return {

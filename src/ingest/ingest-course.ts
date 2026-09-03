@@ -23,6 +23,7 @@ import { identifySyllabusCandidates } from "./syllabus-heuristics.js";
 import {
   selectAttachments,
   selectCourseFiles,
+  selectTopicAttachments,
   buildFolderIndex,
 } from "./attachment-selection.js";
 import { downloadSelectedAttachments } from "./attachment-download.js";
@@ -42,6 +43,8 @@ const MODULE_FILE_METADATA_CONCURRENCY = 4;
  * 3. Identify syllabus candidates via title heuristics
  * 4. Select targeted attachments for download (syllabus + important files)
  * 5. Select ALL module-linked files for download (instructor-curated content)
+ * 5c. Files linked from page/announcement/discussion HTML
+ * 5c'. Files attached to announcements, discussion posts, and replies
  * 5d. Crawl the Files tab: every remaining readable document, folder-aware
  * 6. Download all selected attachments
  * 7. Write all artifacts to local course directory
@@ -124,6 +127,20 @@ export async function ingestCourse(
     [...heuristicAttachments, ...moduleAttachments, ...descriptionAttachments]
   );
 
+  // Step 5c': Files attached to posts through the Canvas "Attach" button.
+  // They are never linked from the message HTML, so the selectors above miss
+  // them — and the Files API may be blocked, so this is often the only route.
+  const topicAttachmentSelection = selectTopicAttachments(
+    raw.announcements,
+    raw.discussionThreads,
+    [
+      ...heuristicAttachments,
+      ...moduleAttachments,
+      ...descriptionAttachments,
+      ...htmlLinkedAttachments,
+    ]
+  );
+
   const capturedExternalLinks = await captureExternalCourseLinks({
     courseId: course.id,
     courseHtmlUrl: courseMeta.htmlUrl,
@@ -152,6 +169,7 @@ export async function ingestCourse(
     ...moduleAttachments,
     ...descriptionAttachments,
     ...htmlLinkedAttachments,
+    ...topicAttachmentSelection.selected,
   ]);
 
   const allSelected = [
@@ -159,8 +177,18 @@ export async function ingestCourse(
     ...moduleAttachments,
     ...descriptionAttachments,
     ...htmlLinkedAttachments,
+    ...topicAttachmentSelection.selected,
     ...courseFileSelection.selected,
   ];
+  // downloadSelectedAttachments returns results in input order; remember where
+  // the topic attachments sit so their outcome can be summarised.
+  const topicAttachmentStart =
+    heuristicAttachments.length +
+    moduleAttachments.length +
+    descriptionAttachments.length +
+    htmlLinkedAttachments.length;
+  const topicAttachmentEnd =
+    topicAttachmentStart + topicAttachmentSelection.selected.length;
 
   // Step 6: Download all attachments
   const attachmentsDir = path.join(coursePath, "attachments");
@@ -193,6 +221,10 @@ export async function ingestCourse(
   const courseFileResults = attachmentResults.filter(
     (a) => a.sourceType === "course_file"
   );
+  const topicAttachmentResults = attachmentResults.slice(
+    topicAttachmentStart,
+    topicAttachmentEnd
+  );
 
   const ingestion: IngestionMeta = {
     version: 1,
@@ -217,6 +249,11 @@ export async function ingestCourse(
       ...courseFileSelection.summary,
       downloaded: courseFileResults.filter((a) => a.status !== "failed").length,
       failed: courseFileResults.filter((a) => a.status === "failed").length,
+    },
+    topicAttachments: {
+      ...topicAttachmentSelection.summary,
+      downloaded: topicAttachmentResults.filter((a) => a.status !== "failed").length,
+      failed: topicAttachmentResults.filter((a) => a.status === "failed").length,
     },
     discussionThreads: {
       topics: raw.discussionThreads.length,
