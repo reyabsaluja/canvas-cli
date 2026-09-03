@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **retrieve**
+Next area: **reason**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -26,7 +26,7 @@ Next area: **retrieve**
 
 - discover: course tabs / external tool links not recorded
 - extract: zip summary text still capped at 30k/file, 50k total; no OCR for scanned PDFs
-- retrieve: no synonym expansion (due/deadline, rubric/grading); artifact-level scoring is presence-only so long docs win ties (`CoursePassage.score` is available as a tie-break); `list_files` still shows both the `[file]` and `[attachment]` entries for downloaded Files-tab files
+- retrieve: artifact-level scoring is presence-only so long docs win ties (`CoursePassage.score` is available as a tie-break); `list_files` still shows both the `[file]` and `[attachment]` entries for downloaded Files-tab files
 - ground: workups silently prefer Canvas over the syllabus on due-date conflicts instead of surfacing them; numeric-claim check only covers digit-bearing tokens (spelled-out numbers, weekday inferences like "Friday" are not checked); a date's bare day number is matched by any unrelated number in the evidence ("March 20" passes because "style 20 marks" exists), so date claims should be checked as month+day pairs; the base note can say "matched search evidence, not a full document read" even when a read was made this turn
 
 ## Done
@@ -53,3 +53,4 @@ Next area: **retrieve**
 - 2026-09-03 ground: the numeric-claim check also accepts figures supported by earlier turns' grounded reads (priorObservations), so a correctly remembered due date is no longer flagged as unconfirmed; citations and confidence still use this turn's evidence only (caller did it directly)
 - 2026-09-03 discover: quizzes (classic + New Quizzes, incl. practice quizzes and surveys) fetched from /quizzes and stored as pages ("Quiz: <title>") with type, due/lock dates, time limit, attempts, points, question count and instructions; count in ingestion.json and summary; 403 degrades to none (caller did it directly)
 - 2026-09-03 extract: links whose visible text is generic ("here", "download", "this link") now render the filename from title/aria-label/download attributes, and descriptive labels gain the filename in brackets, so a search for the handout finds the page that links it (caller did it directly)
+- 2026-09-03 retrieve: workspace extracted files are now split on their markdown headings ("## Page N", DOCX/PPTX headings) like course documents instead of paragraph chunks, so page/heading sections are searchable and citable inside workspaces; plus course-vocabulary synonym expansion in both scorers (due/deadline, rubric/grading/marking, late/penalty, submit/upload, exam/midterm, lecture/slides, ...) at 0.6 weight so direct matches still win (caller did it directly)
