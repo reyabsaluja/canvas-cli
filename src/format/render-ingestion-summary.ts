@@ -50,6 +50,31 @@ export function renderIngestionSummary(result: IngestionResult): string {
       `  ${chalk.dim("-")} ${result.announcements?.length ?? 0} announcements`
     );
   }
+  const topicAttachments = result.ingestion.topicAttachments;
+  if (topicAttachments) {
+    const total =
+      topicAttachments.announcements +
+      topicAttachments.discussions +
+      topicAttachments.replies;
+    if (total > 0) {
+      const parts: string[] = [];
+      if (topicAttachments.announcements > 0) {
+        parts.push(plural(topicAttachments.announcements, "announcement"));
+      }
+      if (topicAttachments.discussions > 0) {
+        parts.push(plural(topicAttachments.discussions, "discussion"));
+      }
+      if (topicAttachments.replies > 0) {
+        parts.push(plural(topicAttachments.replies, "reply", "replies"));
+      }
+      lines.push(
+        `  ${chalk.dim("-")} ${total} files attached to posts (${parts.join(", ")})` +
+          (topicAttachments.failed > 0
+            ? ` ${chalk.red(`(${topicAttachments.failed} failed)`)}`
+            : "")
+      );
+    }
+  }
   if ((result.discussions?.length ?? 0) > 0) {
     const threads = result.ingestion.discussionThreads;
     let replyNote = "";
@@ -132,6 +157,10 @@ export function renderIngestionSummary(result: IngestionResult): string {
   lines.push("");
 
   return lines.join("\n");
+}
+
+function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : pluralForm}`;
 }
 
 /**

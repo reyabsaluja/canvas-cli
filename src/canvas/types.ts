@@ -157,6 +157,23 @@ export interface CanvasEnrollment {
   };
 }
 
+/**
+ * A file attached to a discussion topic, announcement, or reply through the
+ * Canvas "Attach" button. Canvas serialises the MIME type as `content-type`
+ * (hyphenated) on these records; `content_type` is accepted for fixtures and
+ * older instances.
+ */
+export interface CanvasTopicAttachment {
+  id: number;
+  display_name?: string | null;
+  filename?: string | null;
+  "content-type"?: string | null;
+  content_type?: string | null;
+  size?: number | null;
+  url: string;
+  locked_for_user?: boolean;
+}
+
 /** A discussion topic or announcement from the Canvas API. */
 export interface CanvasDiscussionTopic {
   id: number;
@@ -173,6 +190,8 @@ export interface CanvasDiscussionTopic {
   published: boolean;
   is_announcement: boolean;
   locked: boolean;
+  /** Files attached to the post itself (not linked from `message`). */
+  attachments?: CanvasTopicAttachment[] | null;
 }
 
 /**
@@ -195,6 +214,8 @@ export interface CanvasDiscussionEntry {
   read_state?: string;
   /** Set on tombstones left behind when an entry was deleted (no message). */
   deleted?: boolean;
+  /** File attached to this reply (Canvas allows one per entry). */
+  attachment?: CanvasTopicAttachment | null;
   /** Threaded children as returned by GET .../view. */
   replies?: CanvasDiscussionEntry[];
   recent_replies?: CanvasDiscussionEntry[];

@@ -80,6 +80,16 @@ export interface MockFolder {
   folders_count?: number;
 }
 
+/** A file attached to a topic post or reply, shaped like Canvas's file JSON. */
+export interface MockAttachment {
+  id: number;
+  display_name: string;
+  filename: string;
+  "content-type": string;
+  size: number;
+  url: string;
+}
+
 export interface MockDiscussionEntry {
   id: number;
   user_id: number;
@@ -88,6 +98,8 @@ export interface MockDiscussionEntry {
   created_at: string;
   updated_at?: string;
   deleted?: boolean;
+  /** File attached to this reply (Canvas allows one per entry). */
+  attachment?: MockAttachment | null;
   /** Nested replies (threaded discussions). */
   replies?: MockDiscussionEntry[];
 }
@@ -102,6 +114,8 @@ export interface MockDiscussionTopic {
   html_url: string;
   is_announcement?: boolean;
   discussion_type?: string;
+  /** Files attached to the post itself (not linked from the message HTML). */
+  attachments?: MockAttachment[];
   /** Top-level entries; each may carry nested `replies`. */
   entries?: MockDiscussionEntry[];
 }
@@ -209,6 +223,23 @@ function toListEntry(
     updated_at: entry.updated_at ?? entry.created_at,
     read_state: "read",
   };
+}
+
+/** Every file attached to a topic post or reply, across all courses. */
+function findMockTopicAttachment(
+  data: MockServerData,
+  fileId: number
+): MockAttachment | undefined {
+  for (const topics of data.discussions?.values() ?? []) {
+    for (const topic of topics) {
+      const onTopic = (topic.attachments ?? []).find((a) => a.id === fileId);
+      if (onTopic) return onTopic;
+      for (const entry of flattenMockEntries(topic.entries ?? [], null)) {
+        if (entry.attachment?.id === fileId) return entry.attachment;
+      }
+    }
+  }
+  return undefined;
 }
 
 function findMockTopic(
@@ -453,15 +484,18 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
         found = files.find((f) => f.id === fileId);
         if (found) break;
       }
-      if (!found) {
+      const attached = found ? undefined : findMockTopicAttachment(data, fileId);
+      if (!found && !attached) {
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ errors: [{ message: "not found" }] }));
         return;
       }
+      const filename = found?.filename ?? attached!.filename;
+      const contentType = found?.content_type ?? attached!["content-type"];
       const content =
-        data.fileContents?.get(fileId) ?? `mock content of ${found.filename}\n`;
+        data.fileContents?.get(fileId) ?? `mock content of ${filename}\n`;
       res.writeHead(200, {
-        "Content-Type": found.content_type,
+        "Content-Type": contentType,
         "Content-Length": String(Buffer.byteLength(content)),
       });
       res.end(content);

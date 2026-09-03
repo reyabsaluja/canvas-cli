@@ -268,3 +268,28 @@ export interface DiscussionThreadSummary {
 export interface IngestionMeta {
   discussionThreads?: DiscussionThreadSummary;
 }
+
+// ---------------------------------------------------------------------------
+// ADDITIVE: topic attachments (src/ingest/attachment-selection.ts,
+// src/ingest/ingest-course.ts, src/format/render-ingestion-summary.ts).
+// ---------------------------------------------------------------------------
+
+/** How files attached to announcements, discussion posts, and replies were captured. */
+export interface TopicAttachmentSummary {
+  /** Files attached to announcement posts. */
+  announcements: number;
+  /** Files attached to discussion topic posts. */
+  discussions: number;
+  /** Files attached to discussion replies. */
+  replies: number;
+  /** Attached files another selector had already claimed (same Canvas file id or URL). */
+  alreadySelected: number;
+  /** Attached files larger than the download limit. */
+  skippedTooLarge: number;
+  downloaded: number;
+  failed: number;
+}
+
+export interface IngestionMeta {
+  topicAttachments?: TopicAttachmentSummary;
+}
