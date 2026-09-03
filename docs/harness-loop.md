@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **retrieve**
+Next area: **reason**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -26,9 +26,9 @@ Next area: **retrieve**
 
 - discover: embedded `<iframe>` media (YouTube/Panopto/Kaltura/Studio) in pages and announcements is dropped; quizzes (`/quizzes`) not fetched; discussion/announcement topic `attachments[]` (files attached to the post, not linked in HTML) not downloaded; course tabs / external tool links not recorded
 - extract: HTML nested tables and `colspan` headers flattened; `<dl>` lists lost; file-link `title` hints dropped when anchor text is generic; zip summary text still capped at 30k/file, 50k total; image-only PDF pages leave no page marker (no OCR / "page N is an image" hint)
-- retrieve: `search_course` excerpt is the first 140 chars rather than the matching passage; section previews truncated at 2000 chars; no synonym expansion (due/deadline, rubric/grading); flat scoring favours long syllabi
+- retrieve: `search_workspace` section previews are the first 2000 chars, not a window around the match (reuse `buildMatchExcerpt`); no synonym expansion (due/deadline, rubric/grading); artifact-level scoring is presence-only so long docs win ties (`CoursePassage.score` is available as a tie-break); `list_files` still shows both the `[file]` and `[attachment]` entries for downloaded Files-tab files
 - reason (URGENT): `read_file` returns only the first 30k chars (tool-execution.ts `MAX_DOC_TEXT`), but PDF sidecars can now be 400k and search hits cite `Page 57`; accept `section: "Page 57"` or a char offset so the model can open the cited page. Also `buildReadModelText` caps the outline at 24 labels, so a 60-page deck shows "Page 1 | ... | Page 24 | ... and 36 more"
-- ground: verification scores relevance to the question, not support for the answer (confidence too generous); no "not found after checking X, Y, Z" answer path; `/ask` still caps answers at 2-4 sentences; workups silently prefer Canvas over the syllabus on due-date conflicts instead of surfacing them
+- ground: `search_course` observation still records `excerpt: artifact.excerpt`; switch to `match.passage?.excerpt` and add `sectionIds`/`sectionLabel` from the passage so citations can point at "Page 57" like `search_workspace` does; verification scores relevance to the question, not support for the answer (confidence too generous); no "not found after checking X, Y, Z" answer path; `/ask` still caps answers at 2-4 sentences; workups silently prefer Canvas over the syllabus on due-date conflicts instead of surfacing them
 
 ## Done
 
@@ -39,3 +39,4 @@ Next area: **retrieve**
 - 2026-09-02 ground: section-level, answer-attributed citations for full-document reads; read results framed with their section outline
 - 2026-09-02 discover: threaded discussion replies captured in thread order (nested /view replies, participant names, /entries fallback, has_more_replies paged), reply counts in summary
 - 2026-09-02 extract: PDFs extracted page by page with "## Page N" citable headings, cap 30k → 400k with page-boundary truncation note, pdf.js fed a Uint8Array view (fixes "bad XRef entry" on pdfkit-made PDFs)
+- 2026-09-02 retrieve: search_course shows the best-matching section + query-centred passage ("Page 57: ...MESI protocol...") instead of the document's first 140 chars; Files-tab file entries deduped against their extracted attachment

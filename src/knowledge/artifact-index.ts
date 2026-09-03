@@ -839,6 +839,7 @@ async function addCourseArtifacts(
         metadata: {
           localPath: attachment.localPath,
           status: attachment.status,
+          canvasFileId: attachment.canvasFileId,
         },
       },
       registerArtifact,
@@ -1455,6 +1456,95 @@ function buildExcerpt(text: string): string {
   const cleaned = text.replace(/\s+/g, " ").trim();
   if (cleaned.length <= 140) return cleaned;
   return `${cleaned.slice(0, 137)}...`;
+}
+
+interface MatchExcerptHit {
+  start: number;
+  end: number;
+  token: string;
+}
+
+/**
+ * Excerpt of `text` centred on the passage that matches `query` best: the
+ * window of `maxLength` characters covering the most distinct query terms
+ * (ties broken by total hits, then by earliest position). Falls back to the
+ * head of the text when no query term occurs. Whitespace is collapsed and
+ * the window is snapped to word boundaries, with "..." marking cut edges.
+ */
+export function buildMatchExcerpt(
+  text: string,
+  query: string,
+  maxLength: number = 240
+): string {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= maxLength) return cleaned;
+
+  const queryTokens = new Set(analyzeSearchQuery(query).tokens);
+  const hits: MatchExcerptHit[] = [];
+  if (queryTokens.size > 0) {
+    const lowered = cleaned.toLowerCase();
+    const wordPattern = /[a-z0-9]+/g;
+    let match: RegExpExecArray | null;
+    while ((match = wordPattern.exec(lowered)) !== null) {
+      const word = match[0];
+      if (word.length < 2) continue;
+      const stem = stemSearchToken(word);
+      if (queryTokens.has(stem)) {
+        hits.push({ start: match.index, end: match.index + word.length, token: stem });
+      }
+    }
+  }
+
+  if (hits.length === 0) {
+    return `${trimToWordBoundary(cleaned.slice(0, maxLength - 3), "end")}...`;
+  }
+
+  let best = { distinct: 0, count: 0, first: 0, last: 0 };
+  for (let anchor = 0; anchor < hits.length; anchor += 1) {
+    const windowStart = hits[anchor]!.start;
+    const seen = new Set<string>();
+    let count = 0;
+    let lastEnd = hits[anchor]!.end;
+    for (let index = anchor; index < hits.length; index += 1) {
+      const hit = hits[index]!;
+      if (hit.end - windowStart > maxLength) break;
+      seen.add(hit.token);
+      count += 1;
+      lastEnd = hit.end;
+    }
+    if (
+      seen.size > best.distinct ||
+      (seen.size === best.distinct && count > best.count)
+    ) {
+      best = { distinct: seen.size, count, first: windowStart, last: lastEnd };
+    }
+  }
+
+  const clusterLength = best.last - best.first;
+  const padding = Math.max(0, Math.floor((maxLength - clusterLength) / 2));
+  let start = Math.max(0, best.first - padding);
+  let end = Math.min(cleaned.length, start + maxLength);
+  if (end - start < maxLength) {
+    start = Math.max(0, end - maxLength);
+  }
+
+  const prefix = start > 0 ? "..." : "";
+  const suffix = end < cleaned.length ? "..." : "";
+  let window = cleaned.slice(start, end);
+  if (prefix) window = trimToWordBoundary(window, "start");
+  if (suffix) window = trimToWordBoundary(window, "end");
+  return `${prefix}${window.trim()}${suffix}`;
+}
+
+function trimToWordBoundary(value: string, edge: "start" | "end"): string {
+  if (edge === "start") {
+    const firstSpace = value.indexOf(" ");
+    return firstSpace > 0 && firstSpace < 24 ? value.slice(firstSpace + 1) : value;
+  }
+  const lastSpace = value.lastIndexOf(" ");
+  return lastSpace > 0 && value.length - lastSpace < 24
+    ? value.slice(0, lastSpace)
+    : value;
 }
 
 function normalizeText(value: string): string {
