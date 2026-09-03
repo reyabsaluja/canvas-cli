@@ -8,8 +8,41 @@ import type { InvestigationState } from "./types.js";
 import { extractFileText } from "../extract/extract-text.js";
 import { confineToDirectory, sanitizeFilename } from "../sanitize.js";
 
-/** Max text returned per document read. */
-const MAX_DOC_TEXT = 15000;
+/**
+ * Max text returned per document read. PDF extracts carry a "## Page N"
+ * heading per page, so a cut-off names the pages that were left out instead
+ * of silently dropping them. Synthesis re-trims per document (18k), so this
+ * only widens what the investigation model itself gets to read.
+ */
+const MAX_DOC_TEXT = 60000;
+const PAGE_HEADING_PATTERN = /^## Page (\d+)\s*$/gm;
+
+/**
+ * Cut a document read at MAX_DOC_TEXT. The note after the cut names the page
+ * range that was not included (when the document is page-numbered) and how
+ * many characters remain, so the model knows the document continues.
+ */
+export function truncateDocumentText(
+  text: string,
+  maxChars: number = MAX_DOC_TEXT
+): string {
+  if (text.length <= maxChars) {
+    return text;
+  }
+  const kept = text.slice(0, maxChars);
+  const rest = text.slice(maxChars);
+  const pagesAfter = [...rest.matchAll(PAGE_HEADING_PATTERN)].map((match) =>
+    Number(match[1])
+  );
+  const remaining = text.length - kept.length;
+  const pageNote =
+    pagesAfter.length > 0
+      ? pagesAfter.length === 1
+        ? `; Page ${pagesAfter[0]} not included`
+        : `; Page ${pagesAfter[0]}–${pagesAfter[pagesAfter.length - 1]} not included`
+      : "";
+  return `${kept}\n[...truncated]\n[${remaining.toLocaleString("en-US")} more characters in the original extract${pageNote}]`;
+}
 const INSTRUCTION_TITLE_KEYWORDS = [
   "spec",
   "instruction",
@@ -209,10 +242,7 @@ async function readDocument(
   const fullPath = path.join(cache.coursePath, att.localPath);
   const text = await extractFileText(fullPath, att.originalFilename);
 
-  const truncated =
-    text.length > MAX_DOC_TEXT
-      ? text.slice(0, MAX_DOC_TEXT) + "\n[...truncated]"
-      : text;
+  const truncated = truncateDocumentText(text);
 
   state.extractedTexts.set(filename, truncated);
   state.visitedSources.push(filename);
@@ -346,10 +376,7 @@ async function downloadModuleFile(
   // Extract text
   const text = await extractFileText(localFilePath, fileMeta.display_name);
 
-  const truncated =
-    text.length > MAX_DOC_TEXT
-      ? text.slice(0, MAX_DOC_TEXT) + "\n[...truncated]"
-      : text;
+  const truncated = truncateDocumentText(text);
 
   state.extractedTexts.set(fileMeta.display_name, truncated);
   state.extractedTexts.set(itemTitle, truncated);
@@ -397,10 +424,7 @@ async function getSyllabus(ctx: ToolContext): Promise<ToolExecutionResult> {
       };
     }
     state.visitedSources.push("syllabus");
-    const truncated =
-      text.length > MAX_DOC_TEXT
-        ? text.slice(0, MAX_DOC_TEXT) + "\n[...truncated]"
-        : text;
+    const truncated = truncateDocumentText(text);
     state.extractedTexts.set("syllabus-body.txt", truncated);
     rememberDueDateSource(state, "syllabus");
     return {

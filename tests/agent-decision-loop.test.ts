@@ -80,7 +80,8 @@ test("system prompt teaches a plan-investigate-reflect loop with a visible step 
   assert.match(prompt, /Recover from dead ends by changing source class/);
   assert.match(prompt, /Finish only when the question is actually answered/);
   assert.match(prompt, /It is a SUMMARY produced earlier, not the source material/);
-  assert.match(prompt, /very long documents are cut off at the end/);
+  assert.match(prompt, /a longer document ends with a note naming the sections that were not included/);
+  assert.match(prompt, /call read_file with section \(e\.g\. section "Page 57"/);
   assert.match(prompt, /list_announcements with a keyword, then read_thread/);
 
   // Brevity-biased instructions must be gone.
@@ -115,7 +116,8 @@ test("tool descriptions make scope and follow-up unambiguous", () => {
   assert.match(byName.get("search_workspace") ?? "", /does NOT cover announcements/);
   assert.match(byName.get("search_workspace") ?? "", /Best first tool when you do not know which document/);
   assert.match(byName.get("search_course") ?? "", /Broader than search_workspace/);
-  assert.match(byName.get("read_file") ?? "", /30,000 characters/);
+  assert.match(byName.get("read_file") ?? "", /120,000 characters/);
+  assert.match(byName.get("read_file") ?? "", /pass section/);
   assert.match(byName.get("read_file") ?? "", /rubric or grading page are usually both needed/);
   assert.match(byName.get("list_announcements") ?? "", /deadline change, extension/);
   assert.match(byName.get("list_announcements") ?? "", /follow up with read_thread/);

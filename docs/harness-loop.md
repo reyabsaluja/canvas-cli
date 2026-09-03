@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **reason**
+Next area: **ground**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -27,7 +27,9 @@ Next area: **reason**
 - discover: embedded `<iframe>` media (YouTube/Panopto/Kaltura/Studio) in pages and announcements is dropped; quizzes (`/quizzes`) not fetched; discussion/announcement topic `attachments[]` (files attached to the post, not linked in HTML) not downloaded; course tabs / external tool links not recorded
 - extract: HTML nested tables and `colspan` headers flattened; `<dl>` lists lost; file-link `title` hints dropped when anchor text is generic; zip summary text still capped at 30k/file, 50k total; image-only PDF pages leave no page marker (no OCR / "page N is an image" hint)
 - retrieve: `search_workspace` section previews are the first 2000 chars, not a window around the match (reuse `buildMatchExcerpt`); no synonym expansion (due/deadline, rubric/grading); artifact-level scoring is presence-only so long docs win ties (`CoursePassage.score` is available as a tie-break); `list_files` still shows both the `[file]` and `[attachment]` entries for downloaded Files-tab files
-- reason (URGENT): `read_file` returns only the first 30k chars (tool-execution.ts `MAX_DOC_TEXT`), but PDF sidecars can now be 400k and search hits cite `Page 57`; accept `section: "Page 57"` or a char offset so the model can open the cited page. Also `buildReadModelText` caps the outline at 24 labels, so a 60-page deck shows "Page 1 | ... | Page 24 | ... and 36 more"
+- ground: `download_course_file` fresh-download path (tool-execution.ts ~line 614) still returns the full sidecar uncapped; route it through `buildDocumentReadResult`/`buildDocumentReadView` so it gets the 120k window, outline, and cut-off note like `read_file`
+- retrieve: retrieval gate answers from memory when `readArtifactIds` contains the artifact even if that whole read was cut off before the asked-about page; record truncation on the ArtifactRef and let the gate re-read with `section` when the question names a page/heading outside the remembered window
+- reason: `read_file` section lookup falls back to the whole document when a page heading was folded into a neighbour by `splitDocumentIntoSections` (image-only pages with no body text); consider a raw "## Page N" heading scan as a last resort
 - ground: `search_course` observation still records `excerpt: artifact.excerpt`; switch to `match.passage?.excerpt` and add `sectionIds`/`sectionLabel` from the passage so citations can point at "Page 57" like `search_workspace` does; verification scores relevance to the question, not support for the answer (confidence too generous); no "not found after checking X, Y, Z" answer path; `/ask` still caps answers at 2-4 sentences; workups silently prefer Canvas over the syllabus on due-date conflicts instead of surfacing them
 
 ## Done
@@ -40,3 +42,4 @@ Next area: **reason**
 - 2026-09-02 discover: threaded discussion replies captured in thread order (nested /view replies, participant names, /entries fallback, has_more_replies paged), reply counts in summary
 - 2026-09-02 extract: PDFs extracted page by page with "## Page N" citable headings, cap 30k → 400k with page-boundary truncation note, pdf.js fed a Uint8Array view (fixes "bad XRef entry" on pdfkit-made PDFs)
 - 2026-09-02 retrieve: search_course shows the best-matching section + query-centred passage ("Page 57: ...MESI protocol...") instead of the document's first 140 chars; Files-tab file entries deduped against their extracted attachment
+- 2026-09-02 reason: read_file takes section ("Page 57"/heading, fuzzy) and offset, whole-read cap 30k → 120k with a cut-off note naming omitted sections, outline lists every page as "Page 1–60", section reads carry sectionLabel for citations and never dedupe against truncated whole reads; work read_document 15k → 60k with page-aware cut-off
