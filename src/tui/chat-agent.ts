@@ -194,7 +194,7 @@ export async function runChatAgent(
     usedWorkup,
     loaded: ctx.loaded,
   });
-  const finalAnswer = finalizeAnswerText(fullText, verification.missing);
+  const finalAnswer = finalizeAnswerText(fullText, verification.missing, verification.checkedSources);
 
   ctx.conversationHistory.push({ role: "user", content: question });
   ctx.conversationHistory.push({ role: "assistant", content: finalAnswer });
