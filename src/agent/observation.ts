@@ -96,6 +96,20 @@ export function buildStepReflectionNote(input: StepReflectionInput): string {
     );
   }
 
+  const truncatedRead = grounded
+    ? input.observation.artifacts.find(
+        (artifact) => artifact.truncated && (artifact.omittedLabels?.length ?? 0) > 0
+      )
+    : undefined;
+  if (truncatedRead) {
+    const omitted = truncatedRead.omittedLabels ?? [];
+    const shown = omitted.slice(0, 6).join(", ");
+    const more = omitted.length > 6 ? ` and ${omitted.length - 6} more` : "";
+    lines.push(
+      `This read was cut off before the end of ${truncatedRead.title}; sections not included: ${shown}${more}. If the question concerns one of them, call read_file again with section: "<that label>" rather than assuming it is not covered.`
+    );
+  }
+
   if (
     input.needsMultipleSources &&
     (input.groundedReadCount ?? 0) < 2
@@ -115,7 +129,7 @@ export function buildStepReflectionNote(input: StepReflectionInput): string {
     );
   } else {
     lines.push(
-      "Do not stop because you have already used several tools; stop only when every part of the question is answered from something you actually read.]"
+      "Do not stop because you have already used several tools; stop only when every part of the question is answered from something you actually read. Any date, time, percentage or value you will state must come from a result you read this turn; read the section that states it if you have not.]"
     );
     return lines.join(" ");
   }
