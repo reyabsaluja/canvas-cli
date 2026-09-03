@@ -5,7 +5,31 @@ import { htmlToText } from "../format/html-to-text.js";
 import { extractOfficeText, isOfficeExtension } from "./office-text.js";
 
 const require = createRequire(import.meta.url);
-const pdfParse: (buffer: Buffer) => Promise<{ text: string }> = require("pdf-parse");
+
+interface PdfTextItem {
+  str: string;
+  transform: number[];
+}
+
+interface PdfPageProxy {
+  pageNumber: number;
+  getTextContent(options: {
+    normalizeWhitespace: boolean;
+    disableCombineTextItems: boolean;
+  }): Promise<{ items: PdfTextItem[] }>;
+}
+
+interface PdfParseOptions {
+  pagerender?: (page: PdfPageProxy) => Promise<string>;
+  max?: number;
+  version?: string;
+}
+
+const pdfParse: (
+  data: Uint8Array,
+  options?: PdfParseOptions
+) => Promise<{ text: string; numpages: number; numrender: number }> =
+  require("pdf-parse");
 
 /**
  * Shared text extraction utility used by ingestion, work agent, and chat agent.
@@ -13,7 +37,13 @@ const pdfParse: (buffer: Buffer) => Promise<{ text: string }> = require("pdf-par
  * from files inside the zip).
  */
 
-const MAX_TEXT = 30000;
+/**
+ * Per-document cap on stored extracted text. Stored sidecars are indexed
+ * section-by-section and read through tools that apply their own (smaller)
+ * per-read limits, so the stored copy should be as complete as possible: a
+ * 150-page lecture deck or a full textbook chapter must not lose its tail.
+ */
+const MAX_TEXT = 400_000;
 const MAX_ZIP_TEXT = 50000; // Higher limit for zips since they contain multiple files
 const MAX_ZIP_FILE_TEXT = 30000; // Per-file limit inside zips
 const MAX_ZIP_ENTRY_BYTES = 100 * 1024 * 1024; // Per-entry inflated size cap when unpacking
@@ -220,19 +250,10 @@ export async function extractZip(
           for await (const chunk of stream) {
             chunks.push(chunk as Buffer);
           }
-          const buffer = Buffer.concat(chunks);
-          const origLog = console.log;
-          console.log = () => {};
-          try {
-            const data = await pdfParse(buffer);
-            const text = data.text?.trim() ?? "";
-            if (text.length > 0) {
-              const truncated = text.slice(0, MAX_ZIP_FILE_TEXT);
-              textContents.push({ name: entry.filename, content: truncated });
-              totalText += truncated.length;
-            }
-          } finally {
-            console.log = origLog;
+          const text = await extractPdfText(Buffer.concat(chunks), MAX_ZIP_FILE_TEXT);
+          if (text.length > 0) {
+            textContents.push({ name: entry.filename, content: text });
+            totalText += text.length;
           }
         } catch {
           // Skip unreadable PDFs
@@ -270,15 +291,120 @@ export async function extractZip(
 
 async function extractPdf(filePath: string): Promise<string> {
   const buffer = await fs.readFile(filePath);
+  const text = await extractPdfText(buffer, MAX_TEXT);
+  return text || "[Could not extract text from PDF]";
+}
+
+/** Heading used to mark page boundaries in multi-page PDF text. */
+export const PDF_PAGE_HEADING_PREFIX = "## Page ";
+
+/**
+ * Extract the text of a PDF, page by page.
+ *
+ * Multi-page documents come back with a `## Page N` heading in front of every
+ * page that has text. That heading form is what the knowledge index splits
+ * sections on and what answer verification recognises, so each page becomes
+ * an individually searchable, citable section ("Lecture12.pdf — Page 35").
+ * Single-page documents are returned as plain text, unchanged.
+ *
+ * Text is capped at `maxChars`, cutting on a page boundary and appending a
+ * note that names the omitted page range so the model (and the student) can
+ * tell the document continues. Returns "" when no page has extractable text
+ * (image-only scans).
+ */
+export async function extractPdfText(
+  buffer: Buffer | Uint8Array,
+  maxChars: number = MAX_TEXT
+): Promise<string> {
+  const pages = new Map<number, string>();
+  let pageCount = 0;
+
+  // pdf.js chokes on some valid PDFs (notably pdfkit output) when handed a
+  // Node Buffer; a plain Uint8Array view over the same bytes always works.
+  const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+
   const origLog = console.log;
   console.log = () => {};
   try {
-    const data = await pdfParse(buffer);
-    const text = data.text?.trim() ?? "";
-    return text.slice(0, MAX_TEXT) || "[Could not extract text from PDF]";
+    const result = await pdfParse(bytes, {
+      pagerender: async (page) => {
+        const text = await renderPdfPageText(page);
+        pages.set(page.pageNumber, text);
+        return text;
+      },
+    });
+    pageCount = result.numpages;
   } finally {
     console.log = origLog;
   }
+
+  const blocks: Array<{ pageNumber: number; text: string }> = [];
+  for (const [pageNumber, rawText] of [...pages.entries()].sort((a, b) => a[0] - b[0])) {
+    const text = rawText.trim();
+    if (text.length === 0) continue;
+    blocks.push({ pageNumber, text });
+  }
+  if (blocks.length === 0) {
+    return "";
+  }
+
+  if (pageCount <= 1 && blocks.length === 1) {
+    return blocks[0]!.text.slice(0, maxChars);
+  }
+
+  const parts: string[] = [];
+  let used = 0;
+  let firstOmittedPage: number | null = null;
+  for (const block of blocks) {
+    const rendered = `${PDF_PAGE_HEADING_PREFIX}${block.pageNumber}\n\n${block.text}`;
+    const separator = parts.length > 0 ? 2 : 0;
+    if (used + separator + rendered.length > maxChars) {
+      if (parts.length === 0) {
+        // A single page larger than the whole budget: keep what fits.
+        parts.push(rendered.slice(0, maxChars));
+        used = maxChars;
+        continue;
+      }
+      firstOmittedPage = block.pageNumber;
+      break;
+    }
+    parts.push(rendered);
+    used += separator + rendered.length;
+  }
+
+  let text = parts.join("\n\n");
+  if (firstOmittedPage !== null) {
+    const lastPage = blocks[blocks.length - 1]!.pageNumber;
+    const range =
+      firstOmittedPage === lastPage
+        ? `page ${lastPage}`
+        : `pages ${firstOmittedPage}-${lastPage}`;
+    text += `\n\n[Text truncated: ${range} of ${pageCount} omitted because the document exceeds ${maxChars} characters]`;
+  }
+  return text;
+}
+
+/**
+ * Mirror pdf-parse's default page renderer: text items on the same baseline
+ * are joined, a change in baseline starts a new line.
+ */
+async function renderPdfPageText(page: PdfPageProxy): Promise<string> {
+  const content = await page.getTextContent({
+    normalizeWhitespace: false,
+    disableCombineTextItems: false,
+  });
+  let lastY: number | undefined;
+  let text = "";
+  for (const item of content.items) {
+    const y = item.transform[5];
+    if (lastY === undefined || lastY === y) {
+      text += item.str;
+    } else {
+      text += "\n" + item.str;
+    }
+    lastY = y;
+  }
+  return text;
 }
 
 async function extractOffice(filePath: string, filename: string): Promise<string> {
