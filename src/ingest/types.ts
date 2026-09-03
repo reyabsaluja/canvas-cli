@@ -249,3 +249,22 @@ export interface IngestionMeta {
 export interface IngestionResult {
   folders?: FolderIndexEntry[];
 }
+
+// ---------------------------------------------------------------------------
+// ADDITIVE: discussion thread capture (src/ingest/fetch-course-content.ts,
+// src/ingest/ingest-course.ts, src/format/render-ingestion-summary.ts).
+// ---------------------------------------------------------------------------
+
+/** How discussion threads were captured for one ingestion. */
+export interface DiscussionThreadSummary {
+  /** Discussion topics (announcements excluded) whose threads were fetched. */
+  topics: number;
+  /** Entries captured across all topics, nested replies included. */
+  replies: number;
+  /** Replies retrieved through GET .../entries/:id/replies because the inline list was truncated. */
+  pagedReplies: number;
+}
+
+export interface IngestionMeta {
+  discussionThreads?: DiscussionThreadSummary;
+}

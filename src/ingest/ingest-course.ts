@@ -218,6 +218,17 @@ export async function ingestCourse(
       downloaded: courseFileResults.filter((a) => a.status !== "failed").length,
       failed: courseFileResults.filter((a) => a.status === "failed").length,
     },
+    discussionThreads: {
+      topics: raw.discussionThreads.length,
+      replies: raw.discussionThreads.reduce(
+        (sum, thread) => sum + thread.entries.length,
+        0
+      ),
+      pagedReplies: raw.discussionThreads.reduce(
+        (sum, thread) => sum + (thread.repliesPaged ?? 0),
+        0
+      ),
+    },
   };
 
   // Step 9: Write all artifacts (including front page and fetched pages)

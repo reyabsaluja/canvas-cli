@@ -80,6 +80,32 @@ export interface MockFolder {
   folders_count?: number;
 }
 
+export interface MockDiscussionEntry {
+  id: number;
+  user_id: number;
+  user_name: string;
+  message: string | null;
+  created_at: string;
+  updated_at?: string;
+  deleted?: boolean;
+  /** Nested replies (threaded discussions). */
+  replies?: MockDiscussionEntry[];
+}
+
+export interface MockDiscussionTopic {
+  id: number;
+  title: string;
+  message: string | null;
+  posted_at: string | null;
+  last_reply_at: string | null;
+  user_name: string | null;
+  html_url: string;
+  is_announcement?: boolean;
+  discussion_type?: string;
+  /** Top-level entries; each may carry nested `replies`. */
+  entries?: MockDiscussionEntry[];
+}
+
 export interface MockServerData {
   courses: MockCourse[];
   assignments: Map<number, MockAssignment[]>;
@@ -92,6 +118,17 @@ export interface MockServerData {
   fileContents?: Map<number, string>;
   /** Any API path matching one of these returns 403, to simulate institution blocks. */
   forbiddenPaths?: RegExp[];
+  /**
+   * Discussion topics (and announcements, flagged with `is_announcement`)
+   * served from GET /courses/:id/discussion_topics, plus the /view, /entries
+   * and /entries/:id/replies endpoints built from their `entries` trees.
+   */
+  discussions?: Map<number, MockDiscussionTopic[]>;
+  /**
+   * How many `recent_replies` GET .../entries lists inline before setting
+   * `has_more_replies` (real Canvas caps this at 10). Defaults to 2.
+   */
+  discussionRecentReplyLimit?: number;
   courseDetails: Map<number, { syllabus_body: string | null }>;
   pagePerPage?: number;
 }
@@ -131,6 +168,55 @@ function paginatedResponse(
   }
 
   return { body: JSON.stringify(slice), headers };
+}
+
+function flattenMockEntries(
+  entries: MockDiscussionEntry[],
+  parentId: number | null,
+  out: Array<MockDiscussionEntry & { parent_id: number | null }> = []
+): Array<MockDiscussionEntry & { parent_id: number | null }> {
+  for (const entry of entries) {
+    out.push({ ...entry, parent_id: parentId });
+    flattenMockEntries(entry.replies ?? [], entry.id, out);
+  }
+  return out;
+}
+
+/** Shape a mock entry the way GET .../view does: no user_name, nested `replies`. */
+function toViewEntry(
+  entry: MockDiscussionEntry,
+  parentId: number | null
+): Record<string, unknown> {
+  const { replies, user_name: _userName, ...rest } = entry;
+  const view: Record<string, unknown> = {
+    ...rest,
+    parent_id: parentId,
+    updated_at: entry.updated_at ?? entry.created_at,
+  };
+  if (replies && replies.length > 0) {
+    view.replies = replies.map((reply) => toViewEntry(reply, entry.id));
+  }
+  return view;
+}
+
+/** Shape a mock entry the way GET .../entries and .../replies do. */
+function toListEntry(
+  entry: MockDiscussionEntry & { parent_id: number | null }
+): Record<string, unknown> {
+  const { replies: _replies, ...rest } = entry;
+  return {
+    ...rest,
+    updated_at: entry.updated_at ?? entry.created_at,
+    read_state: "read",
+  };
+}
+
+function findMockTopic(
+  data: MockServerData,
+  courseId: number,
+  topicId: number
+): MockDiscussionTopic | undefined {
+  return (data.discussions?.get(courseId) ?? []).find((t) => t.id === topicId);
 }
 
 export function createMockCanvasServer(data: MockServerData): http.Server {
@@ -382,11 +468,123 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
       return;
     }
 
-    // GET /courses/:id/discussion_topics
+    // GET /courses/:id/discussion_topics (announcements when only_announcements=true)
     const discussionMatch = path.match(/^\/courses\/(\d+)\/discussion_topics$/);
     if (discussionMatch && req.method === "GET") {
+      const courseId = parseInt(discussionMatch[1], 10);
+      const onlyAnnouncements = url.searchParams.get("only_announcements") === "true";
+      const topics = (data.discussions?.get(courseId) ?? [])
+        .filter((topic) => (topic.is_announcement ?? false) === onlyAnnouncements)
+        .map(({ entries: _entries, ...topic }) => ({
+          context_code: `course_${courseId}`,
+          discussion_type: "threaded",
+          read_state: "read",
+          unread_count: 0,
+          published: true,
+          locked: false,
+          is_announcement: false,
+          ...topic,
+        }));
+      const { body, headers } = paginatedResponse(
+        topics,
+        page,
+        effectivePerPage,
+        baseApiUrl,
+        `/courses/${courseId}/discussion_topics`
+      );
+      res.writeHead(200, headers);
+      res.end(body);
+      return;
+    }
+
+    // GET /courses/:id/discussion_topics/:tid/view
+    const discussionViewMatch = path.match(/^\/courses\/(\d+)\/discussion_topics\/(\d+)\/view$/);
+    if (discussionViewMatch && req.method === "GET") {
+      const topic = findMockTopic(data, parseInt(discussionViewMatch[1], 10), parseInt(discussionViewMatch[2], 10));
+      if (!topic) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ errors: [{ message: "not found" }] }));
+        return;
+      }
+      const participants = new Map<number, string>();
+      for (const entry of flattenMockEntries(topic.entries ?? [], null)) {
+        participants.set(entry.user_id, entry.user_name);
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify([]));
+      res.end(
+        JSON.stringify({
+          participants: [...participants].map(([id, display_name]) => ({ id, display_name })),
+          unread_entries: [],
+          view: (topic.entries ?? []).map((entry) => toViewEntry(entry, null)),
+          new_entries: [],
+        })
+      );
+      return;
+    }
+
+    // GET /courses/:id/discussion_topics/:tid/entries
+    const discussionEntriesMatch = path.match(/^\/courses\/(\d+)\/discussion_topics\/(\d+)\/entries$/);
+    if (discussionEntriesMatch && req.method === "GET") {
+      const courseId = parseInt(discussionEntriesMatch[1], 10);
+      const topicId = parseInt(discussionEntriesMatch[2], 10);
+      const topic = findMockTopic(data, courseId, topicId);
+      if (!topic) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ errors: [{ message: "not found" }] }));
+        return;
+      }
+      const limit = data.discussionRecentReplyLimit ?? 2;
+      const topLevel = (topic.entries ?? []).map((entry) => {
+        const descendants = flattenMockEntries(entry.replies ?? [], entry.id);
+        const recent = descendants
+          .slice()
+          .sort((a, b) => b.created_at.localeCompare(a.created_at))
+          .slice(0, limit);
+        return {
+          ...toListEntry({ ...entry, parent_id: null }),
+          recent_replies: recent.map(toListEntry),
+          has_more_replies: descendants.length > limit,
+        };
+      });
+      const { body, headers } = paginatedResponse(
+        topLevel,
+        page,
+        effectivePerPage,
+        baseApiUrl,
+        `/courses/${courseId}/discussion_topics/${topicId}/entries`
+      );
+      res.writeHead(200, headers);
+      res.end(body);
+      return;
+    }
+
+    // GET /courses/:id/discussion_topics/:tid/entries/:eid/replies
+    const discussionRepliesMatch = path.match(
+      /^\/courses\/(\d+)\/discussion_topics\/(\d+)\/entries\/(\d+)\/replies$/
+    );
+    if (discussionRepliesMatch && req.method === "GET") {
+      const courseId = parseInt(discussionRepliesMatch[1], 10);
+      const topicId = parseInt(discussionRepliesMatch[2], 10);
+      const entryId = parseInt(discussionRepliesMatch[3], 10);
+      const topic = findMockTopic(data, courseId, topicId);
+      const root = topic
+        ? flattenMockEntries(topic.entries ?? [], null).find((e) => e.id === entryId)
+        : undefined;
+      if (!topic || !root) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ errors: [{ message: "not found" }] }));
+        return;
+      }
+      const replies = flattenMockEntries(root.replies ?? [], root.id).map(toListEntry);
+      const { body, headers } = paginatedResponse(
+        replies,
+        page,
+        effectivePerPage,
+        baseApiUrl,
+        `/courses/${courseId}/discussion_topics/${topicId}/entries/${entryId}/replies`
+      );
+      res.writeHead(200, headers);
+      res.end(body);
       return;
     }
 

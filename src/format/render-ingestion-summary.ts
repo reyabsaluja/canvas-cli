@@ -51,8 +51,14 @@ export function renderIngestionSummary(result: IngestionResult): string {
     );
   }
   if ((result.discussions?.length ?? 0) > 0) {
+    const threads = result.ingestion.discussionThreads;
+    let replyNote = "";
+    if (threads && threads.replies > 0) {
+      const paged = threads.pagedReplies > 0 ? `, ${threads.pagedReplies} paged` : "";
+      replyNote = ` (${threads.replies} replies${paged})`;
+    }
     lines.push(
-      `  ${chalk.dim("-")} ${result.discussions?.length ?? 0} discussions`
+      `  ${chalk.dim("-")} ${result.discussions?.length ?? 0} discussions${replyNote}`
     );
   }
   if ((result.externalLinks?.length ?? 0) > 0) {
