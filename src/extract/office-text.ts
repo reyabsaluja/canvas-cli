@@ -235,6 +235,22 @@ export async function extractDocxText(buffer: Buffer): Promise<string> {
     blocks.push("", "Endnotes:", endnotes);
   }
 
+  // Reviewer comments often carry the instructor's clarifications ("two
+  // cycles is also fine"); headers and footers carry the course, term, and
+  // draft status that the body never repeats.
+  const comments = renderDocxComments(parts.get("word/comments.xml"), context);
+  if (comments) {
+    blocks.push("", "Comments:", comments);
+  }
+  const headers = renderDocxHeaderFooters(parts, /^word\/header\d+\.xml$/i, context);
+  if (headers) {
+    blocks.push("", "Headers:", headers);
+  }
+  const footers = renderDocxHeaderFooters(parts, /^word\/footer\d+\.xml$/i, context);
+  if (footers) {
+    blocks.push("", "Footers:", footers);
+  }
+
   return finalizeOutput(blocks);
 }
 
@@ -416,7 +432,7 @@ function docxHeadingLevel(props: string, context: DocxContext): number | null {
 }
 
 const DOCX_RUN_PATTERN =
-  /<w:hyperlink\b([^>]*)>([\s\S]*?)<\/w:hyperlink>|<w:t\b[^>]*>([\s\S]*?)<\/w:t>|<m:t\b[^>]*>([\s\S]*?)<\/m:t>|<w:tab\b[^>]*\/>|<w:(?:br|cr)\b[^>]*\/>|<wp:docPr\b([^>]*?)\/?>|<w:footnoteReference\b([^>]*)\/>|<w:endnoteReference\b([^>]*)\/>/g;
+  /<w:hyperlink\b([^>]*)>([\s\S]*?)<\/w:hyperlink>|<w:t\b[^>]*>([\s\S]*?)<\/w:t>|<m:t\b[^>]*>([\s\S]*?)<\/m:t>|<w:tab\b[^>]*\/>|<w:(?:br|cr)\b[^>]*\/>|<wp:docPr\b([^>]*?)\/?>|<w:footnoteReference\b([^>]*)\/>|<w:endnoteReference\b([^>]*)\/>|<w:commentReference\b([^>]*)\/>/g;
 
 function renderDocxRuns(xml: string, context: DocxContext): string {
   const withoutDeletions = xml.replace(/<w:del\b[^>]*>[\s\S]*?<\/w:del>/g, "");
@@ -469,9 +485,64 @@ function renderDocxRuns(xml: string, context: DocxContext): string {
       }
       continue;
     }
+    if (token.startsWith("<w:commentReference")) {
+      // Marks where a reviewer comment is anchored; the comment text itself
+      // is listed under "Comments:" with the same id.
+      const id = xmlAttr(match[8] ?? "", "w:id");
+      if (id) output += `[comment ${id}]`;
+      continue;
+    }
   }
 
   return output;
+}
+
+function renderDocxComments(xml: string | undefined, context: DocxContext): string {
+  if (!xml) return "";
+  const lines: string[] = [];
+  for (const match of xml.matchAll(/<w:comment\b([^>]*)>([\s\S]*?)<\/w:comment>/g)) {
+    const attrs = match[1] ?? "";
+    const id = xmlAttr(attrs, "w:id");
+    const author = xmlAttr(attrs, "w:author");
+    const text = collapseWhitespace(
+      [...(match[2] ?? "").matchAll(/<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g)]
+        .map((paragraph) => renderDocxRuns(paragraph[1] ?? "", context))
+        .join(" ")
+    );
+    if (!text) continue;
+    const prefix = id ? `[${id}] ` : "";
+    lines.push(author ? `${prefix}${author}: ${text}` : `${prefix}${text}`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Render every header (or footer) part once. Word keeps separate parts for
+ * first/even/default pages that usually repeat the same text, so identical
+ * renderings are collapsed.
+ */
+function renderDocxHeaderFooters(
+  parts: Map<string, string>,
+  pattern: RegExp,
+  context: DocxContext
+): string {
+  const names = [...parts.keys()]
+    .filter((name) => pattern.test(name))
+    .sort((a, b) => partIndex(a) - partIndex(b));
+  const seen = new Set<string>();
+  const rendered: string[] = [];
+  for (const name of names) {
+    const text = finalizeOutput(renderDocxBlocks(parts.get(name) ?? "", context));
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    rendered.push(text);
+  }
+  return rendered.join("\n");
+}
+
+function partIndex(name: string): number {
+  const match = name.match(/(\d+)\.xml$/i);
+  return match ? Number.parseInt(match[1] ?? "0", 10) : 0;
 }
 
 function renderDocxTable(tableXml: string, context: DocxContext): string {
@@ -550,6 +621,11 @@ export async function extractPptxText(buffer: Buffer): Promise<string> {
     throw new Error("no slides found in presentation");
   }
 
+  const commentAuthors = parsePptxCommentAuthors(parts);
+  const unplacedCommentParts = new Set(
+    [...parts.keys()].filter((name) => PPTX_COMMENT_PART.test(name))
+  );
+
   const blocks: string[] = [];
   for (let index = 0; index < slidePaths.length; index += 1) {
     const slidePath = slidePaths[index] ?? "";
@@ -581,9 +657,81 @@ export async function extractPptxText(buffer: Buffer): Promise<string> {
         }
       }
     }
+
+    // Reviewer comments (legacy ppt/comments and threaded ppt/threadedComments)
+    // are linked from the slide's rels; keep them with their slide.
+    const commentLines: string[] = [];
+    for (const target of slideRels.values()) {
+      if (!PPTX_COMMENT_TARGET.test(target)) continue;
+      const commentPath = resolvePartPath(path.posix.dirname(slidePath), target);
+      const commentXml = parts.get(commentPath);
+      if (!commentXml) continue;
+      unplacedCommentParts.delete(commentPath);
+      for (const line of renderPptxComments(commentXml, commentAuthors)) {
+        if (!commentLines.includes(line)) commentLines.push(line);
+      }
+    }
+    if (commentLines.length > 0) {
+      blocks.push("", "Comments:", ...commentLines);
+    }
+  }
+
+  // Comment parts no slide links to (a damaged rels file, an exported deck):
+  // still the reviewer's words, so list them after the slides.
+  const leftover: string[] = [];
+  for (const name of [...unplacedCommentParts].sort((a, b) => partIndex(a) - partIndex(b))) {
+    for (const line of renderPptxComments(parts.get(name) ?? "", commentAuthors)) {
+      if (!leftover.includes(line)) leftover.push(line);
+    }
+  }
+  if (leftover.length > 0) {
+    blocks.push("", "## Comments", "", ...leftover);
   }
 
   return finalizeOutput(blocks);
+}
+
+const PPTX_COMMENT_PART =
+  /^ppt\/(?:comments\/comment\d+|threadedComments\/threadedComment\d+)\.xml$/i;
+const PPTX_COMMENT_TARGET =
+  /(?:^|\/)(?:comments\/comment\d+|threadedComments\/threadedComment\d+)\.xml$/i;
+
+/** Author id -> display name, from ppt/commentAuthors.xml (legacy) and ppt/authors.xml (threaded). */
+function parsePptxCommentAuthors(parts: Map<string, string>): Map<string, string> {
+  const authors = new Map<string, string>();
+  for (const name of ["ppt/commentAuthors.xml", "ppt/authors.xml"]) {
+    const xml = parts.get(name);
+    if (!xml) continue;
+    for (const match of xml.matchAll(/<(?:[a-z0-9]+:)?(?:cmAuthor|author)\b([^>]*?)\/?>/gi)) {
+      const attrs = match[1] ?? "";
+      const id = xmlAttr(attrs, "id");
+      const authorName = xmlAttr(attrs, "name");
+      if (id && authorName) authors.set(id, authorName);
+    }
+  }
+  return authors;
+}
+
+/**
+ * One line per comment: "- Author: text". Legacy parts hold the text in
+ * `<p:text>`; threaded parts hold DrawingML runs in a `txBody`.
+ */
+function renderPptxComments(xml: string, authors: Map<string, string>): string[] {
+  const lines: string[] = [];
+  for (const match of xml.matchAll(/<(?:[a-z0-9]+:)?cm\b([^>]*)>([\s\S]*?)<\/(?:[a-z0-9]+:)?cm>/gi)) {
+    const attrs = match[1] ?? "";
+    const inner = match[2] ?? "";
+    const authorId = xmlAttr(attrs, "authorId");
+    const author = authorId ? authors.get(authorId) ?? null : null;
+    const explicit = inner.match(/<(?:[a-z0-9]+:)?text\b[^>]*>([\s\S]*?)<\/(?:[a-z0-9]+:)?text>/i);
+    const text = collapseWhitespace(
+      explicit ? decodeXmlText(explicit[1] ?? "") : drawingRunText(inner)
+    );
+    if (!text) continue;
+    const line = author ? `- ${author}: ${text}` : `- ${text}`;
+    if (!lines.includes(line)) lines.push(line);
+  }
+  return lines;
 }
 
 function orderedSlidePaths(parts: Map<string, string>): string[] {
@@ -848,8 +996,11 @@ function renderSheet(sheetXml: string, sharedStrings: string[]): string {
   const rows: string[][] = [];
   let omitted = 0;
 
+  let firstRowValues: string[] = [];
+
   for (const rowMatch of sheetXml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
     const cells: string[] = [];
+    const values: string[] = [];
     for (const cellMatch of (rowMatch[1] ?? "").matchAll(
       /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g
     )) {
@@ -858,21 +1009,35 @@ function renderSheet(sheetXml: string, sharedStrings: string[]): string {
       const reference = xmlAttr(attrs, "r") ?? "";
       const column = columnIndexFromReference(reference);
       const value = cellValue(attrs, inner, sharedStrings);
+      // Show the formula beside its cached value: "0.75 (formula: =SUM(B2:B3))"
+      // tells the reader how a weight or total was derived, which the value
+      // alone hides.
+      const formula = cellFormula(inner);
+      const rendered = formula
+        ? value
+          ? `${value} (formula: ${formula})`
+          : `(formula: ${formula})`
+        : value;
       const index = column ?? cells.length;
-      while (cells.length < index) cells.push("");
-      cells[index] = value;
+      while (cells.length < index) {
+        cells.push("");
+        values.push("");
+      }
+      cells[index] = rendered;
+      values[index] = value;
     }
     if (!cells.some((cell) => cell.length > 0)) continue;
     if (rows.length >= MAX_SHEET_ROWS) {
       omitted += 1;
       continue;
     }
+    if (rows.length === 0) firstRowValues = values.map((cell) => cell ?? "");
     rows.push(cells.map((cell) => cell ?? ""));
   }
 
   if (rows.length === 0) return "";
 
-  const first = rows[0] ?? [];
+  const first = firstRowValues;
   const headerLikely =
     rows.length > 1 &&
     first.filter((cell) => cell.length > 0).length >= 2 &&
@@ -902,6 +1067,15 @@ function cellValue(attrs: string, inner: string, sharedStrings: string[]): strin
     return value === "1" ? "TRUE" : "FALSE";
   }
   return collapseWhitespace(value);
+}
+
+/** The cell's formula as written ("=SUM(B2:B3)"), or null when it has none of its own. */
+function cellFormula(inner: string): string | null {
+  const match = inner.match(/<f\b[^>]*>([\s\S]*?)<\/f>/);
+  if (!match) return null;
+  const formula = collapseWhitespace(decodeXmlText(match[1] ?? ""));
+  if (!formula) return null;
+  return formula.startsWith("=") ? formula : `=${formula}`;
 }
 
 function isNumericCell(value: string): boolean {
