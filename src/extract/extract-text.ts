@@ -68,6 +68,12 @@ const MAX_TEXT = 400_000;
 const MAX_ZIP_TEXT = 400_000;
 const MAX_ZIP_FILE_TEXT = 120_000;
 // Inflation bounds (per entry, entry count, total) live in ./zip-bounds.ts.
+/**
+ * How many zips deep the summary follows archives inside archives. A course
+ * "starter bundle" that wraps a "resources.zip" that wraps a "rubric.zip" is
+ * three levels; anything deeper is listed but not opened.
+ */
+export const MAX_ZIP_DEPTH = 3;
 
 const TEXTUAL_ZIP_EXTENSIONS = new Set([
   ".txt", ".md", ".csv", ".py", ".c", ".h", ".java", ".js",
@@ -203,27 +209,49 @@ export async function unpackZipToDirectory(
  * Extract and list contents of a zip file.
  * Reads text-based files inside the zip and returns their content.
  * For PDFs inside the zip, extracts text. For other binary files, lists them.
+ * Zips inside the zip are opened in turn (to MAX_ZIP_DEPTH) and their
+ * summaries inlined under the entry, so a rubric buried two archives down is
+ * still searchable.
  *
  * Every entry is listed (the central directory is cheap), but bodies are
  * only inflated within the zip bounds: an entry past the per-file cap gets a
  * "[Skipped ...]" note under its listing line, and reading stops with a note
- * once the entry-count or total-bytes cap is reached.
+ * once the entry-count or total-bytes cap is reached. The caps are shared
+ * across nesting levels, so an inner zip cannot inflate more than the outer
+ * archive was allowed to.
  */
 export async function extractZip(
   zipPath: string,
   zipName: string,
   limits?: Partial<ZipReadLimits>
 ): Promise<string> {
-  const yauzl = require("yauzl-promise");
   const bounds = resolveZipReadLimits(limits);
+  const budget: ZipReadBudget = { entriesRead: 0, totalBytes: 0 };
+  return extractZipSource(zipPath, zipName, 0, bounds, budget);
+}
 
-  const zip = await yauzl.open(zipPath);
+/** Running totals shared by an archive and every zip nested inside it. */
+interface ZipReadBudget {
+  entriesRead: number;
+  totalBytes: number;
+}
+
+async function extractZipSource(
+  zipSource: string | Buffer,
+  zipName: string,
+  depth: number,
+  bounds: ZipReadLimits,
+  budget: ZipReadBudget
+): Promise<string> {
+  const yauzl = require("yauzl-promise");
+
+  const zip = Buffer.isBuffer(zipSource)
+    ? await yauzl.fromBuffer(zipSource)
+    : await yauzl.open(zipSource);
   const entries: Array<{ name: string; size: number; note?: string }> = [];
   const textContents: Array<{ name: string; content: string }> = [];
   const stopNotes: string[] = [];
   let totalText = 0;
-  let entriesRead = 0;
-  let totalBytes = 0;
   let stopped = false;
 
   try {
@@ -244,19 +272,25 @@ export async function extractZip(
       const isTextFile = TEXTUAL_ZIP_EXTENSIONS.has(ext);
       const isOffice = isOfficeExtension(ext);
       const isPdf = ext === ".pdf";
-      if (!isTextFile && !isOffice && !isPdf) continue;
+      const isZip = ext === ".zip";
+      if (!isTextFile && !isOffice && !isPdf && !isZip) continue;
+
+      if (isZip && depth >= MAX_ZIP_DEPTH) {
+        listing.note = `[Skipped ${entry.filename}: nested more than ${MAX_ZIP_DEPTH} zips deep]`;
+        continue;
+      }
 
       const declaredSize = Number(entry.uncompressedSize ?? 0);
       if (declaredSize > bounds.maxEntryBytes) {
         listing.note = `[Skipped ${entry.filename}: inflates past the ${formatByteCap(bounds.maxEntryBytes)} per-file cap]`;
         continue;
       }
-      if (entriesRead >= bounds.maxEntries) {
+      if (budget.entriesRead >= bounds.maxEntries) {
         stopNotes.push(`[Read stopped after ${bounds.maxEntries} entries]`);
         stopped = true;
         continue;
       }
-      if (totalBytes + declaredSize > bounds.maxTotalBytes) {
+      if (budget.totalBytes + declaredSize > bounds.maxTotalBytes) {
         stopNotes.push(
           `[Read stopped: archive inflates past the ${formatByteCap(bounds.maxTotalBytes)} total cap]`
         );
@@ -274,8 +308,8 @@ export async function extractZip(
         // Otherwise the entry is unreadable (corrupt, encrypted); skip it.
         continue;
       }
-      entriesRead += 1;
-      totalBytes += buffer.length;
+      budget.entriesRead += 1;
+      budget.totalBytes += buffer.length;
 
       if (isTextFile) {
         try {
@@ -312,9 +346,26 @@ export async function extractZip(
         } catch {
           // Skip unreadable PDFs
         }
+      } else if (isZip) {
+        try {
+          const text = await extractZipSource(
+            buffer,
+            entry.filename,
+            depth + 1,
+            bounds,
+            budget
+          );
+          if (text.trim().length > 0) {
+            const truncated = capZipEntryText(text, entry.filename);
+            textContents.push({ name: entry.filename, content: truncated });
+            totalText += truncated.length;
+          }
+        } catch {
+          // Skip unreadable nested zips
+        }
       }
 
-      if (totalBytes >= bounds.maxTotalBytes) {
+      if (budget.totalBytes >= bounds.maxTotalBytes) {
         stopNotes.push(
           `[Read stopped: archive inflates past the ${formatByteCap(bounds.maxTotalBytes)} total cap]`
         );

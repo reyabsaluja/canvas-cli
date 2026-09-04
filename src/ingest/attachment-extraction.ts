@@ -1,6 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { extractFileText, unpackZipToDirectory } from "../extract/extract-text.js";
+import {
+  MAX_ZIP_DEPTH,
+  extractFileText,
+  unpackZipToDirectory,
+} from "../extract/extract-text.js";
+import { DEFAULT_ZIP_READ_LIMITS } from "../extract/zip-bounds.js";
 import {
   getExtractedAttachmentPath,
   getUnpackedZipDir,
@@ -68,7 +73,10 @@ export async function extractSingleAttachment(
 /**
  * Unpack a zip attachment next to its original location and write per-entry
  * text sidecars so inner PDFs/text files are individually searchable and
- * openable. Returns the per-entry metadata for persisting on the attachment.
+ * openable. Zips inside the zip are unpacked in turn into
+ * `<entry>.zip.unpacked/` trees (to MAX_ZIP_DEPTH), with their entries named
+ * `outer-entry.zip.unpacked/inner/path` so every file stays addressable.
+ * Returns the per-entry metadata for persisting on the attachment.
  */
 export async function unpackAttachmentZip(
   coursePath: string,
@@ -76,50 +84,116 @@ export async function unpackAttachmentZip(
 ): Promise<ZipAttachmentEntry[]> {
   const zipAbsolutePath = path.join(coursePath, attachment.localPath);
   const unpackDirAbsolute = getUnpackedZipDir(coursePath, attachment.localPath);
+  return unpackZipEntries(coursePath, zipAbsolutePath, unpackDirAbsolute, {
+    depth: 0,
+    entryNamePrefix: "",
+    budget: { entriesRead: 0, totalBytes: 0 },
+  });
+}
+
+/**
+ * Entry-count and inflated-byte totals shared by an archive and every zip
+ * nested inside it, so nesting cannot multiply the per-archive caps.
+ */
+interface UnpackBudget {
+  entriesRead: number;
+  totalBytes: number;
+}
+
+async function unpackZipEntries(
+  coursePath: string,
+  zipAbsolutePath: string,
+  unpackDirAbsolute: string,
+  options: { depth: number; entryNamePrefix: string; budget: UnpackBudget }
+): Promise<ZipAttachmentEntry[]> {
+  const { budget } = options;
+  const remainingEntries = DEFAULT_ZIP_READ_LIMITS.maxEntries - budget.entriesRead;
+  const remainingBytes = DEFAULT_ZIP_READ_LIMITS.maxTotalBytes - budget.totalBytes;
+  if (remainingEntries <= 0 || remainingBytes <= 0) {
+    return [];
+  }
+
   await fs.mkdir(unpackDirAbsolute, { recursive: true });
 
   const unpackedEntries = await unpackZipToDirectory(
     zipAbsolutePath,
-    unpackDirAbsolute
+    unpackDirAbsolute,
+    { maxEntries: remainingEntries, maxTotalBytes: remainingBytes }
   );
+  budget.entriesRead += unpackedEntries.length;
+  for (const unpacked of unpackedEntries) {
+    budget.totalBytes += unpacked.size;
+  }
 
   const entries: ZipAttachmentEntry[] = [];
   for (const unpacked of unpackedEntries) {
+    const entryName = `${options.entryNamePrefix}${unpacked.entryName}`;
     const entryLocalPath = path.relative(coursePath, unpacked.absolutePath);
-    let extractedTextPath: string | null = null;
-
-    const innerExt = path.extname(unpacked.entryName).toLowerCase();
-    if (innerExt !== ".zip") {
-      try {
-        const filename = path.basename(unpacked.entryName);
-        const text = await extractFileText(unpacked.absolutePath, filename);
-        if (isReadableExtractedText(text)) {
-          const absoluteExtractedPath = getExtractedAttachmentPath(
-            coursePath,
-            entryLocalPath
-          );
-          await fs.mkdir(path.dirname(absoluteExtractedPath), { recursive: true });
-          await writeAtomicText(
-            absoluteExtractedPath,
-            text.endsWith("\n") ? text : text + "\n"
-          );
-          extractedTextPath = path.relative(coursePath, absoluteExtractedPath);
-        }
-      } catch {
-        // Best-effort — leave extractedTextPath as null if extraction fails.
-      }
-    }
+    const filename = path.basename(unpacked.entryName);
+    const extractedTextPath = await writeExtractedEntryText(
+      coursePath,
+      entryLocalPath,
+      unpacked.absolutePath,
+      filename
+    );
 
     entries.push({
-      entryName: unpacked.entryName,
-      filename: path.basename(unpacked.entryName),
+      entryName,
+      filename,
       localPath: entryLocalPath,
       extractedTextPath,
       size: unpacked.size,
     });
+
+    if (
+      path.extname(unpacked.entryName).toLowerCase() === ".zip" &&
+      options.depth < MAX_ZIP_DEPTH
+    ) {
+      try {
+        const nestedEntries = await unpackZipEntries(
+          coursePath,
+          unpacked.absolutePath,
+          `${unpacked.absolutePath}.unpacked`,
+          {
+            depth: options.depth + 1,
+            entryNamePrefix: `${entryName}.unpacked/`,
+            budget,
+          }
+        );
+        entries.push(...nestedEntries);
+      } catch {
+        // Best-effort — keep the nested zip entry even if it cannot be unpacked.
+      }
+    }
   }
 
   return entries;
+}
+
+async function writeExtractedEntryText(
+  coursePath: string,
+  entryLocalPath: string,
+  absolutePath: string,
+  filename: string
+): Promise<string | null> {
+  try {
+    const text = await extractFileText(absolutePath, filename);
+    if (isReadableExtractedText(text)) {
+      const absoluteExtractedPath = getExtractedAttachmentPath(
+        coursePath,
+        entryLocalPath
+      );
+      await fs.mkdir(path.dirname(absoluteExtractedPath), { recursive: true });
+      await writeAtomicText(
+        absoluteExtractedPath,
+        text.endsWith("\n") ? text : text + "\n"
+      );
+      return path.relative(coursePath, absoluteExtractedPath);
+    }
+  } catch {
+    // Best-effort — leave extractedTextPath as null if extraction fails.
+  }
+  return null;
 }
 
 function isReadableExtractedText(text: string): boolean {

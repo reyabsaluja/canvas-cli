@@ -203,6 +203,117 @@ test("download_course_file unpacks a cached zip and exposes inner files", async 
   });
 });
 
+test("download_course_file unpacks nested zips and exposes deeply nested files", async () => {
+  await withTempDir(async (tempDir) => {
+    clearArtifactIndexCache();
+    const loaded = await createWorkspace(tempDir);
+    const coursePath = path.join(tempDir, "course");
+    const zipDir = path.join(coursePath, "attachments", "modules");
+    await fs.mkdir(zipDir, { recursive: true });
+
+    const innerZip = buildZipBuffer([
+      {
+        name: "docs/deep-spec.md",
+        content:
+          "# Deep Spec\nThe buried starter archive requires branch hazard tests.\n",
+      },
+    ]);
+    const outerZip = buildZipBuffer([
+      {
+        name: "README.md",
+        content: "# Starter Bundle\nLook inside starter-files.zip.\n",
+      },
+      {
+        name: "starter-files.zip",
+        content: innerZip,
+      },
+    ]);
+    const zipPath = path.join(zipDir, "starter-bundle.zip");
+    await fs.writeFile(zipPath, outerZip);
+
+    const cache = createCourseCache(coursePath);
+    cache.modules = [
+      {
+        id: 8,
+        name: "Lab 4 Module",
+        position: 1,
+        itemCount: 1,
+        items: [
+          {
+            id: 10,
+            title: "starter-bundle.zip",
+            type: "File",
+            position: 1,
+            contentId: 555,
+            pageUrl: null,
+            htmlUrl: null,
+            externalUrl: null,
+          },
+        ],
+      },
+    ];
+    cache.attachments = [
+      {
+        sourceType: "module_linked",
+        canvasFileId: 555,
+        originalFilename: "starter-bundle.zip",
+        localPath: "attachments/modules/starter-bundle.zip",
+        contentType: "application/zip",
+        size: outerZip.length,
+        downloadUrl: "https://canvas.example/files/555/download",
+        reason: "downloaded on demand from module item \"starter-bundle.zip\"",
+        status: "downloaded",
+      },
+    ];
+
+    const attachmentsJsonPath = path.join(coursePath, "attachments.json");
+    await fs.writeFile(
+      attachmentsJsonPath,
+      JSON.stringify(cache.attachments, null, 2) + "\n",
+      "utf-8"
+    );
+
+    const ctx = createChatContext(
+      { provider: "anthropic", model: "test-model" },
+      loaded,
+      { cache, client: null, config: null, courseId: 17 }
+    );
+
+    const result = await executeToolCallForTurn(
+      new Map(),
+      "download_course_file",
+      { title: "starter-bundle.zip" },
+      ctx
+    );
+
+    assert.equal(result.result.observation.status, "ok");
+
+    const persisted = JSON.parse(
+      await fs.readFile(attachmentsJsonPath, "utf-8")
+    ) as typeof cache.attachments;
+    const zipEntries = persisted[0]?.zipEntries ?? [];
+    assert.ok(
+      zipEntries.some(
+        (entry) =>
+          entry.entryName === "starter-files.zip.unpacked/docs/deep-spec.md"
+      ),
+      `expected the nested entry, got: ${zipEntries.map((entry) => entry.entryName).join(", ")}`
+    );
+
+    const readResult = await readWorkspaceKnowledgeArtifact(
+      loaded,
+      cache,
+      "deep-spec.md",
+      30000
+    );
+    assert.equal(readResult.status, "ok");
+    if (readResult.status === "ok") {
+      assert.match(readResult.content, /branch hazard tests/);
+      assert.equal(readResult.artifact.title, "deep-spec.md");
+    }
+  });
+});
+
 test("download_course_file unpacks a freshly downloaded zip from Canvas", async () => {
   await withTempDir(async (tempDir) => {
     clearArtifactIndexCache();
