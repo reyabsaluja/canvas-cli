@@ -1816,9 +1816,9 @@ export const SYNONYM_MATCH_WEIGHT = 0.6;
  * course-logistics vocabulary where a miss is common and costly.
  */
 const SYNONYM_GROUPS: string[][] = [
-  ["due", "deadline", "deadlines"],
+  ["due", "deadline", "deadlines", "date"],
   ["rubric", "grading", "marking", "criteria", "breakdown"],
-  ["late", "penalty", "penalties", "extension", "extensions"],
+  ["late", "penalty", "penalties", "extension", "extensions", "deduction", "extend"],
   ["submit", "submission", "submissions", "upload", "handin"],
   ["exam", "midterm", "final", "test"],
   ["quiz", "quizzes", "test"],
@@ -1827,8 +1827,9 @@ const SYNONYM_GROUPS: string[][] = [
   ["assignment", "assignments", "homework", "hw", "pset", "problemset"],
   ["syllabus", "outline"],
   ["textbook", "reading", "readings", "chapter"],
-  ["grade", "grades", "mark", "marks", "score", "weight", "weighting"],
+  ["grade", "grades", "mark", "marks", "score", "weight", "weighting", "worth", "point", "points"],
   ["policy", "policies", "rules"],
+  ["starter", "template", "skeleton", "scaffold", "boilerplate"],
   ["tutorial", "tutorials", "section", "recitation"],
   ["office", "officehours"],
   ["group", "team", "partner", "partners"],
