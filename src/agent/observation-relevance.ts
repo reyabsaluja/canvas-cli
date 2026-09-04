@@ -127,7 +127,7 @@ export function scoreObservationRelevance(
 function collectHeadingText(content: string): string {
   const headings: string[] = [];
   for (const line of content.split("\n")) {
-    const match = line.match(/^\s{0,3}#{1,4}\s+(.+?)\s*$/);
+    const match = line.match(/^\s{0,3}#{1,6}\s+(.+?)\s*$/);
     if (match?.[1]) headings.push(match[1]);
   }
   return headings.join(" ");

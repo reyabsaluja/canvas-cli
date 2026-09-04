@@ -1370,7 +1370,7 @@ function splitMarkdownIntoSections(
   };
 
   for (const line of lines) {
-    const headingMatch = line.match(/^#{1,4}\s+(.+)/);
+    const headingMatch = line.match(/^#{1,6}\s+(.+)/);
     if (headingMatch) {
       flush();
       currentSection = headingMatch[1] ?? "Top";
