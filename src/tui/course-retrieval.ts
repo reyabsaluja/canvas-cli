@@ -387,6 +387,7 @@ const COURSE_ARTIFACT_KINDS: ArtifactKind[] = [
   "attachment",
   "syllabus",
   "front_page",
+  "lecture",
 ];
 
 const COURSE_READABLE_KINDS: ArtifactKind[] = [

@@ -1713,6 +1713,18 @@ function buildCourseSearchGuidance(
     );
   }
 
+  const lectureTitles = [...new Set(
+    matches
+      .filter((match) => match.artifact.kind === "lecture")
+      .map((match) => match.artifact.title.trim())
+      .filter((title) => title.length > 0)
+  )].slice(0, 3);
+  if (lectureTitles.length > 0) {
+    guidance.push(
+      `Lecture results are not readable documents: to open one for the student call open_lecture (or open_resource with its URL), such as ${joinQuotedTitles(lectureTitles)}; if the slides are also listed as a file or attachment, read those with read_file.`
+    );
+  }
+
   return guidance.join(" ");
 }
 
