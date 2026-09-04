@@ -11,7 +11,12 @@ import type {
 } from "./types.js";
 import type { SelectedAttachment } from "./attachment-selection.js";
 import type { CanvasAssignment } from "../canvas/types.js";
-import { extractLinkedFiles } from "../workspace/attachments.js";
+import {
+  canvasFileIdFromUrl,
+  extractLinkedFileFromUrl,
+  extractLinkedFiles,
+  type LinkedFile,
+} from "../workspace/attachments.js";
 import { makeCourseSlug, getCoursePath } from "./slug.js";
 import {
   fetchCourseContent,
@@ -107,6 +112,7 @@ export async function ingestCourse(
     files,
     heuristicAttachments,
     client,
+    config.baseUrl,
     signal
   );
 
@@ -114,7 +120,8 @@ export async function ingestCourse(
   // These have verifier tokens making them downloadable even when Files API is blocked
   const descriptionAttachments = selectDescriptionLinkedFiles(
     raw.assignments,
-    [...heuristicAttachments, ...moduleAttachments]
+    [...heuristicAttachments, ...moduleAttachments],
+    config.baseUrl
   );
 
   // Step 5c: Download files linked in fetched Canvas pages, front page,
@@ -125,7 +132,8 @@ export async function ingestCourse(
     courseMeta.syllabusBody,
     raw.announcements,
     raw.discussionThreads,
-    [...heuristicAttachments, ...moduleAttachments, ...descriptionAttachments]
+    [...heuristicAttachments, ...moduleAttachments, ...descriptionAttachments],
+    config.baseUrl
   );
 
   // Step 5c': Files attached to posts through the Canvas "Attach" button.
@@ -369,6 +377,7 @@ async function selectModuleFiles(
   files: FileIndexEntry[],
   alreadySelected: SelectedAttachment[],
   client: CanvasClient,
+  canvasBaseUrl: string,
   signal?: AbortSignal | null
 ): Promise<SelectedAttachment[]> {
   const selected: SelectedAttachment[] = [];
@@ -387,18 +396,30 @@ async function selectModuleFiles(
     itemTitle: string;
     contentId: number;
     file: FileIndexEntry | null;
+    /** For "external URL" items that really point at a Canvas file: the link itself. */
+    linkedFile: LinkedFile | null;
   }> = [];
 
   for (const mod of modules) {
     for (const item of mod.items) {
-      if (item.type !== "File") continue;
-      if (item.contentId === null) continue;
-      if (alreadySelectedIds.has(item.contentId)) continue;
+      // "External URL" items are often a pasted link to a Canvas file
+      // (/courses/:id/files/:id); treat those exactly like File items.
+      const linkedFile =
+        item.type === "ExternalUrl" || item.type === "ExternalTool"
+          ? extractLinkedFileFromUrl(item.externalUrl, item.title, canvasBaseUrl)
+          : null;
+      const contentId =
+        item.type === "File"
+          ? item.contentId
+          : canvasFileIdFromUrl(item.externalUrl, canvasBaseUrl);
+      if (contentId === null) continue;
+      if (alreadySelectedIds.has(contentId)) continue;
       candidates.push({
         modName: mod.name,
         itemTitle: item.title,
-        contentId: item.contentId,
-        file: fileById.get(item.contentId) ?? null,
+        contentId,
+        file: fileById.get(contentId) ?? null,
+        linkedFile,
       });
     }
   }
@@ -417,7 +438,23 @@ async function selectModuleFiles(
 
       const fetched = await client.getFileSafe(candidate.contentId, signal);
       if (!fetched) {
-        return null;
+        // The metadata endpoint may be blocked while the link itself still
+        // downloads (verifier tokens); fall back to the link.
+        if (!candidate.linkedFile) return null;
+        return {
+          file: {
+            id: candidate.contentId,
+            displayName: candidate.linkedFile.title,
+            filename: candidate.linkedFile.title,
+            contentType: "",
+            size: 0,
+            url: candidate.linkedFile.downloadUrl,
+            updatedAt: null,
+            folderId: null,
+          },
+          modName: candidate.modName,
+          itemTitle: candidate.itemTitle,
+        };
       }
 
       return {
@@ -448,8 +485,8 @@ async function selectModuleFiles(
       filename: entry.file.displayName || entry.itemTitle,
       downloadUrl: entry.file.url,
       reason: `module file in "${entry.modName}"`,
-      contentType: entry.file.contentType,
-      size: entry.file.size,
+      contentType: entry.file.contentType || null,
+      size: entry.file.size || null,
       subfolder: "modules",
     });
   }
@@ -464,7 +501,8 @@ async function selectModuleFiles(
  */
 function selectDescriptionLinkedFiles(
   assignments: CanvasAssignment[],
-  alreadySelected: SelectedAttachment[]
+  alreadySelected: SelectedAttachment[],
+  canvasBaseUrl: string
 ): SelectedAttachment[] {
   const selected: SelectedAttachment[] = [];
   const alreadyUrls = new Set(alreadySelected.map((a) => a.downloadUrl));
@@ -473,7 +511,7 @@ function selectDescriptionLinkedFiles(
     const desc = (assignment as any).description;
     if (!desc || typeof desc !== "string") continue;
 
-    const linked = extractLinkedFiles(desc);
+    const linked = extractLinkedFiles(desc, canvasBaseUrl);
     for (const file of linked) {
       if (alreadyUrls.has(file.downloadUrl)) continue;
       alreadyUrls.add(file.downloadUrl);
@@ -505,7 +543,8 @@ function selectHtmlLinkedFiles(
   syllabusBody: string | null,
   announcements: Array<{ title: string; message: string | null }>,
   discussionThreads: RawDiscussionThread[],
-  alreadySelected: SelectedAttachment[]
+  alreadySelected: SelectedAttachment[],
+  canvasBaseUrl: string
 ): SelectedAttachment[] {
   const selected: SelectedAttachment[] = [];
   const alreadyUrls = new Set(alreadySelected.map((a) => a.downloadUrl));
@@ -544,7 +583,7 @@ function selectHtmlLinkedFiles(
   }
 
   for (const source of htmlSources) {
-    const linked = extractLinkedFiles(source.body);
+    const linked = extractLinkedFiles(source.body, canvasBaseUrl);
     for (const file of linked) {
       if (alreadyUrls.has(file.downloadUrl)) continue;
       alreadyUrls.add(file.downloadUrl);

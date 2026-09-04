@@ -173,7 +173,7 @@ async function writeWorkspaceArtifacts(
   }
 
   const linkedFiles = detail.description
-    ? extractLinkedFiles(detail.description)
+    ? extractLinkedFiles(detail.description, options.config?.baseUrl)
     : [];
   let attachmentResult: DownloadResult = {
     downloaded: [],

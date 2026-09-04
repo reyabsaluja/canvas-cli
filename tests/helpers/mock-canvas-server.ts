@@ -568,8 +568,9 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
       return;
     }
 
-    // GET /files/:id/download (also reachable without the /api/v1 prefix)
-    const fileDownloadMatch = path.match(/^\/files\/(\d+)\/download$/);
+    // GET /files/:id/download and /courses/:cid/files/:id/download (also
+    // reachable without the /api/v1 prefix)
+    const fileDownloadMatch = path.match(/^(?:\/courses\/\d+)?\/files\/(\d+)\/download$/);
     if (fileDownloadMatch && req.method === "GET") {
       const fileId = parseInt(fileDownloadMatch[1], 10);
       let found: MockFile | undefined;
