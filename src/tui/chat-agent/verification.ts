@@ -6,6 +6,7 @@ import {
 } from "../../agent/observation-relevance.js";
 import {
   answerLooksLikeNotFound,
+  collectEvidenceText,
   findUnsupportedAnswerClaims,
 } from "../../agent/verify.js";
 
@@ -305,9 +306,12 @@ export function selectUngroundedSearchRecoveryReadArtifactId(
 /**
  * True when a non-empty answer was given from search snippets: the turn has a
  * successful search breadcrumb with an unread, unfailed artifact, and the
- * answer either states a checkable figure (date, time, number) beyond what
- * the question already said, or visibly echoes that breadcrumb. Trivial
- * answers to trivial questions are left alone so they are not answered twice.
+ * answer either states a checkable figure (date, time, number) that neither
+ * the question nor a grounded read this turn supplied, or visibly echoes
+ * that breadcrumb. An answer whose figures all sit in what was actually read
+ * is grounded already; re-reading the other hit would only cost a second
+ * model call. Trivial answers to trivial questions are left alone so they
+ * are not answered twice.
  */
 export function shouldGroundUnverifiedAnswer(
   answer: string,
@@ -335,7 +339,7 @@ export function shouldGroundUnverifiedAnswer(
   }
 
   return (
-    answerStatesCheckableFigure(answer, question) ||
+    answerStatesUngroundedFigure(answer, question, currentTurnObservations) ||
     answerEchoesBreadcrumb(answer, breadcrumbs, recoverableArtifactId)
   );
 }
@@ -722,9 +726,22 @@ function isSuccessfulSearchBreadcrumbObservation(
   );
 }
 
-/** A date, time, or multi-digit figure in the answer that the question did not supply. */
-function answerStatesCheckableFigure(answer: string, question: string): boolean {
-  return findUnsupportedAnswerClaims(answer, "", question).length > 0;
+/**
+ * A date, time, or multi-digit figure in the answer that neither the question
+ * nor this turn's grounded reads supplied. On a snippet-only turn (no
+ * grounded read at all) the evidence is empty, so every such figure counts.
+ */
+function answerStatesUngroundedFigure(
+  answer: string,
+  question: string,
+  currentTurnObservations: Observation[]
+): boolean {
+  const groundedEvidence = collectEvidenceText(
+    currentTurnObservations.filter((observation) =>
+      isGroundedContentObservation(observation)
+    )
+  );
+  return findUnsupportedAnswerClaims(answer, groundedEvidence, question).length > 0;
 }
 
 /**
@@ -865,6 +882,12 @@ function extractListedThreadTitles(content: string): string[] {
   return titles;
 }
 
+/**
+ * Listed titles that share at least one content word (or the whole title)
+ * with the question, best first. A listing whose titles all score zero has
+ * no candidate: opening the first post anyway would ground the answer in an
+ * unrelated announcement.
+ */
 function rankListedThreadTitles(question: string, titles: string[]): string[] {
   const questionText = normalizeThreadLookupText(question);
   const questionTokens = new Set(tokenizeThreadLookupText(questionText));
@@ -879,6 +902,7 @@ function rankListedThreadTitles(question: string, titles: string[]): string[] {
       }
       return { title, index, score };
     })
+    .filter((entry) => entry.score > 0)
     .sort((left, right) =>
       right.score !== left.score ? right.score - left.score : left.index - right.index
     )
@@ -893,8 +917,11 @@ function normalizeThreadLookupText(value: string): string {
     .trim();
 }
 
+/** Content words only: "the" shared by a question and a title is not a match. */
 function tokenizeThreadLookupText(value: string): string[] {
-  return value.split(/\s+/).filter((token) => token.length > 2);
+  return value
+    .split(/\s+/)
+    .filter((token) => token.length > 2 && !NO_INFO_RECOVERY_QUERY_STOP_WORDS.has(token));
 }
 
 function findBestObservationForArtifact(

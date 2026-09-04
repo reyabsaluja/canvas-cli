@@ -511,3 +511,108 @@ test("selectors: thread and complementary recovery pick unread targets only", ()
     []
   );
 });
+
+// A grounded read this turn supplies the evidence the answer's figures are
+// checked against; only a figure that read does not contain sends recovery to
+// the unread hit.
+function latePolicyBreadcrumb(): Observation {
+  return {
+    tool: "search_workspace",
+    status: "ok",
+    summary: 'Found 2 relevant workspace matches for "late penalty".',
+    artifacts: [
+      {
+        artifactId: "art:syllabus.pdf",
+        title: "syllabus.pdf",
+        kind: "attachment",
+        excerpt: "Late work loses 10% per day.",
+      },
+      {
+        artifactId: "art:lab1.pdf",
+        title: "lab1.pdf",
+        kind: "attachment",
+        excerpt: "Lab 1 late penalty: 10% per day, capped at 50%.",
+      },
+    ],
+  };
+}
+
+test("an answer whose figure comes from this turn's grounded read is not re-checked against the unread hit", async () => {
+  const syllabusRead = groundedRead("syllabus.pdf", "## Late Policy\n\nLate work loses 10% per day.");
+  const lab1Read = groundedRead("lab1.pdf", "Lab 1 late penalty: 10% per day, capped at 50%.");
+  const { harness, run } = createHarness({
+    question: "What is the late penalty?",
+    answer: "Late work loses 10% per day (syllabus.pdf — Late Policy).",
+    toolNames: ["search_workspace", "read_file", "list_files"],
+    turnObservations: [latePolicyBreadcrumb(), syllabusRead],
+    readResults: { "art:lab1.pdf": toolResult(lab1Read, lab1Read.content) },
+  });
+
+  const result = await run();
+
+  assert.deepEqual(harness.reads, [], "the other search hit must not be read");
+  assert.deepEqual(harness.calls, []);
+  assert.equal(result.regenerated, false);
+  assert.deepEqual(harness.deltas, [], "no separator is streamed when the answer is grounded");
+  assert.equal(result.answer, "Late work loses 10% per day (syllabus.pdf — Late Policy).");
+  assert.equal(
+    shouldGroundUnverifiedAnswer(
+      "Late work loses 10% per day.",
+      [latePolicyBreadcrumb(), syllabusRead],
+      "What is the late penalty?"
+    ),
+    false
+  );
+});
+
+test("an answer with a figure the grounded read does not contain still reads the unread hit and regenerates", async () => {
+  const syllabusRead = groundedRead("syllabus.pdf", "## Late Policy\n\nLate work loses 10% per day.");
+  const lab1Read = groundedRead("lab1.pdf", "Lab 1 late penalty: 10% per day, capped at 50%.");
+  const { harness, run } = createHarness({
+    question: "What is the late penalty?",
+    answer: "Late work loses 10% per day, capped at 50%.",
+    toolNames: ["search_workspace", "read_file", "list_files"],
+    turnObservations: [latePolicyBreadcrumb(), syllabusRead],
+    readResults: { "art:lab1.pdf": toolResult(lab1Read, lab1Read.content) },
+    regeneratedAnswer: "The syllabus says 10% per day; Lab 1 caps the penalty at 50% (lab1.pdf).",
+  });
+
+  const result = await run();
+
+  assert.deepEqual(harness.reads, ["art:lab1.pdf"]);
+  assert.equal(result.regenerated, true);
+  assert.equal(harness.deltas[0], RECOVERY_SEPARATOR);
+  assert.ok(harness.regenerations[0]?.some((observation) => observation.content === lab1Read.content));
+});
+
+test("thread recovery skips a listing whose titles share nothing with the question", async () => {
+  const listing: Observation = {
+    tool: "list_announcements",
+    status: "ok",
+    summary: "Listed 2 announcements for this course.",
+    artifacts: [],
+    content: [
+      "**Announcements** (2 items)",
+      "",
+      "[A] Welcome to the course — Prof. Ada — ECE243 — 30d ago",
+      "[A] Office hours moved — Prof. Ada — ECE243 — 2d ago",
+    ].join("\n"),
+  };
+  const question = "what did the professor say about the midterm";
+  assert.equal(selectThreadRecoveryTopic(question, [listing]), null);
+
+  const { harness, run } = createHarness({
+    question,
+    answer: "The two announcements posted are a course welcome and an office-hours change; neither mentions the midterm.",
+    toolNames: ["search_workspace", "read_file", "list_announcements", "read_thread"],
+    turnObservations: [listing],
+  });
+
+  const result = await run();
+
+  assert.ok(
+    !harness.calls.some((call) => call.name === "read_thread"),
+    `must not open an off-topic post, got ${JSON.stringify(harness.calls)}`
+  );
+  assert.equal(result.regenerated, false);
+});

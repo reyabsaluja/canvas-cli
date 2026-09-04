@@ -168,7 +168,7 @@ function lowerConfidence(
 }
 
 /** Everything a successful observation actually showed the model. */
-function collectEvidenceText(observations: Observation[]): string {
+export function collectEvidenceText(observations: Observation[]): string {
   const parts: string[] = [];
   for (const observation of observations) {
     if (observation.status !== "ok") {
