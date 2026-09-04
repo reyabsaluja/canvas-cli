@@ -9,13 +9,33 @@ export function htmlToText(
   html: string,
   options?: { baseUrl?: string | null }
 ): string {
+  // htmlToText recurses through htmlFragmentToText for cells, list items and
+  // captions. <pre> blocks are parked at the outermost call and restored after
+  // whitespace normalisation, so their indentation survives every level.
+  const isOutermost = preBlocks === null;
+  if (isOutermost) preBlocks = [];
+  try {
+    let text = convert(html, options);
+    if (isOutermost) text = restorePreformatted(text, preBlocks ?? []);
+    return text;
+  } finally {
+    if (isOutermost) preBlocks = null;
+  }
+}
+
+function convert(
+  html: string,
+  options?: { baseUrl?: string | null }
+): string {
   let text = html.replace(/\r\n/g, "\n");
 
   text = stripCommentsScriptsAndStyles(text);
+  text = replacePreformatted(text);
   text = replaceFigures(text, options);
   text = replaceTables(text, options);
   text = replaceDefinitionLists(text, options);
   text = replaceLists(text, options);
+  text = replaceDetails(text, options);
   text = replaceMedia(text, options);
 
   text = text.replace(/<br\s*\/?>/gi, "\n");
@@ -97,6 +117,97 @@ function stripCommentsScriptsAndStyles(html: string): string {
   return html
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<(script|style|noscript)\b[^>]*>[\s\S]*?<\/\1>/gi, "");
+}
+
+/**
+ * Parked <pre> blocks for the current top-level htmlToText call, or null when
+ * no conversion is in progress. Conversion is synchronous, so a module-level
+ * slot is safe.
+ */
+let preBlocks: string[] | null = null;
+
+// Private-use code points survive stripControlChars and never occur in course
+// HTML, so the placeholder can travel through normalisation untouched.
+const PRE_SENTINEL = "";
+const PRE_PLACEHOLDER_PATTERN = /PRE(\d+)/g;
+
+/**
+ * Swap each <pre> block for a placeholder so later passes (which collapse
+ * runs of spaces and trim lines) cannot touch its whitespace. The blocks are
+ * rendered as fenced code once normalisation has finished.
+ */
+function replacePreformatted(html: string): string {
+  return html.replace(/<pre\b([^>]*)>([\s\S]*?)<\/pre>/gi, (_match, attrs, inner) => {
+    const store = preBlocks;
+    if (!store) return _match;
+    const language = codeLanguage(String(attrs)) ?? codeLanguage(innerCodeAttrs(String(inner)));
+    let content = String(inner)
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|li|tr)>/gi, "\n");
+    content = decodeEntities(stripTags(content));
+    content = stripControlChars(content).replace(/^\n/, "").replace(/\s+$/, "");
+    if (!content.trim()) return "\n";
+    const index = store.length;
+    store.push(`\`\`\`${language ?? ""}\n${content}\n\`\`\``);
+    return `\n\n${PRE_SENTINEL}PRE${index}${PRE_SENTINEL}\n\n`;
+  });
+}
+
+function restorePreformatted(text: string, blocks: string[]): string {
+  if (blocks.length === 0) return text;
+  return text.replace(PRE_PLACEHOLDER_PATTERN, (_match, indexStr) => {
+    const block = blocks[Number.parseInt(indexStr, 10)];
+    return block ?? "";
+  });
+}
+
+function innerCodeAttrs(inner: string): string {
+  const code = inner.match(/^\s*<code\b([^>]*)>/i);
+  return code?.[1] ?? "";
+}
+
+/** "language-python" / "lang-c" class names name the fence's language. */
+function codeLanguage(attrs: string): string | null {
+  const classes = extractAttr(attrs, "class") ?? "";
+  const match = classes.match(/(?:^|\s)(?:language|lang)-([A-Za-z0-9_+#.-]+)/);
+  return match?.[1] ?? null;
+}
+
+function replaceDetails(
+  html: string,
+  options?: { baseUrl?: string | null }
+): string {
+  // Innermost first, so nested <details> render before the outer one reads them.
+  const pattern = /<details\b[^>]*>((?:(?!<details\b)[\s\S])*?)<\/details>/gi;
+  let current = html;
+  let previous: string;
+
+  do {
+    previous = current;
+    current = current.replace(pattern, (_match, inner) => {
+      const rendered = renderDetails(String(inner), options);
+      return rendered ? `\n${rendered}\n` : "\n";
+    });
+  } while (current !== previous);
+
+  return current;
+}
+
+/** `<details>` becomes a "Details: <summary>" line followed by its body. */
+function renderDetails(
+  detailsHtml: string,
+  options?: { baseUrl?: string | null }
+): string {
+  const summaryMatch = detailsHtml.match(/<summary\b[^>]*>([\s\S]*?)<\/summary>/i);
+  const summary = summaryMatch
+    ? htmlFragmentToSingleLineText(summaryMatch[1] ?? "", options)
+    : "";
+  const bodyHtml = detailsHtml.replace(/<summary\b[^>]*>[\s\S]*?<\/summary>/i, "");
+  const body = htmlFragmentToText(bodyHtml, options);
+
+  if (summary && body) return `Details: ${summary}\n${body}`;
+  if (summary) return `Details: ${summary}`;
+  return body ? `Details:\n${body}` : "";
 }
 
 function replaceTables(
@@ -478,14 +589,145 @@ function replaceMedia(
   current = current.replace(/<iframe\b([^>]*)>([\s\S]*?)<\/iframe>/gi, (_match, attrs) => {
     return renderEmbed("Embedded content", attrs, options);
   });
-  current = current.replace(/<video\b([^>]*)>([\s\S]*?)<\/video>/gi, (_match, attrs) => {
-    return renderEmbed("Video", attrs, options);
+  current = current.replace(/<video\b([^>]*)>([\s\S]*?)<\/video>/gi, (_match, attrs, inner) => {
+    return blockLines(renderMediaElement("Video", attrs, inner, options));
   });
-  current = current.replace(/<audio\b([^>]*)>([\s\S]*?)<\/audio>/gi, (_match, attrs) => {
-    return renderEmbed("Audio", attrs, options);
+  current = current.replace(/<audio\b([^>]*)>([\s\S]*?)<\/audio>/gi, (_match, attrs, inner) => {
+    return blockLines(renderMediaElement("Audio", attrs, inner, options));
+  });
+  current = current.replace(/<object\b([^>]*)>([\s\S]*?)<\/object>/gi, (_match, attrs, inner) => {
+    return blockLines(renderObject(attrs, inner, options));
+  });
+  current = current.replace(/<embed\b([^>]*?)\/?>/gi, (_match, attrs) => {
+    return renderEmbed("Embedded object", attrs, options);
   });
 
   return current;
+}
+
+/** Multi-part media descriptions stand on their own lines in flowing text. */
+function blockLines(parts: string[]): string {
+  if (parts.length === 0) return "";
+  return parts.length === 1 ? parts[0]! : `\n${parts.join("\n")}\n`;
+}
+
+/**
+ * `<video>`/`<audio>`: the headline names the element (title, aria-label,
+ * fallback text, or its URL); every `<source>`, caption/subtitle `<track>` and
+ * the poster image follow, so a lecture recording is findable by any of them.
+ */
+function renderMediaElement(
+  kind: "Audio" | "Video",
+  attrs: string,
+  inner: string,
+  options?: { baseUrl?: string | null }
+): string[] {
+  const baseUrl = options?.baseUrl ?? null;
+  const title = extractAttr(attrs, "title") ?? extractAttr(attrs, "aria-label");
+  const directSrc = extractAttr(attrs, "src") ?? extractAttr(attrs, "data-src");
+  const resolvedDirectSrc = directSrc ? resolveHref(directSrc, baseUrl) : "";
+  const poster = extractAttr(attrs, "poster");
+  const sources = extractSources(inner, baseUrl);
+  const tracks = extractTracks(inner, baseUrl);
+  const fallback = htmlFragmentToSingleLineText(
+    inner.replace(/<(source|track)\b[^>]*\/?>/gi, ""),
+    options
+  );
+
+  const headlineSrc = resolvedDirectSrc || sources[0]?.src || "";
+  const label = title || fallback || headlineSrc;
+  if (!label && tracks.length === 0 && !poster) return [];
+
+  const parts: string[] = [];
+  if (label && headlineSrc && label !== headlineSrc) {
+    parts.push(`${kind}: ${label} (${headlineSrc})`);
+  } else {
+    parts.push(`${kind}: ${label || headlineSrc}`.replace(/:\s*$/, ":"));
+  }
+  for (const source of sources) {
+    if (source.src === headlineSrc && !source.type && !resolvedDirectSrc) continue;
+    parts.push(source.type ? `Source: ${source.src} (${source.type})` : `Source: ${source.src}`);
+  }
+  parts.push(...tracks);
+  if (poster) parts.push(`Poster: ${resolveHref(poster, baseUrl)}`);
+  return parts;
+}
+
+function extractSources(
+  html: string,
+  baseUrl: string | null
+): Array<{ src: string; type: string | null }> {
+  const sources: Array<{ src: string; type: string | null }> = [];
+  const seen = new Set<string>();
+  for (const match of html.matchAll(/<source\b([^>]*?)\/?>/gi)) {
+    const attrs = match[1] ?? "";
+    const src = extractAttr(attrs, "src") ?? extractAttr(attrs, "data-src");
+    if (!src) continue;
+    const resolved = resolveHref(src, baseUrl);
+    const type = extractAttr(attrs, "type");
+    const key = `${resolved}|${type ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    sources.push({ src: resolved, type });
+  }
+  return sources;
+}
+
+/** "Captions: English (en) https://…/lec3.en.vtt" per `<track>`. */
+function extractTracks(html: string, baseUrl: string | null): string[] {
+  const tracks: string[] = [];
+  for (const match of html.matchAll(/<track\b([^>]*?)\/?>/gi)) {
+    const attrs = match[1] ?? "";
+    const src = extractAttr(attrs, "src");
+    if (!src) continue;
+    const resolved = resolveHref(src, baseUrl);
+    const kind = titleCase(extractAttr(attrs, "kind") ?? "subtitles");
+    const label = extractAttr(attrs, "label");
+    const lang = extractAttr(attrs, "srclang");
+    const descriptor = label && lang ? `${label} (${lang})` : label || lang || "";
+    const line = descriptor ? `${kind}: ${descriptor} ${resolved}` : `${kind}: ${resolved}`;
+    if (!tracks.includes(line)) tracks.push(line);
+  }
+  return tracks;
+}
+
+/**
+ * `<object>`: an embed line for its data URL and type, plus whatever fallback
+ * content it carries (often the "download the PDF" link).
+ */
+function renderObject(
+  attrs: string,
+  inner: string,
+  options?: { baseUrl?: string | null }
+): string[] {
+  let embedAttrs = attrs;
+  if (!extractAttr(attrs, "data") && !extractAttr(attrs, "src") && !extractAttr(attrs, "data-src")) {
+    // Legacy markup names the file in a <param> or a nested <embed>.
+    const nested = inner.match(/<embed\b([^>]*?)\/?>/i)?.[1];
+    const param = [...inner.matchAll(/<param\b([^>]*?)\/?>/gi)]
+      .map((match) => match[1] ?? "")
+      .find((paramAttrs) => /^(src|movie|url|data)$/i.test(extractAttr(paramAttrs, "name") ?? ""));
+    const paramValue = param ? extractAttr(param, "value") : null;
+    if (nested) embedAttrs = `${attrs} ${nested}`;
+    else if (paramValue) embedAttrs = `${attrs} data="${paramValue.replace(/"/g, "&quot;")}"`;
+  }
+  const parts: string[] = [];
+  const embed = renderEmbed("Embedded object", embedAttrs, options);
+  if (embed) parts.push(embed);
+  const fallback = htmlFragmentToText(
+    inner.replace(/<(embed|param)\b[^>]*\/?>/gi, ""),
+    options
+  );
+  if (fallback) parts.push(fallback);
+  return parts;
+}
+
+function titleCase(value: string): string {
+  const cleaned = value.replace(/[-_]+/g, " ").trim();
+  return cleaned
+    .split(/\s+/)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
 }
 
 function renderImage(
@@ -510,13 +752,17 @@ function renderEmbed(
 ): string {
   const title = extractAttr(attrs, "title");
   const ariaLabel = extractAttr(attrs, "aria-label");
-  const src = extractAttr(attrs, "src");
+  // Lazy-loaded iframes keep the URL in data-src; <object> uses data=.
+  const src =
+    extractAttr(attrs, "src") ?? extractAttr(attrs, "data-src") ?? extractAttr(attrs, "data");
   const resolvedSrc = src ? resolveHref(src, options?.baseUrl ?? null) : "";
   const label = title || ariaLabel || resolvedSrc;
   if (!label) return "";
+  const type = kind === "Embedded object" ? extractAttr(attrs, "type") : null;
+  const suffix = type ? ` [${type}]` : "";
   return resolvedSrc && label !== resolvedSrc
-    ? `${kind}: ${label} (${resolvedSrc})`
-    : `${kind}: ${label}`;
+    ? `${kind}: ${label} (${resolvedSrc})${suffix}`
+    : `${kind}: ${label}${suffix}`;
 }
 
 function extractMediaDescriptions(
@@ -534,11 +780,21 @@ function extractMediaDescriptions(
     if (rendered) descriptions.push(rendered);
   }
   for (const match of html.matchAll(/<video\b([^>]*)>([\s\S]*?)<\/video>/gi)) {
-    const rendered = renderEmbed("Video", match[1] ?? "", options);
-    if (rendered) descriptions.push(rendered);
+    const rendered = renderMediaElement("Video", match[1] ?? "", match[2] ?? "", options);
+    if (rendered.length > 0) descriptions.push(rendered.join(" — "));
   }
   for (const match of html.matchAll(/<audio\b([^>]*)>([\s\S]*?)<\/audio>/gi)) {
-    const rendered = renderEmbed("Audio", match[1] ?? "", options);
+    const rendered = renderMediaElement("Audio", match[1] ?? "", match[2] ?? "", options);
+    if (rendered.length > 0) descriptions.push(rendered.join(" — "));
+  }
+  let remaining = html;
+  remaining = remaining.replace(/<object\b([^>]*)>([\s\S]*?)<\/object>/gi, (_match, attrs, inner) => {
+    const rendered = renderObject(attrs, inner, options);
+    if (rendered.length > 0) descriptions.push(rendered.join(" — "));
+    return "";
+  });
+  for (const match of remaining.matchAll(/<embed\b([^>]*?)\/?>/gi)) {
+    const rendered = renderEmbed("Embedded object", match[1] ?? "", options);
     if (rendered) descriptions.push(rendered);
   }
 

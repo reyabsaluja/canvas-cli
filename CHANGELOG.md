@@ -77,6 +77,7 @@ Initial release of `@reyabsaluja/canvas-cli`.
 - Agent: when a question names a page or heading that a cut-off read never included, the retrieval gate issues a section read instead of answering from truncated memory; the numeric-claim check also accepts figures grounded by earlier turns' reads
 - Extraction: HTML tables keep colspan/rowspan, nested tables, captions, and row-header keys; `<dl>` lists render as "term: definition" lines; links with generic text ("here", "download") show the linked filename
 - Extraction: zip summary caps raised from 30k to 120k characters per file and from 50k to 400k total, with an explicit "N more characters omitted" note instead of a silent cut
+- Extraction: HTML `<pre>` blocks become fenced code with indentation, tabs, and blank lines intact (with the language from `language-*` classes); `<details>` render as "Details: <summary>" blocks; `<video>`/`<audio>` list every `<source>`, caption/subtitle `<track>`, and poster; `<object>`/`<embed>` and lazy `data-src`/`data` URLs emit "Embedded object" lines with their type and fallback text
 - Workspace answers are no longer capped at 2-4 sentences, and the prompt asks the agent to list the sources it checked in not-found answers
 - Observation relevance stems question words and treats a match on a document heading as strong on its own, so a read that answers the question counts as grounded evidence across verification, memory reuse, and the retrieval gate
 
