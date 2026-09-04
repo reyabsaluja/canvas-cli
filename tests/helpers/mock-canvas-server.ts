@@ -45,9 +45,13 @@ export interface MockModule {
   position: number;
   items_count: number;
   items_url: string;
+  unlock_at?: string | null;
+  require_sequential_progress?: boolean;
+  prerequisite_module_ids?: number[];
   items?: Array<{
     id: number;
     title: string;
+    completion_requirement?: { type: string; min_score?: number };
     type: string;
     position: number;
     content_id?: number;

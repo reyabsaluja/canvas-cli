@@ -109,6 +109,18 @@ export interface CanvasModule {
   position: number;
   items_count: number;
   items_url: string;
+  unlock_at?: string | null;
+  require_sequential_progress?: boolean | null;
+  /** Modules that must be completed before this one unlocks. */
+  prerequisite_module_ids?: number[] | null;
+  state?: string | null;
+}
+
+export interface CanvasModuleItemCompletionRequirement {
+  /** must_view | must_submit | must_contribute | min_score | must_mark_done */
+  type: string;
+  min_score?: number | null;
+  completed?: boolean | null;
 }
 
 export interface CanvasModuleItem {
@@ -121,6 +133,7 @@ export interface CanvasModuleItem {
   html_url?: string;
   external_url?: string;
   url?: string; // API URL to the resource
+  completion_requirement?: CanvasModuleItemCompletionRequirement | null;
 }
 
 export interface CanvasFile {

@@ -147,8 +147,10 @@ export const CS101_MODULES: MockModule[] = [
     position: 2,
     items_count: 1,
     items_url: "http://localhost/api/v1/courses/101/modules/11/items",
+    prerequisite_module_ids: [10],
+    require_sequential_progress: true,
     items: [
-      { id: 102, title: "Variables Lecture Notes", type: "Page", position: 1, page_url: "variables-lecture" },
+      { id: 102, title: "Variables Lecture Notes", type: "Page", position: 1, page_url: "variables-lecture", completion_requirement: { type: "must_view" } },
     ],
   },
 ];

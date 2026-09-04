@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **discover**
+Next area: **extract**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -24,7 +24,7 @@ Next area: **discover**
 
 ## Backlog (known gaps, pick from here first if still open)
 
-- discover: (backlog empty; candidates: module item completion requirements / prerequisites not recorded; grade posting policy / late policy fields on assignments)
+- discover: (backlog empty; candidate: grade posting policy / late policy fields on assignments)
 - extract: no OCR for scanned PDFs
 - retrieve: (backlog empty)
 - ground: numeric-claim check does not verify weekday inferences ("due Friday" when the evidence only gives a date)
@@ -71,3 +71,4 @@ Next area: **discover**
 - 2026-09-04 retrieve: course search hits list up to two further matching sections of the same document ("also — Extensions: ...") when they score at least 40% of the best one, so a syllabus that answers in two places shows both (caller did it directly)
 - 2026-09-04 reason: the /work investigation's read_document takes a section ("Page 57", heading fragment) and caches section reads separately from cut-off whole reads, so workups can reach pages past the 60k cut like the chat agent can; unknown sections fall back to the head with the section list (caller did it directly)
 - 2026-09-04 ground: spelled-out figures with a unit ("ten percent", "twenty-five marks", "two hundred words") are normalised to digits in answers and evidence, so they are checked both ways by the numeric-claim guard (caller did it directly)
+- 2026-09-04 discover: module prerequisites, unlock dates, sequential-progress and per-item completion requirements (must view/submit/contribute, min score) are recorded in modules.json and rendered into the module artifact ("Requirements: unlocks after completing Week 1; ...") so "what do I need to do to unlock module 3" is searchable (caller did it directly)
