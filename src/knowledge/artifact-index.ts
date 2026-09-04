@@ -384,7 +384,7 @@ export function searchArtifacts(
       score += 12;
     }
 
-    score *= artifact.scoreBoost;
+    score *= artifact.scoreBoost * recencyMultiplier(artifact);
 
     if (score > 0) {
       scored.push({ artifact, score });
@@ -523,7 +523,9 @@ export function searchArtifactSections(
         score += 4;
       }
 
-      score *= section.scoreBoost;
+      score *=
+        section.scoreBoost *
+        recencyMultiplier(index.artifactsById.get(section.artifactId));
       return { section, score };
     })
     .filter((entry) => entry.score > 0);
@@ -1691,6 +1693,30 @@ export function analyzeSearchQuery(query: string): SearchQueryAnalysis {
   }
 
   return { tokens, phrases, expansions };
+}
+
+/**
+ * Posts age: when two announcements or threads match equally, the newer one
+ * is almost always the one the student means ("did the prof say anything
+ * about the extension?"). Up to +20% for a post from today, fading to
+ * nothing at 90 days. Other artifact kinds are unaffected.
+ */
+const RECENCY_MAX_BOOST = 0.2;
+const RECENCY_HORIZON_DAYS = 90;
+const RECENCY_KINDS = new Set<ArtifactKind>(["announcement", "discussion"]);
+
+export function recencyMultiplier(
+  artifact: Pick<ArtifactRecord, "kind" | "metadata"> | undefined,
+  now: number = Date.now()
+): number {
+  if (!artifact || !RECENCY_KINDS.has(artifact.kind)) return 1;
+  const stamp = artifact.metadata.lastReplyAt ?? artifact.metadata.postedAt;
+  if (typeof stamp !== "string") return 1;
+  const posted = Date.parse(stamp);
+  if (!Number.isFinite(posted)) return 1;
+  const ageDays = Math.max(0, (now - posted) / 86_400_000);
+  if (ageDays >= RECENCY_HORIZON_DAYS) return 1;
+  return 1 + RECENCY_MAX_BOOST * (1 - ageDays / RECENCY_HORIZON_DAYS);
 }
 
 /** Weight of a match through a synonym relative to a direct token match. */
