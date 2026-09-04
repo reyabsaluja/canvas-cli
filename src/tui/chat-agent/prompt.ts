@@ -245,13 +245,30 @@ export function buildEvidenceBackedQuestion(
     sections.push(`- Tool: ${observation.tool}`);
     sections.push(`  Summary: ${observation.summary}`);
     for (const artifact of observation.artifacts) {
-      sections.push(`  Source: [${artifact.kind}] ${artifact.title}`);
+      // Name the section and carry the matched excerpt: for search-only
+      // evidence the excerpt is the only text the model gets, and the
+      // section label is what lets it cite "Submission" rather than the file.
+      const sourceLabel = artifact.sectionLabel
+        ? `${artifact.title} — ${artifact.sectionLabel}`
+        : artifact.title;
+      sections.push(`  Source: [${artifact.kind}] ${sourceLabel}`);
+      const excerpt = artifact.excerpt?.replace(/\s+/g, " ").trim();
+      if (excerpt) {
+        sections.push(`  Excerpt: ${excerpt}`);
+      }
     }
     if (observation.content) {
       sections.push(observation.content);
     }
     sections.push("");
   }
+  sections.push(
+    "Answer rules for this evidence:",
+    "- Cite at the section level when possible (e.g. \"according to the Grading section of the syllabus\"), not just the document title.",
+    "- When quoting a specific requirement, due date, or threshold, use the exact wording from the evidence rather than paraphrasing it loosely.",
+    "- If the evidence partially answers the question but leaves something unaddressed, say what you found and what remains unclear — do not fill gaps with assumptions.",
+    "- When multiple sources address the same point, synthesize them: note if they agree, and flag if they conflict."
+  );
   return sections.join("\n");
 }
 
