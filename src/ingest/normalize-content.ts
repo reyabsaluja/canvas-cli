@@ -2,12 +2,15 @@ import type { RawCourseContent } from "./fetch-course-content.js";
 import type {
   CourseMetadata,
   AssignmentIndexEntry,
+  AssignmentDateDetailsIndex,
+  AssignmentDateOverrideIndexEntry,
   ModuleIndexEntry,
   FileIndexEntry,
   PageIndexEntry,
   AnnouncementIndexEntry,
   DiscussionIndexEntry,
 } from "./types.js";
+import type { CanvasAssignmentDate } from "../canvas/types.js";
 import { extractLinkedFiles } from "../workspace/attachments.js";
 import { stripControlChars } from "../sanitize.js";
 
@@ -53,6 +56,7 @@ export function normalizeCourseContent(raw: RawCourseContent): {
       htmlUrl: a.html_url,
       hasDescription: !!description,
       descriptionLinkCount: linkCount,
+      dateDetails: normalizeAssignmentDates(a.all_dates),
     };
   });
 
@@ -181,4 +185,49 @@ export function normalizeCourseContent(raw: RawCourseContent): {
     announcements,
     discussions,
   };
+}
+
+/**
+ * Turn `all_dates` (include[]=all_dates on the assignment list) into base
+ * dates plus overrides. Returns null when there is nothing beyond the base
+ * entry, so "## Assignment Dates" only appears for assignments that really
+ * have section/group/student dates. Exported for tests.
+ */
+export function normalizeAssignmentDates(
+  value: CanvasAssignmentDate[] | null | undefined
+): AssignmentDateDetailsIndex | null {
+  if (!Array.isArray(value) || value.length === 0) {
+    return null;
+  }
+  const rows = value.filter((row): row is CanvasAssignmentDate => !!row && typeof row === "object");
+  const base = rows.find((row) => row.base === true) ?? null;
+  const overrides: AssignmentDateOverrideIndexEntry[] = rows
+    .filter((row) => row !== base)
+    .map((row) => ({
+      id: typeof row.id === "number" ? row.id : null,
+      title: normalizeText(row.title),
+      dueAt: normalizeText(row.due_at),
+      unlockAt: normalizeText(row.unlock_at),
+      lockAt: normalizeText(row.lock_at),
+      setType: normalizeText(row.set_type),
+      setId: typeof row.set_id === "number" ? row.set_id : null,
+    }));
+  if (overrides.length === 0) {
+    return null;
+  }
+  return {
+    dueAt: normalizeText(base?.due_at),
+    unlockAt: normalizeText(base?.unlock_at),
+    lockAt: normalizeText(base?.lock_at),
+    baseTitle: normalizeText(base?.title),
+    hasBase: base !== null,
+    overrideCount: overrides.length,
+    overrides,
+  };
+}
+
+function normalizeText(value: string | null | undefined): string | null {
+  return typeof value === "string" && value.trim().length > 0
+    ? stripControlChars(value)
+    : null;
 }

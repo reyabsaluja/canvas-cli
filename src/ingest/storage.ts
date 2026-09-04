@@ -24,6 +24,7 @@ import type {
 import type {
   CourseMetadata,
   AssignmentIndexEntry,
+  AssignmentDateDetailsIndex,
   ModuleIndexEntry,
   FileIndexEntry,
   PageIndexEntry,
@@ -328,6 +329,18 @@ function formatAssignmentText(
     lines.push(line);
   }
   lines.push(`Canvas URL: ${assignment.htmlUrl}`);
+
+  // Section/group/student dates. The "Due:" line above is already the
+  // student's own effective date; this lists every dated group so "when is
+  // it due for the evening section?" has an answer.
+  const dateLines = formatAssignmentDatesText(assignment.dateDetails ?? null);
+  if (dateLines.length > 0) {
+    lines.push("");
+    lines.push("## Assignment Dates");
+    lines.push("");
+    lines.push(...dateLines);
+  }
+
   lines.push("");
   lines.push("## Description");
   lines.push("");
@@ -542,6 +555,49 @@ function isRubricAssessmentCriterion(
     return true;
   }
   return typeof value.comments === "string" && value.comments.trim().length > 0;
+}
+
+const DATE_SET_TYPE_LABELS: Record<string, string> = {
+  coursesection: "section",
+  group: "group",
+  adhoc: "specific students",
+  noop: "mastery paths",
+};
+
+/**
+ * "- Everyone else: due …; unlocks …" then one line per override, or []
+ * when the assignment has no overrides. Exported for tests.
+ */
+export function formatAssignmentDatesText(
+  details: AssignmentDateDetailsIndex | null
+): string[] {
+  if (!details || details.overrides.length === 0) {
+    return [];
+  }
+  const describe = (row: {
+    dueAt: string | null;
+    unlockAt: string | null;
+    lockAt: string | null;
+  }): string => {
+    const parts: string[] = [];
+    parts.push(row.dueAt ? `due ${row.dueAt}` : "no due date");
+    if (row.unlockAt) parts.push(`unlocks ${row.unlockAt}`);
+    if (row.lockAt) parts.push(`locks ${row.lockAt}`);
+    return parts.join("; ");
+  };
+  const lines: string[] = [
+    "The dates at the top of this file are the ones that apply to you. Canvas lists these dates per section, group, or student set:",
+    "",
+  ];
+  if (details.hasBase) {
+    lines.push(`- ${details.baseTitle ?? "Everyone else"}: ${describe(details)}`);
+  }
+  details.overrides.forEach((override, index) => {
+    const label = override.title ?? `Override ${index + 1}`;
+    const kind = override.setType ? DATE_SET_TYPE_LABELS[override.setType.toLowerCase()] : null;
+    lines.push(`- ${label}${kind ? ` (${kind})` : ""}: ${describe(override)}`);
+  });
+  return lines;
 }
 
 function formatSubmissionRules(rawAssignment?: RawAssignmentRecord): string[] {

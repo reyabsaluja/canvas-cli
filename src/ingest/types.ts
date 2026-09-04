@@ -342,3 +342,40 @@ export interface SubmissionFeedbackSummary {
 export interface IngestionMeta {
   submissionFeedback?: SubmissionFeedbackSummary;
 }
+
+// ---------------------------------------------------------------------------
+// ADDITIVE: assignment date overrides from include[]=all_dates
+// (src/ingest/normalize-content.ts, src/ingest/storage.ts).
+// ---------------------------------------------------------------------------
+
+/** One section/group/student date set for an assignment. */
+export interface AssignmentDateOverrideIndexEntry {
+  id: number | null;
+  /** Section or group name, or Canvas's label for ad-hoc student sets. */
+  title: string | null;
+  dueAt: string | null;
+  unlockAt: string | null;
+  lockAt: string | null;
+  /** "CourseSection" | "Group" | "ADHOC" | "Noop" when Canvas reports it. */
+  setType: string | null;
+  setId: number | null;
+}
+
+/**
+ * Base dates plus every override, present only when at least one override
+ * exists (a lone base entry is the same as the assignment's own dates).
+ */
+export interface AssignmentDateDetailsIndex {
+  /** The "Everyone" / "Everyone else" dates, when Canvas lists a base entry. */
+  dueAt: string | null;
+  unlockAt: string | null;
+  lockAt: string | null;
+  baseTitle: string | null;
+  hasBase: boolean;
+  overrideCount: number;
+  overrides: AssignmentDateOverrideIndexEntry[];
+}
+
+export interface AssignmentIndexEntry {
+  dateDetails?: AssignmentDateDetailsIndex | null;
+}
