@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **retrieve**
+Next area: **reason**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -26,7 +26,7 @@ Next area: **retrieve**
 
 - discover: (backlog empty; candidates: module item completion requirements / prerequisites not recorded; grade posting policy / late policy fields on assignments)
 - extract: no OCR for scanned PDFs
-- retrieve: (backlog empty; candidate: section previews for search_course hits could show two passages when a document matches in several places)
+- retrieve: (backlog empty)
 - ground: numeric-claim check only covers digit-bearing tokens (spelled-out numbers, weekday inferences like "Friday" are not checked)
 
 ## Done
@@ -68,3 +68,4 @@ Next area: **retrieve**
 - 2026-09-04 ground: synthesis always reports the document-stated due date, and the workup shows a "Due-date conflict" line when it disagrees with Canvas (same-day in any spelling counts as a match; unparseable dates are shown verbatim) instead of silently trusting Canvas (caller did it directly)
 - 2026-09-04 discover: files attached directly to assignments (starter code, templates, data via the Canvas "Attach" control) are now selected and downloaded under attachments/assignments, deduped against every other selector, with counts in ingestion.json and the summary (caller did it directly)
 - 2026-09-04 extract: assignment extracts state their assignment group, its weight and drop rules, and the assignment's approximate share of the final grade ("7.5% (10 of 40 points in Labs)"), so the first document the agent reads answers "how much is this worth" (caller did it directly)
+- 2026-09-04 retrieve: course search hits list up to two further matching sections of the same document ("also — Extensions: ...") when they score at least 40% of the best one, so a syllabus that answers in two places shows both (caller did it directly)
