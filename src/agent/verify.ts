@@ -786,12 +786,21 @@ export function findUnsupportedAnswerClaims(
   const questionDateKeys = new Set(extractDateClaims(normalizedQuestion).map((date) => date.key));
   const dateCoveredTokens = new Set<string>();
   const seenDates = new Set<string>();
+  const evidenceYears = collectYearHints(normalizedEvidence);
   for (const date of answerDates) {
     for (const token of date.tokens) dateCoveredTokens.add(token);
     if (seenDates.has(date.key) || questionDateKeys.has(date.key)) continue;
     seenDates.add(date.key);
     if (!evidenceDateKeys.has(date.key)) {
       unsupported.push(date.label);
+      continue;
+    }
+    // "Thursday, March 27" when March 27 falls on a Friday: the date is
+    // supported but the weekday is an inference, and a wrong one sends the
+    // student to the wrong day.
+    const weekdayProblem = checkWeekdayNextToDate(normalizedAnswer, date, evidenceYears);
+    if (weekdayProblem) {
+      unsupported.push(weekdayProblem);
     }
   }
 
@@ -815,6 +824,57 @@ export function findUnsupportedAnswerClaims(
     unsupported.push(describeClaim(token, normalizedAnswer));
   }
   return unsupported;
+}
+
+const WEEKDAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+const WEEKDAY_PATTERN = "sun(?:day)?|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:rs(?:day)?)?|fri(?:day)?|sat(?:urday)?";
+
+function weekdayIndex(word: string): number {
+  const lower = word.toLowerCase();
+  return WEEKDAY_NAMES.findIndex((name) => name.startsWith(lower.slice(0, 3)));
+}
+
+/** Four-digit years mentioned in the evidence, most frequent first. */
+function collectYearHints(normalizedEvidence: string): number[] {
+  const counts = new Map<number, number>();
+  for (const match of normalizedEvidence.matchAll(/\b(20\d{2})\b/g)) {
+    const year = Number(match[1]);
+    counts.set(year, (counts.get(year) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([year]) => year);
+}
+
+/**
+ * If the answer writes a weekday immediately before or after this date
+ * ("Friday March 27", "March 27 (Thursday)"), verify it against the calendar.
+ * Returns a description of the mismatch, or null. The year comes from the
+ * claim itself, else the evidence, else the current year. Exported for tests.
+ */
+export function checkWeekdayNextToDate(
+  normalizedAnswer: string,
+  date: DateClaim,
+  yearHints: number[],
+  now: Date = new Date()
+): string | null {
+  const escaped = escapeRegExp(date.label);
+  const pattern = new RegExp(
+    `\\b(${WEEKDAY_PATTERN})\\.?,?\\s+(?:the\\s+)?${escaped}|${escaped}\\s*[,(]?\\s*(${WEEKDAY_PATTERN})\\b`,
+    "i"
+  );
+  const match = normalizedAnswer.match(pattern);
+  const weekdayWord = match?.[1] ?? match?.[2];
+  if (!weekdayWord) return null;
+  const claimed = weekdayIndex(weekdayWord);
+  if (claimed < 0) return null;
+  const [monthText, dayText] = date.key.split("-");
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const yearInClaim = date.tokens.find((token) => /^20\d{2}$/.test(token));
+  const year = yearInClaim ? Number(yearInClaim) : (yearHints[0] ?? now.getFullYear());
+  const actual = new Date(year, month - 1, day).getDay();
+  if (actual === claimed) return null;
+  const actualName = WEEKDAY_NAMES[actual]!;
+  return `${weekdayWord} ${date.label} (${date.label}, ${year} is a ${actualName[0]!.toUpperCase()}${actualName.slice(1)})`;
 }
 
 const MONTH_INDEX: Record<string, number> = {
