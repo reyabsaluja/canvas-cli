@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **extract**
+Next area: **retrieve**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -67,3 +67,4 @@ Next area: **extract**
 - 2026-09-04 reason: prompt lists the course reference pages ingestion now builds (grading scheme, course tools, quiz pages) and routes "how much is this worth", "where do I ask questions" and quiz-rule questions to them (caller did it directly)
 - 2026-09-04 ground: synthesis always reports the document-stated due date, and the workup shows a "Due-date conflict" line when it disagrees with Canvas (same-day in any spelling counts as a match; unparseable dates are shown verbatim) instead of silently trusting Canvas (caller did it directly)
 - 2026-09-04 discover: files attached directly to assignments (starter code, templates, data via the Canvas "Attach" control) are now selected and downloaded under attachments/assignments, deduped against every other selector, with counts in ingestion.json and the summary (caller did it directly)
+- 2026-09-04 extract: assignment extracts state their assignment group, its weight and drop rules, and the assignment's approximate share of the final grade ("7.5% (10 of 40 points in Labs)"), so the first document the agent reads answers "how much is this worth" (caller did it directly)

@@ -336,7 +336,8 @@ export async function ingestCourse(
     raw.fetchedPages,
     raw.announcements,
     raw.discussionThreads,
-    capturedExternalLinks
+    capturedExternalLinks,
+    raw.assignmentGroups
   );
 
   return {
