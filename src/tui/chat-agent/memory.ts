@@ -1,6 +1,7 @@
 import type { Observation } from "../../agent/observation.js";
 import type { RunState } from "../../agent/run-state.js";
 import { buildMatchExcerpt } from "../../knowledge/artifact-index.js";
+import { isGroundedContentObservation } from "../../agent/observation-relevance.js";
 import { questionNeedsMultipleSources } from "../../agent/question-intent.js";
 import { cleanInlineText } from "./shared.js";
 import type {
@@ -29,6 +30,10 @@ const MAX_CONVERSATION_CHARS = 80000;
 const MAX_TOOL_MEMORY_CHARS = 12000;
 const MAX_TOOL_MEMORY_DETAIL_CHARS = 1200;
 const MAX_NEXT_STEP_SOURCES = 3;
+/** Coverage labels ("syllabus.pdf — Late Policy") named in the evidence checkpoint. */
+const MAX_CHECKPOINT_COVERAGE_LABELS = 3;
+/** Unread search candidates named as the likely next read in the checkpoint. */
+const MAX_CHECKPOINT_NEXT_READS = 2;
 
 export function buildToolPromptMessages(
   history: ChatAgentConversationEntry[],
@@ -235,31 +240,32 @@ function buildNextToolStep(
   question: string,
   observations: Observation[]
 ): string | null {
+  // A listing (list_announcements) has content but is not a grounded read;
+  // isGroundedContentObservation keeps it out of the coverage count.
+  const groundedObservations = observations.filter((observation) =>
+    isGroundedContentObservation(observation)
+  );
   const groundedArtifactIds = new Set(
-    observations
-      .filter((observation) => observation.status === "ok" && observation.content?.trim())
+    groundedObservations
       .flatMap((observation) => observation.artifacts)
       .map((artifact) => artifact.artifactId)
   );
-  const candidateTitles = [
-    ...new Set(
-      observations
-        .filter(
-          (observation) =>
-            observation.status === "ok" &&
-            (observation.tool === "search_workspace" ||
-              observation.tool === "search_course")
-        )
-        .flatMap((observation) => observation.artifacts)
-        .map((artifact) => artifact.title.trim())
-        .filter((title) => title.length > 0)
-    ),
-  ].slice(0, MAX_NEXT_STEP_SOURCES);
+  const unavailableArtifactIds = new Set([
+    ...groundedArtifactIds,
+    ...collectFailedReadArtifactIds(observations),
+  ]);
+  const candidateTitles = collectViableSearchCandidateTitles(
+    observations,
+    unavailableArtifactIds
+  );
 
   const needsMultipleSources = questionNeedsMultipleSources(question);
   if (groundedArtifactIds.size > 0) {
     if (!needsMultipleSources || groundedArtifactIds.size > 1) {
-      return null;
+      return buildEvidenceSufficientDirective(
+        groundedObservations,
+        candidateTitles
+      );
     }
     if (candidateTitles.length === 0) {
       return buildFailureRecoveryNextStep(observations, {
@@ -293,6 +299,114 @@ function buildNextToolStep(
           .join(", ");
 
   return `Unresolved next step: you already found candidate sources but do not have grounded text yet. Reuse those breadcrumbs and call read_file on ${candidates} before running another search or answering from snippets.`;
+}
+
+/**
+ * Per-question coverage prompt once at least one grounded read exists. It
+ * never tells the model to stop: it names what the evidence covers, asks it
+ * to check every specific detail of the question against that, and points at
+ * the best unread candidate for a follow-up read.
+ */
+function buildEvidenceSufficientDirective(
+  groundedObservations: Observation[],
+  remainingCandidateTitles: string[]
+): string {
+  const sourceCount = new Set(
+    groundedObservations
+      .flatMap((observation) => observation.artifacts)
+      .map((artifact) => artifact.artifactId)
+  ).size;
+
+  const coverageLabels = collectGroundedCoverageLabels(groundedObservations);
+  const coverageSummary =
+    coverageLabels.length > 0 ? ` covering: ${coverageLabels.join("; ")}.` : ".";
+
+  const parts = [
+    `Evidence checkpoint: you have grounded text from ${sourceCount} source${sourceCount > 1 ? "s" : ""}${coverageSummary}`,
+    "Compare this evidence against the student's question — does it address every specific detail with exact facts (dates, points, names, steps)?",
+    "If any detail is vague, partially covered, or could be more specific, do a follow-up read to strengthen your answer.",
+  ];
+
+  if (remainingCandidateTitles.length > 0) {
+    const candidates = remainingCandidateTitles
+      .slice(0, MAX_CHECKPOINT_NEXT_READS)
+      .map((title) => `"${title}"`)
+      .join(", ");
+    parts.push(
+      `Likely next read: ${candidates}. Read before answering if the evidence above doesn't fully nail every detail.`
+    );
+  } else {
+    parts.push(
+      "If a specific detail is still missing, run one more focused search (search_workspace, search_course, or list_announcements then read_thread) for it; if nothing turns up, state exactly what you found and what could not be verified."
+    );
+  }
+
+  return parts.join(" ");
+}
+
+/**
+ * "title — section" labels for what the grounded reads covered, using the
+ * same section/cut-off framing as describeReadCoverage so the checkpoint and
+ * the per-observation memory lines agree about what was and was not read.
+ */
+function collectGroundedCoverageLabels(
+  groundedObservations: Observation[]
+): string[] {
+  const labels: string[] = [];
+  const seen = new Set<string>();
+
+  for (const observation of groundedObservations) {
+    for (const artifact of observation.artifacts) {
+      let label = formatToolMemorySourceLabel(artifact);
+      if (!label) {
+        continue;
+      }
+      if (artifact.truncated && (artifact.omittedLabels?.length ?? 0) > 0) {
+        const omitted = artifact.omittedLabels ?? [];
+        const shown = omitted.slice(0, 4).join(", ");
+        const more = omitted.length > 4 ? ` and ${omitted.length - 4} more` : "";
+        label = `${label} (cut off; not read: ${shown}${more})`;
+      }
+      if (!seen.has(label)) {
+        seen.add(label);
+        labels.push(label);
+      }
+    }
+  }
+
+  return labels.slice(0, MAX_CHECKPOINT_COVERAGE_LABELS);
+}
+
+/**
+ * Titles of search hits that are still worth reading: not already read in
+ * full and not a target whose read already failed.
+ */
+function collectViableSearchCandidateTitles(
+  observations: Observation[],
+  unavailableArtifactIds: Set<string>
+): string[] {
+  const titlesByArtifactId = new Map<string, string>();
+  for (const observation of observations) {
+    if (
+      observation.status !== "ok" ||
+      (observation.tool !== "search_workspace" &&
+        observation.tool !== "search_course")
+    ) {
+      continue;
+    }
+
+    for (const artifact of observation.artifacts) {
+      if (unavailableArtifactIds.has(artifact.artifactId)) {
+        continue;
+      }
+      const title = artifact.title.trim();
+      if (title.length > 0 && !titlesByArtifactId.has(artifact.artifactId)) {
+        titlesByArtifactId.set(artifact.artifactId, title);
+      }
+    }
+  }
+
+  return [...titlesByArtifactId.values()].slice(0, MAX_NEXT_STEP_SOURCES);
 }
 
 function buildFailureRecoveryNextStep(
@@ -368,6 +482,18 @@ function describeReadCoverage(observation: Observation): string | null {
     );
   }
   return notes.length > 0 ? notes.join(" ") : null;
+}
+
+/** "title — section" when the artifact is a section read, else the title. */
+function formatToolMemorySourceLabel(
+  artifact: Observation["artifacts"][number]
+): string {
+  const title = artifact.title.trim();
+  if (!title) {
+    return "";
+  }
+  const section = artifact.sectionLabel?.trim();
+  return section ? `${title} — ${section}` : title;
 }
 
 function summarizeObservationDetail(

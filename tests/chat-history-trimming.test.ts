@@ -246,6 +246,124 @@ test("buildToolPromptMessages does not force a second read for ordinary single-s
   assert.match(latestMessage, /docs\/reference\.txt/);
   assert.match(latestMessage, /docs\/walkthrough\.txt/);
   assert.doesNotMatch(latestMessage, /Unresolved next step:/i);
+  // One grounded read is not a stop signal: the checkpoint names what was
+  // covered and the unread breadcrumb the model should reach for next.
+  assert.match(latestMessage, /Evidence checkpoint.*1 source/i);
+  assert.match(latestMessage, /covering:.*docs\/reference\.txt/i);
+  assert.match(latestMessage, /Likely next read: "docs\/walkthrough\.txt"/);
+  assert.doesNotMatch(latestMessage, /do not call another tool/i);
+  assert.doesNotMatch(latestMessage, /Evidence sufficient/i);
+});
+
+test("buildToolPromptMessages includes section-level coverage labels and unread candidates in the evidence checkpoint", () => {
+  const promptMessages = buildToolPromptMessages(
+    [],
+    "What is the late penalty?",
+    {
+      observations: [
+        {
+          tool: "search_workspace",
+          status: "ok",
+          summary: 'Found 2 relevant workspace matches for "late penalty".',
+          artifacts: [
+            {
+              artifactId: "artifact-1",
+              title: "syllabus.pdf",
+              kind: "attachment",
+              excerpt: "Late penalty: 10% per day.",
+              sectionLabel: "Late Policy",
+            },
+            {
+              artifactId: "artifact-2",
+              title: "lab4.pdf",
+              kind: "attachment",
+              excerpt: "Late labs are penalised as described in the syllabus.",
+              sectionLabel: "Submission",
+            },
+            {
+              artifactId: "artifact-3",
+              title: "broken.pdf",
+              kind: "attachment",
+              excerpt: "Late work.",
+            },
+          ],
+        },
+        {
+          tool: "read_file",
+          status: "missing_text",
+          summary: "Matched broken.pdf, but the cached extracted text is missing.",
+          artifacts: [
+            { artifactId: "artifact-3", title: "broken.pdf", kind: "attachment" },
+          ],
+        },
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read syllabus.pdf — Late Policy.",
+          artifacts: [
+            {
+              artifactId: "artifact-1",
+              title: "syllabus.pdf",
+              kind: "attachment",
+              excerpt: "Late penalty: 10% per day.",
+              sectionLabel: "Late Policy",
+            },
+          ],
+          content: "Late penalty: 10% per day. Maximum 3 days late.",
+        },
+      ],
+      readArtifactIds: [],
+      stepCount: 3,
+    }
+  );
+
+  const latestMessage = promptMessages.at(-1)?.content ?? "";
+  assert.match(latestMessage, /Evidence checkpoint.*1 source/i);
+  assert.match(latestMessage, /covering: syllabus\.pdf — Late Policy/);
+  assert.match(latestMessage, /every specific detail/i);
+  assert.match(latestMessage, /dates, points, names, steps/i);
+  assert.match(latestMessage, /follow-up read/i);
+  // The already-read syllabus and the unreadable broken.pdf are not offered
+  // as the next read; the unread lab handout is.
+  assert.match(latestMessage, /Likely next read: "lab4\.pdf"\./);
+  assert.doesNotMatch(latestMessage, /Likely next read:[^\n]*(syllabus|broken)\.pdf/);
+  assert.doesNotMatch(latestMessage, /do not call another tool/i);
+  assert.match(
+    latestMessage,
+    /Reuse this memory instead of repeating the same calls, and call tools for any evidence it does not already contain\./
+  );
+});
+
+test("buildToolPromptMessages tells the model when no unread candidate remains after a grounded read", () => {
+  const promptMessages = buildToolPromptMessages(
+    [],
+    "What is the late penalty?",
+    {
+      observations: [
+        {
+          tool: "read_file",
+          status: "ok",
+          summary: "Read syllabus.pdf.",
+          artifacts: [
+            {
+              artifactId: "artifact-1",
+              title: "syllabus.pdf",
+              kind: "attachment",
+              excerpt: "Late penalty: 10% per day.",
+            },
+          ],
+          content: "Late penalty: 10% per day. Maximum 3 days late.",
+        },
+      ],
+      readArtifactIds: ["artifact-1"],
+      stepCount: 1,
+    }
+  );
+
+  const latestMessage = promptMessages.at(-1)?.content ?? "";
+  assert.match(latestMessage, /Evidence checkpoint.*1 source covering: syllabus\.pdf\./i);
+  assert.doesNotMatch(latestMessage, /Likely next read/);
+  assert.match(latestMessage, /state exactly what you found and what could not be verified/i);
 });
 
 test("buildToolPromptMessages prefers viable breadcrumbs over already-failed artifacts", () => {
