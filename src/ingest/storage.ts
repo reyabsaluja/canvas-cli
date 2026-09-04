@@ -75,7 +75,9 @@ export async function writeIngestionArtifacts(
   rawDiscussionThreads?: RawDiscussionThread[],
   capturedExternalLinks?: CapturedExternalLink[],
   /** Assignment groups so each assignment extract can state its weight. */
-  assignmentGroups?: CanvasAssignmentGroup[]
+  assignmentGroups?: CanvasAssignmentGroup[],
+  /** Reply threads under announcements, rendered after each announcement's post. */
+  rawAnnouncementThreads?: RawDiscussionThread[]
 ): Promise<void> {
   debugFs("write", coursePath, "writing ingestion artifacts");
   // Ensure directory structure
@@ -190,25 +192,42 @@ export async function writeIngestionArtifacts(
     await fs.mkdir(path.join(coursePath, "extracted", "announcements"), {
       recursive: true,
     });
+    const announcementThreadById = new Map(
+      (rawAnnouncementThreads ?? []).map((thread) => [thread.topic.id, thread])
+    );
     for (const announcement of rawAnnouncements) {
       const attachmentLine = formatTopicAttachmentsLine(
         announcement.attachments,
         attachmentLookup
       );
-      if (!announcement.message && !attachmentLine) continue;
+      const thread = announcementThreadById.get(announcement.id);
+      const replies = thread?.entries ?? [];
+      if (!announcement.message && !attachmentLine && replies.length === 0) continue;
+      const baseUrl = announcement.html_url ?? courseMeta.htmlUrl;
       const header = [
         announcement.posted_at ? `Posted: ${announcement.posted_at}` : "",
         announcement.user_name ? `From: ${announcement.user_name}` : "",
+        thread && replies.length > 0 && thread.topic.last_reply_at
+          ? `Last reply: ${thread.topic.last_reply_at}`
+          : "",
+        thread && replies.length > 0 ? `Participants: ${thread.participantCount}` : "",
+        thread ? `Replies captured: ${replies.length}` : "",
         announcement.html_url ? `Canvas URL: ${announcement.html_url}` : "",
         attachmentLine,
       ].filter(Boolean);
       const postedAt = header.length > 0 ? `${header.join("\n")}\n\n` : "";
-      const content =
+      let content =
         `# ${announcement.title}\n\n` +
         postedAt +
-        `${htmlToText(announcement.message ?? "", {
-          baseUrl: announcement.html_url ?? courseMeta.htmlUrl,
-        })}\n`;
+        `${htmlToText(announcement.message ?? "", { baseUrl })}\n`;
+      if (replies.length > 0) {
+        content +=
+          "\n" +
+          formatThreadRepliesText(replies, baseUrl, attachmentLookup)
+            .replace(/\n{3,}/g, "\n\n")
+            .trimEnd() +
+          "\n";
+      }
       await writeAtomic(
         getExtractedAnnouncementPath(coursePath, announcement.id),
         content
@@ -810,34 +829,42 @@ function formatDiscussionThreadText(
 
   if (thread.entries.length > 0) {
     lines.push("");
-    lines.push("## Replies");
-    lines.push("");
-
-    for (const entry of thread.entries) {
-      const headingParts = [
-        entry.user_name ?? `User ${entry.user_id}`,
-        entry.created_at,
-      ].filter((part) => typeof part === "string" && part.length > 0);
-      lines.push(`### ${headingParts.join(" — ")}`);
-      lines.push("");
-      const replyAttachment = entry.attachment
-        ? formatTopicAttachmentsLine([entry.attachment], attachmentLookup, "Attachment")
-        : "";
-      if (replyAttachment) {
-        lines.push(replyAttachment);
-        lines.push("");
-      }
-      if (entry.message && entry.message.trim().length > 0) {
-        lines.push(
-          htmlToText(entry.message, { baseUrl: thread.topic.html_url }) ||
-            "No reply text captured."
-        );
-      } else {
-        lines.push("No reply text captured.");
-      }
-      lines.push("");
-    }
+    lines.push(formatThreadRepliesText(thread.entries, thread.topic.html_url, attachmentLookup));
   }
 
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+}
+
+/**
+ * "## Replies" followed by one "### author — date" block per entry, in
+ * thread order. Shared by discussion and announcement extracts.
+ */
+function formatThreadRepliesText(
+  entries: RawDiscussionThread["entries"],
+  baseUrl: string | null,
+  attachmentLookup: TopicAttachmentLookup
+): string {
+  const lines: string[] = ["## Replies", ""];
+  for (const entry of entries) {
+    const headingParts = [
+      entry.user_name ?? `User ${entry.user_id}`,
+      entry.created_at,
+    ].filter((part) => typeof part === "string" && part.length > 0);
+    lines.push(`### ${headingParts.join(" — ")}`);
+    lines.push("");
+    const replyAttachment = entry.attachment
+      ? formatTopicAttachmentsLine([entry.attachment], attachmentLookup, "Attachment")
+      : "";
+    if (replyAttachment) {
+      lines.push(replyAttachment);
+      lines.push("");
+    }
+    if (entry.message && entry.message.trim().length > 0) {
+      lines.push(htmlToText(entry.message, { baseUrl }) || "No reply text captured.");
+    } else {
+      lines.push("No reply text captured.");
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
 }

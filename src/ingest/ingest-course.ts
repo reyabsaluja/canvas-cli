@@ -28,6 +28,7 @@ import {
   selectAssignmentAttachments,
   selectTopicAttachments,
   buildFolderIndex,
+  MAX_COURSE_FILE_BYTES,
 } from "./attachment-selection.js";
 import { downloadSelectedAttachments } from "./attachment-download.js";
 import { discoverLectures } from "./lecture-discovery.js";
@@ -138,7 +139,8 @@ export async function ingestCourse(
     courseMeta.syllabusBody,
     raw.announcements,
     raw.discussionThreads,
-    [...heuristicAttachments, ...moduleAttachments, ...descriptionAttachments]
+    [...heuristicAttachments, ...moduleAttachments, ...descriptionAttachments],
+    raw.announcementThreads
   );
 
   // Step 5c': Files attached to posts through the Canvas "Attach" button.
@@ -154,6 +156,24 @@ export async function ingestCourse(
       ...htmlLinkedAttachments,
     ]
   );
+  // Files attached to replies under announcements ("updated handout
+  // attached"), kept with the announcement's own files.
+  const announcementReplyAttachments = selectAnnouncementReplyAttachments(
+    raw.announcementThreads,
+    [
+      ...heuristicAttachments,
+      ...moduleAttachments,
+      ...descriptionAttachments,
+      ...htmlLinkedAttachments,
+      ...topicAttachmentSelection.selected,
+    ]
+  );
+  topicAttachmentSelection.selected.push(...announcementReplyAttachments.selected);
+  topicAttachmentSelection.summary.replies += announcementReplyAttachments.summary.replies;
+  topicAttachmentSelection.summary.alreadySelected +=
+    announcementReplyAttachments.summary.alreadySelected;
+  topicAttachmentSelection.summary.skippedTooLarge +=
+    announcementReplyAttachments.summary.skippedTooLarge;
 
   // Step 5c'': Files attached to assignments themselves (starter code,
   // templates, data). Never linked from the description HTML either.
@@ -189,6 +209,16 @@ export async function ingestCourse(
     }))
   );
 
+  // Announcement replies ride along as threads whose topic message is blank:
+  // the announcement post itself is already a candidate source above, so
+  // this only adds the replies.
+  const announcementReplyThreads: RawDiscussionThread[] = raw.announcementThreads
+    .filter((thread) => thread.entries.length > 0)
+    .map((thread) => ({
+      ...thread,
+      topic: { ...thread.topic, message: null, attachments: null },
+    }));
+
   const capturedExternalLinks = await captureExternalCourseLinks({
     courseId: course.id,
     courseHtmlUrl: courseMeta.htmlUrl,
@@ -198,7 +228,7 @@ export async function ingestCourse(
     fetchedPages: [...raw.fetchedPages, ...feedbackHtmlSources],
     syllabusBody: courseMeta.syllabusBody,
     announcements: raw.announcements,
-    discussionThreads: raw.discussionThreads,
+    discussionThreads: [...raw.discussionThreads, ...announcementReplyThreads],
     config,
   });
   const externalLinks = capturedExternalLinks.map((capture) => capture.entry);
@@ -264,6 +294,13 @@ export async function ingestCourse(
       body: topic.message ?? "",
       source: `announcement: ${topic.title}`,
     })),
+    ...raw.announcementThreads.flatMap((thread) =>
+      thread.entries.map((entry) => ({
+        title: thread.topic.title,
+        body: entry.message ?? "",
+        source: `announcement reply: ${thread.topic.title}`,
+      }))
+    ),
     ...raw.discussions.map((topic) => ({
       title: topic.title,
       body: topic.message ?? "",
@@ -355,6 +392,17 @@ export async function ingestCourse(
         0
       ),
     },
+    announcementThreads: {
+      topics: raw.announcementThreads.length,
+      replies: raw.announcementThreads.reduce(
+        (sum, thread) => sum + thread.entries.length,
+        0
+      ),
+      pagedReplies: raw.announcementThreads.reduce(
+        (sum, thread) => sum + (thread.repliesPaged ?? 0),
+        0
+      ),
+    },
     submissionFeedback: {
       ...raw.submissionFeedback,
       attachmentsSelected: submissionFeedbackAttachments.length,
@@ -385,7 +433,8 @@ export async function ingestCourse(
     raw.announcements,
     raw.discussionThreads,
     capturedExternalLinks,
-    raw.assignmentGroups
+    raw.assignmentGroups,
+    raw.announcementThreads
   );
 
   return {
@@ -639,6 +688,63 @@ function topicAttachmentDisplayName(attachment: CanvasTopicAttachment): string {
 }
 
 /**
+ * Files attached to replies under announcements. Mirrors the reply branch of
+ * `selectTopicAttachments`, but files land under attachments/announcements
+ * next to the announcement's own files.
+ */
+function selectAnnouncementReplyAttachments(
+  announcementThreads: RawDiscussionThread[],
+  alreadySelected: SelectedAttachment[]
+): {
+  selected: SelectedAttachment[];
+  summary: { replies: number; alreadySelected: number; skippedTooLarge: number };
+} {
+  const claimedIds = new Set<number>();
+  const claimedUrls = new Set<string>();
+  for (const attachment of alreadySelected) {
+    if (attachment.fileId !== null) claimedIds.add(attachment.fileId);
+    claimedUrls.add(attachment.downloadUrl);
+    const idFromUrl = attachment.downloadUrl.match(/\/files\/(\d+)/)?.[1];
+    if (idFromUrl) claimedIds.add(parseInt(idFromUrl, 10));
+  }
+  const selected: SelectedAttachment[] = [];
+  const summary = { replies: 0, alreadySelected: 0, skippedTooLarge: 0 };
+
+  for (const thread of announcementThreads) {
+    for (const entry of thread.entries) {
+      const attachment = entry.attachment;
+      if (!attachment || typeof attachment.url !== "string" || attachment.url.length === 0) {
+        continue;
+      }
+      if (claimedIds.has(attachment.id) || claimedUrls.has(attachment.url)) {
+        summary.alreadySelected += 1;
+        continue;
+      }
+      if (typeof attachment.size === "number" && attachment.size > MAX_COURSE_FILE_BYTES) {
+        summary.skippedTooLarge += 1;
+        continue;
+      }
+      claimedIds.add(attachment.id);
+      claimedUrls.add(attachment.url);
+      summary.replies += 1;
+      const author = entry.user_name ?? `User ${entry.user_id}`;
+      selected.push({
+        sourceType: "page_linked",
+        fileId: attachment.id,
+        filename: topicAttachmentDisplayName(attachment),
+        downloadUrl: attachment.url,
+        reason: `attached to reply by ${author} in announcement "${thread.topic.title}"`,
+        contentType: attachment["content-type"] ?? attachment.content_type ?? null,
+        size: typeof attachment.size === "number" ? attachment.size : null,
+        subfolder: "announcements",
+      });
+    }
+  }
+
+  return { selected, summary };
+}
+
+/**
  * Extract files linked in fetched Canvas page bodies, front page, syllabus,
  * and announcements. Pages like "Labs" or announcement posts often contain
  * direct download links to worksheets, handouts, and other course materials.
@@ -649,7 +755,8 @@ function selectHtmlLinkedFiles(
   syllabusBody: string | null,
   announcements: Array<{ title: string; message: string | null }>,
   discussionThreads: RawDiscussionThread[],
-  alreadySelected: SelectedAttachment[]
+  alreadySelected: SelectedAttachment[],
+  announcementThreads: RawDiscussionThread[] = []
 ): SelectedAttachment[] {
   const selected: SelectedAttachment[] = [];
   const alreadyUrls = new Set(alreadySelected.map((a) => a.downloadUrl));
@@ -669,6 +776,16 @@ function selectHtmlLinkedFiles(
       title: `Announcement: ${announcement.title}`,
       body: announcement.message,
     });
+  }
+  for (const thread of announcementThreads) {
+    for (const entry of thread.entries) {
+      if (!entry.message) continue;
+      const author = entry.user_name ?? `User ${entry.user_id}`;
+      htmlSources.push({
+        title: `Announcement reply in "${thread.topic.title}" by ${author}`,
+        body: entry.message,
+      });
+    }
   }
   for (const thread of discussionThreads) {
     if (thread.topic.message) {

@@ -47,6 +47,12 @@ export interface RawCourseContent {
   folders: CanvasFolder[];
   pages: CanvasPage[];
   announcements: CanvasDiscussionTopic[];
+  /**
+   * Reply threads under announcements (instructors answer "is the room
+   * change for both sections?" there), captured the same way as discussion
+   * threads: one entry per announcement, empty when comments are disabled.
+   */
+  announcementThreads: RawDiscussionThread[];
   discussions: CanvasDiscussionTopic[];
   discussionThreads: RawDiscussionThread[];
   /** Front page (home page) HTML body, if accessible. */
@@ -234,6 +240,12 @@ export async function fetchCourseContent(
     (topic) => collectDiscussionThread(client, courseId, topic, signal),
     signal
   );
+  const announcementThreads = await mapWithConcurrency(
+    announcements,
+    DISCUSSION_VIEW_CONCURRENCY,
+    (topic) => collectDiscussionThread(client, courseId, topic, signal),
+    signal
+  );
 
   const seenSlugs = new Set<string>();
   const pendingSlugs: string[] = [];
@@ -304,6 +316,11 @@ export async function fetchCourseContent(
   }
   for (const announcement of announcements) {
     enqueueLinkedPageSlugs(announcement.message);
+  }
+  for (const thread of announcementThreads) {
+    for (const entry of thread.entries) {
+      enqueueLinkedPageSlugs(entry.message);
+    }
   }
   for (const thread of discussionThreads) {
     enqueueLinkedPageSlugs(thread.topic.message);
@@ -385,6 +402,7 @@ export async function fetchCourseContent(
     folders,
     pages,
     announcements,
+    announcementThreads,
     discussions,
     discussionThreads,
     frontPageBody,

@@ -379,3 +379,31 @@ export interface AssignmentDateDetailsIndex {
 export interface AssignmentIndexEntry {
   dateDetails?: AssignmentDateDetailsIndex | null;
 }
+
+// ---------------------------------------------------------------------------
+// ADDITIVE: announcement reply threads (src/ingest/fetch-course-content.ts,
+// src/ingest/ingest-course.ts, src/ingest/storage.ts,
+// src/format/render-ingestion-summary.ts).
+// ---------------------------------------------------------------------------
+
+export interface AnnouncementIndexEntry {
+  /** Replies captured under the announcement, nested replies included. */
+  replyCount?: number;
+  participantCount?: number;
+  /** Canvas file links found in reply HTML. */
+  replyFileLinkCount?: number;
+}
+
+/** How announcement reply threads were captured for one ingestion. */
+export interface AnnouncementThreadSummary {
+  /** Announcements whose reply thread was fetched. */
+  topics: number;
+  /** Replies captured across all announcements. */
+  replies: number;
+  /** Replies retrieved through GET .../entries/:id/replies because the inline list was truncated. */
+  pagedReplies: number;
+}
+
+export interface IngestionMeta {
+  announcementThreads?: AnnouncementThreadSummary;
+}

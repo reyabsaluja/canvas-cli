@@ -82,8 +82,14 @@ export function renderIngestionSummary(result: IngestionResult): string {
     );
   }
   if ((result.announcements?.length ?? 0) > 0) {
+    const threads = result.ingestion.announcementThreads;
+    let replyNote = "";
+    if (threads && threads.replies > 0) {
+      const paged = threads.pagedReplies > 0 ? `, ${threads.pagedReplies} paged` : "";
+      replyNote = ` (${plural(threads.replies, "reply", "replies")}${paged})`;
+    }
     lines.push(
-      `  ${chalk.dim("-")} ${result.announcements?.length ?? 0} announcements`
+      `  ${chalk.dim("-")} ${result.announcements?.length ?? 0} announcements${replyNote}`
     );
   }
   const topicAttachments = result.ingestion.topicAttachments;
