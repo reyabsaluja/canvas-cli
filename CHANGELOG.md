@@ -93,6 +93,7 @@ Initial release of `@reyabsaluja/canvas-cli`.
 - A wrong due date is flagged even when its day number appears elsewhere in the evidence (dates are checked as month+day pairs in any common spelling)
 - Questions already covered by the workup still get tool calls instead of an answer from memory alone
 - Quizzes, external tools, and assignment groups degrade to none on a 403 instead of failing ingestion
+- `login` prompts no longer abort on arrow keys, other escape sequences, or a bracketed paste (only a bare Esc goes back), and a rejected token re-prompts in place with the error still visible and a "Try again or press esc to go back" hint
 
 ### Security
 
