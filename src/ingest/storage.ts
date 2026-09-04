@@ -14,7 +14,10 @@ import type {
   RawDiscussionThread,
 } from "./fetch-course-content.js";
 import type {
+  CanvasRubricAssessment,
+  CanvasRubricAssessmentCriterion,
   CanvasRubricCriterion,
+  CanvasSubmissionComment,
   CanvasTopicAttachment,
   CanvasAssignmentGroup,
 } from "../canvas/types.js";
@@ -119,6 +122,7 @@ export async function writeIngestionArtifacts(
   const rawAssignmentsById = new Map(
     (rawAssignments ?? []).map((assignment) => [assignment.id, assignment])
   );
+  const attachmentLookup = buildTopicAttachmentLookup(attachments);
 
   if (assignments.length > 0) {
     await fs.mkdir(path.join(coursePath, "extracted", "assignments"), {
@@ -129,7 +133,8 @@ export async function writeIngestionArtifacts(
       const assignmentText = formatAssignmentText(
         assignment,
         rawAssignment,
-        describeAssignmentWeight(assignment.id, rawAssignment, assignmentGroups ?? [])
+        describeAssignmentWeight(assignment.id, rawAssignment, assignmentGroups ?? []),
+        attachmentLookup
       );
       await writeAtomic(
         getExtractedAssignmentPath(coursePath, assignment.id),
@@ -179,8 +184,6 @@ export async function writeIngestionArtifacts(
       );
     }
   }
-
-  const attachmentLookup = buildTopicAttachmentLookup(attachments);
 
   if (rawAnnouncements && rawAnnouncements.length > 0) {
     await fs.mkdir(path.join(coursePath, "extracted", "announcements"), {
@@ -286,7 +289,8 @@ export function describeAssignmentWeight(
 function formatAssignmentText(
   assignment: AssignmentIndexEntry,
   rawAssignment?: RawAssignmentRecord,
-  weightLines: string[] = []
+  weightLines: string[] = [],
+  attachmentLookup: TopicAttachmentLookup = buildTopicAttachmentLookup([])
 ): string {
   const lines = [`# ${assignment.name}`, ""];
 
@@ -348,7 +352,196 @@ function formatAssignmentText(
     lines.push(formatRubricText(rubric, assignment.htmlUrl));
   }
 
+  // The student's own grader feedback: comments (with media and attached
+  // files) and the rubric assessment, so "what did I lose marks on?" is
+  // answerable from the cache.
+  const submission = rawAssignment?.submission;
+  const submissionComments = (submission?.submission_comments ?? []).filter(
+    (comment): comment is CanvasSubmissionComment => !!comment
+  );
+  const rubricAssessmentText = formatSubmissionRubricAssessmentText(
+    submission?.rubric_assessment,
+    rubric,
+    assignment.htmlUrl
+  );
+  if (submissionComments.length > 0 || rubricAssessmentText) {
+    lines.push("");
+    lines.push("## Submission Feedback");
+    lines.push("");
+    if (submissionComments.length > 0) {
+      lines.push(
+        formatSubmissionFeedbackText(submissionComments, assignment.htmlUrl, attachmentLookup)
+      );
+    }
+    if (rubricAssessmentText) {
+      if (submissionComments.length > 0) {
+        lines.push("");
+      }
+      lines.push(rubricAssessmentText);
+    }
+  }
+
   return lines.join("\n") + "\n";
+}
+
+/**
+ * "### TA Linus — 2026-03-01T…" followed by the comment text, any media
+ * comment, and the attached files with their on-disk paths.
+ */
+function formatSubmissionFeedbackText(
+  comments: CanvasSubmissionComment[],
+  baseUrl: string | null,
+  attachmentLookup: TopicAttachmentLookup
+): string {
+  const sections: string[] = [];
+
+  for (const comment of comments) {
+    const headingParts = [
+      stripControlChars(comment.author_name ?? "") || "Unknown author",
+      comment.created_at ?? null,
+    ].filter((part): part is string => typeof part === "string" && part.length > 0);
+    sections.push(`### ${headingParts.join(" — ")}`);
+    if (comment.edited_at && comment.edited_at !== comment.created_at) {
+      sections.push(`Edited: ${comment.edited_at}`);
+    }
+    sections.push("");
+
+    const body =
+      renderRichText(comment.html_comment, baseUrl) ||
+      renderRichText(comment.comment, baseUrl);
+    sections.push(body || "No text feedback captured.");
+
+    if (comment.media_comment) {
+      const media = comment.media_comment;
+      const label =
+        stripControlChars(media.display_name ?? "") ||
+        media.media_id ||
+        `${media.media_type ?? "media"} comment`;
+      const mediaParts = [`Media comment: ${label}`];
+      if (media.media_type) {
+        mediaParts.push(`type: ${media.media_type}`);
+      }
+      if (media.url) {
+        mediaParts.push(`URL: ${media.url}`);
+      }
+      sections.push("");
+      sections.push(mediaParts.join(" — "));
+    }
+
+    const attachmentLine = formatTopicAttachmentsLine(comment.attachments, attachmentLookup);
+    if (attachmentLine) {
+      sections.push("");
+      sections.push(attachmentLine);
+    }
+
+    sections.push("");
+  }
+
+  return sections.join("\n").trimEnd();
+}
+
+/**
+ * "### Rubric Assessment" with one "#### <criterion>" block per scored
+ * criterion: points out of the criterion maximum, the rating chosen, and the
+ * grader's comment. Empty string when nothing was assessed.
+ */
+function formatSubmissionRubricAssessmentText(
+  assessment: CanvasRubricAssessment | null | undefined,
+  rubric: CanvasRubricCriterion[],
+  baseUrl: string | null
+): string {
+  const rows = normalizeRubricAssessmentRows(assessment, rubric);
+  if (rows.length === 0) {
+    return "";
+  }
+
+  const criterionById = new Map(rubric.map((criterion) => [String(criterion.id), criterion]));
+  const sections = ["### Rubric Assessment", ""];
+
+  for (const [criterionId, row] of rows) {
+    const criterion = criterionById.get(criterionId);
+    const heading =
+      (criterion ? toSingleLineText(criterion.description, baseUrl) : "") ||
+      `Criterion ${criterionId}`;
+    sections.push(`#### ${heading}`);
+    sections.push("");
+
+    const facts: string[] = [];
+    if (typeof row.points === "number" && Number.isFinite(row.points)) {
+      const max = criterion?.points;
+      facts.push(
+        `Points: ${typeof max === "number" && Number.isFinite(max) ? `${row.points} / ${max}` : String(row.points)}`
+      );
+    }
+
+    const ratingId =
+      row.rating_id !== null && row.rating_id !== undefined ? String(row.rating_id) : null;
+    if (ratingId) {
+      const rating = criterion?.ratings?.find((candidate) => String(candidate.id) === ratingId);
+      if (rating) {
+        const ratingLabel = toSingleLineText(rating.description, baseUrl) || ratingId;
+        const ratingPoints = formatPointLabel(rating.points);
+        facts.push(`Rating: ${ratingLabel}${ratingPoints ? ` (${ratingPoints})` : ""}`);
+      } else {
+        facts.push(`Rating ID: ${ratingId}`);
+      }
+    }
+
+    sections.push(...facts);
+
+    const comments = renderRichText(row.comments, baseUrl);
+    if (comments) {
+      if (facts.length > 0) {
+        sections.push("");
+      }
+      sections.push(comments);
+    }
+
+    sections.push("");
+  }
+
+  return sections.join("\n").trimEnd();
+}
+
+/** Scored criteria in rubric order (unknown criteria last), skipping empty rows. */
+function normalizeRubricAssessmentRows(
+  assessment: CanvasRubricAssessment | null | undefined,
+  rubric: CanvasRubricCriterion[]
+): Array<[string, CanvasRubricAssessmentCriterion]> {
+  if (!assessment || typeof assessment !== "object") {
+    return [];
+  }
+
+  const rubricOrder = new Map(rubric.map((criterion, index) => [String(criterion.id), index]));
+  return Object.entries(assessment)
+    .filter((entry): entry is [string, CanvasRubricAssessmentCriterion] =>
+      isRubricAssessmentCriterion(entry[1])
+    )
+    .sort(([leftId], [rightId]) => {
+      const leftOrder = rubricOrder.get(leftId);
+      const rightOrder = rubricOrder.get(rightId);
+      if (leftOrder !== undefined && rightOrder !== undefined) {
+        return leftOrder - rightOrder;
+      }
+      if (leftOrder !== undefined) return -1;
+      if (rightOrder !== undefined) return 1;
+      return 0;
+    });
+}
+
+function isRubricAssessmentCriterion(
+  value: CanvasRubricAssessment[string]
+): value is CanvasRubricAssessmentCriterion {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  if (typeof value.points === "number" && Number.isFinite(value.points)) {
+    return true;
+  }
+  if (value.rating_id !== null && value.rating_id !== undefined) {
+    return true;
+  }
+  return typeof value.comments === "string" && value.comments.trim().length > 0;
 }
 
 function formatSubmissionRules(rawAssignment?: RawAssignmentRecord): string[] {

@@ -133,7 +133,9 @@ export type AttachmentSourceType =
   | "assignment_linked"
   | "module_linked"
   | "page_linked"
-  | "course_file";
+  | "course_file"
+  /** A file the grader attached to (or linked from) feedback on the student's own submission. */
+  | "submission_comment_attachment";
 
 export interface ZipAttachmentEntry {
   /** Path of the entry inside the zip, forward slashes, no leading slash. */
@@ -313,4 +315,30 @@ export interface TopicAttachmentSummary {
 
 export interface IngestionMeta {
   topicAttachments?: TopicAttachmentSummary;
+}
+
+// ---------------------------------------------------------------------------
+// ADDITIVE: submission feedback (src/ingest/fetch-course-content.ts,
+// src/ingest/ingest-course.ts, src/ingest/storage.ts,
+// src/format/render-ingestion-summary.ts).
+// ---------------------------------------------------------------------------
+
+/** How the student's own grader feedback was captured for one ingestion. */
+export interface SubmissionFeedbackSummary {
+  /** False when the run opted out (`--no-feedback`); nothing was requested then. */
+  enabled: boolean;
+  /** Submissions returned for the current user. */
+  submissions: number;
+  /** Grader/peer comments across those submissions. */
+  comments: number;
+  /** Submissions carrying a rubric assessment. */
+  rubricAssessments: number;
+  /** Files attached to, or linked from, feedback that were selected for download. */
+  attachmentsSelected: number;
+  attachmentsDownloaded: number;
+  attachmentsFailed: number;
+}
+
+export interface IngestionMeta {
+  submissionFeedback?: SubmissionFeedbackSummary;
 }

@@ -650,9 +650,12 @@ canvas-cli ingest ece297                              # ingest by course code
 canvas-cli ingest "Software Design and Communication" # ingest by course name
 canvas-cli ingest ece297 --refresh                    # force re-ingestion
 canvas-cli ingest ece297 --json                       # machine-readable summary
+canvas-cli ingest ece297 --no-feedback                # leave grader comments on your submissions out
 ```
 
 **Storage location:** `.canvas-cli/courses/<course-slug>/` in the current directory.
+
+**Your own grader feedback.** Ingestion also fetches the comments, attached feedback files, and rubric assessments that graders left on *your* submissions (Canvas returns only the caller's own submissions; nothing about other students is requested). They are rendered as a `## Submission Feedback` section in each assignment extract, and the files land under `attachments/submission-comments/`, so the assistant can answer "what did I lose marks on in Lab 2?". This is stored in plain text in the local cache like everything else. Pass `--no-feedback` to skip the request entirely, or set `"ingestSubmissionFeedback": false` in the profile's `config.json` to make that the default.
 
 **What gets captured.** Beyond modules, pages, files, and assignments, ingestion crawls the whole Files tab folder by folder, reads announcements and discussion threads with every reply in thread order, downloads files attached to posts, replies, and assignments, and finds lecture recordings embedded in pages, the syllabus, announcements, and assignment descriptions (YouTube, Panopto, Kaltura, Echo360, Zoom, and others). It also builds a few reference pages that the assistant can search and read like any other document: one `Quiz: <title>` page per quiz (classic and New Quizzes, practice quizzes, surveys) with due and lock dates, time limit, attempts, points, and instructions; a **Course tools and external links** page from the course navigation (Piazza, Ed, Zoom, Gradescope, ...); and a **Grading scheme** page from the assignment groups with their weights, drop rules, and each assignment's share of the final grade. Assignment extracts state their submission rules (attempts, group work, peer review) and grade weight, and modules record their prerequisites and completion requirements. The summary printed after `ingest` lists a count for each of these.
 
@@ -680,6 +683,7 @@ PDFs are extracted page by page under `## Page N` headings (up to 400k character
 | `attachments/important/` | Downloaded important course documents |
 | `attachments/files/<folder>/` | Files-tab crawl, mirroring the Canvas folder structure |
 | `attachments/assignments/`, `attachments/announcements/`, `attachments/discussions/` | Files attached to assignments, announcements, and discussion posts or replies |
+| `attachments/submission-comments/` | Files graders attached to (or linked from) feedback on your own submissions (skipped with `--no-feedback`) |
 
 **Repeated invocation** refreshes all data and re-downloads missing attachments. Use `--refresh` to force a complete re-ingestion.
 

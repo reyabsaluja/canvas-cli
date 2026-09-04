@@ -37,6 +37,91 @@ export interface MockAssignment {
     late: boolean;
     missing: boolean;
   };
+  /** Rubric criteria, as returned with include[]=rubric on the detail endpoint. */
+  rubric?: MockRubricCriterion[] | null;
+  /** Per-section/group/student dates, as returned with include[]=all_dates. */
+  all_dates?: MockAssignmentDate[] | null;
+}
+
+export interface MockRubricCriterion {
+  id: string | number;
+  description: string;
+  long_description?: string | null;
+  points: number | null;
+  ratings?: Array<{
+    id?: string | number;
+    description: string;
+    long_description?: string | null;
+    points?: number | null;
+  }> | null;
+}
+
+export interface MockAssignmentDate {
+  id?: number;
+  base?: boolean;
+  title?: string | null;
+  due_at: string | null;
+  unlock_at?: string | null;
+  lock_at?: string | null;
+  set_type?: string | null;
+  set_id?: number | null;
+}
+
+/** One of the current user's submissions, as served by GET /courses/:id/students/submissions. */
+export interface MockSubmission {
+  assignment_id: number;
+  user_id: number;
+  workflow_state: string;
+  submitted_at: string | null;
+  score: number | null;
+  grade: string | null;
+  attempt: number | null;
+  late: boolean;
+  missing: boolean;
+  submission_comments?: MockSubmissionComment[] | null;
+  rubric_assessment?: Record<
+    string,
+    {
+      points?: number | null;
+      rating_id?: string | number | null;
+      comments?: string | null;
+      comments_enabled?: boolean | null;
+    } | null
+  > | null;
+}
+
+export interface MockSubmissionComment {
+  id: number;
+  author_id?: number | null;
+  author_name?: string | null;
+  comment?: string | null;
+  html_comment?: string | null;
+  created_at?: string | null;
+  edited_at?: string | null;
+  media_comment?: {
+    "content-type"?: string | null;
+    display_name?: string | null;
+    media_id?: string | null;
+    media_type?: string | null;
+    url?: string | null;
+  } | null;
+  /** Files the grader attached to the comment (marked-up PDFs, rubrics). */
+  attachments?: MockAttachment[] | null;
+}
+
+/** A course calendar event served by GET /calendar_events?context_codes[]=course_<id>. */
+export interface MockCalendarEvent {
+  id: number;
+  title: string;
+  description?: string | null;
+  start_at?: string | null;
+  end_at?: string | null;
+  all_day?: boolean | null;
+  location_name?: string | null;
+  location_address?: string | null;
+  context_code?: string | null;
+  html_url?: string | null;
+  workflow_state?: string | null;
 }
 
 export interface MockModule {
@@ -193,6 +278,12 @@ export interface MockServerData {
   discussionRecentReplyLimit?: number;
   courseDetails: Map<number, { syllabus_body: string | null }>;
   pagePerPage?: number;
+  /** The current user's submissions served from GET /courses/:id/students/submissions. */
+  submissions?: Map<number, MockSubmission[]>;
+  /** Course calendar events served from GET /calendar_events. */
+  calendarEvents?: Map<number, MockCalendarEvent[]>;
+  /** Called for every authenticated request, so tests can assert what was (not) fetched. */
+  onRequest?: (method: string, path: string) => void;
 }
 
 function parseLinkParams(url: URL): { page: number; perPage: number } {
@@ -293,6 +384,14 @@ function findMockTopicAttachment(
       }
     }
   }
+  for (const submissions of data.submissions?.values() ?? []) {
+    for (const submission of submissions) {
+      for (const comment of submission.submission_comments ?? []) {
+        const onComment = (comment.attachments ?? []).find((a) => a.id === fileId);
+        if (onComment) return onComment;
+      }
+    }
+  }
   return undefined;
 }
 
@@ -343,6 +442,7 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
 
     const { page, perPage } = parseLinkParams(url);
     const effectivePerPage = data.pagePerPage ?? perPage;
+    data.onRequest?.(req.method ?? "GET", path);
 
     // GET /courses
     if (path === "/courses" && req.method === "GET") {
@@ -385,6 +485,42 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
         effectivePerPage,
         baseApiUrl,
         `/courses/${courseId}/assignments`
+      );
+      res.writeHead(200, headers);
+      res.end(body);
+      return;
+    }
+
+    // GET /courses/:id/students/submissions (the caller's own submissions when
+    // student_ids[] is omitted, with grader comments and rubric assessments)
+    const ownSubmissionsMatch = path.match(/^\/courses\/(\d+)\/students\/submissions$/);
+    if (ownSubmissionsMatch && req.method === "GET") {
+      const courseId = parseInt(ownSubmissionsMatch[1], 10);
+      const submissions = data.submissions?.get(courseId) ?? [];
+      const { body, headers } = paginatedResponse(
+        submissions,
+        page,
+        effectivePerPage,
+        baseApiUrl,
+        `/courses/${courseId}/students/submissions`
+      );
+      res.writeHead(200, headers);
+      res.end(body);
+      return;
+    }
+
+    // GET /calendar_events?context_codes[]=course_<id>
+    if (path === "/calendar_events" && req.method === "GET") {
+      const events = url.searchParams.getAll("context_codes[]").flatMap((code) => {
+        const match = code.match(/^course_(\d+)$/);
+        return match ? (data.calendarEvents?.get(parseInt(match[1], 10)) ?? []) : [];
+      });
+      const { body, headers } = paginatedResponse(
+        events,
+        page,
+        effectivePerPage,
+        baseApiUrl,
+        "/calendar_events"
       );
       res.writeHead(200, headers);
       res.end(body);

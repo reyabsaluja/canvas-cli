@@ -14,8 +14,13 @@ import type {
   CanvasDiscussionEntry,
   CanvasDiscussionTopic,
   CanvasDiscussionTopicView,
+  CanvasSubmission,
 } from "../canvas/types.js";
 import { mapWithConcurrency } from "./concurrency.js";
+import {
+  collectAssignmentFeedbackHtmlSources,
+  collectAssignmentRubricHtmlSources,
+} from "./rich-text-sources.js";
 
 export interface RawDiscussionThread {
   topic: CanvasDiscussionTopic;
@@ -54,7 +59,33 @@ export interface RawCourseContent {
   tabs: CanvasTab[];
   /** Assignment groups (weights, drop rules); rendered as a "Grading scheme" page. */
   assignmentGroups: CanvasAssignmentGroup[];
+  /**
+   * How the student's own grader feedback was captured. The comments and
+   * rubric assessments themselves are merged into each assignment's
+   * `submission`; this only says what was fetched.
+   */
+  submissionFeedback: SubmissionFeedbackFetchSummary;
   warnings: string[];
+}
+
+export interface SubmissionFeedbackFetchSummary {
+  /** False when the caller opted out (`--no-feedback`); no request is made then. */
+  enabled: boolean;
+  /** Submissions returned for the current user. */
+  submissions: number;
+  /** Grader/peer comments across all submissions. */
+  comments: number;
+  /** Submissions carrying a rubric assessment. */
+  rubricAssessments: number;
+}
+
+export interface FetchCourseContentOptions {
+  /**
+   * Fetch the student's own submission comments, feedback attachments, and
+   * rubric assessments (GET /courses/:id/students/submissions). Defaults to
+   * true; when false the endpoint is never requested.
+   */
+  includeSubmissionFeedback?: boolean;
 }
 
 const MODULE_ITEMS_CONCURRENCY = 4;
@@ -70,9 +101,11 @@ const ASSIGNMENT_DETAIL_CONCURRENCY = 4;
 export async function fetchCourseContent(
   client: CanvasClient,
   courseId: number,
-  signal?: AbortSignal | null
+  signal?: AbortSignal | null,
+  options?: FetchCourseContentOptions
 ): Promise<RawCourseContent> {
   const warnings: string[] = [];
+  const includeSubmissionFeedback = options?.includeSubmissionFeedback !== false;
   client.resetSkippedEndpoints();
 
   // Fetch course detail (with syllabus) and assignments in parallel
@@ -103,6 +136,11 @@ export async function fetchCourseContent(
   const folderFetcher = (client as CanvasClient & {
     getFoldersSafe?: (courseId: number, signal?: AbortSignal | null) => Promise<CanvasFolder[]>;
   }).getFoldersSafe;
+  // The student's own grader feedback. Optional on the client so hand-rolled
+  // test doubles keep working; skipped entirely when the caller opted out.
+  const submissionFetcher = (client as CanvasClient & {
+    getCurrentUserSubmissionsSafe?: (courseId: number, signal?: AbortSignal | null) => Promise<CanvasSubmission[]>;
+  }).getCurrentUserSubmissionsSafe;
   const [
     rawModules,
     files,
@@ -112,6 +150,7 @@ export async function fetchCourseContent(
     discussions,
     frontPage,
     assignmentDetailResult,
+    currentUserSubmissions,
   ] =
     await Promise.all([
       client.getModulesSafe(courseId, signal),
@@ -128,11 +167,31 @@ export async function fetchCourseContent(
         : Promise.resolve([]),
       client.getFrontPageSafe(courseId, signal),
       assignmentDetailsPromise,
+      includeSubmissionFeedback && submissionFetcher
+        ? submissionFetcher.call(client, courseId, signal)
+        : Promise.resolve([] as CanvasSubmission[]),
     ]);
-  const assignments = assignmentDetailResult.assignments;
+  const assignments = mergeSubmissionFeedback(
+    assignmentDetailResult.assignments,
+    currentUserSubmissions
+  );
   if (assignmentDetailResult.warning) {
     warnings.push(assignmentDetailResult.warning);
   }
+  const submissionFeedback: SubmissionFeedbackFetchSummary = {
+    enabled: includeSubmissionFeedback,
+    submissions: currentUserSubmissions.length,
+    comments: currentUserSubmissions.reduce(
+      (sum, submission) => sum + (submission.submission_comments?.length ?? 0),
+      0
+    ),
+    rubricAssessments: currentUserSubmissions.filter(
+      (submission) =>
+        submission.rubric_assessment &&
+        typeof submission.rubric_assessment === "object" &&
+        Object.keys(submission.rubric_assessment).length > 0
+    ).length,
+  };
 
   const modules = await mapWithConcurrency(
     rawModules,
@@ -234,6 +293,14 @@ export async function fetchCourseContent(
     if (typeof description === "string") {
       enqueueLinkedPageSlugs(description);
     }
+    // Rubric details and grader feedback link to pages too ("see the style
+    // guide page"), so they seed the crawl like any other rich text.
+    for (const source of collectAssignmentRubricHtmlSources(assignment)) {
+      enqueueLinkedPageSlugs(source.html);
+    }
+    for (const source of collectAssignmentFeedbackHtmlSources(assignment)) {
+      enqueueLinkedPageSlugs(source.html);
+    }
   }
   for (const announcement of announcements) {
     enqueueLinkedPageSlugs(announcement.message);
@@ -325,8 +392,49 @@ export async function fetchCourseContent(
     quizzes,
     tabs,
     assignmentGroups,
+    submissionFeedback,
     warnings,
   };
+}
+
+/**
+ * Attach the student's own submission records (comments, feedback files,
+ * rubric assessment) to the matching assignments. The assignment list's
+ * inline `submission` (score, grade, late/missing) is kept and the richer
+ * record is layered on top.
+ */
+export function mergeSubmissionFeedback(
+  assignments: RawAssignmentRecord[],
+  submissions: CanvasSubmission[]
+): RawAssignmentRecord[] {
+  if (submissions.length === 0) {
+    return assignments;
+  }
+
+  const submissionByAssignmentId = new Map<number, CanvasSubmission>();
+  for (const submission of submissions) {
+    if (typeof submission.assignment_id !== "number") {
+      continue;
+    }
+    submissionByAssignmentId.set(submission.assignment_id, submission);
+  }
+
+  if (submissionByAssignmentId.size === 0) {
+    return assignments;
+  }
+
+  return assignments.map((assignment) => {
+    const submission = submissionByAssignmentId.get(assignment.id);
+    if (!submission) {
+      return assignment;
+    }
+    return {
+      ...assignment,
+      submission: assignment.submission
+        ? { ...assignment.submission, ...submission }
+        : submission,
+    };
+  });
 }
 
 /**

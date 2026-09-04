@@ -39,6 +39,25 @@ export function renderIngestionSummary(result: IngestionResult): string {
       }`
     );
   }
+  const feedback = result.ingestion.submissionFeedback;
+  if (feedback && feedback.enabled && (feedback.comments > 0 || feedback.rubricAssessments > 0)) {
+    const parts: string[] = [];
+    if (feedback.comments > 0) parts.push(plural(feedback.comments, "grader comment"));
+    if (feedback.rubricAssessments > 0) {
+      parts.push(plural(feedback.rubricAssessments, "rubric assessment"));
+    }
+    if (feedback.attachmentsDownloaded > 0) {
+      parts.push(plural(feedback.attachmentsDownloaded, "feedback file"));
+    }
+    lines.push(
+      `  ${chalk.dim("-")} ${parts.join(", ")} ${chalk.dim("(on your own submissions)")}` +
+        (feedback.attachmentsFailed > 0
+          ? ` ${chalk.red(`(${feedback.attachmentsFailed} failed)`)}`
+          : "")
+    );
+  } else if (feedback && !feedback.enabled) {
+    lines.push(`  ${chalk.dim("-")} ${chalk.dim("submission feedback skipped (--no-feedback)")}`);
+  }
   if ((c.assignmentGroups ?? 0) > 0) {
     lines.push(`  ${chalk.dim("-")} ${c.assignmentGroups} assignment groups ${chalk.dim("(weights and drop rules on the grading-scheme page)")}`);
   }

@@ -107,14 +107,19 @@ program
   )
   .option("--refresh", "Force re-download even if a cached version exists")
   .option("--json", "Output a machine-readable JSON summary instead of formatted text")
+  .option(
+    "--no-feedback",
+    "Skip your own grader comments, feedback files, and rubric assessments (never requested)"
+  )
   .addHelpText(
     "after",
     `
 Examples:
-  $ canvas-cli ingest CS101            Download modules, pages, and files for CS101
-  $ canvas-cli ingest "Intro to"       Match by partial course name
-  $ canvas-cli ingest CS101 --refresh  Re-download even if already cached
-  $ canvas-cli ingest CS101 --json     Output JSON for scripting or piping`
+  $ canvas-cli ingest CS101               Download modules, pages, and files for CS101
+  $ canvas-cli ingest "Intro to"          Match by partial course name
+  $ canvas-cli ingest CS101 --refresh     Re-download even if already cached
+  $ canvas-cli ingest CS101 --json        Output JSON for scripting or piping
+  $ canvas-cli ingest CS101 --no-feedback Leave grader comments on your submissions out of the cache`
   )
   .action(ingestCourseCommand);
 

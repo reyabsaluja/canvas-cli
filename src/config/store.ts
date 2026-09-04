@@ -10,6 +10,12 @@ export interface StoredConfig {
   aiModel?: string;
   aiEffort?: string;
   awsRegion?: string;
+  /**
+   * Whether `ingest` captures grader comments, feedback files, and rubric
+   * assessments on the user's own submissions. Defaults to true; set to false
+   * to never request them (same effect as `canvas-cli ingest --no-feedback`).
+   */
+  ingestSubmissionFeedback?: boolean;
 }
 
 export function defaultStoredConfig(): StoredConfig {

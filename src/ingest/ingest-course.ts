@@ -10,13 +10,15 @@ import type {
   LectureIndexEntry,
 } from "./types.js";
 import type { SelectedAttachment } from "./attachment-selection.js";
-import type { CanvasAssignment } from "../canvas/types.js";
+import type { CanvasAssignment, CanvasTopicAttachment } from "../canvas/types.js";
 import { extractLinkedFiles } from "../workspace/attachments.js";
 import { makeCourseSlug, getCoursePath } from "./slug.js";
 import {
   fetchCourseContent,
+  type RawAssignmentRecord,
   type RawDiscussionThread,
 } from "./fetch-course-content.js";
+import { collectAssignmentFeedbackHtmlSources } from "./rich-text-sources.js";
 import { mapWithConcurrency } from "./concurrency.js";
 import { normalizeCourseContent } from "./normalize-content.js";
 import { identifySyllabusCandidates } from "./syllabus-heuristics.js";
@@ -46,6 +48,8 @@ const MODULE_FILE_METADATA_CONCURRENCY = 4;
  * 5. Select ALL module-linked files for download (instructor-curated content)
  * 5c. Files linked from page/announcement/discussion HTML
  * 5c'. Files attached to announcements, discussion posts, and replies
+ * 5c''. Files attached to assignments themselves
+ * 5c'''. Files attached to, or linked from, grader feedback on the student's submissions
  * 5d. Crawl the Files tab: every remaining readable document, folder-aware
  * 6. Download all selected attachments
  * 7. Write all artifacts to local course directory
@@ -61,6 +65,13 @@ export async function ingestCourse(
     refresh: boolean;
     signal?: AbortSignal | null;
     onProgress?: ProgressCallback | null;
+    /**
+     * Capture the student's own grader comments, feedback files, and rubric
+     * assessments. Defaults to true; `canvas-cli ingest --no-feedback` and the
+     * stored `ingestSubmissionFeedback: false` toggle turn it off, in which
+     * case the submissions endpoint is never requested.
+     */
+    includeSubmissionFeedback?: boolean;
   }
 ): Promise<IngestionResult> {
   const signal = options.signal ?? null;
@@ -70,7 +81,9 @@ export async function ingestCourse(
 
   // Step 1: Fetch raw content from Canvas
   onProgress("Fetching course content from Canvas...");
-  const raw = await fetchCourseContent(client, course.id, signal);
+  const raw = await fetchCourseContent(client, course.id, signal, {
+    includeSubmissionFeedback: options.includeSubmissionFeedback !== false,
+  });
 
   // Step 2: Normalize
   onProgress("Processing course structure...");
@@ -152,13 +165,37 @@ export async function ingestCourse(
     ...topicAttachmentSelection.selected,
   ]);
 
+  // Step 5c''': Files the grader attached to feedback on the student's own
+  // submissions (marked-up PDFs, annotated rubrics) or linked from the
+  // comment text. Never appear in the Files tab or any page HTML.
+  const submissionFeedbackAttachments = selectSubmissionFeedbackFiles(raw.assignments, [
+    ...heuristicAttachments,
+    ...moduleAttachments,
+    ...descriptionAttachments,
+    ...htmlLinkedAttachments,
+    ...topicAttachmentSelection.selected,
+    ...assignmentAttachmentSelection.selected,
+  ]);
+
+  // Grader feedback often points at external resources ("see this video on
+  // recursion"); feed it into link capture alongside the page bodies. The
+  // capture step's input shape is page-like, so feedback rides along as
+  // pseudo-pages labelled by assignment and author.
+  const feedbackHtmlSources = raw.assignments.flatMap((assignment) =>
+    collectAssignmentFeedbackHtmlSources(assignment).map((source, index) => ({
+      slug: `submission-feedback-${assignment.id}-${index + 1}`,
+      title: `${source.label} on "${assignment.name}"`,
+      body: source.html,
+    }))
+  );
+
   const capturedExternalLinks = await captureExternalCourseLinks({
     courseId: course.id,
     courseHtmlUrl: courseMeta.htmlUrl,
     modules,
     assignments: raw.assignments,
     frontPageBody: raw.frontPageBody,
-    fetchedPages: raw.fetchedPages,
+    fetchedPages: [...raw.fetchedPages, ...feedbackHtmlSources],
     syllabusBody: courseMeta.syllabusBody,
     announcements: raw.announcements,
     discussionThreads: raw.discussionThreads,
@@ -182,6 +219,7 @@ export async function ingestCourse(
     ...htmlLinkedAttachments,
     ...topicAttachmentSelection.selected,
     ...assignmentAttachmentSelection.selected,
+    ...submissionFeedbackAttachments,
   ]);
 
   const allSelected = [
@@ -191,6 +229,7 @@ export async function ingestCourse(
     ...htmlLinkedAttachments,
     ...topicAttachmentSelection.selected,
     ...assignmentAttachmentSelection.selected,
+    ...submissionFeedbackAttachments,
     ...courseFileSelection.selected,
   ];
   // downloadSelectedAttachments returns results in input order; remember where
@@ -254,6 +293,9 @@ export async function ingestCourse(
   const courseFileResults = attachmentResults.filter(
     (a) => a.sourceType === "course_file"
   );
+  const feedbackAttachmentResults = attachmentResults.filter(
+    (a) => a.sourceType === "submission_comment_attachment"
+  );
   const topicAttachmentResults = attachmentResults.slice(
     topicAttachmentStart,
     topicAttachmentEnd
@@ -312,6 +354,12 @@ export async function ingestCourse(
         (sum, thread) => sum + (thread.repliesPaged ?? 0),
         0
       ),
+    },
+    submissionFeedback: {
+      ...raw.submissionFeedback,
+      attachmentsSelected: submissionFeedbackAttachments.length,
+      attachmentsDownloaded: feedbackAttachmentResults.filter((a) => a.status !== "failed").length,
+      attachmentsFailed: feedbackAttachmentResults.filter((a) => a.status === "failed").length,
     },
   };
 
@@ -491,6 +539,103 @@ function selectDescriptionLinkedFiles(
   }
 
   return selected;
+}
+
+/**
+ * Files the grader attached to feedback on the student's own submissions
+ * (annotated PDFs, filled-in rubrics) and files linked from the comment text
+ * or rubric-assessment comments. Land under attachments/submission-comments/.
+ */
+function selectSubmissionFeedbackFiles(
+  assignments: RawAssignmentRecord[],
+  alreadySelected: SelectedAttachment[]
+): SelectedAttachment[] {
+  const selected: SelectedAttachment[] = [];
+  const claimedIds = new Set<number>();
+  const claimedUrls = new Set<string>();
+  for (const attachment of alreadySelected) {
+    if (attachment.fileId !== null) claimedIds.add(attachment.fileId);
+    claimedUrls.add(attachment.downloadUrl);
+  }
+
+  const claim = (fileId: number | null, downloadUrl: string): boolean => {
+    if ((fileId !== null && claimedIds.has(fileId)) || claimedUrls.has(downloadUrl)) {
+      return false;
+    }
+    if (fileId !== null) claimedIds.add(fileId);
+    claimedUrls.add(downloadUrl);
+    return true;
+  };
+
+  for (const assignment of assignments) {
+    const comments = assignment.submission?.submission_comments ?? [];
+    for (const comment of comments) {
+      const author = comment.author_name?.trim() ? ` by ${comment.author_name.trim()}` : "";
+      const reason = `submission feedback for "${assignment.name}"${author}`;
+
+      for (const attachment of comment.attachments ?? []) {
+        if (!attachment || typeof attachment.url !== "string" || attachment.url.length === 0) {
+          continue;
+        }
+        if (!claim(attachment.id, attachment.url)) continue;
+        selected.push({
+          sourceType: "submission_comment_attachment",
+          fileId: attachment.id,
+          filename: topicAttachmentDisplayName(attachment),
+          downloadUrl: attachment.url,
+          reason: `attached to ${reason}`,
+          contentType: attachment["content-type"] ?? attachment.content_type ?? null,
+          size: typeof attachment.size === "number" ? attachment.size : null,
+          subfolder: "submission-comments",
+        });
+      }
+
+      for (const source of collectAssignmentFeedbackHtmlSources({
+        submission: { submission_comments: [comment] },
+      })) {
+        for (const file of extractLinkedFiles(source.html)) {
+          if (!claim(null, file.downloadUrl)) continue;
+          selected.push({
+            sourceType: "submission_comment_attachment",
+            fileId: null,
+            filename: file.title,
+            downloadUrl: file.downloadUrl,
+            reason: `linked in ${reason}`,
+            contentType: null,
+            size: null,
+            subfolder: "submission-comments",
+          });
+        }
+      }
+    }
+
+    // Rubric-assessment comments are per criterion and have no author field;
+    // label them by criterion instead.
+    for (const source of collectAssignmentFeedbackHtmlSources({
+      rubric: assignment.rubric,
+      submission: { rubric_assessment: assignment.submission?.rubric_assessment },
+    })) {
+      for (const file of extractLinkedFiles(source.html)) {
+        if (!claim(null, file.downloadUrl)) continue;
+        selected.push({
+          sourceType: "submission_comment_attachment",
+          fileId: null,
+          filename: file.title,
+          downloadUrl: file.downloadUrl,
+          reason: `linked in ${source.label} on "${assignment.name}"`,
+          contentType: null,
+          size: null,
+          subfolder: "submission-comments",
+        });
+      }
+    }
+  }
+
+  return selected;
+}
+
+function topicAttachmentDisplayName(attachment: CanvasTopicAttachment): string {
+  return attachment.display_name || attachment.filename || `file-${attachment.id}`;
 }
 
 /**
