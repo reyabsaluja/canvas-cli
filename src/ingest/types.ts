@@ -183,6 +183,8 @@ export interface IngestionMeta {
     quizzes?: number;
     /** External tools (LTI tabs such as Piazza, Zoom, Ed) captured on the course-tools page. */
     externalTools?: number;
+    /** Assignment groups captured on the grading-scheme page. */
+    assignmentGroups?: number;
     attachmentsDownloaded: number;
     attachmentsSkipped: number;
     attachmentsFailed: number;

@@ -134,6 +134,14 @@ export interface MockQuiz {
   published?: boolean;
 }
 
+export interface MockAssignmentGroup {
+  id: number;
+  name: string;
+  position?: number;
+  group_weight?: number;
+  rules?: { drop_lowest?: number; drop_highest?: number };
+}
+
 export interface MockTab {
   id: string;
   label: string;
@@ -156,6 +164,8 @@ export interface MockServerData {
   quizzes?: Map<number, MockQuiz[]>;
   /** Navigation tabs served from GET /courses/:id/tabs. */
   tabs?: Map<number, MockTab[]>;
+  /** Assignment groups served from GET /courses/:id/assignment_groups. */
+  assignmentGroups?: Map<number, MockAssignmentGroup[]>;
   /** Bytes served from GET /files/:id/download (defaults to a short text body). */
   fileContents?: Map<number, string>;
   /** Any API path matching one of these returns 403, to simulate institution blocks. */
@@ -414,6 +424,17 @@ export function createMockCanvasServer(data: MockServerData): http.Server {
         baseApiUrl,
         `/courses/${courseId}/modules/${moduleId}/items`
       );
+      res.writeHead(200, headers);
+      res.end(body);
+      return;
+    }
+
+    // GET /courses/:id/assignment_groups
+    const groupsMatch = path.match(/^\/courses\/(\d+)\/assignment_groups$/);
+    if (groupsMatch && req.method === "GET") {
+      const courseId = parseInt(groupsMatch[1], 10);
+      const groups = data.assignmentGroups?.get(courseId) ?? [];
+      const { body, headers } = paginatedResponse(groups, page, effectivePerPage, baseApiUrl, `/courses/${courseId}/assignment_groups`);
       res.writeHead(200, headers);
       res.end(body);
       return;

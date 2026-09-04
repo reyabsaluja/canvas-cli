@@ -59,12 +59,12 @@ test("integration: ingest pipeline end-to-end with mock API", async (t) => {
     assert.equal(normalized.files.length, 2);
     assert.equal(normalized.files[0].displayName, "syllabus.pdf");
 
-    // Quizzes and the external-tools list ride through the page pipeline.
-    const regularPages = normalized.pages.filter(
-      (page) => !page.title.startsWith("Quiz: ") && !page.title.startsWith("Course tools")
-    );
+    // Quizzes, the external-tools list and the grading scheme ride through
+    // the page pipeline as synthetic pages.
+    const SYNTHETIC_PAGE_TITLE = /^(Quiz: |Course tools|Grading scheme)/;
+    const regularPages = normalized.pages.filter((page) => !SYNTHETIC_PAGE_TITLE.test(page.title));
     assert.equal(regularPages.length, 2);
-    assert.equal(normalized.pages.length - regularPages.length, 3);
+    assert.equal(normalized.pages.length - regularPages.length, 4);
     assert.equal(normalized.pages[0].title, "Welcome to CS101");
   });
 

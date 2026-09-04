@@ -8,6 +8,7 @@ import type {
   CanvasFile,
   CanvasQuiz,
   CanvasTab,
+  CanvasAssignmentGroup,
   CanvasFolder,
   CanvasPage,
   CanvasDiscussionEntry,
@@ -51,6 +52,8 @@ export interface RawCourseContent {
   quizzes: CanvasQuiz[];
   /** Course navigation tabs; external tools (Piazza, Zoom, Ed, ...) are captured as a page. */
   tabs: CanvasTab[];
+  /** Assignment groups (weights, drop rules); rendered as a "Grading scheme" page. */
+  assignmentGroups: CanvasAssignmentGroup[];
   warnings: string[];
 }
 
@@ -266,6 +269,23 @@ export async function fetchCourseContent(
     rememberFetchedPage("course-tools", "Course tools and external links", toolsBody);
   }
 
+  // Grading scheme: "how much is Lab 4 worth?" is answered by assignment
+  // group weights and drop rules, which live only on assignment_groups.
+  const getAssignmentGroupsSafe = (client as {
+    getAssignmentGroupsSafe?: (courseId: number, signal?: AbortSignal | null) => Promise<CanvasAssignmentGroup[]>;
+  }).getAssignmentGroupsSafe;
+  const assignmentGroups = getAssignmentGroupsSafe
+    ? await getAssignmentGroupsSafe.call(client, courseId, signal)
+    : [];
+  const gradingBody = buildGradingSchemePageBody(
+    assignmentGroups,
+    assignments,
+    courseDetail.apply_assignment_group_weights ?? null
+  );
+  if (gradingBody) {
+    rememberFetchedPage("grading-scheme", "Grading scheme: assignment groups and weights", gradingBody);
+  }
+
   while (pendingSlugs.length > 0) {
     if (signal?.aborted) {
       throw signal.reason ?? new DOMException("Aborted", "AbortError");
@@ -304,8 +324,71 @@ export async function fetchCourseContent(
     fetchedPages: Array.from(fetchedPagesBySlug.values()),
     quizzes,
     tabs,
+    assignmentGroups,
     warnings,
   };
+}
+
+/**
+ * Assignment groups with weights, drop rules and member assignments as a
+ * page, or null when there are no groups. Exported for tests.
+ */
+export function buildGradingSchemePageBody(
+  groups: CanvasAssignmentGroup[],
+  assignments: Array<{
+    id: number;
+    name: string;
+    assignment_group_id?: number | null;
+    points_possible?: number | null;
+    due_at?: string | null;
+  }>,
+  weightsApplied: boolean | null
+): string | null {
+  if (groups.length === 0) return null;
+  const sorted = [...groups].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  const anyWeight = sorted.some((group) => typeof group.group_weight === "number" && group.group_weight > 0);
+  const parts: string[] = [];
+  if (weightsApplied === true || (weightsApplied === null && anyWeight)) {
+    parts.push("<p>The final grade is a weighted sum of these assignment groups.</p>");
+  } else if (weightsApplied === false) {
+    parts.push("<p>Assignment group weights are not applied; the final grade is based on total points.</p>");
+  }
+  for (const group of sorted) {
+    const weight =
+      typeof group.group_weight === "number" && (anyWeight || weightsApplied)
+        ? ` — ${group.group_weight}% of the final grade`
+        : "";
+    parts.push(`<h2>${group.name}${weight}</h2>`);
+    const rules: string[] = [];
+    if (group.rules?.drop_lowest) rules.push(`the lowest ${group.rules.drop_lowest} score${group.rules.drop_lowest > 1 ? "s are" : " is"} dropped`);
+    if (group.rules?.drop_highest) rules.push(`the highest ${group.rules.drop_highest} score${group.rules.drop_highest > 1 ? "s are" : " is"} dropped`);
+    if (rules.length > 0) parts.push(`<p>Rules: ${rules.join("; ")}.</p>`);
+    // Prefer the group's own assignment list (include[]=assignments); fall
+    // back to the course assignments tagged with this group id.
+    const members: Array<{ name: string; points_possible?: number | null; due_at?: string | null }> =
+      group.assignments && group.assignments.length > 0
+        ? group.assignments.filter((a) => !a.omit_from_final_grade)
+        : assignments.filter((assignment) => assignment.assignment_group_id === group.id);
+    if (members.length === 0) {
+      parts.push("<p>No assignments in this group yet.</p>");
+      continue;
+    }
+    const totalPoints = members.reduce((sum, a) => sum + (a.points_possible ?? 0), 0);
+    parts.push(
+      `<ul>${members
+        .map((a) => {
+          const points = a.points_possible !== null && a.points_possible !== undefined ? `${a.points_possible} points` : "points not set";
+          const share =
+            totalPoints > 0 && typeof group.group_weight === "number" && group.group_weight > 0 && a.points_possible
+              ? `, about ${((a.points_possible / totalPoints) * group.group_weight).toFixed(1)}% of the final grade`
+              : "";
+          const due = a.due_at ? `, due ${a.due_at}` : "";
+          return `<li>${a.name} (${points}${share}${due})</li>`;
+        })
+        .join("")}</ul>`
+    );
+  }
+  return parts.join("\n");
 }
 
 const TOOL_HINTS: Array<[RegExp, string]> = [

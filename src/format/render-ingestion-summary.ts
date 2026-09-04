@@ -31,6 +31,9 @@ export function renderIngestionSummary(result: IngestionResult): string {
   } else {
     lines.push(`  ${chalk.dim("-")} files ${chalk.dim("(API not accessible)")}`);
   }
+  if ((c.assignmentGroups ?? 0) > 0) {
+    lines.push(`  ${chalk.dim("-")} ${c.assignmentGroups} assignment groups ${chalk.dim("(weights and drop rules on the grading-scheme page)")}`);
+  }
   if ((c.externalTools ?? 0) > 0) {
     lines.push(`  ${chalk.dim("-")} ${c.externalTools} external tools ${chalk.dim("(Piazza, Zoom, Ed, ... from course navigation)")}`);
   }
