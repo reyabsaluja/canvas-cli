@@ -6,6 +6,72 @@ import type {
 } from "./types.js";
 import { htmlToText } from "../format/html-to-text.js";
 
+/**
+ * Due-date lines for the workup. When Canvas and a course document both
+ * state a date and they disagree, say so instead of silently trusting
+ * Canvas: a syllabus that says March 20 while Canvas says March 27 is
+ * exactly what a student needs to know. Exported for tests.
+ */
+export function describeDueDate(
+  canvasDueAt: Date | null,
+  documentDueDate: string | null
+): string[] {
+  const documentDate = documentDueDate?.trim() || null;
+  if (canvasDueAt && documentDate) {
+    const agreement = compareDueDates(canvasDueAt, documentDate);
+    if (agreement === "conflict") {
+      return [
+        `**Due:** ${formatDate(canvasDueAt)} *(Canvas)*`,
+        `**Due-date conflict:** the syllabus/schedule says **${documentDate}**, which does not match Canvas. Confirm with the instructor before relying on either.`,
+      ];
+    }
+    if (agreement === "unknown") {
+      return [`**Due:** ${formatDate(canvasDueAt)} *(Canvas; the syllabus/schedule says "${documentDate}")*`];
+    }
+    return [`**Due:** ${formatDate(canvasDueAt)} *(Canvas, matches the syllabus/schedule)*`];
+  }
+  if (canvasDueAt) {
+    return [`**Due:** ${formatDate(canvasDueAt)}`];
+  }
+  if (documentDate) {
+    return [`**Due:** ${documentDate} *(inferred from syllabus/schedule)*`];
+  }
+  return [`**Due:** not set on Canvas`];
+}
+
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+/** Same calendar day → "match"; different day → "conflict"; unparseable → "unknown". */
+export function compareDueDates(canvasDueAt: Date, documentDueDate: string): "match" | "conflict" | "unknown" {
+  const canvasMonth = canvasDueAt.getMonth();
+  const canvasDay = canvasDueAt.getDate();
+  const canvasYear = canvasDueAt.getFullYear();
+  const text = documentDueDate.toLowerCase();
+
+  // ISO or numeric dates.
+  const iso = text.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+  if (iso) {
+    const [, y, m, d] = iso;
+    return Number(y) === canvasYear && Number(m) - 1 === canvasMonth && Number(d) === canvasDay ? "match" : "conflict";
+  }
+  const slash = text.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+  if (slash) {
+    const [, m, d] = slash;
+    return Number(m) - 1 === canvasMonth && Number(d) === canvasDay ? "match" : "conflict";
+  }
+  // "March 20", "Mar. 20, 2026", "20 March".
+  const monthIndex = MONTHS.findIndex((month) => new RegExp(`\\b${month}[a-z]*\\.?\\b`).test(text));
+  if (monthIndex >= 0) {
+    const dayMatch =
+      text.match(new RegExp(`\\b${MONTHS[monthIndex]}[a-z]*\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`)) ??
+      text.match(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?${MONTHS[monthIndex]}[a-z]*\\b`));
+    if (dayMatch) {
+      return monthIndex === canvasMonth && Number(dayMatch[1]) === canvasDay ? "match" : "conflict";
+    }
+  }
+  return "unknown";
+}
+
 function formatDate(date: Date | null): string {
   if (!date) return "—";
   return date.toLocaleString("en-US", {
@@ -77,15 +143,9 @@ export function generateWorkAssignmentMarkdown(
   // Metadata
   lines.push(`- **Course:** ${detail.courseName}`);
 
-  // Due date with provenance
-  if (detail.dueAt) {
-    lines.push(`- **Due:** ${formatDate(detail.dueAt)}`);
-  } else if (workup.dueDate) {
-    lines.push(
-      `- **Due:** ${workup.dueDate} *(inferred from syllabus/schedule)*`
-    );
-  } else {
-    lines.push(`- **Due:** not set on Canvas`);
+  // Due date with provenance, surfacing Canvas-vs-document disagreements.
+  for (const line of describeDueDate(detail.dueAt, workup.dueDate)) {
+    lines.push(`- ${line}`);
   }
 
   if (detail.pointsPossible !== null)
@@ -231,10 +291,8 @@ export function generatePlanMarkdown(
   lines.push(`# Plan: ${detail.name}`);
   lines.push("");
 
-  if (detail.dueAt) {
-    lines.push(`**Due:** ${formatDate(detail.dueAt)}`);
-  } else if (workup.dueDate) {
-    lines.push(`**Due:** ${workup.dueDate} *(from syllabus)*`);
+  for (const line of describeDueDate(detail.dueAt, workup.dueDate)) {
+    lines.push(line);
   }
   lines.push("");
 
