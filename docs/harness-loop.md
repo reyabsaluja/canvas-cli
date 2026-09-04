@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **ground**
+Next area: **discover**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -27,7 +27,7 @@ Next area: **ground**
 - discover: (backlog empty; candidates: module item completion requirements / prerequisites not recorded; grade posting policy / late policy fields on assignments)
 - extract: no OCR for scanned PDFs
 - retrieve: (backlog empty)
-- ground: numeric-claim check only covers digit-bearing tokens (spelled-out numbers, weekday inferences like "Friday" are not checked)
+- ground: numeric-claim check does not verify weekday inferences ("due Friday" when the evidence only gives a date)
 
 ## Done
 
@@ -70,3 +70,4 @@ Next area: **ground**
 - 2026-09-04 extract: assignment extracts state their assignment group, its weight and drop rules, and the assignment's approximate share of the final grade ("7.5% (10 of 40 points in Labs)"), so the first document the agent reads answers "how much is this worth" (caller did it directly)
 - 2026-09-04 retrieve: course search hits list up to two further matching sections of the same document ("also — Extensions: ...") when they score at least 40% of the best one, so a syllabus that answers in two places shows both (caller did it directly)
 - 2026-09-04 reason: the /work investigation's read_document takes a section ("Page 57", heading fragment) and caches section reads separately from cut-off whole reads, so workups can reach pages past the 60k cut like the chat agent can; unknown sections fall back to the head with the section list (caller did it directly)
+- 2026-09-04 ground: spelled-out figures with a unit ("ten percent", "twenty-five marks", "two hundred words") are normalised to digits in answers and evidence, so they are checked both ways by the numeric-claim guard (caller did it directly)
