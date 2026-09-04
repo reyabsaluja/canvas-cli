@@ -2,6 +2,10 @@ import type { AnswerSource } from "../ask/types.js";
 import type { LoadedWorkspace } from "../ask/types.js";
 import type { Observation } from "./observation.js";
 import { questionExplicitlyComparesSources } from "./question-intent.js";
+import {
+  collectUnsupportedRequirementClaims,
+  findContextuallyUnsupportedClaims,
+} from "./claim-context.js";
 import { workupExplicitlySupportsQuestion } from "./workup-coverage.js";
 import {
   isGroundedContentObservation,
@@ -885,23 +889,31 @@ export function findUnsupportedAnswerClaims(
   }
 
   const answerTokens = extractNumericClaimTokens(normalizedAnswer);
-  if (answerTokens.length === 0) {
-    return unsupported;
+  if (answerTokens.length > 0) {
+    const evidenceTokens = collectNumericEvidenceTokens(evidenceText);
+    const questionTokens = new Set(extractNumericClaimTokens(normalizedQuestion));
+
+    const seen = new Set<string>();
+    for (const token of answerTokens) {
+      if (seen.has(token) || questionTokens.has(token) || dateCoveredTokens.has(token)) {
+        continue;
+      }
+      seen.add(token);
+      if (isClaimTokenSupported(token, evidenceTokens)) {
+        continue;
+      }
+      unsupported.push(describeClaim(token, normalizedAnswer));
+    }
   }
 
-  const evidenceTokens = collectNumericEvidenceTokens(evidenceText);
-  const questionTokens = new Set(extractNumericClaimTokens(normalizedQuestion));
-
-  const seen = new Set<string>();
-  for (const token of answerTokens) {
-    if (seen.has(token) || questionTokens.has(token) || dateCoveredTokens.has(token)) {
-      continue;
-    }
-    seen.add(token);
-    if (isClaimTokenSupported(token, evidenceTokens)) {
-      continue;
-    }
-    unsupported.push(describeClaim(token, normalizedAnswer));
+  // Presence is not support when the evidence lists several values of the
+  // same kind: "March 20" is in a schedule that lists every lab, but the Lab
+  // 4 line says March 27. Likewise "must" against a source that says "may".
+  if (normalizedEvidence.trim()) {
+    unsupported.push(
+      ...findContextuallyUnsupportedClaims(normalizedAnswer, normalizedEvidence, normalizedQuestion),
+      ...collectUnsupportedRequirementClaims(normalizedAnswer, normalizedEvidence)
+    );
   }
   return unsupported;
 }
