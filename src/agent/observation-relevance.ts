@@ -35,6 +35,10 @@ export function isGroundedContentObservation(
 ): boolean {
   return (
     observation.status === "ok" &&
+    // An announcement listing carries citable titles and dates but is not a
+    // full read: it must never satisfy "already read" so the model still
+    // follows it with read_thread on the matching post.
+    observation.tool !== "list_announcements" &&
     observation.artifacts.length > 0 &&
     typeof observation.content === "string" &&
     observation.content.trim().length > 0

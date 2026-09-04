@@ -74,7 +74,7 @@ Answer rules:
 
 IMPORTANT: Before calling any tool, ALWAYS write a brief sentence explaining what you're about to do and why. For example, write "Let me read the lab document to get the exact requirements..." before calling read_file, or "Searching the announcements for the extension..." before calling list_announcements. This sentence must come BEFORE the tool call, not after. The student needs to see your reasoning in real-time.
 
-Course-level tools (when available): use list_assignments to orient across the course's other work, open_lecture to launch lecture content by number or topic, list_announcements for announcements and discussions, and read_thread to pull a full discussion thread. These are the same capabilities the course assistant has — stay assignment-focused but reach for them when the student's question points outside this assignment.
+Course-level tools (when available): use list_assignments to orient across the course's other work, open_lecture to launch lecture content by number or topic, list_announcements for announcements and discussions, and read_thread to pull a full discussion thread. list_assignments and read_thread return grounded, citable evidence (cite the thread by its title); list_announcements is a listing of titles and dates, so follow it with read_thread on the matching post before answering from it. These are the same capabilities the course assistant has — stay assignment-focused but reach for them when the student's question points outside this assignment.
 
 When every part of the question is answered by something you actually read, respond with your answer directly (no tool calls).`);
 

@@ -757,7 +757,18 @@ async function listAssignments(
       tool: "list_assignments",
       status: "ok",
       summary: `Listed ${assignments.length} assignment${assignments.length === 1 ? "" : "s"} for this course.`,
-      artifacts: [],
+      // The listing is Canvas metadata the student can be pointed at, so it
+      // is citable evidence: without an artifact and content a correct
+      // "what is due next" answer verified as low confidence with no source.
+      artifacts: [
+        createVirtualEvidenceArtifact(
+          `course:assignments:${ctx.courseId ?? ctx.loaded.courseId ?? "unknown"}`,
+          "Course assignments",
+          "assignment",
+          rendered
+        ),
+      ],
+      content: rendered,
     },
     modelText: rendered,
     uiText: rendered,
@@ -796,7 +807,18 @@ async function listAnnouncements(
       tool: "list_announcements",
       status: "ok",
       summary: `Listed ${items.length} announcement${items.length === 1 ? "" : "s"}${query ? ` matching "${query}"` : ""}.`,
-      artifacts: [],
+      // A listing is citable (titles, authors, dates) but it is not a full
+      // read: isGroundedContentObservation excludes list_announcements so the
+      // model is still told to read_thread before answering from it.
+      artifacts: [
+        createVirtualEvidenceArtifact(
+          `course:radar:${ctx.courseId}:${filter}:${normalizeToolInput(query || "all")}`,
+          formatRadarEvidenceTitle(filter, query),
+          filter === "discussions" ? "discussion" : "announcement",
+          rendered
+        ),
+      ],
+      content: rendered,
     },
     modelText: rendered,
     uiText: rendered,
@@ -827,18 +849,75 @@ async function readThread(
     [{ id: ctx.courseId, name: courseName }],
     topic
   );
+  const title = resolved.found
+    ? extractThreadTitle(resolved.content, topic)
+    : topic;
   return {
     observation: {
       tool: "read_thread",
       status: resolved.found ? "ok" : "not_found",
       summary: resolved.found
-        ? `Read discussion thread for "${topic}".`
+        ? `Read discussion thread "${title}".`
         : resolved.content,
-      artifacts: [],
+      // A thread read is full source text, the same as read_file: it must
+      // yield a citation titled after the thread and count as a grounded read.
+      artifacts: resolved.found
+        ? [
+            createVirtualEvidenceArtifact(
+              `course:thread:${ctx.courseId}:${normalizeToolInput(title)}`,
+              title,
+              "discussion",
+              resolved.content
+            ),
+          ]
+        : [],
+      content: resolved.found ? resolved.content : undefined,
     },
     modelText: resolved.content,
     uiText: resolved.content,
   };
+}
+
+/**
+ * Evidence artifact for a course-native tool result that has no backing
+ * knowledge-index record (assignment listings, announcement listings, thread
+ * reads). The id is stable per target so run-state dedupes repeat calls.
+ */
+function createVirtualEvidenceArtifact(
+  artifactId: string,
+  title: string,
+  kind: string,
+  content: string
+): ArtifactRef {
+  return {
+    artifactId,
+    title,
+    kind,
+    excerpt: buildArtifactExcerpt(content),
+  };
+}
+
+function formatRadarEvidenceTitle(filter: RadarFilter, query: string): string {
+  const base =
+    filter === "announcements"
+      ? "Course announcements"
+      : filter === "discussions"
+        ? "Course discussions"
+        : "Course announcements and discussions";
+  const trimmedQuery = query.trim();
+  return trimmedQuery ? `${base}: ${trimmedQuery}` : base;
+}
+
+/** Thread title from the first `**bold**` line of a rendered thread. */
+function extractThreadTitle(content: string, fallback: string): string {
+  const firstLine = content.split("\n").find((line) => line.trim().length > 0);
+  if (!firstLine) {
+    return fallback;
+  }
+
+  const titleMatch = firstLine.match(/^\*\*(.*?)\*\*/);
+  const title = titleMatch?.[1]?.trim();
+  return title && title.length > 0 ? title : fallback;
 }
 
 function normalizeToolInput(value: unknown): string {
