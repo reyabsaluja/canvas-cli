@@ -79,6 +79,7 @@ Initial release of `@reyabsaluja/canvas-cli`.
 - Extraction: zip summary caps raised from 30k to 120k characters per file and from 50k to 400k total, with an explicit "N more characters omitted" note instead of a silent cut
 - Workspace answers are no longer capped at 2-4 sentences, and the prompt asks the agent to list the sources it checked in not-found answers
 - Observation relevance stems question words and treats a match on a document heading as strong on its own, so a read that answers the question counts as grounded evidence across verification, memory reuse, and the retrieval gate
+- Agent: a post-answer recovery pass runs after the model answers, outside the tool-step budget: an answer that states a date or figure from a search hit it never opened gets that hit read and the answer regenerated on the full text; a "not found" answer triggers the tools the model skipped (`list_assignments` for due-date questions, `list_announcements` for post questions, then a workspace and a course search, else `list_files`); an announcement listing is followed by `read_thread` on the best-matching unread post; a comparison grounded in one source searches for and reads the other side. Recovery calls show in the transcript like normal tool calls, a separator line is streamed before the regenerated answer, and verification runs on the regenerated answer
 
 ### Fixed
 

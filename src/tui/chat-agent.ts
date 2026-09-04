@@ -43,15 +43,25 @@ import type {
   TurnToolCache,
 } from "./chat-agent/types.js";
 import {
+  MAX_RECOVERY_READ_ATTEMPTS,
+  runPostAnswerRecovery,
+} from "./chat-agent/recovery.js";
+import {
   finalizeAnswerText,
   resolveToolTurnVerificationObservations,
   selectArtifactSupportObservations,
+  selectComplementaryRecoveryReadArtifactId,
+  selectComplementarySearchToolCalls,
+  selectNoInfoRecoveryToolCalls,
   selectRecoveryReadArtifactId,
+  selectThreadRecoveryTopic,
+  selectUngroundedSearchRecoveryReadArtifactId,
   shouldContinueToolLoopAfterGateRead,
+  shouldGroundUnverifiedAnswer,
+  shouldRecoverFromNoInfoAnswer,
   shouldRecoverFromToolLoop,
+  shouldRegenerateAnswerAfterRecoveryRead,
 } from "./chat-agent/verification.js";
-
-const MAX_RECOVERY_READ_ATTEMPTS = 2;
 
 /**
  * Run the chat agent with streaming text output.
@@ -278,70 +288,46 @@ async function runToolLoopTurn(
     toolLoopError = error;
   }
 
-  let supportingObservations = ctx.runState.observations.slice(observationStart);
-  let verificationObservations = resolveToolTurnVerificationObservations(
-    ctx.runState.observations,
-    observationStart,
-    question
-  );
-  if (fullText.trim().length === 0) {
-    const attemptedRecoveryArtifactIds = new Set<string>();
-    while (attemptedRecoveryArtifactIds.size < MAX_RECOVERY_READ_ATTEMPTS) {
-      const recoveryArtifactId = selectRecoveryReadArtifactId(
-        question,
-        supportingObservations,
-        ctx.runState.observations
-      );
-      if (
-        !recoveryArtifactId ||
-        attemptedRecoveryArtifactIds.has(recoveryArtifactId)
-      ) {
-        break;
-      }
-      attemptedRecoveryArtifactIds.add(recoveryArtifactId);
-
-      const recoveryResult = await readArtifactForGate(recoveryArtifactId, ctx);
-      appendObservation(ctx.runState, recoveryResult.observation);
-      const recoveryFilename =
-        recoveryResult.observation.artifacts[0]?.title ?? recoveryArtifactId;
-      const { action, target } = mapToolCall("read_file", {
-        filename: recoveryFilename,
-      });
-      onToolCall({
-        action,
-        target,
-        result: recoveryResult.uiText,
-        color: recoveryResult.observation.status === "ok" ? "green" : "red",
-        observation: recoveryResult.observation,
-      });
-      supportingObservations = ctx.runState.observations.slice(observationStart);
-      verificationObservations = resolveToolTurnVerificationObservations(
-        ctx.runState.observations,
-        observationStart,
-        question
-      );
-      if (recoveryResult.observation.status === "ok" && recoveryResult.observation.content) {
-        break;
-      }
-    }
+  // A loop that failed mid-answer (abort, provider error) keeps failing; only
+  // an empty answer is worth recovering through extra reads.
+  if (toolLoopError && fullText.trim().length > 0) {
+    throw toolLoopError;
   }
-  if (shouldRecoverFromToolLoop(fullText, verificationObservations)) {
-    fullText = await answerWithoutTools(
-      ctx,
-      systemPrompt,
-      question,
-      verificationObservations,
-      onTextDelta,
-      abortSignal
-    );
-  } else if (toolLoopError) {
+
+  // Post-answer recovery: deterministic extra tool calls when the model
+  // stopped early (see recovery.ts). These sit outside the step budget.
+  const recovery = await runPostAnswerRecovery({
+    question,
+    answer: fullText,
+    toolNames: toolDefs.map((tool) => tool.name),
+    runState: ctx.runState,
+    observationStart,
+    executeRecoveryToolCall: (name, input) =>
+      executeToolCallForTurn(turnToolCache, name, input, ctx),
+    readRecoveryArtifact: (artifactId) => readArtifactForGate(artifactId, ctx),
+    regenerateAnswer: (observations) =>
+      answerWithoutTools(
+        ctx,
+        systemPrompt,
+        question,
+        observations,
+        onTextDelta,
+        abortSignal
+      ),
+    onToolCall,
+    onTextDelta,
+    abortSignal,
+    maxRecoveryReadAttempts: MAX_RECOVERY_READ_ATTEMPTS,
+  });
+
+  if (!recovery.regenerated && toolLoopError) {
     throw toolLoopError;
   }
 
   return {
-    fullText,
-    supportingObservations,
-    verificationObservations,
+    fullText: recovery.answer,
+    supportingObservations: recovery.supportingObservations,
+    verificationObservations: recovery.verificationObservations,
   };
 }
 
@@ -408,11 +394,20 @@ export {
   executeToolCallForTurn,
   getAvailableChatToolNames,
   resolveToolTurnVerificationObservations,
+  runPostAnswerRecovery,
   seedTurnToolCacheEntry,
   selectArtifactSupportObservations,
+  selectComplementaryRecoveryReadArtifactId,
+  selectComplementarySearchToolCalls,
+  selectNoInfoRecoveryToolCalls,
   selectRecoveryReadArtifactId,
+  selectThreadRecoveryTopic,
+  selectUngroundedSearchRecoveryReadArtifactId,
   shouldContinueToolLoopAfterGateRead,
+  shouldGroundUnverifiedAnswer,
+  shouldRecoverFromNoInfoAnswer,
   shouldRecoverFromToolLoop,
+  shouldRegenerateAnswerAfterRecoveryRead,
 };
 
 export type {
