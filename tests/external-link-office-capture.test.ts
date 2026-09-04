@@ -466,6 +466,53 @@ test("captureExternalCourseLinks never fetches Canvas external-tool launch URLs 
   }
 });
 
+test("captureExternalCourseLinks labels links found in announcement replies as announcement replies", async () => {
+  const server = await startServer({
+    "/room-change": {
+      contentType: "text/html",
+      body: Buffer.from(
+        "<html><head><title>Room change</title></head><body><p>The review session moved to ENG 102.</p></body></html>"
+      ),
+    },
+  });
+  try {
+    const reply = {
+      id: 5,
+      user_id: 2,
+      user_name: "TA Linus",
+      message: `<p>Room change: see <a href="${server.url}/room-change">this notice</a>.</p>`,
+      created_at: "2026-03-01T10:00:00Z",
+    };
+    const topic = {
+      id: 7101,
+      title: "Midterm review session Thursday",
+      message: null,
+      html_url: "https://canvas.example.com/courses/1/discussion_topics/7101",
+    };
+    const result = await captureExternalCourseLinks(
+      baseOptions({
+        announcementThreads: [{ topic, entries: [reply], participantCount: 1 } as any],
+      })
+    );
+    assert.equal(result.length, 1);
+    assert.deepEqual(result[0]!.entry.sources, [
+      'announcement reply in "Midterm review session Thursday" by TA Linus',
+    ]);
+
+    // The same thread passed as a discussion keeps the discussion label.
+    const asDiscussion = await captureExternalCourseLinks(
+      baseOptions({
+        discussionThreads: [{ topic, entries: [reply], participantCount: 1 } as any],
+      })
+    );
+    assert.deepEqual(asDiscussion[0]!.entry.sources, [
+      'discussion reply in "Midterm review session Thursday" by TA Linus',
+    ]);
+  } finally {
+    await server.close();
+  }
+});
+
 test("Google Docs, Slides and Sheets links map to their text, pptx and csv export URLs", () => {
   assert.deepEqual(
     buildGoogleWorkspaceExportRequest("https://docs.google.com/document/d/abc123/edit?usp=sharing"),

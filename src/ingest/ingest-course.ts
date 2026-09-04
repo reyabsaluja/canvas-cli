@@ -240,7 +240,8 @@ export async function ingestCourse(
     fetchedPages: [...raw.fetchedPages, ...feedbackHtmlSources],
     syllabusBody: courseMeta.syllabusBody,
     announcements: raw.announcements,
-    discussionThreads: [...raw.discussionThreads, ...announcementReplyThreads],
+    discussionThreads: raw.discussionThreads,
+    announcementThreads: announcementReplyThreads,
     config,
     signal,
   });

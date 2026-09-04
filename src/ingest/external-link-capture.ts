@@ -71,6 +71,12 @@ export async function captureExternalCourseLinks(options: {
     html_url?: string | null;
   }>;
   discussionThreads: RawDiscussionThread[];
+  /**
+   * Announcement reply threads (the post itself is already covered by
+   * `announcements`, so callers blank the topic message); their links are
+   * labelled as announcement replies.
+   */
+  announcementThreads?: RawDiscussionThread[] | null;
   config: Config;
   /** Ctrl-C during ingestion: stops new fetches and aborts in-flight ones. */
   signal?: AbortSignal | null;
@@ -173,20 +179,30 @@ export async function captureExternalCourseLinks(options: {
     );
   }
 
-  for (const thread of options.discussionThreads) {
+  const addThreadCandidates = (
+    thread: RawDiscussionThread,
+    kind: "discussion" | "announcement"
+  ): void => {
     addHtmlCandidates(
       thread.topic.message,
-      `discussion "${thread.topic.title}"`,
+      `${kind} "${thread.topic.title}"`,
       thread.topic.html_url
     );
     for (const entry of thread.entries) {
       const author = entry.user_name ?? `User ${entry.user_id}`;
       addHtmlCandidates(
         entry.message,
-        `discussion reply in "${thread.topic.title}" by ${author}`,
+        `${kind} reply in "${thread.topic.title}" by ${author}`,
         thread.topic.html_url
       );
     }
+  };
+
+  for (const thread of options.discussionThreads) {
+    addThreadCandidates(thread, "discussion");
+  }
+  for (const thread of options.announcementThreads ?? []) {
+    addThreadCandidates(thread, "announcement");
   }
 
   const candidates = Array.from(aggregated.values());

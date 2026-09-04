@@ -1076,6 +1076,7 @@ export type CheckedSourceKind =
   | "read"
   | "search"
   | "announcements"
+  | "assignments"
   | "thread"
   | "failed_read";
 
@@ -1182,6 +1183,13 @@ export function collectCheckedSources(observations: Observation[]): CheckedSourc
         kind: "announcements",
         label: query ? `the announcements matching "${query}"` : "the announcements",
       });
+      continue;
+    }
+
+    // The assignment list counts as a grounded read (it carries every due
+    // date), so a not-found trail must say it was consulted.
+    if (observation.tool === "list_assignments" && observation.status === "ok") {
+      push({ kind: "assignments", label: "the assignment list" });
       continue;
     }
 

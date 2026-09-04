@@ -143,11 +143,30 @@ test("collectCheckedSources dedupes repeated reads and ignores action-only tools
       summary: 'Read discussion thread for "lab 4 late".',
       artifacts: [],
     },
+    // A grounded read of the assignment list belongs in the trail too.
+    {
+      tool: "list_assignments",
+      status: "ok",
+      summary: "Listed 2 assignments for this course.",
+      artifacts: [{ artifactId: "course:assignments:17", title: "Assignments", kind: "assignment" }],
+      content: "- Lab 3 — Mar 20, 11:59 PM\n- Lab 4 — Mar 27, 11:59 PM",
+    },
+    {
+      tool: "list_assignments",
+      status: "ok",
+      summary: "Listed 2 assignments for this course.",
+      artifacts: [{ artifactId: "course:assignments:17", title: "Assignments", kind: "assignment" }],
+      content: "- Lab 3 — Mar 20, 11:59 PM\n- Lab 4 — Mar 27, 11:59 PM",
+    },
   ]);
 
+  assert.deepEqual(
+    checked.map((entry) => entry.kind),
+    ["read", "thread", "assignments"]
+  );
   assert.equal(
     formatCheckedSourcesNote(checked),
-    'Lab4.pdf (read in full); the discussion thread "lab 4 late"'
+    'Lab4.pdf (read in full); the discussion thread "lab 4 late"; the assignment list'
   );
   assert.equal(formatCheckedSourcesNote([]), null);
 });
