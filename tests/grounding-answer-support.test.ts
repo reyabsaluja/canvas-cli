@@ -400,3 +400,77 @@ test("download_course_file fresh downloads get the same windowed read as read_fi
     assert.match(result.modelText, /Not included in this read: Page 5\d–70/);
   });
 });
+
+test("workup-derived answers cite the workup's source trace instead of a generic workup.json", () => {
+  const question = "When is the lab 4 zip due and what is the late penalty?";
+  const answer =
+    "The zip is due Friday March 27 at 11:59 PM, and late submissions lose 10% per day.";
+  const tracedWorkup = {
+    workupJson: {
+      overview: "Interrupt-driven timer lab.",
+      dueDate: "2026-03-27",
+      sourceTrace: [
+        {
+          conclusion: "The zip is due on Canvas by Friday March 27 at 11:59 PM.",
+          source: "lab4.pdf",
+        },
+        {
+          conclusion: "Late submissions lose 10% per day.",
+          source: "Course syllabus",
+        },
+        // Duplicate source (case-insensitive) collapses into the first entry.
+        {
+          conclusion: "The demo is worth 60% and the report 40%.",
+          source: "LAB4.PDF",
+        },
+        { conclusion: "No source recorded.", source: "" },
+      ],
+    },
+  } as unknown as LoadedWorkspace;
+
+  const traced = verifyWorkspaceAnswer({
+    question,
+    answer,
+    observations: [],
+    usedWorkup: true,
+    loaded: tracedWorkup,
+  });
+  assert.equal(traced.ok, true);
+  assert.deepEqual(
+    traced.sources.map((source) => [source.title, source.kind, source.excerpt]),
+    [
+      ["lab4.pdf", "attachment", "The zip is due on Canvas by Friday March 27 at 11:59 PM."],
+      ["Course syllabus", "syllabus", "Late submissions lose 10% per day."],
+    ]
+  );
+  assert.ok(
+    traced.sources.every((source) => source.title !== "workup.json"),
+    "a traced workup must not fall back to the generic workup.json citation"
+  );
+
+  // The generic citation remains the fallback when the workup has no trace.
+  const untraced = verifyWorkspaceAnswer({
+    question,
+    answer,
+    observations: [],
+    usedWorkup: true,
+    loaded: {
+      workupJson: { overview: "Interrupt-driven timer lab.", sourceTrace: [] },
+    } as unknown as LoadedWorkspace,
+  });
+  assert.deepEqual(
+    untraced.sources.map((source) => [source.title, source.kind, source.excerpt]),
+    [["workup.json", "workup", "Interrupt-driven timer lab."]]
+  );
+
+  // A grounded read still wins over the workup trace.
+  const fromRead = verifyWorkspaceAnswer({
+    question,
+    answer,
+    observations: [createReadObservation(LAB_HANDOUT)],
+    usedWorkup: true,
+    loaded: tracedWorkup,
+  });
+  assert.equal(fromRead.sources[0]?.title, "lab4.txt");
+  assert.ok(fromRead.sources.every((source) => source.title !== "lab4.pdf"));
+});

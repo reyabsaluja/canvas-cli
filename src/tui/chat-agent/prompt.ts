@@ -74,7 +74,7 @@ Answer rules:
 
 IMPORTANT: Before calling any tool, ALWAYS write a brief sentence explaining what you're about to do and why. For example, write "Let me read the lab document to get the exact requirements..." before calling read_file, or "Searching the announcements for the extension..." before calling list_announcements. This sentence must come BEFORE the tool call, not after. The student needs to see your reasoning in real-time.
 
-Course-level tools (when available): use list_assignments to orient across the course's other work, open_lecture to launch lecture content by number or topic, list_announcements for announcements and discussions, and read_thread to pull a full discussion thread. These are the same capabilities the course assistant has — stay assignment-focused but reach for them when the student's question points outside this assignment.
+Course-level tools (when available): use list_assignments to orient across the course's other work, open_lecture to launch lecture content by number or topic, list_announcements for announcements and discussions, and read_thread to pull a full discussion thread. list_assignments and read_thread return grounded, citable evidence (cite the thread by its title); list_announcements is a listing of titles and dates, so follow it with read_thread on the matching post before answering from it. These are the same capabilities the course assistant has — stay assignment-focused but reach for them when the student's question points outside this assignment.
 
 When every part of the question is answered by something you actually read, respond with your answer directly (no tool calls).`);
 
@@ -245,13 +245,30 @@ export function buildEvidenceBackedQuestion(
     sections.push(`- Tool: ${observation.tool}`);
     sections.push(`  Summary: ${observation.summary}`);
     for (const artifact of observation.artifacts) {
-      sections.push(`  Source: [${artifact.kind}] ${artifact.title}`);
+      // Name the section and carry the matched excerpt: for search-only
+      // evidence the excerpt is the only text the model gets, and the
+      // section label is what lets it cite "Submission" rather than the file.
+      const sourceLabel = artifact.sectionLabel
+        ? `${artifact.title} — ${artifact.sectionLabel}`
+        : artifact.title;
+      sections.push(`  Source: [${artifact.kind}] ${sourceLabel}`);
+      const excerpt = artifact.excerpt?.replace(/\s+/g, " ").trim();
+      if (excerpt) {
+        sections.push(`  Excerpt: ${excerpt}`);
+      }
     }
     if (observation.content) {
       sections.push(observation.content);
     }
     sections.push("");
   }
+  sections.push(
+    "Answer rules for this evidence:",
+    "- Cite at the section level when possible (e.g. \"according to the Grading section of the syllabus\"), not just the document title.",
+    "- When quoting a specific requirement, due date, or threshold, use the exact wording from the evidence rather than paraphrasing it loosely.",
+    "- If the evidence partially answers the question but leaves something unaddressed, say what you found and what remains unclear — do not fill gaps with assumptions.",
+    "- When multiple sources address the same point, synthesize them: note if they agree, and flag if they conflict."
+  );
   return sections.join("\n");
 }
 

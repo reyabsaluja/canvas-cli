@@ -320,15 +320,69 @@ function collectSources(
   }
 
   if (resolved.length === 0 && usedWorkup && loaded.workupJson) {
-    const overview = (loaded.workupJson.overview as string | undefined) ?? null;
-    resolved.push({
-      title: "workup.json",
-      kind: "workup",
-      excerpt: overview ?? "Pre-loaded assignment workup context.",
-    });
+    // The workup records where each of its conclusions came from; cite those
+    // documents rather than the workup file, which the student never reads.
+    const traceSources = collectWorkupTraceSources(loaded.workupJson);
+    if (traceSources.length > 0) {
+      for (const traceSource of traceSources) {
+        pushSource(traceSource);
+      }
+    } else {
+      const overview = (loaded.workupJson.overview as string | undefined) ?? null;
+      resolved.push({
+        title: "workup.json",
+        kind: "workup",
+        excerpt: overview ?? "Pre-loaded assignment workup context.",
+      });
+    }
   }
 
   return resolved;
+}
+
+const MAX_WORKUP_TRACE_SOURCES = 4;
+
+/** One citation per distinct `sourceTrace` document, with its conclusion as the excerpt. */
+function collectWorkupTraceSources(
+  workupJson: Record<string, unknown>
+): AnswerSource[] {
+  const trace = workupJson.sourceTrace ?? workupJson.source_trace;
+  if (!Array.isArray(trace) || trace.length === 0) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const sources: AnswerSource[] = [];
+  for (const entry of trace as Array<{ conclusion?: unknown; source?: unknown }>) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const source = (typeof entry.source === "string" ? entry.source : "").trim();
+    if (!source || seen.has(source.toLowerCase())) {
+      continue;
+    }
+    seen.add(source.toLowerCase());
+    const conclusion = (
+      typeof entry.conclusion === "string" ? entry.conclusion : ""
+    ).trim();
+    sources.push({
+      title: source,
+      kind: inferWorkupTraceSourceKind(source),
+      excerpt: conclusion || null,
+    });
+  }
+  return sources.slice(0, MAX_WORKUP_TRACE_SOURCES);
+}
+
+function inferWorkupTraceSourceKind(source: string): string {
+  const lower = source.toLowerCase();
+  if (/\.pdf\b/.test(lower)) return "attachment";
+  if (/syllabus/.test(lower)) return "syllabus";
+  if (/assignment\s*description/.test(lower)) return "assignment";
+  if (/announcement/.test(lower)) return "announcement";
+  if (/discussion/.test(lower)) return "discussion";
+  if (/\bpage\b/.test(lower) || /\bmodule\b/.test(lower)) return "page";
+  return "document";
 }
 
 function selectCitationObservations(

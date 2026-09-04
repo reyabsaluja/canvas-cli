@@ -14,6 +14,7 @@ import {
 } from "../src/agent/verify.js";
 import { clearArtifactIndexCache } from "../src/knowledge/artifact-index.js";
 import { executeToolCallForTurn } from "../src/tui/chat-agent.js";
+import { buildEvidenceBackedQuestion } from "../src/tui/chat-agent/prompt.js";
 import { buildReadModelText } from "../src/tui/chat-agent/tool-execution.js";
 import { createChatContext } from "../src/tui/services.js";
 
@@ -421,4 +422,56 @@ test("read_file returns section-framed text to the model while the UI and observ
     );
     assert.match(verified.sources[0]?.excerpt ?? "", /0xFFFEC600/);
   });
+});
+
+test("buildEvidenceBackedQuestion names each source's section and excerpt and adds evidence answer rules", () => {
+  const question = "What is the late penalty and when is the zip due?";
+  // Search-only evidence: the section label and a whitespace-collapsed
+  // excerpt are all the model has, so both must reach it.
+  const fromSearch = buildEvidenceBackedQuestion(question, [
+    {
+      tool: "search_workspace",
+      status: "ok",
+      summary: 'Found 1 relevant workspace match for "late penalty".',
+      artifacts: [
+        {
+          artifactId: "workspace:extracted:lab4.txt",
+          title: "lab4.txt",
+          kind: "extracted",
+          excerpt: "The zip is due on Canvas by Friday March 27 at 11:59 PM.\n  Late submissions   lose 10% per day.",
+          sectionLabel: "SUBMISSION",
+        },
+      ],
+    },
+  ]);
+  assert.match(fromSearch, /^What is the late penalty and when is the zip due\?/);
+  assert.match(fromSearch, /Supplemental evidence already gathered in this chat:/);
+  assert.match(fromSearch, /Source: \[extracted\] lab4\.txt — SUBMISSION\n/);
+  assert.match(
+    fromSearch,
+    /Excerpt: The zip is due on Canvas by Friday March 27 at 11:59 PM\. Late submissions lose 10% per day\.\n/
+  );
+  assert.match(fromSearch, /Answer rules for this evidence:/);
+
+  // A full read keeps its plain title, its head excerpt, and its content.
+  const prompt = buildEvidenceBackedQuestion(question, [
+    createReadObservation(LAB_HANDOUT),
+  ]);
+  assert.match(prompt, /Source: \[extracted\] lab4\.txt\n/);
+  assert.doesNotMatch(prompt, /lab4\.txt — /);
+  assert.match(prompt, /Excerpt: ECE243 Lab 4: Interrupts and Timers Winter 2026/);
+  assert.match(prompt, /The demo is worth 60% and the report is worth 40%/);
+  // The answer rules follow the evidence so the model cites sections, quotes
+  // exact wording, names gaps, and synthesises across sources.
+  const rulesIndex = prompt.indexOf("Answer rules for this evidence:");
+  assert.ok(rulesIndex > prompt.indexOf("Supplemental evidence"), "rules come after the evidence");
+  const rules = prompt.slice(rulesIndex);
+  assert.match(rules, /- Cite at the section level when possible/);
+  assert.match(rules, /- When quoting a specific requirement, due date, or threshold, use the exact wording/);
+  assert.match(rules, /- If the evidence partially answers the question but leaves something unaddressed, say what you found and what remains unclear/);
+  assert.match(rules, /- When multiple sources address the same point, synthesize them/);
+  assert.equal(rules.match(/^- /gm)?.length, 4);
+
+  // No evidence: the question is returned untouched, without rules.
+  assert.equal(buildEvidenceBackedQuestion(question, []), question);
 });

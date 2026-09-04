@@ -40,6 +40,10 @@ export function isGroundedContentObservation(
 ): boolean {
   return (
     observation.status === "ok" &&
+    // An announcement listing carries citable titles and dates but is not a
+    // full read: it must never satisfy "already read" so the model still
+    // follows it with read_thread on the matching post.
+    observation.tool !== "list_announcements" &&
     observation.artifacts.length > 0 &&
     typeof observation.content === "string" &&
     observation.content.trim().length > 0
@@ -58,6 +62,13 @@ export function scoreObservationRelevance(
   const titleText = normalizeObservationRelevanceText(
     observation.artifacts.map((artifact) => artifact.title).join(" ")
   );
+  // A search hit or section read labelled "Late Penalty" is about the late
+  // penalty even when the title ("syllabus.pdf") and excerpt say nothing.
+  const sectionText = normalizeObservationRelevanceText(
+    observation.artifacts
+      .map((artifact) => artifact.sectionLabel ?? "")
+      .join(" ")
+  );
   const summaryText = normalizeObservationRelevanceText(observation.summary ?? "");
   const excerptText = normalizeObservationRelevanceText(
     observation.artifacts
@@ -65,14 +76,17 @@ export function scoreObservationRelevance(
       .join(" ")
   );
   const contentText = normalizeObservationRelevanceText(observation.content ?? "");
-  const haystack = `${titleText} ${summaryText} ${excerptText} ${contentText}`.trim();
+  const haystack =
+    `${titleText} ${sectionText} ${summaryText} ${excerptText} ${contentText}`.trim();
   if (!haystack) {
     return 0;
   }
 
   const questionTokens = tokenizeObservationRelevanceText(normalizedQuestion);
   const fullPhraseMatch =
-    haystack.includes(normalizedQuestion) || titleText.includes(normalizedQuestion);
+    haystack.includes(normalizedQuestion) ||
+    titleText.includes(normalizedQuestion) ||
+    sectionText.includes(normalizedQuestion);
   let score = fullPhraseMatch ? 14 : 0;
   let matchedTokens = 0;
   // A question word that names one of the document's headings ("graded" vs
@@ -92,6 +106,11 @@ export function scoreObservationRelevance(
     }
     if (titleText.includes(token)) {
       score += 8;
+      matchedTokens += 1;
+      continue;
+    }
+    if (sectionText.includes(token)) {
+      score += 6;
       matchedTokens += 1;
       continue;
     }
