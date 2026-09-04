@@ -19,7 +19,7 @@ Rules:
 - Base your analysis on the evidence provided — do not invent requirements.
 - Be specific and actionable. Extract real deliverables from the instruction documents.
 - If you read the actual instruction PDF, cite specific requirements from it.
-- If the due date is missing from Canvas, try to provide it from the syllabus/schedule.
+- Report the due date as stated in the syllabus, schedule, or instruction document whenever a document states one, even if Canvas also has a due date; the two are compared so the student can be warned when they disagree. Use null only when no document states a due date.
 - Keep the overview concise (3-5 sentences).
 - Action plan should be practical steps a student would actually follow.
 - Only list real uncertainties — things you genuinely couldn't determine.
@@ -33,7 +33,7 @@ Return valid JSON matching this exact schema:
   "recommended_read_order": ["string — what to read first, second, etc"],
   "action_plan": [{"step": 1, "action": "string — what to do", "detail": "string or null — additional info"}],
   "uncertainties": ["string — what remains genuinely unclear"],
-  "due_date": "string or null — due date from syllabus if Canvas didn't have it",
+  "due_date": "string or null — the due date as stated in a course document (syllabus, schedule, or instructions), even when Canvas has one; null if no document states one",
   "confidence": "high | medium | low",
   "source_trace": [{"conclusion": "string — a key finding", "source": "string — where you got it"}]
 }

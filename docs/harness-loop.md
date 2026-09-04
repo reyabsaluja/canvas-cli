@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **ground**
+Next area: **discover**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -27,7 +27,7 @@ Next area: **ground**
 - discover: (backlog empty; candidates: assignment `attachments` field never consumed; module item completion requirements / prerequisites not recorded; grade posting policy / late policy fields on assignments)
 - extract: no OCR for scanned PDFs
 - retrieve: (backlog empty; candidate: section previews for search_course hits could show two passages when a document matches in several places)
-- ground: workups silently prefer Canvas over the syllabus on due-date conflicts instead of surfacing them; numeric-claim check only covers digit-bearing tokens (spelled-out numbers, weekday inferences like "Friday" are not checked)
+- ground: numeric-claim check only covers digit-bearing tokens (spelled-out numbers, weekday inferences like "Friday" are not checked)
 
 ## Done
 
@@ -65,3 +65,4 @@ Next area: **ground**
 - 2026-09-04 extract: assignment extracts now state submission rules from the detail record (attempts allowed, group assignment and grading mode, peer reviews and count, anonymous, omitted from final grade, unpublished, lock reason) so "can I resubmit?" / "is this a group lab?" are answerable (caller did it directly)
 - 2026-09-04 retrieve: announcements and discussion threads get a recency multiplier in both search scorers (up to +20% for a post from today, fading to nothing at 90 days; discussions use last reply time), so the newest matching post ranks first (caller did it directly)
 - 2026-09-04 reason: prompt lists the course reference pages ingestion now builds (grading scheme, course tools, quiz pages) and routes "how much is this worth", "where do I ask questions" and quiz-rule questions to them (caller did it directly)
+- 2026-09-04 ground: synthesis always reports the document-stated due date, and the workup shows a "Due-date conflict" line when it disagrees with Canvas (same-day in any spelling counts as a match; unparseable dates are shown verbatim) instead of silently trusting Canvas (caller did it directly)
