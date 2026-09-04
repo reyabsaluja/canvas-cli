@@ -10,7 +10,7 @@ import type {
   LectureIndexEntry,
 } from "./types.js";
 import type { SelectedAttachment } from "./attachment-selection.js";
-import type { CanvasAssignment } from "../canvas/types.js";
+import type { CanvasAssignment, CanvasTopicAttachment } from "../canvas/types.js";
 import {
   canvasFileIdFromUrl,
   extractLinkedFileFromUrl,
@@ -20,8 +20,10 @@ import {
 import { makeCourseSlug, getCoursePath } from "./slug.js";
 import {
   fetchCourseContent,
+  type RawAssignmentRecord,
   type RawDiscussionThread,
 } from "./fetch-course-content.js";
+import { collectAssignmentFeedbackHtmlSources } from "./rich-text-sources.js";
 import { mapWithConcurrency } from "./concurrency.js";
 import { normalizeCourseContent } from "./normalize-content.js";
 import { identifySyllabusCandidates } from "./syllabus-heuristics.js";
@@ -31,6 +33,7 @@ import {
   selectAssignmentAttachments,
   selectTopicAttachments,
   buildFolderIndex,
+  MAX_COURSE_FILE_BYTES,
 } from "./attachment-selection.js";
 import { downloadSelectedAttachments } from "./attachment-download.js";
 import { discoverLectures } from "./lecture-discovery.js";
@@ -51,6 +54,8 @@ const MODULE_FILE_METADATA_CONCURRENCY = 4;
  * 5. Select ALL module-linked files for download (instructor-curated content)
  * 5c. Files linked from page/announcement/discussion HTML
  * 5c'. Files attached to announcements, discussion posts, and replies
+ * 5c''. Files attached to assignments themselves
+ * 5c'''. Files attached to, or linked from, grader feedback on the student's submissions
  * 5d. Crawl the Files tab: every remaining readable document, folder-aware
  * 6. Download all selected attachments
  * 7. Write all artifacts to local course directory
@@ -66,6 +71,13 @@ export async function ingestCourse(
     refresh: boolean;
     signal?: AbortSignal | null;
     onProgress?: ProgressCallback | null;
+    /**
+     * Capture the student's own grader comments, feedback files, and rubric
+     * assessments. Defaults to true; `canvas-cli ingest --no-feedback` and the
+     * stored `ingestSubmissionFeedback: false` toggle turn it off, in which
+     * case the submissions endpoint is never requested.
+     */
+    includeSubmissionFeedback?: boolean;
   }
 ): Promise<IngestionResult> {
   const signal = options.signal ?? null;
@@ -75,7 +87,9 @@ export async function ingestCourse(
 
   // Step 1: Fetch raw content from Canvas
   onProgress("Fetching course content from Canvas...");
-  const raw = await fetchCourseContent(client, course.id, signal);
+  const raw = await fetchCourseContent(client, course.id, signal, {
+    includeSubmissionFeedback: options.includeSubmissionFeedback !== false,
+  });
 
   // Step 2: Normalize
   onProgress("Processing course structure...");
@@ -133,7 +147,8 @@ export async function ingestCourse(
     raw.announcements,
     raw.discussionThreads,
     [...heuristicAttachments, ...moduleAttachments, ...descriptionAttachments],
-    config.baseUrl
+    config.baseUrl,
+    raw.announcementThreads
   );
 
   // Step 5c': Files attached to posts through the Canvas "Attach" button.
@@ -149,6 +164,24 @@ export async function ingestCourse(
       ...htmlLinkedAttachments,
     ]
   );
+  // Files attached to replies under announcements ("updated handout
+  // attached"), kept with the announcement's own files.
+  const announcementReplyAttachments = selectAnnouncementReplyAttachments(
+    raw.announcementThreads,
+    [
+      ...heuristicAttachments,
+      ...moduleAttachments,
+      ...descriptionAttachments,
+      ...htmlLinkedAttachments,
+      ...topicAttachmentSelection.selected,
+    ]
+  );
+  topicAttachmentSelection.selected.push(...announcementReplyAttachments.selected);
+  topicAttachmentSelection.summary.replies += announcementReplyAttachments.summary.replies;
+  topicAttachmentSelection.summary.alreadySelected +=
+    announcementReplyAttachments.summary.alreadySelected;
+  topicAttachmentSelection.summary.skippedTooLarge +=
+    announcementReplyAttachments.summary.skippedTooLarge;
 
   // Step 5c'': Files attached to assignments themselves (starter code,
   // templates, data). Never linked from the description HTML either.
@@ -160,16 +193,50 @@ export async function ingestCourse(
     ...topicAttachmentSelection.selected,
   ]);
 
+  // Step 5c''': Files the grader attached to feedback on the student's own
+  // submissions (marked-up PDFs, annotated rubrics) or linked from the
+  // comment text. Never appear in the Files tab or any page HTML.
+  const submissionFeedbackAttachments = selectSubmissionFeedbackFiles(raw.assignments, [
+    ...heuristicAttachments,
+    ...moduleAttachments,
+    ...descriptionAttachments,
+    ...htmlLinkedAttachments,
+    ...topicAttachmentSelection.selected,
+    ...assignmentAttachmentSelection.selected,
+  ]);
+
+  // Grader feedback often points at external resources ("see this video on
+  // recursion"); feed it into link capture alongside the page bodies. The
+  // capture step's input shape is page-like, so feedback rides along as
+  // pseudo-pages labelled by assignment and author.
+  const feedbackHtmlSources = raw.assignments.flatMap((assignment) =>
+    collectAssignmentFeedbackHtmlSources(assignment).map((source, index) => ({
+      slug: `submission-feedback-${assignment.id}-${index + 1}`,
+      title: `${source.label} on "${assignment.name}"`,
+      body: source.html,
+    }))
+  );
+
+  // Announcement replies ride along as threads whose topic message is blank:
+  // the announcement post itself is already a candidate source above, so
+  // this only adds the replies.
+  const announcementReplyThreads: RawDiscussionThread[] = raw.announcementThreads
+    .filter((thread) => thread.entries.length > 0)
+    .map((thread) => ({
+      ...thread,
+      topic: { ...thread.topic, message: null, attachments: null },
+    }));
+
   const capturedExternalLinks = await captureExternalCourseLinks({
     courseId: course.id,
     courseHtmlUrl: courseMeta.htmlUrl,
     modules,
     assignments: raw.assignments,
     frontPageBody: raw.frontPageBody,
-    fetchedPages: raw.fetchedPages,
+    fetchedPages: [...raw.fetchedPages, ...feedbackHtmlSources],
     syllabusBody: courseMeta.syllabusBody,
     announcements: raw.announcements,
-    discussionThreads: raw.discussionThreads,
+    discussionThreads: [...raw.discussionThreads, ...announcementReplyThreads],
     tabs: raw.tabs,
     config,
     signal,
@@ -192,6 +259,7 @@ export async function ingestCourse(
     ...htmlLinkedAttachments,
     ...topicAttachmentSelection.selected,
     ...assignmentAttachmentSelection.selected,
+    ...submissionFeedbackAttachments,
   ]);
 
   const allSelected = [
@@ -201,6 +269,7 @@ export async function ingestCourse(
     ...htmlLinkedAttachments,
     ...topicAttachmentSelection.selected,
     ...assignmentAttachmentSelection.selected,
+    ...submissionFeedbackAttachments,
     ...courseFileSelection.selected,
   ];
   // downloadSelectedAttachments returns results in input order; remember where
@@ -235,6 +304,13 @@ export async function ingestCourse(
       body: topic.message ?? "",
       source: `announcement: ${topic.title}`,
     })),
+    ...raw.announcementThreads.flatMap((thread) =>
+      thread.entries.map((entry) => ({
+        title: thread.topic.title,
+        body: entry.message ?? "",
+        source: `announcement reply: ${thread.topic.title}`,
+      }))
+    ),
     ...raw.discussions.map((topic) => ({
       title: topic.title,
       body: topic.message ?? "",
@@ -263,6 +339,9 @@ export async function ingestCourse(
 
   const courseFileResults = attachmentResults.filter(
     (a) => a.sourceType === "course_file"
+  );
+  const feedbackAttachmentResults = attachmentResults.filter(
+    (a) => a.sourceType === "submission_comment_attachment"
   );
   const topicAttachmentResults = attachmentResults.slice(
     topicAttachmentStart,
@@ -323,6 +402,24 @@ export async function ingestCourse(
         0
       ),
     },
+    calendar: { events: raw.calendarEvents.length },
+    announcementThreads: {
+      topics: raw.announcementThreads.length,
+      replies: raw.announcementThreads.reduce(
+        (sum, thread) => sum + thread.entries.length,
+        0
+      ),
+      pagedReplies: raw.announcementThreads.reduce(
+        (sum, thread) => sum + (thread.repliesPaged ?? 0),
+        0
+      ),
+    },
+    submissionFeedback: {
+      ...raw.submissionFeedback,
+      attachmentsSelected: submissionFeedbackAttachments.length,
+      attachmentsDownloaded: feedbackAttachmentResults.filter((a) => a.status !== "failed").length,
+      attachmentsFailed: feedbackAttachmentResults.filter((a) => a.status === "failed").length,
+    },
   };
 
   // Step 9: Write all artifacts (including front page and fetched pages)
@@ -347,7 +444,8 @@ export async function ingestCourse(
     raw.announcements,
     raw.discussionThreads,
     capturedExternalLinks,
-    raw.assignmentGroups
+    raw.assignmentGroups,
+    raw.announcementThreads
   );
 
   return {
@@ -534,6 +632,160 @@ function selectDescriptionLinkedFiles(
 }
 
 /**
+ * Files the grader attached to feedback on the student's own submissions
+ * (annotated PDFs, filled-in rubrics) and files linked from the comment text
+ * or rubric-assessment comments. Land under attachments/submission-comments/.
+ */
+function selectSubmissionFeedbackFiles(
+  assignments: RawAssignmentRecord[],
+  alreadySelected: SelectedAttachment[]
+): SelectedAttachment[] {
+  const selected: SelectedAttachment[] = [];
+  const claimedIds = new Set<number>();
+  const claimedUrls = new Set<string>();
+  for (const attachment of alreadySelected) {
+    if (attachment.fileId !== null) claimedIds.add(attachment.fileId);
+    claimedUrls.add(attachment.downloadUrl);
+  }
+
+  const claim = (fileId: number | null, downloadUrl: string): boolean => {
+    if ((fileId !== null && claimedIds.has(fileId)) || claimedUrls.has(downloadUrl)) {
+      return false;
+    }
+    if (fileId !== null) claimedIds.add(fileId);
+    claimedUrls.add(downloadUrl);
+    return true;
+  };
+
+  for (const assignment of assignments) {
+    const comments = assignment.submission?.submission_comments ?? [];
+    for (const comment of comments) {
+      const author = comment.author_name?.trim() ? ` by ${comment.author_name.trim()}` : "";
+      const reason = `submission feedback for "${assignment.name}"${author}`;
+
+      for (const attachment of comment.attachments ?? []) {
+        if (!attachment || typeof attachment.url !== "string" || attachment.url.length === 0) {
+          continue;
+        }
+        if (!claim(attachment.id, attachment.url)) continue;
+        selected.push({
+          sourceType: "submission_comment_attachment",
+          fileId: attachment.id,
+          filename: topicAttachmentDisplayName(attachment),
+          downloadUrl: attachment.url,
+          reason: `attached to ${reason}`,
+          contentType: attachment["content-type"] ?? attachment.content_type ?? null,
+          size: typeof attachment.size === "number" ? attachment.size : null,
+          subfolder: "submission-comments",
+        });
+      }
+
+      for (const source of collectAssignmentFeedbackHtmlSources({
+        submission: { submission_comments: [comment] },
+      })) {
+        for (const file of extractLinkedFiles(source.html)) {
+          if (!claim(null, file.downloadUrl)) continue;
+          selected.push({
+            sourceType: "submission_comment_attachment",
+            fileId: null,
+            filename: file.title,
+            downloadUrl: file.downloadUrl,
+            reason: `linked in ${reason}`,
+            contentType: null,
+            size: null,
+            subfolder: "submission-comments",
+          });
+        }
+      }
+    }
+
+    // Rubric-assessment comments are per criterion and have no author field;
+    // label them by criterion instead.
+    for (const source of collectAssignmentFeedbackHtmlSources({
+      rubric: assignment.rubric,
+      submission: { rubric_assessment: assignment.submission?.rubric_assessment },
+    })) {
+      for (const file of extractLinkedFiles(source.html)) {
+        if (!claim(null, file.downloadUrl)) continue;
+        selected.push({
+          sourceType: "submission_comment_attachment",
+          fileId: null,
+          filename: file.title,
+          downloadUrl: file.downloadUrl,
+          reason: `linked in ${source.label} on "${assignment.name}"`,
+          contentType: null,
+          size: null,
+          subfolder: "submission-comments",
+        });
+      }
+    }
+  }
+
+  return selected;
+}
+
+function topicAttachmentDisplayName(attachment: CanvasTopicAttachment): string {
+  return attachment.display_name || attachment.filename || `file-${attachment.id}`;
+}
+
+/**
+ * Files attached to replies under announcements. Mirrors the reply branch of
+ * `selectTopicAttachments`, but files land under attachments/announcements
+ * next to the announcement's own files.
+ */
+function selectAnnouncementReplyAttachments(
+  announcementThreads: RawDiscussionThread[],
+  alreadySelected: SelectedAttachment[]
+): {
+  selected: SelectedAttachment[];
+  summary: { replies: number; alreadySelected: number; skippedTooLarge: number };
+} {
+  const claimedIds = new Set<number>();
+  const claimedUrls = new Set<string>();
+  for (const attachment of alreadySelected) {
+    if (attachment.fileId !== null) claimedIds.add(attachment.fileId);
+    claimedUrls.add(attachment.downloadUrl);
+    const idFromUrl = attachment.downloadUrl.match(/\/files\/(\d+)/)?.[1];
+    if (idFromUrl) claimedIds.add(parseInt(idFromUrl, 10));
+  }
+  const selected: SelectedAttachment[] = [];
+  const summary = { replies: 0, alreadySelected: 0, skippedTooLarge: 0 };
+
+  for (const thread of announcementThreads) {
+    for (const entry of thread.entries) {
+      const attachment = entry.attachment;
+      if (!attachment || typeof attachment.url !== "string" || attachment.url.length === 0) {
+        continue;
+      }
+      if (claimedIds.has(attachment.id) || claimedUrls.has(attachment.url)) {
+        summary.alreadySelected += 1;
+        continue;
+      }
+      if (typeof attachment.size === "number" && attachment.size > MAX_COURSE_FILE_BYTES) {
+        summary.skippedTooLarge += 1;
+        continue;
+      }
+      claimedIds.add(attachment.id);
+      claimedUrls.add(attachment.url);
+      summary.replies += 1;
+      const author = entry.user_name ?? `User ${entry.user_id}`;
+      selected.push({
+        sourceType: "page_linked",
+        fileId: attachment.id,
+        filename: topicAttachmentDisplayName(attachment),
+        downloadUrl: attachment.url,
+        reason: `attached to reply by ${author} in announcement "${thread.topic.title}"`,
+        contentType: attachment["content-type"] ?? attachment.content_type ?? null,
+        size: typeof attachment.size === "number" ? attachment.size : null,
+        subfolder: "announcements",
+      });
+    }
+  }
+
+  return { selected, summary };
+}
+
+/**
  * Extract files linked in fetched Canvas page bodies, front page, syllabus,
  * and announcements. Pages like "Labs" or announcement posts often contain
  * direct download links to worksheets, handouts, and other course materials.
@@ -545,7 +797,8 @@ function selectHtmlLinkedFiles(
   announcements: Array<{ title: string; message: string | null }>,
   discussionThreads: RawDiscussionThread[],
   alreadySelected: SelectedAttachment[],
-  canvasBaseUrl: string
+  canvasBaseUrl: string,
+  announcementThreads: RawDiscussionThread[] = []
 ): SelectedAttachment[] {
   const selected: SelectedAttachment[] = [];
   const alreadyUrls = new Set(alreadySelected.map((a) => a.downloadUrl));
@@ -565,6 +818,16 @@ function selectHtmlLinkedFiles(
       title: `Announcement: ${announcement.title}`,
       body: announcement.message,
     });
+  }
+  for (const thread of announcementThreads) {
+    for (const entry of thread.entries) {
+      if (!entry.message) continue;
+      const author = entry.user_name ?? `User ${entry.user_id}`;
+      htmlSources.push({
+        title: `Announcement reply in "${thread.topic.title}" by ${author}`,
+        body: entry.message,
+      });
+    }
   }
   for (const thread of discussionThreads) {
     if (thread.topic.message) {

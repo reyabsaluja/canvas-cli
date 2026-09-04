@@ -133,7 +133,9 @@ export type AttachmentSourceType =
   | "assignment_linked"
   | "module_linked"
   | "page_linked"
-  | "course_file";
+  | "course_file"
+  /** A file the grader attached to (or linked from) feedback on the student's own submission. */
+  | "submission_comment_attachment";
 
 export interface ZipAttachmentEntry {
   /** Path of the entry inside the zip, forward slashes, no leading slash. */
@@ -313,4 +315,105 @@ export interface TopicAttachmentSummary {
 
 export interface IngestionMeta {
   topicAttachments?: TopicAttachmentSummary;
+}
+
+// ---------------------------------------------------------------------------
+// ADDITIVE: submission feedback (src/ingest/fetch-course-content.ts,
+// src/ingest/ingest-course.ts, src/ingest/storage.ts,
+// src/format/render-ingestion-summary.ts).
+// ---------------------------------------------------------------------------
+
+/** How the student's own grader feedback was captured for one ingestion. */
+export interface SubmissionFeedbackSummary {
+  /** False when the run opted out (`--no-feedback`); nothing was requested then. */
+  enabled: boolean;
+  /** Submissions returned for the current user. */
+  submissions: number;
+  /** Grader/peer comments across those submissions. */
+  comments: number;
+  /** Submissions carrying a rubric assessment. */
+  rubricAssessments: number;
+  /** Files attached to, or linked from, feedback that were selected for download. */
+  attachmentsSelected: number;
+  attachmentsDownloaded: number;
+  attachmentsFailed: number;
+}
+
+export interface IngestionMeta {
+  submissionFeedback?: SubmissionFeedbackSummary;
+}
+
+// ---------------------------------------------------------------------------
+// ADDITIVE: assignment date overrides from include[]=all_dates
+// (src/ingest/normalize-content.ts, src/ingest/storage.ts).
+// ---------------------------------------------------------------------------
+
+/** One section/group/student date set for an assignment. */
+export interface AssignmentDateOverrideIndexEntry {
+  id: number | null;
+  /** Section or group name, or Canvas's label for ad-hoc student sets. */
+  title: string | null;
+  dueAt: string | null;
+  unlockAt: string | null;
+  lockAt: string | null;
+  /** "CourseSection" | "Group" | "ADHOC" | "Noop" when Canvas reports it. */
+  setType: string | null;
+  setId: number | null;
+}
+
+/**
+ * Base dates plus every override, present only when at least one override
+ * exists (a lone base entry is the same as the assignment's own dates).
+ */
+export interface AssignmentDateDetailsIndex {
+  /** The "Everyone" / "Everyone else" dates, when Canvas lists a base entry. */
+  dueAt: string | null;
+  unlockAt: string | null;
+  lockAt: string | null;
+  baseTitle: string | null;
+  hasBase: boolean;
+  overrideCount: number;
+  overrides: AssignmentDateOverrideIndexEntry[];
+}
+
+export interface AssignmentIndexEntry {
+  dateDetails?: AssignmentDateDetailsIndex | null;
+}
+
+// ---------------------------------------------------------------------------
+// ADDITIVE: announcement reply threads (src/ingest/fetch-course-content.ts,
+// src/ingest/ingest-course.ts, src/ingest/storage.ts,
+// src/format/render-ingestion-summary.ts).
+// ---------------------------------------------------------------------------
+
+export interface AnnouncementIndexEntry {
+  /** Replies captured under the announcement, nested replies included. */
+  replyCount?: number;
+  participantCount?: number;
+  /** Canvas file links found in reply HTML. */
+  replyFileLinkCount?: number;
+}
+
+/** How announcement reply threads were captured for one ingestion. */
+export interface AnnouncementThreadSummary {
+  /** Announcements whose reply thread was fetched. */
+  topics: number;
+  /** Replies captured across all announcements. */
+  replies: number;
+  /** Replies retrieved through GET .../entries/:id/replies because the inline list was truncated. */
+  pagedReplies: number;
+}
+
+export interface IngestionMeta {
+  announcementThreads?: AnnouncementThreadSummary;
+}
+
+// ---------------------------------------------------------------------------
+// ADDITIVE: course calendar (src/ingest/fetch-course-content.ts,
+// src/ingest/ingest-course.ts, src/format/render-ingestion-summary.ts).
+// ---------------------------------------------------------------------------
+
+export interface IngestionMeta {
+  /** Calendar events captured as "Calendar event: <title>" pages plus the "Course calendar" page. */
+  calendar?: { events: number };
 }

@@ -39,6 +39,25 @@ export function renderIngestionSummary(result: IngestionResult): string {
       }`
     );
   }
+  const feedback = result.ingestion.submissionFeedback;
+  if (feedback && feedback.enabled && (feedback.comments > 0 || feedback.rubricAssessments > 0)) {
+    const parts: string[] = [];
+    if (feedback.comments > 0) parts.push(plural(feedback.comments, "grader comment"));
+    if (feedback.rubricAssessments > 0) {
+      parts.push(plural(feedback.rubricAssessments, "rubric assessment"));
+    }
+    if (feedback.attachmentsDownloaded > 0) {
+      parts.push(plural(feedback.attachmentsDownloaded, "feedback file"));
+    }
+    lines.push(
+      `  ${chalk.dim("-")} ${parts.join(", ")} ${chalk.dim("(on your own submissions)")}` +
+        (feedback.attachmentsFailed > 0
+          ? ` ${chalk.red(`(${feedback.attachmentsFailed} failed)`)}`
+          : "")
+    );
+  } else if (feedback && !feedback.enabled) {
+    lines.push(`  ${chalk.dim("-")} ${chalk.dim("submission feedback skipped (--no-feedback)")}`);
+  }
   if ((c.assignmentGroups ?? 0) > 0) {
     lines.push(`  ${chalk.dim("-")} ${c.assignmentGroups} assignment groups ${chalk.dim("(weights and drop rules on the grading-scheme page)")}`);
   }
@@ -47,6 +66,12 @@ export function renderIngestionSummary(result: IngestionResult): string {
   }
   if ((c.quizzes ?? 0) > 0) {
     lines.push(`  ${chalk.dim("-")} ${c.quizzes} quizzes ${chalk.dim("(instructions, time limits, attempts)")}`);
+  }
+  const calendarEvents = result.ingestion.calendar?.events ?? 0;
+  if (calendarEvents > 0) {
+    lines.push(
+      `  ${chalk.dim("-")} ${plural(calendarEvents, "calendar event")} ${chalk.dim("(exam slots, review sessions, office hours; see the Course calendar page)")}`
+    );
   }
   if (c.pages > 0) {
     lines.push(`  ${chalk.dim("-")} ${c.pages} pages`);
@@ -63,8 +88,14 @@ export function renderIngestionSummary(result: IngestionResult): string {
     );
   }
   if ((result.announcements?.length ?? 0) > 0) {
+    const threads = result.ingestion.announcementThreads;
+    let replyNote = "";
+    if (threads && threads.replies > 0) {
+      const paged = threads.pagedReplies > 0 ? `, ${threads.pagedReplies} paged` : "";
+      replyNote = ` (${plural(threads.replies, "reply", "replies")}${paged})`;
+    }
     lines.push(
-      `  ${chalk.dim("-")} ${result.announcements?.length ?? 0} announcements`
+      `  ${chalk.dim("-")} ${result.announcements?.length ?? 0} announcements${replyNote}`
     );
   }
   const topicAttachments = result.ingestion.topicAttachments;

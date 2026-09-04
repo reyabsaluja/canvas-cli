@@ -1,4 +1,4 @@
-import type { MockCourse, MockAssignment, MockModule, MockQuiz, MockTab, MockAssignmentGroup, MockPage, MockFile, MockFolder, MockAttachment, MockDiscussionTopic, MockServerData } from "./mock-canvas-server.js";
+import type { MockCourse, MockAssignment, MockAssignmentDate, MockModule, MockQuiz, MockTab, MockAssignmentGroup, MockPage, MockFile, MockFolder, MockAttachment, MockCalendarEvent, MockDiscussionTopic, MockRubricCriterion, MockServerData, MockSubmission } from "./mock-canvas-server.js";
 
 // All dates are relative to "now" so the fixtures never go stale: the two
 // CS courses are always in the current term and HIST303 is always finished.
@@ -358,6 +358,120 @@ export const CS101_ANNOUNCEMENTS: MockDiscussionTopic[] = [
     is_announcement: true,
     discussion_type: "side_comment",
     attachments: [CS101_MIDTERM_REVIEW_ATTACHMENT],
+  },
+];
+
+/**
+ * Grader feedback on the student's own Midterm Exam submission: a TA comment
+ * with an attached marked-up PDF, and a rubric assessment against the
+ * midterm's rubric. Served by GET /courses/101/students/submissions; not part
+ * of the default server data (tests opt in with `data.submissions`).
+ */
+export const CS101_MIDTERM_RUBRIC: MockRubricCriterion[] = [
+  {
+    id: "_crit_1",
+    description: "Correctness",
+    long_description: "<p>Answers are right and fully justified.</p>",
+    points: 10,
+    ratings: [
+      { id: "_rat_full", description: "Full marks", points: 10 },
+      { id: "_rat_partial", description: "Mostly right", long_description: "Minor slips", points: 8 },
+      { id: "_rat_none", description: "Missing", points: 0 },
+    ],
+  },
+  {
+    id: "_crit_2",
+    description: "Clarity",
+    points: 5,
+    ratings: [
+      { id: "_rat_clear", description: "Clear", points: 5 },
+      { id: "_rat_unclear", description: "Hard to follow", points: 2 },
+    ],
+  },
+];
+
+export const CS101_MIDTERM_FEEDBACK_ATTACHMENT: MockAttachment = {
+  id: 5401,
+  display_name: "midterm-feedback.pdf",
+  filename: "midterm-feedback.pdf",
+  "content-type": "application/pdf",
+  size: 2048,
+  url: "https://canvas.example/files/5401/download?download_frd=1&verifier=fb1",
+};
+
+export const CS101_SUBMISSIONS: MockSubmission[] = [
+  {
+    assignment_id: 1003,
+    user_id: 11,
+    workflow_state: "graded",
+    submitted_at: daysFromNow(-30),
+    score: 87,
+    grade: "87",
+    attempt: 1,
+    late: false,
+    missing: false,
+    submission_comments: [
+      {
+        id: 8801,
+        author_id: 2,
+        author_name: "TA Linus",
+        comment: "Good work on question 3; show your steps next time.",
+        html_comment: "<p>Good work on question 3; <strong>show your steps</strong> next time.</p>",
+        created_at: daysFromNow(-25),
+        attachments: [CS101_MIDTERM_FEEDBACK_ATTACHMENT],
+      },
+    ],
+    rubric_assessment: {
+      _crit_1: { points: 8, rating_id: "_rat_partial", comments: "Sign error in part (b)." },
+      _crit_2: { points: 5, rating_id: "_rat_clear" },
+    },
+  },
+];
+
+/**
+ * Per-section due dates for Lab 1 as returned by include[]=all_dates: the
+ * base ("Everyone else") date plus a section override with a later due date.
+ */
+export const CS101_LAB1_ALL_DATES: MockAssignmentDate[] = [
+  { base: true, title: "Everyone else", due_at: daysFromNow(14), unlock_at: daysFromNow(-7), lock_at: null },
+  {
+    id: 55,
+    title: "Section B (evening)",
+    due_at: daysFromNow(16),
+    unlock_at: daysFromNow(-7),
+    lock_at: daysFromNow(17),
+    set_type: "CourseSection",
+    set_id: 9,
+  },
+];
+
+/** Course calendar: a review session with a location and a linked handout. */
+export const CS101_CALENDAR_EVENTS: MockCalendarEvent[] = [
+  {
+    id: 6101,
+    title: "Midterm review",
+    description:
+      '<p>Bring your questions. Review sheet: <a href="https://canvas.example/courses/101/files/5001/download">syllabus.pdf</a>. Topics: loops, variables.</p>',
+    start_at: daysFromNow(5).replace(/T.*$/, "T17:00:00Z"),
+    end_at: daysFromNow(5).replace(/T.*$/, "T18:30:00Z"),
+    all_day: false,
+    location_name: "ENG 101",
+    location_address: "Engineering Building, 1st floor",
+    context_code: "course_101",
+    html_url: "https://canvas.example/calendar?event_id=6101&include_contexts=course_101",
+    workflow_state: "active",
+  },
+  {
+    id: 6102,
+    title: "Reading week",
+    description: null,
+    start_at: daysFromNow(20).replace(/T.*$/, "T00:00:00Z"),
+    end_at: daysFromNow(20).replace(/T.*$/, "T00:00:00Z"),
+    all_day: true,
+    location_name: null,
+    context_code: "course_101",
+    html_url: "https://canvas.example/calendar?event_id=6102&include_contexts=course_101",
+    workflow_state: "active",
   },
 ];
 

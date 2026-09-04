@@ -14,8 +14,14 @@ import type {
   CanvasDiscussionEntry,
   CanvasDiscussionTopic,
   CanvasDiscussionTopicView,
+  CanvasSubmission,
+  CanvasCalendarEvent,
 } from "../canvas/types.js";
 import { mapWithConcurrency } from "./concurrency.js";
+import {
+  collectAssignmentFeedbackHtmlSources,
+  collectAssignmentRubricHtmlSources,
+} from "./rich-text-sources.js";
 
 export interface RawDiscussionThread {
   topic: CanvasDiscussionTopic;
@@ -42,6 +48,12 @@ export interface RawCourseContent {
   folders: CanvasFolder[];
   pages: CanvasPage[];
   announcements: CanvasDiscussionTopic[];
+  /**
+   * Reply threads under announcements (instructors answer "is the room
+   * change for both sections?" there), captured the same way as discussion
+   * threads: one entry per announcement, empty when comments are disabled.
+   */
+  announcementThreads: RawDiscussionThread[];
   discussions: CanvasDiscussionTopic[];
   discussionThreads: RawDiscussionThread[];
   /** Front page (home page) HTML body, if accessible. */
@@ -54,7 +66,39 @@ export interface RawCourseContent {
   tabs: CanvasTab[];
   /** Assignment groups (weights, drop rules); rendered as a "Grading scheme" page. */
   assignmentGroups: CanvasAssignmentGroup[];
+  /**
+   * Course calendar events (exam slots, review sessions, office hours). Each
+   * is stored as a "Calendar event: <title>" page and all of them on the
+   * "Course calendar" page; empty when the calendar is blocked.
+   */
+  calendarEvents: CanvasCalendarEvent[];
+  /**
+   * How the student's own grader feedback was captured. The comments and
+   * rubric assessments themselves are merged into each assignment's
+   * `submission`; this only says what was fetched.
+   */
+  submissionFeedback: SubmissionFeedbackFetchSummary;
   warnings: string[];
+}
+
+export interface SubmissionFeedbackFetchSummary {
+  /** False when the caller opted out (`--no-feedback`); no request is made then. */
+  enabled: boolean;
+  /** Submissions returned for the current user. */
+  submissions: number;
+  /** Grader/peer comments across all submissions. */
+  comments: number;
+  /** Submissions carrying a rubric assessment. */
+  rubricAssessments: number;
+}
+
+export interface FetchCourseContentOptions {
+  /**
+   * Fetch the student's own submission comments, feedback attachments, and
+   * rubric assessments (GET /courses/:id/students/submissions). Defaults to
+   * true; when false the endpoint is never requested.
+   */
+  includeSubmissionFeedback?: boolean;
 }
 
 const MODULE_ITEMS_CONCURRENCY = 4;
@@ -70,9 +114,11 @@ const ASSIGNMENT_DETAIL_CONCURRENCY = 4;
 export async function fetchCourseContent(
   client: CanvasClient,
   courseId: number,
-  signal?: AbortSignal | null
+  signal?: AbortSignal | null,
+  options?: FetchCourseContentOptions
 ): Promise<RawCourseContent> {
   const warnings: string[] = [];
+  const includeSubmissionFeedback = options?.includeSubmissionFeedback !== false;
   client.resetSkippedEndpoints();
 
   // Fetch course detail (with syllabus) and assignments in parallel
@@ -103,6 +149,11 @@ export async function fetchCourseContent(
   const folderFetcher = (client as CanvasClient & {
     getFoldersSafe?: (courseId: number, signal?: AbortSignal | null) => Promise<CanvasFolder[]>;
   }).getFoldersSafe;
+  // The student's own grader feedback. Optional on the client so hand-rolled
+  // test doubles keep working; skipped entirely when the caller opted out.
+  const submissionFetcher = (client as CanvasClient & {
+    getCurrentUserSubmissionsSafe?: (courseId: number, signal?: AbortSignal | null) => Promise<CanvasSubmission[]>;
+  }).getCurrentUserSubmissionsSafe;
   const [
     rawModules,
     files,
@@ -112,6 +163,7 @@ export async function fetchCourseContent(
     discussions,
     frontPage,
     assignmentDetailResult,
+    currentUserSubmissions,
   ] =
     await Promise.all([
       client.getModulesSafe(courseId, signal),
@@ -128,11 +180,31 @@ export async function fetchCourseContent(
         : Promise.resolve([]),
       client.getFrontPageSafe(courseId, signal),
       assignmentDetailsPromise,
+      includeSubmissionFeedback && submissionFetcher
+        ? submissionFetcher.call(client, courseId, signal)
+        : Promise.resolve([] as CanvasSubmission[]),
     ]);
-  const assignments = assignmentDetailResult.assignments;
+  const assignments = mergeSubmissionFeedback(
+    assignmentDetailResult.assignments,
+    currentUserSubmissions
+  );
   if (assignmentDetailResult.warning) {
     warnings.push(assignmentDetailResult.warning);
   }
+  const submissionFeedback: SubmissionFeedbackFetchSummary = {
+    enabled: includeSubmissionFeedback,
+    submissions: currentUserSubmissions.length,
+    comments: currentUserSubmissions.reduce(
+      (sum, submission) => sum + (submission.submission_comments?.length ?? 0),
+      0
+    ),
+    rubricAssessments: currentUserSubmissions.filter(
+      (submission) =>
+        submission.rubric_assessment &&
+        typeof submission.rubric_assessment === "object" &&
+        Object.keys(submission.rubric_assessment).length > 0
+    ).length,
+  };
 
   const modules = await mapWithConcurrency(
     rawModules,
@@ -171,6 +243,12 @@ export async function fetchCourseContent(
 
   const discussionThreads = await mapWithConcurrency(
     discussions,
+    DISCUSSION_VIEW_CONCURRENCY,
+    (topic) => collectDiscussionThread(client, courseId, topic, signal),
+    signal
+  );
+  const announcementThreads = await mapWithConcurrency(
+    announcements,
     DISCUSSION_VIEW_CONCURRENCY,
     (topic) => collectDiscussionThread(client, courseId, topic, signal),
     signal
@@ -234,9 +312,22 @@ export async function fetchCourseContent(
     if (typeof description === "string") {
       enqueueLinkedPageSlugs(description);
     }
+    // Rubric details and grader feedback link to pages too ("see the style
+    // guide page"), so they seed the crawl like any other rich text.
+    for (const source of collectAssignmentRubricHtmlSources(assignment)) {
+      enqueueLinkedPageSlugs(source.html);
+    }
+    for (const source of collectAssignmentFeedbackHtmlSources(assignment)) {
+      enqueueLinkedPageSlugs(source.html);
+    }
   }
   for (const announcement of announcements) {
     enqueueLinkedPageSlugs(announcement.message);
+  }
+  for (const thread of announcementThreads) {
+    for (const entry of thread.entries) {
+      enqueueLinkedPageSlugs(entry.message);
+    }
   }
   for (const thread of discussionThreads) {
     enqueueLinkedPageSlugs(thread.topic.message);
@@ -286,6 +377,27 @@ export async function fetchCourseContent(
     rememberFetchedPage("grading-scheme", "Grading scheme: assignment groups and weights", gradingBody);
   }
 
+  // Course calendar: exam dates, review sessions and office hours often live
+  // only here. One page per event (so search finds "midterm review") plus a
+  // single chronological "Course calendar" page for "what's coming up?".
+  const getCalendarEventsSafe = (client as {
+    getCalendarEventsSafe?: (courseId: number, signal?: AbortSignal | null) => Promise<CanvasCalendarEvent[]>;
+  }).getCalendarEventsSafe;
+  const calendarEvents = getCalendarEventsSafe
+    ? await getCalendarEventsSafe.call(client, courseId, signal)
+    : [];
+  for (const event of calendarEvents) {
+    rememberFetchedPage(
+      `calendar-event-${event.id}`,
+      `Calendar event: ${event.title}`,
+      buildCalendarEventPageBody(event)
+    );
+  }
+  const calendarBody = buildCourseCalendarPageBody(calendarEvents);
+  if (calendarBody) {
+    rememberFetchedPage("course-calendar", "Course calendar", calendarBody);
+  }
+
   while (pendingSlugs.length > 0) {
     if (signal?.aborted) {
       throw signal.reason ?? new DOMException("Aborted", "AbortError");
@@ -318,6 +430,7 @@ export async function fetchCourseContent(
     folders,
     pages,
     announcements,
+    announcementThreads,
     discussions,
     discussionThreads,
     frontPageBody,
@@ -325,8 +438,125 @@ export async function fetchCourseContent(
     quizzes,
     tabs,
     assignmentGroups,
+    calendarEvents,
+    submissionFeedback,
     warnings,
   };
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** "2026-10-02" for an all-day event, else the full timestamp. */
+function describeEventStart(event: CanvasCalendarEvent): string | null {
+  if (event.all_day && event.all_day_date) return event.all_day_date;
+  if (event.all_day && event.start_at) return event.start_at.slice(0, 10);
+  return event.start_at ?? null;
+}
+
+/**
+ * Render one calendar event as HTML for the page pipeline: when, where, and
+ * the description (which may link handouts and pages). Exported for tests.
+ */
+export function buildCalendarEventPageBody(event: CanvasCalendarEvent): string {
+  const facts: string[] = [];
+  const start = describeEventStart(event);
+  if (event.all_day) {
+    facts.push(`<li>Date: ${start ? escapeHtml(start) : "not scheduled"}</li>`);
+    facts.push("<li>All day: yes</li>");
+  } else {
+    facts.push(`<li>Starts: ${start ? escapeHtml(start) : "not scheduled"}</li>`);
+    if (event.end_at && event.end_at !== event.start_at) {
+      facts.push(`<li>Ends: ${escapeHtml(event.end_at)}</li>`);
+    }
+  }
+  if (event.location_name) facts.push(`<li>Location: ${escapeHtml(event.location_name)}</li>`);
+  if (event.location_address) facts.push(`<li>Address: ${escapeHtml(event.location_address)}</li>`);
+  if (event.workflow_state && event.workflow_state !== "active") {
+    facts.push(`<li>Status: ${escapeHtml(event.workflow_state)}</li>`);
+  }
+  if (event.html_url) {
+    facts.push(`<li>Canvas URL: <a href="${escapeHtml(event.html_url)}">${escapeHtml(event.html_url)}</a></li>`);
+  }
+  const description = event.description?.trim()
+    ? `<h2>Description</h2>\n${event.description}`
+    : "<p>No event description provided.</p>";
+  return `<h2>Event details</h2>\n<ul>${facts.join("")}</ul>\n${description}`;
+}
+
+/**
+ * Every calendar event in chronological order (undated last) as one page,
+ * or null when the calendar is empty. Exported for tests.
+ */
+export function buildCourseCalendarPageBody(events: CanvasCalendarEvent[]): string | null {
+  if (events.length === 0) return null;
+  const sorted = [...events].sort((a, b) => {
+    const left = a.start_at ?? a.all_day_date ?? "";
+    const right = b.start_at ?? b.all_day_date ?? "";
+    if (left && right) return left.localeCompare(right);
+    if (left) return -1;
+    if (right) return 1;
+    return a.title.localeCompare(b.title);
+  });
+  const items = sorted.map((event) => {
+    const start = describeEventStart(event);
+    const when = event.all_day
+      ? `${start ?? "date not set"} (all day)`
+      : start
+        ? `${start}${event.end_at && event.end_at !== event.start_at ? ` to ${event.end_at}` : ""}`
+        : "not scheduled";
+    const where = event.location_name ? ` — ${escapeHtml(event.location_name)}` : "";
+    return `<li><strong>${escapeHtml(event.title)}</strong>: ${escapeHtml(when)}${where} (details: page calendar-event-${event.id})</li>`;
+  });
+  return (
+    "<p>Events on this course's Canvas calendar, in date order. Each event also has its own page with the full description.</p>" +
+    `<ul>${items.join("")}</ul>`
+  );
+}
+
+/**
+ * Attach the student's own submission records (comments, feedback files,
+ * rubric assessment) to the matching assignments. The assignment list's
+ * inline `submission` (score, grade, late/missing) is kept and the richer
+ * record is layered on top.
+ */
+export function mergeSubmissionFeedback(
+  assignments: RawAssignmentRecord[],
+  submissions: CanvasSubmission[]
+): RawAssignmentRecord[] {
+  if (submissions.length === 0) {
+    return assignments;
+  }
+
+  const submissionByAssignmentId = new Map<number, CanvasSubmission>();
+  for (const submission of submissions) {
+    if (typeof submission.assignment_id !== "number") {
+      continue;
+    }
+    submissionByAssignmentId.set(submission.assignment_id, submission);
+  }
+
+  if (submissionByAssignmentId.size === 0) {
+    return assignments;
+  }
+
+  return assignments.map((assignment) => {
+    const submission = submissionByAssignmentId.get(assignment.id);
+    if (!submission) {
+      return assignment;
+    }
+    return {
+      ...assignment,
+      submission: assignment.submission
+        ? { ...assignment.submission, ...submission }
+        : submission,
+    };
+  });
 }
 
 /**

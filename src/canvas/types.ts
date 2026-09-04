@@ -29,6 +29,66 @@ export interface CanvasSubmission {
   attempt: number | null;
   late: boolean;
   missing: boolean;
+  /** Present on records from GET /courses/:id/students/submissions. */
+  assignment_id?: number;
+  user_id?: number;
+  /** Grader and peer comments visible to the student (include[]=submission_comments). */
+  submission_comments?: CanvasSubmissionComment[] | null;
+  /** The grader's rubric scoring for this submission (include[]=rubric_assessment). */
+  rubric_assessment?: CanvasRubricAssessment | null;
+}
+
+/** One comment on a submission: text (plain and HTML), optional media and attached files. */
+export interface CanvasSubmissionComment {
+  id: number;
+  author_id?: number | null;
+  author_name?: string | null;
+  comment?: string | null;
+  /** Rich-text version, present with include[]=submission_html_comments. */
+  html_comment?: string | null;
+  created_at?: string | null;
+  edited_at?: string | null;
+  media_comment?: CanvasMediaComment | null;
+  /** Files the grader attached to the comment (marked-up PDFs, rubrics). */
+  attachments?: CanvasTopicAttachment[] | null;
+}
+
+export interface CanvasMediaComment {
+  "content-type"?: string | null;
+  display_name?: string | null;
+  media_id?: string | null;
+  media_type?: string | null;
+  url?: string | null;
+}
+
+/** Rubric assessment keyed by rubric criterion id. */
+export type CanvasRubricAssessment = Record<
+  string,
+  CanvasRubricAssessmentCriterion | null | undefined
+>;
+
+export interface CanvasRubricAssessmentCriterion {
+  points?: number | null;
+  rating_id?: string | number | null;
+  comments?: string | null;
+  comments_enabled?: boolean | null;
+}
+
+/**
+ * One row of an assignment's `all_dates` (include[]=all_dates): the base
+ * dates (`base: true`, titled "Everyone" / "Everyone else") or one override
+ * for a section, group, or set of students.
+ */
+export interface CanvasAssignmentDate {
+  id?: number | null;
+  base?: boolean | null;
+  title?: string | null;
+  due_at: string | null;
+  unlock_at?: string | null;
+  lock_at?: string | null;
+  /** "CourseSection" | "Group" | "ADHOC" | "Noop" */
+  set_type?: string | null;
+  set_id?: number | null;
 }
 
 export interface CanvasAssignment {
@@ -43,6 +103,8 @@ export interface CanvasAssignment {
   course_id: number;
   has_submitted_submissions: boolean;
   submission?: CanvasSubmission;
+  /** Base dates plus every section/group/student override (include[]=all_dates). */
+  all_dates?: CanvasAssignmentDate[] | null;
 }
 
 /** Extended assignment fields returned when fetching a single assignment. */
@@ -303,6 +365,24 @@ export interface CanvasQuiz {
   shuffle_answers?: boolean | null;
   show_correct_answers?: boolean | null;
   one_question_at_a_time?: boolean | null;
+}
+
+/** A course calendar event from GET /calendar_events?context_codes[]=course_<id>. */
+export interface CanvasCalendarEvent {
+  id: number;
+  title: string;
+  /** HTML body of the event. */
+  description?: string | null;
+  start_at?: string | null;
+  end_at?: string | null;
+  all_day?: boolean | null;
+  all_day_date?: string | null;
+  location_name?: string | null;
+  location_address?: string | null;
+  context_code?: string | null;
+  context_name?: string | null;
+  html_url?: string | null;
+  workflow_state?: string | null;
 }
 
 export interface CanvasFolder {

@@ -15,6 +15,7 @@ import type {
   CanvasAssignment,
   CanvasAssignmentDetail,
   CanvasAssignmentGroup,
+  CanvasCalendarEvent,
   CanvasCourse,
   CanvasCourseDetail,
   CanvasDiscussionEntry,
@@ -27,6 +28,7 @@ import type {
   CanvasModuleItem,
   CanvasPage,
   CanvasQuiz,
+  CanvasSubmission,
   CanvasTab,
 } from "./types.js";
 
@@ -154,9 +156,13 @@ export class CanvasClient {
     return this.fetchPaginated<CanvasCourse>(url, signal);
   }
 
-  /** Get assignments for a course, including submission status. */
+  /**
+   * Get assignments for a course, including submission status and every
+   * section/group/student date override (`all_dates`), which comes for free
+   * on the list call instead of one date_details request per assignment.
+   */
   async getAssignments(courseId: number, signal?: AbortSignal | null): Promise<CanvasAssignment[]> {
-    const url = `${this.baseUrl}/courses/${courseId}/assignments?per_page=50&include[]=submission`;
+    const url = `${this.baseUrl}/courses/${courseId}/assignments?per_page=50&include[]=submission&include[]=all_dates`;
     return this.fetchPaginated<CanvasAssignment>(url, signal);
   }
 
@@ -166,8 +172,45 @@ export class CanvasClient {
     assignmentId: number,
     signal?: AbortSignal | null
   ): Promise<CanvasAssignmentDetail> {
-    const url = `${this.baseUrl}/courses/${courseId}/assignments/${assignmentId}?include[]=submission&include[]=rubric`;
+    const url = `${this.baseUrl}/courses/${courseId}/assignments/${assignmentId}?include[]=submission&include[]=rubric&include[]=all_dates`;
     return this.fetchOne<CanvasAssignmentDetail>(url, signal);
+  }
+
+  /**
+   * The current user's own submissions with visible grader comments (text and
+   * HTML), attached feedback files, and the rubric assessment. With
+   * `student_ids[]` omitted Canvas returns only the caller's submissions, so a
+   * student never sees anyone else's feedback. Read-only; [] when blocked.
+   */
+  async getCurrentUserSubmissionsSafe(
+    courseId: number,
+    signal?: AbortSignal | null
+  ): Promise<CanvasSubmission[]> {
+    const params = new URLSearchParams();
+    params.set("per_page", "50");
+    params.append("include[]", "submission_comments");
+    params.append("include[]", "submission_html_comments");
+    params.append("include[]", "rubric_assessment");
+    const url = `${this.baseUrl}/courses/${courseId}/students/submissions?${params.toString()}`;
+    return this.fetchPaginatedSafe<CanvasSubmission>(url, signal);
+  }
+
+  /**
+   * Every calendar event on the course calendar (exam slots, review sessions,
+   * office hours), not just the default "around today" window. [] when the
+   * calendar is disabled or blocked.
+   */
+  async getCalendarEventsSafe(
+    courseId: number,
+    signal?: AbortSignal | null
+  ): Promise<CanvasCalendarEvent[]> {
+    const params = new URLSearchParams();
+    params.set("type", "event");
+    params.set("all_events", "true");
+    params.set("per_page", "100");
+    params.append("context_codes[]", `course_${courseId}`);
+    const url = `${this.baseUrl}/calendar_events?${params.toString()}`;
+    return this.fetchPaginatedSafe<CanvasCalendarEvent>(url, signal);
   }
 
   /** Get course detail with syllabus body. */

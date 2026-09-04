@@ -14,13 +14,17 @@ import type {
   RawDiscussionThread,
 } from "./fetch-course-content.js";
 import type {
+  CanvasRubricAssessment,
+  CanvasRubricAssessmentCriterion,
   CanvasRubricCriterion,
+  CanvasSubmissionComment,
   CanvasTopicAttachment,
   CanvasAssignmentGroup,
 } from "../canvas/types.js";
 import type {
   CourseMetadata,
   AssignmentIndexEntry,
+  AssignmentDateDetailsIndex,
   ModuleIndexEntry,
   FileIndexEntry,
   PageIndexEntry,
@@ -71,7 +75,9 @@ export async function writeIngestionArtifacts(
   rawDiscussionThreads?: RawDiscussionThread[],
   capturedExternalLinks?: CapturedExternalLink[],
   /** Assignment groups so each assignment extract can state its weight. */
-  assignmentGroups?: CanvasAssignmentGroup[]
+  assignmentGroups?: CanvasAssignmentGroup[],
+  /** Reply threads under announcements, rendered after each announcement's post. */
+  rawAnnouncementThreads?: RawDiscussionThread[]
 ): Promise<void> {
   debugFs("write", coursePath, "writing ingestion artifacts");
   // Ensure directory structure
@@ -119,6 +125,7 @@ export async function writeIngestionArtifacts(
   const rawAssignmentsById = new Map(
     (rawAssignments ?? []).map((assignment) => [assignment.id, assignment])
   );
+  const attachmentLookup = buildTopicAttachmentLookup(attachments);
 
   if (assignments.length > 0) {
     await fs.mkdir(path.join(coursePath, "extracted", "assignments"), {
@@ -129,7 +136,8 @@ export async function writeIngestionArtifacts(
       const assignmentText = formatAssignmentText(
         assignment,
         rawAssignment,
-        describeAssignmentWeight(assignment.id, rawAssignment, assignmentGroups ?? [])
+        describeAssignmentWeight(assignment.id, rawAssignment, assignmentGroups ?? []),
+        attachmentLookup
       );
       await writeAtomic(
         getExtractedAssignmentPath(coursePath, assignment.id),
@@ -180,31 +188,46 @@ export async function writeIngestionArtifacts(
     }
   }
 
-  const attachmentLookup = buildTopicAttachmentLookup(attachments);
-
   if (rawAnnouncements && rawAnnouncements.length > 0) {
     await fs.mkdir(path.join(coursePath, "extracted", "announcements"), {
       recursive: true,
     });
+    const announcementThreadById = new Map(
+      (rawAnnouncementThreads ?? []).map((thread) => [thread.topic.id, thread])
+    );
     for (const announcement of rawAnnouncements) {
       const attachmentLine = formatTopicAttachmentsLine(
         announcement.attachments,
         attachmentLookup
       );
-      if (!announcement.message && !attachmentLine) continue;
+      const thread = announcementThreadById.get(announcement.id);
+      const replies = thread?.entries ?? [];
+      if (!announcement.message && !attachmentLine && replies.length === 0) continue;
+      const baseUrl = announcement.html_url ?? courseMeta.htmlUrl;
       const header = [
         announcement.posted_at ? `Posted: ${announcement.posted_at}` : "",
         announcement.user_name ? `From: ${announcement.user_name}` : "",
+        thread && replies.length > 0 && thread.topic.last_reply_at
+          ? `Last reply: ${thread.topic.last_reply_at}`
+          : "",
+        thread && replies.length > 0 ? `Participants: ${thread.participantCount}` : "",
+        thread ? `Replies captured: ${replies.length}` : "",
         announcement.html_url ? `Canvas URL: ${announcement.html_url}` : "",
         attachmentLine,
       ].filter(Boolean);
       const postedAt = header.length > 0 ? `${header.join("\n")}\n\n` : "";
-      const content =
+      let content =
         `# ${announcement.title}\n\n` +
         postedAt +
-        `${htmlToText(announcement.message ?? "", {
-          baseUrl: announcement.html_url ?? courseMeta.htmlUrl,
-        })}\n`;
+        `${htmlToText(announcement.message ?? "", { baseUrl })}\n`;
+      if (replies.length > 0) {
+        content +=
+          "\n" +
+          formatThreadRepliesText(replies, baseUrl, attachmentLookup)
+            .replace(/\n{3,}/g, "\n\n")
+            .trimEnd() +
+          "\n";
+      }
       await writeAtomic(
         getExtractedAnnouncementPath(coursePath, announcement.id),
         content
@@ -286,7 +309,8 @@ export function describeAssignmentWeight(
 function formatAssignmentText(
   assignment: AssignmentIndexEntry,
   rawAssignment?: RawAssignmentRecord,
-  weightLines: string[] = []
+  weightLines: string[] = [],
+  attachmentLookup: TopicAttachmentLookup = buildTopicAttachmentLookup([])
 ): string {
   const lines = [`# ${assignment.name}`, ""];
 
@@ -324,6 +348,18 @@ function formatAssignmentText(
     lines.push(line);
   }
   lines.push(`Canvas URL: ${assignment.htmlUrl}`);
+
+  // Section/group/student dates. The "Due:" line above is already the
+  // student's own effective date; this lists every dated group so "when is
+  // it due for the evening section?" has an answer.
+  const dateLines = formatAssignmentDatesText(assignment.dateDetails ?? null);
+  if (dateLines.length > 0) {
+    lines.push("");
+    lines.push("## Assignment Dates");
+    lines.push("");
+    lines.push(...dateLines);
+  }
+
   lines.push("");
   lines.push("## Description");
   lines.push("");
@@ -348,7 +384,239 @@ function formatAssignmentText(
     lines.push(formatRubricText(rubric, assignment.htmlUrl));
   }
 
+  // The student's own grader feedback: comments (with media and attached
+  // files) and the rubric assessment, so "what did I lose marks on?" is
+  // answerable from the cache.
+  const submission = rawAssignment?.submission;
+  const submissionComments = (submission?.submission_comments ?? []).filter(
+    (comment): comment is CanvasSubmissionComment => !!comment
+  );
+  const rubricAssessmentText = formatSubmissionRubricAssessmentText(
+    submission?.rubric_assessment,
+    rubric,
+    assignment.htmlUrl
+  );
+  if (submissionComments.length > 0 || rubricAssessmentText) {
+    lines.push("");
+    lines.push("## Submission Feedback");
+    lines.push("");
+    if (submissionComments.length > 0) {
+      lines.push(
+        formatSubmissionFeedbackText(submissionComments, assignment.htmlUrl, attachmentLookup)
+      );
+    }
+    if (rubricAssessmentText) {
+      if (submissionComments.length > 0) {
+        lines.push("");
+      }
+      lines.push(rubricAssessmentText);
+    }
+  }
+
   return lines.join("\n") + "\n";
+}
+
+/**
+ * "### TA Linus — 2026-03-01T…" followed by the comment text, any media
+ * comment, and the attached files with their on-disk paths.
+ */
+function formatSubmissionFeedbackText(
+  comments: CanvasSubmissionComment[],
+  baseUrl: string | null,
+  attachmentLookup: TopicAttachmentLookup
+): string {
+  const sections: string[] = [];
+
+  for (const comment of comments) {
+    const headingParts = [
+      stripControlChars(comment.author_name ?? "") || "Unknown author",
+      comment.created_at ?? null,
+    ].filter((part): part is string => typeof part === "string" && part.length > 0);
+    sections.push(`### ${headingParts.join(" — ")}`);
+    if (comment.edited_at && comment.edited_at !== comment.created_at) {
+      sections.push(`Edited: ${comment.edited_at}`);
+    }
+    sections.push("");
+
+    const body =
+      renderRichText(comment.html_comment, baseUrl) ||
+      renderRichText(comment.comment, baseUrl);
+    sections.push(body || "No text feedback captured.");
+
+    if (comment.media_comment) {
+      const media = comment.media_comment;
+      const label =
+        stripControlChars(media.display_name ?? "") ||
+        media.media_id ||
+        `${media.media_type ?? "media"} comment`;
+      const mediaParts = [`Media comment: ${label}`];
+      if (media.media_type) {
+        mediaParts.push(`type: ${media.media_type}`);
+      }
+      if (media.url) {
+        mediaParts.push(`URL: ${media.url}`);
+      }
+      sections.push("");
+      sections.push(mediaParts.join(" — "));
+    }
+
+    const attachmentLine = formatTopicAttachmentsLine(comment.attachments, attachmentLookup);
+    if (attachmentLine) {
+      sections.push("");
+      sections.push(attachmentLine);
+    }
+
+    sections.push("");
+  }
+
+  return sections.join("\n").trimEnd();
+}
+
+/**
+ * "### Rubric Assessment" with one "#### <criterion>" block per scored
+ * criterion: points out of the criterion maximum, the rating chosen, and the
+ * grader's comment. Empty string when nothing was assessed.
+ */
+function formatSubmissionRubricAssessmentText(
+  assessment: CanvasRubricAssessment | null | undefined,
+  rubric: CanvasRubricCriterion[],
+  baseUrl: string | null
+): string {
+  const rows = normalizeRubricAssessmentRows(assessment, rubric);
+  if (rows.length === 0) {
+    return "";
+  }
+
+  const criterionById = new Map(rubric.map((criterion) => [String(criterion.id), criterion]));
+  const sections = ["### Rubric Assessment", ""];
+
+  for (const [criterionId, row] of rows) {
+    const criterion = criterionById.get(criterionId);
+    const heading =
+      (criterion ? toSingleLineText(criterion.description, baseUrl) : "") ||
+      `Criterion ${criterionId}`;
+    sections.push(`#### ${heading}`);
+    sections.push("");
+
+    const facts: string[] = [];
+    if (typeof row.points === "number" && Number.isFinite(row.points)) {
+      const max = criterion?.points;
+      facts.push(
+        `Points: ${typeof max === "number" && Number.isFinite(max) ? `${row.points} / ${max}` : String(row.points)}`
+      );
+    }
+
+    const ratingId =
+      row.rating_id !== null && row.rating_id !== undefined ? String(row.rating_id) : null;
+    if (ratingId) {
+      const rating = criterion?.ratings?.find((candidate) => String(candidate.id) === ratingId);
+      if (rating) {
+        const ratingLabel = toSingleLineText(rating.description, baseUrl) || ratingId;
+        const ratingPoints = formatPointLabel(rating.points);
+        facts.push(`Rating: ${ratingLabel}${ratingPoints ? ` (${ratingPoints})` : ""}`);
+      } else {
+        facts.push(`Rating ID: ${ratingId}`);
+      }
+    }
+
+    sections.push(...facts);
+
+    const comments = renderRichText(row.comments, baseUrl);
+    if (comments) {
+      if (facts.length > 0) {
+        sections.push("");
+      }
+      sections.push(comments);
+    }
+
+    sections.push("");
+  }
+
+  return sections.join("\n").trimEnd();
+}
+
+/** Scored criteria in rubric order (unknown criteria last), skipping empty rows. */
+function normalizeRubricAssessmentRows(
+  assessment: CanvasRubricAssessment | null | undefined,
+  rubric: CanvasRubricCriterion[]
+): Array<[string, CanvasRubricAssessmentCriterion]> {
+  if (!assessment || typeof assessment !== "object") {
+    return [];
+  }
+
+  const rubricOrder = new Map(rubric.map((criterion, index) => [String(criterion.id), index]));
+  return Object.entries(assessment)
+    .filter((entry): entry is [string, CanvasRubricAssessmentCriterion] =>
+      isRubricAssessmentCriterion(entry[1])
+    )
+    .sort(([leftId], [rightId]) => {
+      const leftOrder = rubricOrder.get(leftId);
+      const rightOrder = rubricOrder.get(rightId);
+      if (leftOrder !== undefined && rightOrder !== undefined) {
+        return leftOrder - rightOrder;
+      }
+      if (leftOrder !== undefined) return -1;
+      if (rightOrder !== undefined) return 1;
+      return 0;
+    });
+}
+
+function isRubricAssessmentCriterion(
+  value: CanvasRubricAssessment[string]
+): value is CanvasRubricAssessmentCriterion {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  if (typeof value.points === "number" && Number.isFinite(value.points)) {
+    return true;
+  }
+  if (value.rating_id !== null && value.rating_id !== undefined) {
+    return true;
+  }
+  return typeof value.comments === "string" && value.comments.trim().length > 0;
+}
+
+const DATE_SET_TYPE_LABELS: Record<string, string> = {
+  coursesection: "section",
+  group: "group",
+  adhoc: "specific students",
+  noop: "mastery paths",
+};
+
+/**
+ * "- Everyone else: due …; unlocks …" then one line per override, or []
+ * when the assignment has no overrides. Exported for tests.
+ */
+export function formatAssignmentDatesText(
+  details: AssignmentDateDetailsIndex | null
+): string[] {
+  if (!details || details.overrides.length === 0) {
+    return [];
+  }
+  const describe = (row: {
+    dueAt: string | null;
+    unlockAt: string | null;
+    lockAt: string | null;
+  }): string => {
+    const parts: string[] = [];
+    parts.push(row.dueAt ? `due ${row.dueAt}` : "no due date");
+    if (row.unlockAt) parts.push(`unlocks ${row.unlockAt}`);
+    if (row.lockAt) parts.push(`locks ${row.lockAt}`);
+    return parts.join("; ");
+  };
+  const lines: string[] = [
+    "The dates at the top of this file are the ones that apply to you. Canvas lists these dates per section, group, or student set:",
+    "",
+  ];
+  if (details.hasBase) {
+    lines.push(`- ${details.baseTitle ?? "Everyone else"}: ${describe(details)}`);
+  }
+  details.overrides.forEach((override, index) => {
+    const label = override.title ?? `Override ${index + 1}`;
+    const kind = override.setType ? DATE_SET_TYPE_LABELS[override.setType.toLowerCase()] : null;
+    lines.push(`- ${label}${kind ? ` (${kind})` : ""}: ${describe(override)}`);
+  });
+  return lines;
 }
 
 function formatSubmissionRules(rawAssignment?: RawAssignmentRecord): string[] {
@@ -561,34 +829,42 @@ function formatDiscussionThreadText(
 
   if (thread.entries.length > 0) {
     lines.push("");
-    lines.push("## Replies");
-    lines.push("");
-
-    for (const entry of thread.entries) {
-      const headingParts = [
-        entry.user_name ?? `User ${entry.user_id}`,
-        entry.created_at,
-      ].filter((part) => typeof part === "string" && part.length > 0);
-      lines.push(`### ${headingParts.join(" — ")}`);
-      lines.push("");
-      const replyAttachment = entry.attachment
-        ? formatTopicAttachmentsLine([entry.attachment], attachmentLookup, "Attachment")
-        : "";
-      if (replyAttachment) {
-        lines.push(replyAttachment);
-        lines.push("");
-      }
-      if (entry.message && entry.message.trim().length > 0) {
-        lines.push(
-          htmlToText(entry.message, { baseUrl: thread.topic.html_url }) ||
-            "No reply text captured."
-        );
-      } else {
-        lines.push("No reply text captured.");
-      }
-      lines.push("");
-    }
+    lines.push(formatThreadRepliesText(thread.entries, thread.topic.html_url, attachmentLookup));
   }
 
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+}
+
+/**
+ * "## Replies" followed by one "### author — date" block per entry, in
+ * thread order. Shared by discussion and announcement extracts.
+ */
+function formatThreadRepliesText(
+  entries: RawDiscussionThread["entries"],
+  baseUrl: string | null,
+  attachmentLookup: TopicAttachmentLookup
+): string {
+  const lines: string[] = ["## Replies", ""];
+  for (const entry of entries) {
+    const headingParts = [
+      entry.user_name ?? `User ${entry.user_id}`,
+      entry.created_at,
+    ].filter((part) => typeof part === "string" && part.length > 0);
+    lines.push(`### ${headingParts.join(" — ")}`);
+    lines.push("");
+    const replyAttachment = entry.attachment
+      ? formatTopicAttachmentsLine([entry.attachment], attachmentLookup, "Attachment")
+      : "";
+    if (replyAttachment) {
+      lines.push(replyAttachment);
+      lines.push("");
+    }
+    if (entry.message && entry.message.trim().length > 0) {
+      lines.push(htmlToText(entry.message, { baseUrl }) || "No reply text captured.");
+    } else {
+      lines.push("No reply text captured.");
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
 }

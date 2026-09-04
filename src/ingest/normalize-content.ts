@@ -2,12 +2,15 @@ import type { RawCourseContent } from "./fetch-course-content.js";
 import type {
   CourseMetadata,
   AssignmentIndexEntry,
+  AssignmentDateDetailsIndex,
+  AssignmentDateOverrideIndexEntry,
   ModuleIndexEntry,
   FileIndexEntry,
   PageIndexEntry,
   AnnouncementIndexEntry,
   DiscussionIndexEntry,
 } from "./types.js";
+import type { CanvasAssignmentDate } from "../canvas/types.js";
 import { extractLinkedFiles } from "../workspace/attachments.js";
 import { stripControlChars } from "../sanitize.js";
 
@@ -53,6 +56,7 @@ export function normalizeCourseContent(raw: RawCourseContent): {
       htmlUrl: a.html_url,
       hasDescription: !!description,
       descriptionLinkCount: linkCount,
+      dateDetails: normalizeAssignmentDates(a.all_dates),
     };
   });
 
@@ -125,21 +129,30 @@ export function normalizeCourseContent(raw: RawCourseContent): {
 
   const pages = Array.from(pagesById.values());
 
+  const announcementThreadByTopicId = new Map(
+    raw.announcementThreads.map((thread) => [thread.topic.id, thread])
+  );
   const announcements: AnnouncementIndexEntry[] = raw.announcements.map(
-    (announcement) => ({
-      id: announcement.id,
-      title: stripControlChars(announcement.title),
-      postedAt: announcement.posted_at,
-      htmlUrl: announcement.html_url,
-      userName: announcement.user_name,
-      hasMessage:
-        typeof announcement.message === "string" &&
-        announcement.message.length > 0,
-      messageFileLinkCount:
-        typeof announcement.message === "string"
-          ? extractLinkedFiles(announcement.message).length
-          : 0,
-    })
+    (announcement) => {
+      const thread = announcementThreadByTopicId.get(announcement.id);
+      return {
+        id: announcement.id,
+        title: stripControlChars(announcement.title),
+        postedAt: announcement.posted_at,
+        htmlUrl: announcement.html_url,
+        userName: announcement.user_name,
+        hasMessage:
+          typeof announcement.message === "string" &&
+          announcement.message.length > 0,
+        messageFileLinkCount:
+          typeof announcement.message === "string"
+            ? extractLinkedFiles(announcement.message).length
+            : 0,
+        replyCount: thread?.entries.length ?? 0,
+        participantCount: thread?.participantCount ?? 0,
+        replyFileLinkCount: countReplyFileLinks(thread?.entries ?? []),
+      };
+    }
   );
 
   const threadByTopicId = new Map(
@@ -147,12 +160,7 @@ export function normalizeCourseContent(raw: RawCourseContent): {
   );
   const discussions: DiscussionIndexEntry[] = raw.discussions.map((topic) => {
     const thread = threadByTopicId.get(topic.id);
-    const replyFileLinkCount = (thread?.entries ?? []).reduce((count, entry) => {
-      if (typeof entry.message !== "string") {
-        return count;
-      }
-      return count + extractLinkedFiles(entry.message).length;
-    }, 0);
+    const replyFileLinkCount = countReplyFileLinks(thread?.entries ?? []);
 
     return {
       id: topic.id,
@@ -181,4 +189,58 @@ export function normalizeCourseContent(raw: RawCourseContent): {
     announcements,
     discussions,
   };
+}
+
+function countReplyFileLinks(entries: Array<{ message: string | null }>): number {
+  return entries.reduce((count, entry) => {
+    if (typeof entry.message !== "string") {
+      return count;
+    }
+    return count + extractLinkedFiles(entry.message).length;
+  }, 0);
+}
+
+/**
+ * Turn `all_dates` (include[]=all_dates on the assignment list) into base
+ * dates plus overrides. Returns null when there is nothing beyond the base
+ * entry, so "## Assignment Dates" only appears for assignments that really
+ * have section/group/student dates. Exported for tests.
+ */
+export function normalizeAssignmentDates(
+  value: CanvasAssignmentDate[] | null | undefined
+): AssignmentDateDetailsIndex | null {
+  if (!Array.isArray(value) || value.length === 0) {
+    return null;
+  }
+  const rows = value.filter((row): row is CanvasAssignmentDate => !!row && typeof row === "object");
+  const base = rows.find((row) => row.base === true) ?? null;
+  const overrides: AssignmentDateOverrideIndexEntry[] = rows
+    .filter((row) => row !== base)
+    .map((row) => ({
+      id: typeof row.id === "number" ? row.id : null,
+      title: normalizeText(row.title),
+      dueAt: normalizeText(row.due_at),
+      unlockAt: normalizeText(row.unlock_at),
+      lockAt: normalizeText(row.lock_at),
+      setType: normalizeText(row.set_type),
+      setId: typeof row.set_id === "number" ? row.set_id : null,
+    }));
+  if (overrides.length === 0) {
+    return null;
+  }
+  return {
+    dueAt: normalizeText(base?.due_at),
+    unlockAt: normalizeText(base?.unlock_at),
+    lockAt: normalizeText(base?.lock_at),
+    baseTitle: normalizeText(base?.title),
+    hasBase: base !== null,
+    overrideCount: overrides.length,
+    overrides,
+  };
+}
+
+function normalizeText(value: string | null | undefined): string | null {
+  return typeof value === "string" && value.trim().length > 0
+    ? stripControlChars(value)
+    : null;
 }
