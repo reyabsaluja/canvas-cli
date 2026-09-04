@@ -140,6 +140,40 @@ test(
   }
 );
 
+test("an Office container with more parts, or more inflated XML, than the archive caps allow is refused with an error string", async () => {
+  const documentXml =
+    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Hello from the document part</w:t></w:r></w:p></w:body></w:document>';
+  const entries: ZipFixtureEntry[] = [
+    { name: "[Content_Types].xml", content: "<Types/>" },
+    { name: "word/document.xml", content: documentXml },
+    // Six ~1 KB XML parts the reader would otherwise inflate one after another.
+    ...Array.from({ length: 6 }, (_, i) => ({
+      name: `word/extra${i + 1}.xml`,
+      content: `<extra>${"x".repeat(1000)}</extra>`,
+    })),
+  ];
+  await withZip(
+    entries,
+    async (zipPath) => {
+      assert.match(
+        await extractFileText(zipPath, "many.docx"),
+        /Hello from the document part/,
+        "inside the default caps the document reads normally"
+      );
+
+      const overTotal = await extractFileText(zipPath, "many.docx", { maxTotalBytes: 2500 });
+      assert.match(overTotal, /^\[Error reading "many\.docx":/, "the container must be refused, not partially parsed");
+      assert.match(overTotal, /total cap/);
+      assert.doesNotMatch(overTotal, /Hello from the document part/);
+
+      const overCount = await extractFileText(zipPath, "many.docx", { maxEntries: 3 });
+      assert.match(overCount, /^\[Error reading "many\.docx":/);
+      assert.match(overCount, /more than 3/);
+    },
+    "many.docx"
+  );
+});
+
 test("the streamed byte count refuses an entry that under-declares its size, before the whole body is inflated", async () => {
   // yauzl only reports a size mismatch after inflating everything (and not at
   // all for archives whose sizes it is unsure of), so the reader must stop on

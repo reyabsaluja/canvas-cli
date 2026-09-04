@@ -2,7 +2,14 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { decodeEntities } from "../format/html-to-text.js";
 import { stripControlChars } from "../sanitize.js";
-import { MAX_ZIP_ENTRY_BYTES, readZipEntryBounded } from "./zip-bounds.js";
+import {
+  chargeZipReadBytes,
+  createZipReadBudget,
+  readZipEntryBounded,
+  reserveZipReadEntry,
+  resolveZipReadLimits,
+  type ZipReadLimits,
+} from "./zip-bounds.js";
 
 const require = createRequire(import.meta.url);
 
@@ -41,26 +48,28 @@ export function isOfficeExtension(ext: string): boolean {
 
 /**
  * Extract text from an Office document held in memory. Returns null when the
- * extension is not an Office format. Throws when the container is unreadable.
+ * extension is not an Office format. Throws when the container is unreadable
+ * or its XML parts exceed the zip read caps (`limits` override the defaults).
  */
 export async function extractOfficeText(
   buffer: Buffer,
-  filename: string
+  filename: string,
+  limits?: Partial<ZipReadLimits>
 ): Promise<string | null> {
   const ext = path.extname(filename).toLowerCase();
   switch (ext) {
     case ".docx":
     case ".docm":
     case ".dotx":
-      return extractDocxText(buffer);
+      return extractDocxText(buffer, limits);
     case ".pptx":
     case ".pptm":
     case ".potx":
-      return extractPptxText(buffer);
+      return extractPptxText(buffer, limits);
     case ".xlsx":
     case ".xlsm":
     case ".xltx":
-      return extractXlsxText(buffer);
+      return extractXlsxText(buffer, limits);
     default:
       return null;
   }
@@ -70,7 +79,20 @@ export async function extractOfficeText(
 // Zip container helpers
 // ---------------------------------------------------------------------------
 
-async function readZipParts(buffer: Buffer): Promise<Map<string, string>> {
+/**
+ * Inflate every XML part of the container into memory, under the same caps
+ * as any other archive: a part past the per-entry cap throws
+ * ZipEntryTooLargeError, and one that would take the container past the
+ * entry-count or total-bytes cap throws ZipReadBudgetExceededError. Both
+ * propagate so callers report the container as unreadable instead of
+ * inflating a hostile document part by part.
+ */
+async function readZipParts(
+  buffer: Buffer,
+  limits?: Partial<ZipReadLimits>
+): Promise<Map<string, string>> {
+  const bounds = resolveZipReadLimits(limits);
+  const budget = createZipReadBudget();
   const yauzl = require("yauzl-promise");
   const zip = await yauzl.fromBuffer(buffer);
   const parts = new Map<string, string>();
@@ -79,10 +101,9 @@ async function readZipParts(buffer: Buffer): Promise<Map<string, string>> {
       const name = String(entry.filename).replace(/^\/+/, "");
       if (name.endsWith("/")) continue;
       if (!isInterestingPart(name)) continue;
-      // A part past the per-entry cap throws ZipEntryTooLargeError; it
-      // propagates so callers report the container as unreadable instead of
-      // inflating a hostile XML part into memory.
-      const bytes = await readZipEntryBounded(entry, MAX_ZIP_ENTRY_BYTES);
+      reserveZipReadEntry(budget, bounds, Number(entry.uncompressedSize ?? 0));
+      const bytes = await readZipEntryBounded(entry, bounds.maxEntryBytes);
+      chargeZipReadBytes(budget, bounds, bytes.length);
       parts.set(name, bytes.toString("utf-8"));
     }
   } finally {
@@ -207,8 +228,11 @@ interface DocxContext {
   footnoteRefs: number[];
 }
 
-export async function extractDocxText(buffer: Buffer): Promise<string> {
-  const parts = await readZipParts(buffer);
+export async function extractDocxText(
+  buffer: Buffer,
+  limits?: Partial<ZipReadLimits>
+): Promise<string> {
+  const parts = await readZipParts(buffer, limits);
   const document = parts.get("word/document.xml");
   if (!document) {
     throw new Error("word/document.xml missing from document");
@@ -614,8 +638,11 @@ function renderDocxFootnotes(
 // PPTX
 // ---------------------------------------------------------------------------
 
-export async function extractPptxText(buffer: Buffer): Promise<string> {
-  const parts = await readZipParts(buffer);
+export async function extractPptxText(
+  buffer: Buffer,
+  limits?: Partial<ZipReadLimits>
+): Promise<string> {
+  const parts = await readZipParts(buffer, limits);
   const slidePaths = orderedSlidePaths(parts);
   if (slidePaths.length === 0) {
     throw new Error("no slides found in presentation");
@@ -955,8 +982,11 @@ function renderPptxTable(tableXml: string): string {
 // XLSX
 // ---------------------------------------------------------------------------
 
-export async function extractXlsxText(buffer: Buffer): Promise<string> {
-  const parts = await readZipParts(buffer);
+export async function extractXlsxText(
+  buffer: Buffer,
+  limits?: Partial<ZipReadLimits>
+): Promise<string> {
+  const parts = await readZipParts(buffer, limits);
   const workbook = parts.get("xl/workbook.xml");
   if (!workbook) {
     throw new Error("xl/workbook.xml missing from workbook");

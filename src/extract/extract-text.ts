@@ -5,10 +5,12 @@ import { htmlToText } from "../format/html-to-text.js";
 import { extractOfficeText, isOfficeExtension } from "./office-text.js";
 import {
   ZipEntryTooLargeError,
+  createZipReadBudget,
   formatByteCap,
   readZipEntryBounded,
   resolveZipReadLimits,
   writeZipEntryBounded,
+  type ZipReadBudget,
   type ZipReadLimits,
 } from "./zip-bounds.js";
 
@@ -17,7 +19,9 @@ export {
   MAX_ZIP_ENTRY_COUNT,
   MAX_ZIP_TOTAL_BYTES,
   ZipEntryTooLargeError,
+  ZipReadBudgetExceededError,
   readZipEntryBounded,
+  type ZipReadBudget,
   type ZipReadLimits,
 } from "./zip-bounds.js";
 
@@ -92,10 +96,13 @@ export interface ZipUnpackEntry {
 /**
  * Extract text from a file by path and filename.
  * Returns extracted text or a descriptive message for unsupported formats.
+ * `limits` override the zip read caps for archives and Office containers
+ * (tests use small ones; production callers take the defaults).
  */
 export async function extractFileText(
   filePath: string,
-  filename: string
+  filename: string,
+  limits?: Partial<ZipReadLimits>
 ): Promise<string> {
   const ext = path.extname(filename).toLowerCase();
   try {
@@ -118,10 +125,10 @@ export async function extractFileText(
       case ".htm":
         return await extractHtml(filePath);
       case ".zip":
-        return await extractZip(filePath, filename);
+        return await extractZip(filePath, filename, limits);
       default:
         if (isOfficeExtension(ext)) {
-          return await extractOffice(filePath, filename);
+          return await extractOffice(filePath, filename, limits);
         }
         return `[Binary file: ${filename} — cannot extract text]`;
     }
@@ -226,14 +233,7 @@ export async function extractZip(
   limits?: Partial<ZipReadLimits>
 ): Promise<string> {
   const bounds = resolveZipReadLimits(limits);
-  const budget: ZipReadBudget = { entriesRead: 0, totalBytes: 0 };
-  return extractZipSource(zipPath, zipName, 0, bounds, budget);
-}
-
-/** Running totals shared by an archive and every zip nested inside it. */
-interface ZipReadBudget {
-  entriesRead: number;
-  totalBytes: number;
+  return extractZipSource(zipPath, zipName, 0, bounds, createZipReadBudget());
 }
 
 async function extractZipSource(
@@ -327,7 +327,9 @@ async function extractZipSource(
         }
       } else if (isOffice) {
         try {
-          const text = (await extractOfficeText(buffer, entry.filename)) ?? "";
+          // The container's XML parts are read under the same caps as the
+          // archive; an over-budget document is skipped like a corrupt one.
+          const text = (await extractOfficeText(buffer, entry.filename, bounds)) ?? "";
           if (text.trim().length > 0) {
             const truncated = capZipEntryText(text, entry.filename);
             textContents.push({ name: entry.filename, content: truncated });
@@ -541,9 +543,13 @@ async function renderPdfPageText(page: PdfPageProxy): Promise<string> {
   return text;
 }
 
-async function extractOffice(filePath: string, filename: string): Promise<string> {
+async function extractOffice(
+  filePath: string,
+  filename: string,
+  limits?: Partial<ZipReadLimits>
+): Promise<string> {
   const buffer = await fs.readFile(filePath);
-  const text = (await extractOfficeText(buffer, filename)) ?? "";
+  const text = (await extractOfficeText(buffer, filename, limits)) ?? "";
   return text.slice(0, MAX_TEXT) || `[Could not extract text from ${filename}]`;
 }
 

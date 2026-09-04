@@ -58,6 +58,71 @@ export class ZipEntryTooLargeError extends Error {
   }
 }
 
+/**
+ * Running totals shared by an archive and everything read out of it: the
+ * zips nested inside it, and the XML parts of an Office container.
+ */
+export interface ZipReadBudget {
+  entriesRead: number;
+  totalBytes: number;
+}
+
+export function createZipReadBudget(): ZipReadBudget {
+  return { entriesRead: 0, totalBytes: 0 };
+}
+
+/**
+ * Thrown when reading one more entry would take an archive past its
+ * entry-count or total-bytes cap and the reader cannot continue partially
+ * (an Office container is only meaningful whole).
+ */
+export class ZipReadBudgetExceededError extends Error {
+  readonly reason: "entries" | "bytes";
+  readonly limit: number;
+
+  constructor(reason: "entries" | "bytes", limit: number) {
+    super(
+      reason === "entries"
+        ? `Archive has more than ${limit} readable entries`
+        : `Archive inflates past the ${formatByteCap(limit)} total cap`
+    );
+    this.name = "ZipReadBudgetExceededError";
+    this.reason = reason;
+    this.limit = limit;
+  }
+}
+
+/**
+ * Charge one entry against the budget before its body is inflated. Throws
+ * when the entry count or the declared size would pass the caps; the
+ * streamed size is charged afterwards by `chargeZipReadBytes`.
+ */
+export function reserveZipReadEntry(
+  budget: ZipReadBudget,
+  limits: ZipReadLimits,
+  declaredSize: number
+): void {
+  if (budget.entriesRead >= limits.maxEntries) {
+    throw new ZipReadBudgetExceededError("entries", limits.maxEntries);
+  }
+  if (budget.totalBytes + declaredSize > limits.maxTotalBytes) {
+    throw new ZipReadBudgetExceededError("bytes", limits.maxTotalBytes);
+  }
+}
+
+/** Record an inflated entry; throws when its real size took the archive past the total cap. */
+export function chargeZipReadBytes(
+  budget: ZipReadBudget,
+  limits: ZipReadLimits,
+  bytes: number
+): void {
+  budget.entriesRead += 1;
+  budget.totalBytes += bytes;
+  if (budget.totalBytes > limits.maxTotalBytes) {
+    throw new ZipReadBudgetExceededError("bytes", limits.maxTotalBytes);
+  }
+}
+
 /** The subset of a yauzl-promise Entry these helpers rely on. */
 export interface ZipEntryLike {
   filename: string;
