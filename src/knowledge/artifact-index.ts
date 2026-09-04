@@ -27,6 +27,7 @@ export type ArtifactKind =
   | "attachment"
   | "syllabus"
   | "front_page"
+  | "lecture"
   | "workup"
   | "plan"
   | "notes"
@@ -691,6 +692,41 @@ async function addCourseArtifacts(
       createSectionFromText(artifact, "Metadata", body, artifact.scoreBoost)
     );
   }
+
+  // Lectures (slides, recordings, embedded videos) were only reachable through
+  // the prompt's 30-entry list; index them so "lecture 5 recording" is a
+  // search hit with an openable URL.
+  (cache.lectures ?? []).forEach((lecture, index) => {
+    const numberText = lecture.lectureNumber !== null ? `lecture ${lecture.lectureNumber} lec${lecture.lectureNumber} week ${lecture.lectureNumber}` : "";
+    const body = [
+      lecture.title,
+      lecture.topic ?? "",
+      numberText,
+      lecture.contentType === "video" ? "video recording" : lecture.contentType,
+      lecture.source,
+      lecture.url,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const artifact = createArtifact({
+      id: `course:lecture:${index}`,
+      scope: "course",
+      kind: "lecture",
+      title: lecture.title,
+      source: lecture.source,
+      location: lecture.url,
+      body,
+      scoreBoost: 1,
+      metadata: {
+        url: lecture.url,
+        contentType: lecture.contentType,
+        lectureNumber: lecture.lectureNumber,
+        topic: lecture.topic ?? null,
+      },
+    });
+    registerArtifact(artifact);
+    registerSection(createSectionFromText(artifact, "Metadata", body, artifact.scoreBoost));
+  });
 
   for (const file of cache.files) {
     const body = [file.filename, file.contentType, String(file.size)].join(" ");
