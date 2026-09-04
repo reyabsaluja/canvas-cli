@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **extract**
+Next area: **retrieve**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -72,3 +72,4 @@ Next area: **extract**
 - 2026-09-04 reason: the /work investigation's read_document takes a section ("Page 57", heading fragment) and caches section reads separately from cut-off whole reads, so workups can reach pages past the 60k cut like the chat agent can; unknown sections fall back to the head with the section list (caller did it directly)
 - 2026-09-04 ground: spelled-out figures with a unit ("ten percent", "twenty-five marks", "two hundred words") are normalised to digits in answers and evidence, so they are checked both ways by the numeric-claim guard (caller did it directly)
 - 2026-09-04 discover: module prerequisites, unlock dates, sequential-progress and per-item completion requirements (must view/submit/contribute, min score) are recorded in modules.json and rendered into the module artifact ("Requirements: unlocks after completing Week 1; ...") so "what do I need to do to unlock module 3" is searchable (caller did it directly)
+- 2026-09-04 extract: real page extracts carry "Updated:" and "Canvas URL:" lines from the page index (synthetic pages skip them), and announcement extracts name their author and link beside the posted date, so "is this current", "who said it" and "where is it on Canvas" are answerable (caller did it directly)

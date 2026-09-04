@@ -255,6 +255,8 @@ test("posts without attached files keep their existing layout", async () => {
       path.join(coursePath, "extracted", "announcements", "7102.txt"),
       "utf-8"
     );
-    assert.equal(text, "# Welcome\n\nPosted: 2026-09-01T12:00:00Z\n\nWelcome to CS101.\n");
+    assert.match(text, /^# Welcome\n\nPosted: 2026-09-01T12:00:00Z\n/);
+    assert.match(text, /\n\nWelcome to CS101\.\n$/);
+    assert.doesNotMatch(text, /Attachments:/);
   });
 });
