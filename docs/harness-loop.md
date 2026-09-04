@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **reason**
+Next area: **ground**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -69,3 +69,4 @@ Next area: **reason**
 - 2026-09-04 discover: files attached directly to assignments (starter code, templates, data via the Canvas "Attach" control) are now selected and downloaded under attachments/assignments, deduped against every other selector, with counts in ingestion.json and the summary (caller did it directly)
 - 2026-09-04 extract: assignment extracts state their assignment group, its weight and drop rules, and the assignment's approximate share of the final grade ("7.5% (10 of 40 points in Labs)"), so the first document the agent reads answers "how much is this worth" (caller did it directly)
 - 2026-09-04 retrieve: course search hits list up to two further matching sections of the same document ("also — Extensions: ...") when they score at least 40% of the best one, so a syllabus that answers in two places shows both (caller did it directly)
+- 2026-09-04 reason: the /work investigation's read_document takes a section ("Page 57", heading fragment) and caches section reads separately from cut-off whole reads, so workups can reach pages past the 60k cut like the chat agent can; unknown sections fall back to the head with the section list (caller did it directly)
