@@ -63,6 +63,8 @@ export async function writeIngestionArtifacts(
     message: string | null;
     posted_at: string | null;
     html_url?: string | null;
+    /** Who posted it (instructor or TA name). */
+    user_name?: string | null;
     /** Files attached to the post itself (not linked from `message`). */
     attachments?: CanvasTopicAttachment[] | null;
   }>,
@@ -154,14 +156,26 @@ export async function writeIngestionArtifacts(
   if (fetchedPages && fetchedPages.length > 0) {
     const pagesDir = path.join(coursePath, "extracted", "pages");
     await fs.mkdir(pagesDir, { recursive: true });
+    const pageEntriesBySlug = new Map(pages.map((entry) => [entry.pageId, entry]));
     for (const page of fetchedPages) {
       const pageTextPath = getExtractedPagePath(coursePath, page.slug);
-      const pageUrl = courseMeta.htmlUrl
-        ? `${courseMeta.htmlUrl.replace(/\/$/, "")}/pages/${encodeURIComponent(page.slug)}`
-        : null;
+      const entry = pageEntriesBySlug.get(page.slug);
+      const pageUrl =
+        entry?.htmlUrl ??
+        (courseMeta.htmlUrl
+          ? `${courseMeta.htmlUrl.replace(/\/$/, "")}/pages/${encodeURIComponent(page.slug)}`
+          : null);
+      // "Is this current?" and "where is this on Canvas?" need the date and link.
+      // Synthetic pages (quizzes, course tools, grading scheme) have no real
+      // Canvas page behind them, and no updatedAt; skip their header.
+      const isRealPage = Boolean(entry?.updatedAt);
+      const header = [
+        isRealPage ? `Updated: ${entry!.updatedAt}` : "",
+        isRealPage && pageUrl ? `Canvas URL: ${pageUrl}` : "",
+      ].filter(Boolean);
       await writeAtomic(
         pageTextPath,
-        `# ${page.title}\n\n${htmlToText(page.body, { baseUrl: pageUrl })}\n`
+        `# ${page.title}\n\n${header.length > 0 ? `${header.join("\n")}\n\n` : ""}${htmlToText(page.body, { baseUrl: pageUrl })}\n`
       );
     }
   }
@@ -180,6 +194,8 @@ export async function writeIngestionArtifacts(
       if (!announcement.message && !attachmentLine) continue;
       const header = [
         announcement.posted_at ? `Posted: ${announcement.posted_at}` : "",
+        announcement.user_name ? `From: ${announcement.user_name}` : "",
+        announcement.html_url ? `Canvas URL: ${announcement.html_url}` : "",
         attachmentLine,
       ].filter(Boolean);
       const postedAt = header.length > 0 ? `${header.join("\n")}\n\n` : "";
