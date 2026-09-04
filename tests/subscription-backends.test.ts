@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { after, before } from "node:test";
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,6 +26,22 @@ import {
 } from "../src/ai/backends/copilot.js";
 import { AIError } from "../src/ai/errors.js";
 import { getBackendKind } from "../src/ai/provider.js";
+import { resetCodexModelCacheForTests } from "../src/ai/backends/codex-models.js";
+
+// The Codex model catalog changes what "default" displays as; point CODEX_HOME at an
+// empty directory so these assertions do not depend on a real ~/.codex on this machine.
+const codexHome = mkdtempSync(join(tmpdir(), "canvas-cli-no-codex-"));
+const savedCodexHome = process.env.CODEX_HOME;
+before(() => {
+  process.env.CODEX_HOME = codexHome;
+  resetCodexModelCacheForTests();
+});
+after(() => {
+  if (savedCodexHome === undefined) delete process.env.CODEX_HOME;
+  else process.env.CODEX_HOME = savedCodexHome;
+  resetCodexModelCacheForTests();
+  rmSync(codexHome, { recursive: true, force: true });
+});
 
 // ---------------------------------------------------------------------------
 // Pure helpers

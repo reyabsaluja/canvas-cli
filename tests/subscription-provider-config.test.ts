@@ -1,6 +1,25 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { after, before } from "node:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { getAIConfig, formatModelName, classifyAIError, isAIProviderError, AIError } from "../src/ai/provider.js";
+import { resetCodexModelCacheForTests } from "../src/ai/backends/codex-models.js";
+
+// The Codex model catalog changes what "default" displays as; point CODEX_HOME at an
+// empty directory so these assertions do not depend on a real ~/.codex on this machine.
+const codexHome = mkdtempSync(join(tmpdir(), "canvas-cli-no-codex-"));
+const savedCodexHome = process.env.CODEX_HOME;
+before(() => {
+  process.env.CODEX_HOME = codexHome;
+  resetCodexModelCacheForTests();
+});
+after(() => {
+  if (savedCodexHome === undefined) delete process.env.CODEX_HOME;
+  else process.env.CODEX_HOME = savedCodexHome;
+  resetCodexModelCacheForTests();
+  rmSync(codexHome, { recursive: true, force: true });
+});
 
 const KEYS = ["AI_PROVIDER", "AI_MODEL", "AI_EFFORT", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY"];
 

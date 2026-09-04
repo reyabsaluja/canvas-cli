@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { after, before } from "node:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { resetCodexModelCacheForTests } from "../src/ai/backends/codex-models.js";
 import {
   EFFORT_LEVELS,
   clampEffort,
@@ -12,6 +16,21 @@ import {
 import { DEFAULT_MODEL_BY_PROVIDER, formatModelName } from "../src/ai/provider.js";
 import { effortPickerOptions } from "../src/commands/login-providers.js";
 import catalogJson from "../src/ai/models.json" with { type: "json" };
+
+// The Codex model catalog changes what "default" displays as; point CODEX_HOME at an
+// empty directory so these assertions do not depend on a real ~/.codex on this machine.
+const codexHome = mkdtempSync(join(tmpdir(), "canvas-cli-no-codex-"));
+const savedCodexHome = process.env.CODEX_HOME;
+before(() => {
+  process.env.CODEX_HOME = codexHome;
+  resetCodexModelCacheForTests();
+});
+after(() => {
+  if (savedCodexHome === undefined) delete process.env.CODEX_HOME;
+  else process.env.CODEX_HOME = savedCodexHome;
+  resetCodexModelCacheForTests();
+  rmSync(codexHome, { recursive: true, force: true });
+});
 
 const ALL = ["low", "medium", "high", "xhigh", "max"];
 const NO_XHIGH = ["low", "medium", "high", "max"];

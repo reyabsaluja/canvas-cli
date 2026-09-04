@@ -160,7 +160,7 @@
     {
       "label": "Codex default",
       "value": "default",
-      "description": "your codex config"
+      "description": "Codex's current default model"
     }
   ],
   "_comment_bedrock": "Bedrock ids are US cross-region inference profiles (swap the us. prefix for global., eu., jp. or au. via Custom). Claude 4.7+ ids have no -v1 suffix; Haiku 4.5 keeps its dated -v1:0 id on the Converse API.",

@@ -12,6 +12,7 @@ import {
   type CliBackendRequest,
   type CliDeps,
 } from "../cli-backend.js";
+import { resolveCodexModel } from "./codex-models.js";
 
 /**
  * ChatGPT subscription backend, driven through the OpenAI Codex CLI.
@@ -32,6 +33,8 @@ export function buildCodexArgs(input: {
   effort?: string;
   cwd: string;
   bridgeUrl?: string;
+  /** Environment the run resolves `default` against (CODEX_HOME); defaults to process.env. */
+  env?: NodeJS.ProcessEnv;
 }): string[] {
   const args = [
     "exec",
@@ -51,8 +54,12 @@ export function buildCodexArgs(input: {
     "-c",
     'web_search="disabled"',
   ];
-  if (input.model && input.model !== CODEX_DEFAULT_MODEL) {
-    args.push("-m", input.model);
+  // "default" means Codex's built-in default. When the CLI's model catalog says
+  // which model that is, pass it explicitly so the run matches what the header
+  // shows; without the catalog, leave the choice to Codex as before.
+  const model = input.model ? resolveCodexModel(input.model, input.env) : input.model;
+  if (model && model !== CODEX_DEFAULT_MODEL) {
+    args.push("-m", model);
   }
   if (input.effort) {
     args.push("-c", `model_reasoning_effort="${input.effort}"`);
@@ -131,6 +138,7 @@ export async function runCodex(request: CliBackendRequest, deps: CliDeps = {}): 
       effort: request.effort,
       cwd: scratch.path,
       bridgeUrl: bridge?.url,
+      env: baseEnv,
     });
     const prompt = buildTranscriptPrompt(request.systemPrompt, request.messages);
 

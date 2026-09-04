@@ -1,10 +1,11 @@
 import { verticalPicker, horizontalPicker, BACK, C, type PickerOption } from "./login-picker.js";
 import { promptSecret, promptLine, ESCAPED } from "./login-prompts.js";
-import { getAiKeyName, getCredentialKey, effortPickerOptions } from "./login-providers.js";
+import { getAiKeyName, getCredentialKey, effortPickerOptions, catalogModels } from "./login-providers.js";
 import { readStoredConfig, writeStoredConfig, defaultStoredConfig } from "../config/store.js";
 import { getActiveProfile } from "../config/env.js";
 import { loadCredential, storeCredential } from "../config/credentials.js";
-import { isSubscriptionProvider, SUBSCRIPTION_PROVIDERS, isEffortLevel, type AIEffortLevel } from "../ai/provider.js";
+import { isSubscriptionProvider, SUBSCRIPTION_PROVIDERS, isEffortLevel, deriveModelDisplayName, type AIEffortLevel } from "../ai/provider.js";
+import { describeCodexModel } from "../ai/backends/codex-models.js";
 import { checkSubscriptionCli } from "../ai/subscription-status.js";
 import catalogJson from "../ai/models.json" with { type: "json" };
 
@@ -63,6 +64,8 @@ function readCurrentConfig(): CurrentConfig {
 }
 
 function resolveModelLabel(provider: string | null, modelId: string): string {
+  // Codex: name the model the CLI's catalog says this id runs, even for a stored "default".
+  if (provider === "codex" && describeCodexModel(modelId)) return deriveModelDisplayName(modelId);
   if (provider && MODEL_CATALOG[provider]) {
     const match = MODEL_CATALOG[provider]!.find((m: PickerOption) => m.value === modelId);
     if (match) return match.label;
@@ -80,8 +83,9 @@ function buildModelGroups(): ModelGroup[] {
   if (MODEL_CATALOG["copilot"]) {
     groups.push({ label: "GitHub Copilot", provider: "copilot", models: MODEL_CATALOG["copilot"] });
   }
-  if (MODEL_CATALOG["codex"]) {
-    groups.push({ label: "ChatGPT · Codex (experimental)", provider: "codex", models: MODEL_CATALOG["codex"] });
+  const codexModels = catalogModels("codex");
+  if (codexModels.length > 0) {
+    groups.push({ label: "ChatGPT · Codex (experimental)", provider: "codex", models: codexModels });
   }
   if (MODEL_CATALOG["openai"]) {
     groups.push({ label: "OpenAI", provider: "openai", models: MODEL_CATALOG["openai"] });

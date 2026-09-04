@@ -127,7 +127,7 @@ Select "Configure AI provider" when prompted, choose your provider, and paste yo
 | Google / Gemini | Gemini 3.5 Flash | Low | Budget-friendly, fast |
 | AWS Bedrock | Claude Sonnet 4.6 | Mid | Teams already on AWS, no separate API key |
 | GitHub Copilot | `auto` (Copilot picks) | Subscription | Copilot Free, or the free Copilot Pro students get via GitHub Education — no API key |
-| ChatGPT via Codex (experimental) | `default` (your Codex config) | Subscription | An existing ChatGPT plan — no API key |
+| ChatGPT via Codex (experimental) | `default` (Codex's current default model) | Subscription | An existing ChatGPT plan — no API key |
 
 **Typical usage costs ~$0.50–2/month** for a student using AI features a few times per week (check your provider's pricing page for current rates). Costs depend on the model you choose and how often you use AI features in the TUI (workspace creation, chat, `/quiz`, `/pdf`). Budget models (Gemini Flash, GPT-5.4 Mini) are significantly cheaper; premium models (Claude Opus, GPT-5.5) cost more but produce higher-quality analysis.
 
@@ -220,7 +220,7 @@ codex login
 AI_PROVIDER=codex   # aliases: chatgpt, openai-codex
 ```
 
-The default model is `default` (whatever your Codex config selects); enter a specific ID as a Custom model. `AI_EFFORT` maps to Codex's `model_reasoning_effort`.
+The model picker lists the models your ChatGPT plan offers (for example GPT 5.6 Sol, Terra, Luna, GPT 5.5), read from Codex's own local model catalog at `$CODEX_HOME/models_cache.json` (`~/.codex` by default), which the `codex` CLI refreshes whenever it runs. The default model is `default`, which runs Codex's current default model and shows it by name in the header and `/model` (for example "GPT 5.6 Sol (Codex default)"); if the catalog has not been written yet, it shows as "Codex default" and Codex picks. Any other ID the CLI accepts can be entered as a Custom model. `AI_EFFORT` maps to Codex's `model_reasoning_effort`, and the effort picker only offers the levels the chosen model supports.
 
 > **Experimental:** OpenAI has not published terms that explicitly cover third-party tools using a ChatGPT plan via the Codex CLI. This path relies on your own local `codex login`, and usage counts against your plan.
 
@@ -256,7 +256,7 @@ Available models per provider:
 | Google | `gemini-3.8-flash`, `gemini-3.1-pro-preview`, `gemini-3.7-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-2.5-pro` |
 | Bedrock | `us.anthropic.claude-fable-5-1`, `us.anthropic.claude-opus-5`, `us.anthropic.claude-sonnet-5`, `us.anthropic.claude-fable-5`, `us.anthropic.claude-opus-4-8`, `us.anthropic.claude-opus-4-7`, `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-haiku-4-5-20251001-v1:0` (swap `us.` for `global.`, `eu.`, `jp.`, or `au.` as a Custom model) |
 | GitHub Copilot | `auto`, or any model ID the `copilot` CLI accepts (Custom) |
-| ChatGPT via Codex | `default`, or any model ID the `codex` CLI accepts (Custom) |
+| ChatGPT via Codex | `default` (Codex's current default model), the models your plan offers as listed by the `codex` CLI's local catalog, or any model ID the CLI accepts (Custom) |
 
 You can also set the model interactively with the `/model` command in the TUI, or rotate your API key with `/model key`.
 

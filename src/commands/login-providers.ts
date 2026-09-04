@@ -3,7 +3,8 @@ import { verticalPicker, horizontalPicker, BACK, C, type PickerOption } from "./
 import { promptLine, promptSecret, ESCAPED } from "./login-prompts.js";
 import { SUBSCRIPTION_PROVIDERS, type SubscriptionProvider } from "../ai/cli-backend.js";
 import { checkSubscriptionCli, runSubscriptionLogin } from "../ai/subscription-status.js";
-import { supportedEffortLevels, type AIEffortLevel } from "../ai/model-capabilities.js";
+import { deriveModelDisplayName, supportedEffortLevels, type AIEffortLevel } from "../ai/model-capabilities.js";
+import { listCodexModels } from "../ai/backends/codex-models.js";
 
 const require = createRequire(import.meta.url);
 const modelsJson: Record<string, PickerOption[]> = require("../ai/models.json");
@@ -157,9 +158,33 @@ export function getCredentialKey(provider: string): string | null {
   }
 }
 
+/**
+ * Picker entries for the models the user's ChatGPT plan offers, read from the
+ * Codex CLI's own catalog; null when that catalog is not readable so callers
+ * can fall back to the static entry.
+ */
+export function codexModelOptions(): PickerOption[] | null {
+  const models = listCodexModels();
+  if (models.length === 0) return null;
+  return models.map((model, index) => ({
+    label: deriveModelDisplayName(model.slug),
+    value: model.slug,
+    description: index === 0 ? `Codex default · ${model.description}` : model.description,
+  }));
+}
+
+/** Catalog entries for a provider: the Codex CLI's live list when available, else models.json. */
+export function catalogModels(provider: string): PickerOption[] {
+  if (provider === "codex") {
+    const live = codexModelOptions();
+    if (live) return live;
+  }
+  return MODEL_CATALOG[provider] ?? [];
+}
+
 export function getModelOptions(provider: string): PickerOption[] {
-  const models = MODEL_CATALOG[provider];
-  if (!models || models.length === 0) return [];
+  const models = catalogModels(provider);
+  if (models.length === 0) return [];
   return [...models, { label: "Custom", value: "__custom__", description: "enter model ID" }];
 }
 

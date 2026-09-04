@@ -12,12 +12,10 @@
  * Bedrock model cards.
  */
 
-export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
-export type AIEffortLevel = (typeof EFFORT_LEVELS)[number];
+import { describeCodexModel, listCodexModels, resolveCodexModel } from "./backends/codex-models.js";
+import { EFFORT_LEVELS, isEffortLevel, type AIEffortLevel } from "./effort-levels.js";
 
-export function isEffortLevel(value: unknown): value is AIEffortLevel {
-  return typeof value === "string" && (EFFORT_LEVELS as readonly string[]).includes(value);
-}
+export { EFFORT_LEVELS, isEffortLevel, type AIEffortLevel };
 
 /** How a model's thinking depth is expressed on the wire. */
 export type ThinkingControl =
@@ -137,6 +135,17 @@ function openaiCapabilities(modelId: string): ModelCapabilities {
 }
 
 /**
+ * Levels a Codex model accepts, from the CLI's own model catalog when it is
+ * readable ("default" resolves to Codex's current default first); the full
+ * scale otherwise so the CLI gets to validate whatever the user chose.
+ */
+function codexEffortLevels(modelId: string): readonly AIEffortLevel[] {
+  const slug = resolveCodexModel(modelId);
+  const levels = listCodexModels().find((m) => m.slug === slug)?.effortLevels;
+  return levels && levels.length > 0 ? levels : ALL_LEVELS;
+}
+
+/**
  * What a model accepts for thinking depth. Unknown ids fall back to the most
  * conservative shape for their provider so a request still goes through.
  */
@@ -159,7 +168,7 @@ export function getModelCapabilities(provider: string, modelId: string): ModelCa
     case "copilot":
       return { control: "cli", effortLevels: LEVELS_WITHOUT_XHIGH };
     case "codex":
-      return { control: "cli", effortLevels: ALL_LEVELS };
+      return { control: "cli", effortLevels: codexEffortLevels(modelId) };
     default:
       return { control: "cli", effortLevels: [] };
   }
@@ -200,12 +209,18 @@ function titleWord(word: string): string {
  * Human-friendly name for a model id, derived from the id so new releases
  * read well without a lookup table: "claude-fable-5-1" -> "Fable 5.1",
  * "us.anthropic.claude-opus-5" -> "Opus 5", "gpt-5.6-terra" -> "GPT 5.6 Terra",
- * "gemini-3.8-flash" -> "Gemini 3.8 Flash". Unknown ids come back unchanged.
+ * "gemini-3.8-flash" -> "Gemini 3.8 Flash". Codex's "default" names the model
+ * it currently runs ("GPT 5.6 Sol (Codex default)") when the Codex CLI's model
+ * catalog is readable. Unknown ids come back unchanged.
  */
 export function deriveModelDisplayName(modelId: string): string {
   const id = modelId.trim();
   if (id === "auto") return "Copilot auto";
-  if (id === "default") return "Codex default";
+  if (id === "default") {
+    // Codex's built-in default: name the model it currently resolves to.
+    const codex = describeCodexModel(id);
+    return codex ? `${deriveModelDisplayName(codex.slug)} (Codex default)` : "Codex default";
+  }
 
   const claude = parseClaudeModel(id);
   if (claude) {
@@ -226,6 +241,10 @@ export function deriveModelDisplayName(modelId: string): string {
     const tiers = gemini[2].split("-").filter(Boolean).map(titleWord);
     return ["Gemini", gemini[1], ...tiers].join(" ");
   }
+
+  // A Codex slug the id derivation does not recognise: use the catalog's own name.
+  const codex = describeCodexModel(id);
+  if (codex) return codex.displayName;
 
   return id;
 }
