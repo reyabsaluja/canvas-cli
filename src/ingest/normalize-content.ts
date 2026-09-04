@@ -61,6 +61,9 @@ export function normalizeCourseContent(raw: RawCourseContent): {
     name: stripControlChars(m.name),
     position: m.position,
     itemCount: m.items.length,
+    unlockAt: m.unlock_at ?? null,
+    requireSequentialProgress: Boolean(m.require_sequential_progress),
+    prerequisiteModuleIds: Array.isArray(m.prerequisite_module_ids) ? m.prerequisite_module_ids : [],
     items: m.items.map((item) => ({
       id: item.id,
       title: stripControlChars(item.title),
@@ -70,6 +73,15 @@ export function normalizeCourseContent(raw: RawCourseContent): {
       pageUrl: item.page_url ?? null,
       htmlUrl: item.html_url ?? null,
       externalUrl: item.external_url ?? null,
+      completionRequirement: item.completion_requirement
+        ? {
+            type: item.completion_requirement.type,
+            minScore:
+              typeof item.completion_requirement.min_score === "number"
+                ? item.completion_requirement.min_score
+                : null,
+          }
+        : null,
     })),
   }));
 

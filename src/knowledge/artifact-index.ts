@@ -667,10 +667,14 @@ async function addCourseArtifacts(
     );
   }
 
+  const moduleNamesById = new Map(cache.modules.map((module) => [module.id, module.name]));
   for (const module of cache.modules) {
-    const body = module.items
-      .map((item) => `${item.type} ${item.title}`)
-      .join(" ");
+    const body = [
+      module.items.map((item) => `${item.type} ${item.title}`).join(" "),
+      describeModuleRequirements(module, moduleNamesById),
+    ]
+      .filter(Boolean)
+      .join("\n");
     const artifact = createArtifact({
       id: `course:module:${module.id}`,
       scope: "course",
@@ -1717,6 +1721,54 @@ export function recencyMultiplier(
   const ageDays = Math.max(0, (now - posted) / 86_400_000);
   if (ageDays >= RECENCY_HORIZON_DAYS) return 1;
   return 1 + RECENCY_MAX_BOOST * (1 - ageDays / RECENCY_HORIZON_DAYS);
+}
+
+const COMPLETION_REQUIREMENT_LABELS: Record<string, string> = {
+  must_view: "view",
+  must_submit: "submit",
+  must_contribute: "post a contribution to",
+  must_mark_done: "mark as done",
+  min_score: "score at least",
+};
+
+/**
+ * "Requirements: unlocks after Week 1: Getting Started; items must be done in
+ * order; to complete: submit Lab 1, score at least 8 on Quiz 1." Answers
+ * "what do I need to do to unlock module 3". Exported for tests.
+ */
+export function describeModuleRequirements(
+  module: {
+    unlockAt?: string | null;
+    requireSequentialProgress?: boolean;
+    prerequisiteModuleIds?: number[];
+    items: Array<{ title: string; completionRequirement?: { type: string; minScore: number | null } | null }>;
+  },
+  moduleNamesById: Map<number, string>
+): string {
+  const parts: string[] = [];
+  const prerequisites = (module.prerequisiteModuleIds ?? [])
+    .map((id) => moduleNamesById.get(id) ?? `module ${id}`);
+  if (prerequisites.length > 0) {
+    parts.push(`unlocks after completing ${prerequisites.join(" and ")}`);
+  }
+  if (module.unlockAt) {
+    parts.push(`opens on ${module.unlockAt}`);
+  }
+  if (module.requireSequentialProgress) {
+    parts.push("items must be completed in order");
+  }
+  const completions = module.items
+    .filter((item) => item.completionRequirement)
+    .map((item) => {
+      const requirement = item.completionRequirement!;
+      const verb = COMPLETION_REQUIREMENT_LABELS[requirement.type] ?? requirement.type.replace(/_/g, " ");
+      const score = requirement.type === "min_score" && requirement.minScore !== null ? ` ${requirement.minScore} on` : "";
+      return `${verb}${score} ${item.title}`;
+    });
+  if (completions.length > 0) {
+    parts.push(`to complete this module: ${completions.join(", ")}`);
+  }
+  return parts.length > 0 ? `Requirements: ${parts.join("; ")}.` : "";
 }
 
 /** Weight of a match through a synonym relative to a direct token match. */

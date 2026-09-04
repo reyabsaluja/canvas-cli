@@ -31,6 +31,11 @@ export interface ModuleIndexEntry {
   position: number;
   itemCount: number;
   items: ModuleItemIndexEntry[];
+  /** When the module opens, if it is date-locked. */
+  unlockAt?: string | null;
+  requireSequentialProgress?: boolean;
+  /** Ids of modules that must be completed first. */
+  prerequisiteModuleIds?: number[];
 }
 
 export interface ModuleItemIndexEntry {
@@ -42,6 +47,8 @@ export interface ModuleItemIndexEntry {
   pageUrl: string | null;
   htmlUrl: string | null;
   externalUrl: string | null;
+  /** What counts as completing this item ("must_submit", "min_score" with minScore, ...). */
+  completionRequirement?: { type: string; minScore: number | null } | null;
 }
 
 export interface FileIndexEntry {
