@@ -22,6 +22,11 @@ export interface MockAssignment {
   description?: string | null;
   points_possible?: number | null;
   submission_types?: string[];
+  allowed_attempts?: number;
+  peer_reviews?: boolean;
+  peer_review_count?: number;
+  group_category_id?: number | null;
+  grade_group_students_individually?: boolean;
   submission?: {
     workflow_state: string;
     submitted_at: string | null;

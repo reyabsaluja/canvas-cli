@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **extract**
+Next area: **retrieve**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -62,3 +62,4 @@ Next area: **extract**
 - 2026-09-03 reason: search_workspace and search_course take a `limit` (1-20) so the agent can widen a thin first pass; workspace default raised 5 → 8 matches, course default 8 (caller did it directly)
 - 2026-09-03 ground: observation relevance stems question words and treats a match on a document heading as strong on its own ("how is Lab 4 graded" now matches a read of "## Grading"), so reads that answer the question count as grounded evidence (high confidence, no "search evidence" note) across verification, memory reuse and the gate (caller did it directly)
 - 2026-09-03 discover: assignment groups (weights, drop rules, member assignments with each one's share of the final grade) captured as a "Grading scheme" page via the existing getAssignmentGroupsSafe; count in ingestion.json and summary (caller did it directly)
+- 2026-09-04 extract: assignment extracts now state submission rules from the detail record (attempts allowed, group assignment and grading mode, peer reviews and count, anonymous, omitted from final grade, unpublished, lock reason) so "can I resubmit?" / "is this a group lab?" are answerable (caller did it directly)
