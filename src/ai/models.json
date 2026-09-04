@@ -1,92 +1,152 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "_comment": "Last updated: 2026-05 \u2014 refresh when providers ship new flagship models",
+  "_comment": "Last updated: 2026-09-04 — refresh when providers ship new flagship models. Effort levels per model live in src/ai/model-capabilities.ts.",
   "openai": [
+    {
+      "label": "GPT-5.6",
+      "value": "gpt-5.6",
+      "description": "flagship (Sol)"
+    },
+    {
+      "label": "GPT-5.6 Terra",
+      "value": "gpt-5.6-terra",
+      "description": "balanced"
+    },
+    {
+      "label": "GPT-5.6 Luna",
+      "value": "gpt-5.6-luna",
+      "description": "fastest"
+    },
+    {
+      "label": "GPT-6 Astra",
+      "value": "gpt-6-astra",
+      "description": "frontier (limited access)"
+    },
     {
       "label": "GPT-5.5",
       "value": "gpt-5.5",
-      "description": "most capable"
-    },
-    {
-      "label": "GPT-5.4 Pro",
-      "value": "gpt-5.4-pro",
-      "description": "balanced"
+      "description": "previous flagship"
     },
     {
       "label": "GPT-5.4",
       "value": "gpt-5.4",
-      "description": "fast"
-    },
-    {
-      "label": "GPT-5.4 Mini",
-      "value": "gpt-5.4-mini",
-      "description": "fastest"
+      "description": "legacy"
     }
   ],
   "anthropic": [
     {
-      "label": "Claude Opus 4.7",
-      "value": "claude-opus-4-7",
-      "description": "most capable"
+      "label": "Claude Fable 5.1",
+      "value": "claude-fable-5-1",
+      "description": "frontier"
     },
     {
-      "label": "Claude Opus 4.6",
-      "value": "claude-opus-4-6",
-      "description": "flagship"
+      "label": "Claude Opus 5",
+      "value": "claude-opus-5",
+      "description": "recommended"
+    },
+    {
+      "label": "Claude Sonnet 5",
+      "value": "claude-sonnet-5",
+      "description": "balanced"
+    },
+    {
+      "label": "Claude Fable 5",
+      "value": "claude-fable-5",
+      "description": "previous frontier"
+    },
+    {
+      "label": "Claude Opus 4.8",
+      "value": "claude-opus-4-8",
+      "description": "legacy"
+    },
+    {
+      "label": "Claude Opus 4.7",
+      "value": "claude-opus-4-7",
+      "description": "legacy"
     },
     {
       "label": "Claude Sonnet 4.6",
       "value": "claude-sonnet-4-6",
-      "description": "balanced"
+      "description": "legacy"
+    },
+    {
+      "label": "Claude Haiku 4.5",
+      "value": "claude-haiku-4-5",
+      "description": "fastest"
     }
   ],
   "google": [
     {
-      "label": "Gemini 3.5 Flash",
-      "value": "gemini-3.5-flash",
+      "label": "Gemini 3.8 Flash",
+      "value": "gemini-3.8-flash",
       "description": "fast + capable"
     },
     {
       "label": "Gemini 3.1 Pro",
       "value": "gemini-3.1-pro-preview",
-      "description": "reasoning"
+      "description": "reasoning (preview)"
     },
     {
-      "label": "Gemini 3 Flash",
-      "value": "gemini-3-flash-preview",
-      "description": "balanced"
+      "label": "Gemini 3.7 Flash",
+      "value": "gemini-3.7-flash",
+      "description": "previous"
     },
     {
-      "label": "Gemini 3.1 Flash Lite",
-      "value": "gemini-3.1-flash-lite",
+      "label": "Gemini 3.5 Flash",
+      "value": "gemini-3.5-flash",
+      "description": "previous"
+    },
+    {
+      "label": "Gemini 3.5 Flash Lite",
+      "value": "gemini-3.5-flash-lite",
       "description": "lightweight"
     },
     {
       "label": "Gemini 2.5 Pro",
       "value": "gemini-2.5-pro",
       "description": "legacy reasoning"
-    },
-    {
-      "label": "Gemini 2.5 Flash",
-      "value": "gemini-2.5-flash",
-      "description": "legacy fast"
     }
   ],
   "bedrock": [
     {
-      "label": "Claude Opus 4.7",
-      "value": "us.anthropic.claude-opus-4-7",
-      "description": "most capable"
+      "label": "Claude Fable 5.1",
+      "value": "us.anthropic.claude-fable-5-1",
+      "description": "frontier"
     },
     {
-      "label": "Claude Opus 4.6",
-      "value": "us.anthropic.claude-opus-4-6-v1",
-      "description": "flagship"
+      "label": "Claude Opus 5",
+      "value": "us.anthropic.claude-opus-5",
+      "description": "most capable (needs model access)"
+    },
+    {
+      "label": "Claude Sonnet 5",
+      "value": "us.anthropic.claude-sonnet-5",
+      "description": "balanced"
+    },
+    {
+      "label": "Claude Fable 5",
+      "value": "us.anthropic.claude-fable-5",
+      "description": "previous frontier"
+    },
+    {
+      "label": "Claude Opus 4.8",
+      "value": "us.anthropic.claude-opus-4-8",
+      "description": "legacy"
+    },
+    {
+      "label": "Claude Opus 4.7",
+      "value": "us.anthropic.claude-opus-4-7",
+      "description": "legacy"
     },
     {
       "label": "Claude Sonnet 4.6",
       "value": "us.anthropic.claude-sonnet-4-6",
-      "description": "balanced"
+      "description": "legacy"
+    },
+    {
+      "label": "Claude Haiku 4.5",
+      "value": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "description": "fastest"
     }
   ],
   "copilot": [
@@ -103,5 +163,6 @@
       "description": "your codex config"
     }
   ],
+  "_comment_bedrock": "Bedrock ids are US cross-region inference profiles (swap the us. prefix for global., eu., jp. or au. via Custom). Claude 4.7+ ids have no -v1 suffix; Haiku 4.5 keeps its dated -v1:0 id on the Converse API.",
   "_comment_subscriptions": "copilot/codex run through the vendor CLI on the user's machine. Model IDs are whatever that CLI accepts; use Custom to enter one (run `copilot` then /model, or `codex` then /model, to list yours)."
 }

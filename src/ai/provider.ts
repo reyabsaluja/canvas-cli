@@ -28,7 +28,23 @@ export function getBackendKind(config: Pick<AIProviderConfig, "provider">): AIBa
   return isSubscriptionProvider(config.provider) ? "cli" : "sdk";
 }
 
-export type AIEffortLevel = "low" | "medium" | "high" | "max";
+import {
+  clampEffort,
+  deriveModelDisplayName,
+  getModelCapabilities,
+  isEffortLevel,
+  type AIEffortLevel,
+} from "./model-capabilities.js";
+
+export type { AIEffortLevel, ModelCapabilities, ThinkingControl } from "./model-capabilities.js";
+export {
+  EFFORT_LEVELS,
+  isEffortLevel,
+  getModelCapabilities,
+  supportedEffortLevels,
+  clampEffort,
+  deriveModelDisplayName,
+} from "./model-capabilities.js";
 
 export interface AIProviderConfig {
   provider: AIProviderName;
@@ -36,11 +52,23 @@ export interface AIProviderConfig {
   effort?: AIEffortLevel;
 }
 
+/**
+ * Provider options that express the configured effort level. Each provider
+ * gets the shape its SDK validates: OpenAI reasoning effort, Anthropic
+ * adaptive thinking + effort (or a budget on pre-4.6 models), Gemini thinking
+ * levels, and Bedrock reasoning config.
+ */
 export interface EffortOptions {
   providerOptions?: {
-    openai?: { reasoningEffort: string };
-    anthropic?: { thinking: { type: "enabled"; budgetTokens: number } };
-    bedrock?: { reasoningConfig: { type: "enabled"; budgetTokens: number } };
+    openai?: { reasoningEffort: AIEffortLevel };
+    anthropic?:
+      | { thinking: { type: "adaptive" }; effort: AIEffortLevel }
+      | { thinking: { type: "enabled"; budgetTokens: number } };
+    google?: { thinkingConfig: { thinkingLevel: "low" | "medium" | "high" } };
+    bedrock?:
+      | { reasoningConfig: { type: "adaptive"; maxReasoningEffort: AIEffortLevel } }
+      | { reasoningConfig: { type: "enabled"; budgetTokens: number } }
+      | { reasoningConfig: { maxReasoningEffort: AIEffortLevel } };
   };
 }
 
@@ -53,38 +81,24 @@ export const DEFAULT_MAX_TOOL_STEPS = 30;
 const DEFAULT_RATE_LIMIT_RETRY_MS = 30_000;
 const DEFAULT_UNAVAILABLE_RETRY_MS = 15_000;
 
-const DEFAULT_MODEL_BY_PROVIDER: Record<AIProviderName, string> = {
-  anthropic: "claude-sonnet-4-6",
-  openai: "gpt-5.4",
-  google: "gemini-3.5-flash",
-  bedrock: "us.anthropic.claude-sonnet-4-6",
+/**
+ * Defaults lean toward answer quality: Anthropic's recommended starting point
+ * (Opus 5), OpenAI's flagship alias (GPT-5.6 routes to Sol), Google's newest
+ * stable Flash, and on Bedrock the Claude model that is open to every account
+ * (Opus 5 needs model access approval there).
+ */
+export const DEFAULT_MODEL_BY_PROVIDER: Record<AIProviderName, string> = {
+  anthropic: "claude-opus-5",
+  openai: "gpt-5.6",
+  google: "gemini-3.8-flash",
+  bedrock: "us.anthropic.claude-sonnet-5",
   copilot: "auto",
   codex: "default",
 };
 
-const MODEL_DISPLAY_NAMES: Record<string, string> = {
-  "claude-opus-4-7": "Opus 4.7",
-  "claude-opus-4-6": "Opus 4.6",
-  "claude-sonnet-4-6": "Sonnet 4.6",
-  "us.anthropic.claude-opus-4-7": "Opus 4.7",
-  "us.anthropic.claude-opus-4-6-v1": "Opus 4.6",
-  "us.anthropic.claude-sonnet-4-6": "Sonnet 4.6",
-  "gpt-5.5": "GPT 5.5",
-  "gpt-5.4-pro": "GPT 5.4 Pro",
-  "gpt-5.4": "GPT 5.4",
-  "gpt-5.4-mini": "GPT 5.4 Mini",
-  "gemini-3.5-flash": "Gemini 3.5 Flash",
-  "gemini-3.1-pro-preview": "Gemini 3.1 Pro",
-  "gemini-3-flash-preview": "Gemini 3 Flash",
-  "gemini-3.1-flash-lite": "Gemini 3.1 Lite",
-  "gemini-2.5-pro": "Gemini 2.5 Pro",
-  "gemini-2.5-flash": "Gemini 2.5 Flash",
-  auto: "Copilot auto",
-  default: "Codex default",
-};
-
+/** Friendly model label for headers and pickers, e.g. "Opus 5 · high". */
 export function formatModelName(modelId: string, effort?: AIEffortLevel): string {
-  const name = MODEL_DISPLAY_NAMES[modelId] ?? modelId;
+  const name = deriveModelDisplayName(modelId);
   if (effort) return `${name} · ${effort}`;
   return name;
 }
@@ -154,13 +168,11 @@ function buildAIConfig(
   modelOverride?: string
 ): AIProviderConfig {
   const effortRaw = process.env.AI_EFFORT?.toLowerCase();
-  const effort = (effortRaw === "low" || effortRaw === "medium" || effortRaw === "high" || effortRaw === "max")
-    ? effortRaw as AIEffortLevel
-    : undefined;
+  const effort = isEffortLevel(effortRaw) ? effortRaw : undefined;
   return {
     provider,
     model: modelOverride ?? DEFAULT_MODEL_BY_PROVIDER[provider],
-    ...(effort && provider !== "google" ? { effort } : {}),
+    ...(effort ? { effort } : {}),
   };
 }
 
@@ -190,56 +202,72 @@ function getExplicitAIConfig(
   }
 }
 
-const EFFORT_TO_OPENAI_REASONING: Record<AIEffortLevel, string> = {
-  low: "low",
-  medium: "medium",
-  high: "high",
-  max: "high",
-};
-
+/**
+ * Thinking budgets for models that predate adaptive thinking (Haiku 4.5,
+ * Opus 4.5 and older). Sized generously on purpose: a bigger budget only sets
+ * a ceiling, and better answers are worth the tokens.
+ */
 const EFFORT_TO_THINKING_BUDGET: Record<AIEffortLevel, number> = {
   low: 2048,
   medium: 4096,
   high: 10000,
+  xhigh: 24000,
   max: 32000,
 };
 
+/**
+ * Translate the configured effort into provider options for the model in use.
+ * A level the model does not accept rounds to the nearest one it does (see
+ * clampEffort); an unset effort sends nothing so the provider default applies.
+ */
 export function getEffortOptions(config: AIProviderConfig): EffortOptions {
   if (!config.effort) return {};
 
-  if (config.provider === "openai") {
-    const mapped = EFFORT_TO_OPENAI_REASONING[config.effort];
-    if (mapped !== config.effort) {
-      debugAI(config.provider, config.model, `effort "${config.effort}" clamped to "${mapped}"`);
+  const capabilities = getModelCapabilities(config.provider, config.model);
+  const effort = clampEffort(config.effort, capabilities.effortLevels);
+  if (!effort) {
+    debugAI(config.provider, config.model, `effort "${config.effort}" ignored: model has no effort control`);
+    return {};
+  }
+  if (effort !== config.effort) {
+    debugAI(config.provider, config.model, `effort "${config.effort}" rounded to "${effort}"`);
+  }
+
+  switch (config.provider) {
+    case "openai":
+      return { providerOptions: { openai: { reasoningEffort: effort } } };
+
+    case "google": {
+      const thinkingLevel = effort === "low" || effort === "medium" ? effort : "high";
+      return { providerOptions: { google: { thinkingConfig: { thinkingLevel } } } };
     }
-    return {
-      providerOptions: {
-        openai: { reasoningEffort: mapped },
-      },
-    };
-  }
 
-  if (config.provider === "anthropic") {
-    return {
-      providerOptions: {
-        anthropic: {
-          thinking: { type: "enabled", budgetTokens: EFFORT_TO_THINKING_BUDGET[config.effort] },
+    case "anthropic":
+      if (capabilities.control === "adaptive") {
+        return { providerOptions: { anthropic: { thinking: { type: "adaptive" }, effort } } };
+      }
+      return {
+        providerOptions: {
+          anthropic: { thinking: { type: "enabled", budgetTokens: EFFORT_TO_THINKING_BUDGET[effort] } },
         },
-      },
-    };
-  }
+      };
 
-  if (config.provider === "bedrock") {
-    return {
-      providerOptions: {
-        bedrock: {
-          reasoningConfig: { type: "enabled", budgetTokens: EFFORT_TO_THINKING_BUDGET[config.effort] },
-        },
-      },
-    };
-  }
+    case "bedrock":
+      if (capabilities.control === "adaptive") {
+        return { providerOptions: { bedrock: { reasoningConfig: { type: "adaptive", maxReasoningEffort: effort } } } };
+      }
+      if (capabilities.control === "extended") {
+        return {
+          providerOptions: {
+            bedrock: { reasoningConfig: { type: "enabled", budgetTokens: EFFORT_TO_THINKING_BUDGET[effort] } },
+          },
+        };
+      }
+      return { providerOptions: { bedrock: { reasoningConfig: { maxReasoningEffort: effort } } } };
 
-  return {};
+    default:
+      return {};
+  }
 }
 
 function getModel(config: AIProviderConfig) {
