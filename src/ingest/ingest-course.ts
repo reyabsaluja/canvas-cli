@@ -170,6 +170,7 @@ export async function ingestCourse(
     syllabusBody: courseMeta.syllabusBody,
     announcements: raw.announcements,
     discussionThreads: raw.discussionThreads,
+    tabs: raw.tabs,
     config,
     signal,
   });

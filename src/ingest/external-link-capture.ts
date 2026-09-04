@@ -5,7 +5,9 @@ import {
   readBodyWithLimit,
   withTimeoutSignal,
 } from "../canvas/safe-download.js";
+import type { CanvasTab } from "../canvas/types.js";
 import type { Config } from "../config/env.js";
+import { extractOfficeText } from "../extract/office-text.js";
 import { decodeEntities, htmlToText } from "../format/html-to-text.js";
 import { mapWithConcurrency } from "./concurrency.js";
 import type { RawAssignmentRecord, RawDiscussionThread } from "./fetch-course-content.js";
@@ -70,6 +72,8 @@ export async function captureExternalCourseLinks(options: {
     html_url?: string | null;
   }>;
   discussionThreads: RawDiscussionThread[];
+  /** Course navigation tabs; visible external-tool tabs are captured by their launch URL. */
+  tabs?: CanvasTab[] | null;
   config: Config;
   /** Ctrl-C during ingestion: stops new fetches and aborts in-flight ones. */
   signal?: AbortSignal | null;
@@ -97,6 +101,30 @@ export async function captureExternalCourseLinks(options: {
       sources: [candidate.source],
     });
   };
+
+  // Course navigation tabs for external tools (Piazza, Ed, Zoom, ...). Their
+  // launch URL always lives on the Canvas origin; anything else is not a tab
+  // launch URL and is left alone.
+  for (const tab of options.tabs ?? []) {
+    if (tab.type !== "external" || tab.hidden) continue;
+    for (const rawUrl of [tab.full_url, tab.html_url]) {
+      const url = resolveHref(rawUrl ?? "", options.config.baseUrl);
+      if (
+        !url ||
+        !canvasOrigin ||
+        getOrigin(url) !== canvasOrigin ||
+        !isCapturableExternalUrl(url, { courseId: options.courseId, canvasOrigin })
+      ) {
+        continue;
+      }
+      addCandidate({
+        url,
+        title: tab.label,
+        source: `course navigation tab "${tab.label}"`,
+      });
+      break;
+    }
+  }
 
   for (const module of options.modules) {
     for (const item of module.items) {
@@ -306,7 +334,7 @@ async function fetchExternalLink(
     };
   }
 
-  const googleDocExport = await fetchGoogleDocumentExport(finalUrl, signal);
+  const googleDocExport = await fetchGoogleWorkspaceExport(finalUrl, signal);
   if (googleDocExport) {
     await response.body?.cancel().catch(() => {});
     return {
@@ -343,6 +371,39 @@ async function fetchExternalLink(
         pageTitle: null,
         text: "",
         note: `The PDF was reachable, but text extraction failed: ${
+          error instanceof Error ? error.message : "unknown error"
+        }.`,
+      };
+    }
+  }
+
+  if (looksLikeOfficeDocument(contentType, finalUrl)) {
+    const body = await readExternalBody(response, signal);
+    if (!body.ok) return bodyFailureResult(body, finalUrl, contentType);
+    const filename = guessOfficeFilename(finalUrl, contentType);
+    try {
+      const extracted = ((await extractOfficeText(body.buffer, filename)) ?? "")
+        .trim()
+        .slice(0, MAX_CAPTURED_TEXT);
+      return {
+        status: extracted.length > 0 ? "captured" : "metadata_only",
+        resolvedUrl: finalUrl,
+        contentType,
+        pageTitle: null,
+        text: extracted,
+        note:
+          extracted.length > 0
+            ? null
+            : "The Office document was reachable, but no readable text could be extracted.",
+      };
+    } catch (error) {
+      return {
+        status: "metadata_only",
+        resolvedUrl: finalUrl,
+        contentType,
+        pageTitle: null,
+        text: "",
+        note: `The Office document was reachable, but text extraction failed: ${
           error instanceof Error ? error.message : "unknown error"
         }.`,
       };
@@ -459,7 +520,19 @@ function bodyFailureResult(
   };
 }
 
-async function fetchGoogleDocumentExport(
+interface GoogleWorkspaceExportRequest {
+  url: string;
+  /** Filename whose extension picks the extractor for the export body. */
+  filename: string;
+  label: string;
+}
+
+/**
+ * Google Docs, Slides and Sheets pages are login-walled JavaScript shells, but
+ * each has an export endpoint that serves the document itself: plain text
+ * for a Doc, a .pptx for Slides (speaker notes included), CSV for a Sheet.
+ */
+async function fetchGoogleWorkspaceExport(
   url: string,
   signal: AbortSignal | null
 ): Promise<{
@@ -468,8 +541,8 @@ async function fetchGoogleDocumentExport(
   text: string;
   note: string | null;
 } | null> {
-  const exportUrl = buildGoogleDocumentExportUrl(url);
-  if (!exportUrl) {
+  const exportRequest = buildGoogleWorkspaceExportRequest(url);
+  if (!exportRequest) {
     return null;
   }
 
@@ -477,7 +550,7 @@ async function fetchGoogleDocumentExport(
   try {
     let response: Response;
     try {
-      response = await fetch(exportUrl, {
+      response = await fetch(exportRequest.url, {
         redirect: "follow",
         signal: timed.signal,
       });
@@ -501,7 +574,13 @@ async function fetchGoogleDocumentExport(
       };
     }
 
-    const text = body.buffer.toString("utf-8").trim().slice(0, MAX_CAPTURED_TEXT);
+    const text = (
+      exportRequest.filename.endsWith(".pptx")
+        ? (await extractOfficeText(body.buffer, exportRequest.filename)) ?? ""
+        : body.buffer.toString("utf-8")
+    )
+      .trim()
+      .slice(0, MAX_CAPTURED_TEXT);
     return {
       contentType: response.headers.get("content-type"),
       pageTitle: null,
@@ -509,7 +588,7 @@ async function fetchGoogleDocumentExport(
       note:
         text.length > 0
           ? null
-          : "The Google Doc export was reachable, but it did not include readable text.",
+          : `The ${exportRequest.label} export was reachable, but it did not include readable text.`,
     };
   } catch (error) {
     if (signal?.aborted) throw error;
@@ -517,7 +596,10 @@ async function fetchGoogleDocumentExport(
   }
 }
 
-function buildGoogleDocumentExportUrl(url: string): string | null {
+/** Export URL for a Google Doc, Slides or Sheets link, or null. Exported for tests. */
+export function buildGoogleWorkspaceExportRequest(
+  url: string
+): GoogleWorkspaceExportRequest | null {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -529,14 +611,40 @@ function buildGoogleDocumentExportUrl(url: string): string | null {
     return null;
   }
 
-  const match = parsed.pathname.match(
+  const documentMatch = parsed.pathname.match(
     /^\/document\/(?:u\/\d+\/)?d\/([^/]+)(?:\/|$)/i
   );
-  if (!match?.[1]) {
-    return null;
+  if (documentMatch?.[1]) {
+    return {
+      url: `https://docs.google.com/document/d/${documentMatch[1]}/export?format=txt`,
+      filename: "google-doc.txt",
+      label: "Google Doc",
+    };
   }
 
-  return `https://docs.google.com/document/d/${match[1]}/export?format=txt`;
+  const presentationMatch = parsed.pathname.match(
+    /^\/presentation\/(?:u\/\d+\/)?d\/([^/]+)(?:\/|$)/i
+  );
+  if (presentationMatch?.[1]) {
+    return {
+      url: `https://docs.google.com/presentation/d/${presentationMatch[1]}/export/pptx`,
+      filename: "google-slides.pptx",
+      label: "Google Slides",
+    };
+  }
+
+  const spreadsheetMatch = parsed.pathname.match(
+    /^\/spreadsheets\/(?:u\/\d+\/)?d\/([^/]+)(?:\/|$)/i
+  );
+  if (spreadsheetMatch?.[1]) {
+    return {
+      url: `https://docs.google.com/spreadsheets/d/${spreadsheetMatch[1]}/export?format=csv`,
+      filename: "google-sheet.csv",
+      label: "Google Sheet",
+    };
+  }
+
+  return null;
 }
 
 async function fetchWithControlledRedirects(
@@ -592,15 +700,11 @@ function extractExternalLinksFromHtml(
 ): Array<{ title: string; url: string }> {
   const results: Array<{ title: string; url: string }> = [];
   const seen = new Set<string>();
-  const anchorRegex = /<a\b[^>]*>([\s\S]*?)<\/a>/gi;
-  let match: RegExpExecArray | null;
 
-  while ((match = anchorRegex.exec(html)) !== null) {
-    const tag = match[0];
-    const href = extractAttr(tag, "href");
-    if (!href) continue;
+  const addCandidate = (rawUrl: string | null, title: string | null): void => {
+    if (!rawUrl) return;
 
-    const resolvedUrl = resolveHref(href, options.baseUrl);
+    const resolvedUrl = resolveHref(rawUrl, options.baseUrl);
     if (
       !resolvedUrl ||
       !isCapturableExternalUrl(resolvedUrl, {
@@ -608,22 +712,79 @@ function extractExternalLinksFromHtml(
         canvasOrigin: options.canvasOrigin,
       })
     ) {
-      continue;
+      return;
     }
 
     const normalizedUrl = normalizeExternalUrl(resolvedUrl);
     if (!normalizedUrl || seen.has(normalizedUrl)) {
-      continue;
+      return;
     }
     seen.add(normalizedUrl);
 
     results.push({
-      title: normalizeLinkTitle(match[1], normalizedUrl),
+      title: decodeEntities(title ?? "").replace(/\s+/g, " ").trim() || normalizedUrl,
       url: normalizedUrl,
     });
+  };
+
+  const anchorRegex = /<a\b[^>]*>([\s\S]*?)<\/a>/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = anchorRegex.exec(html)) !== null) {
+    const tag = match[0];
+    addCandidate(extractAttr(tag, "href"), normalizeLinkTitle(match[1], ""));
+  }
+
+  // Embedded players and documents: an iframe around a PDF or a Google Doc,
+  // a <video> with a caption <track> (a transcript of the lecture), an
+  // <object data="..."> viewer. YouTube/Panopto iframes resolve to HTML
+  // shells and land as metadata_only, which still records where the
+  // recording lives.
+  const embeddedTagRegex = /<(iframe|embed|object|video|audio|source|track)\b[^>]*>/gi;
+  let embeddedMatch: RegExpExecArray | null;
+
+  while ((embeddedMatch = embeddedTagRegex.exec(html)) !== null) {
+    const tagName = (embeddedMatch[1] ?? "").toLowerCase();
+    const tag = embeddedMatch[0];
+    const attrName = tagName === "object" ? "data" : "src";
+    const url =
+      extractAttr(tag, attrName) ??
+      extractAttr(tag, "data-src") ??
+      (tagName === "object" ? extractAttr(tag, "src") : null);
+    addCandidate(url, mediaLinkTitle(tagName, tag));
   }
 
   return results;
+}
+
+/** A title for an embedded resource: its own title, else what kind of embed it is. */
+function mediaLinkTitle(tagName: string, tag: string): string | null {
+  const title = extractAttr(tag, "title") ?? extractAttr(tag, "aria-label");
+  if (title) return title;
+
+  if (tagName === "track") {
+    const kind = extractAttr(tag, "kind");
+    const label = extractAttr(tag, "label");
+    const srclang = extractAttr(tag, "srclang");
+    const descriptor = [label, srclang ? `(${srclang})` : null].filter(Boolean).join(" ");
+    const prefix = kind ? titleCase(kind) : "Media track";
+    return descriptor ? `${prefix}: ${descriptor}` : prefix;
+  }
+
+  if (tagName === "source") {
+    const type = extractAttr(tag, "type");
+    return type ? `Media source: ${type}` : "Media source";
+  }
+
+  if (tagName === "video" || tagName === "audio") {
+    return `${titleCase(tagName)} media`;
+  }
+
+  return "Embedded content";
+}
+
+function titleCase(value: string): string {
+  return value.length > 0 ? value[0]!.toUpperCase() + value.slice(1).toLowerCase() : value;
 }
 
 function isCapturableExternalUrl(
@@ -848,7 +1009,7 @@ function looksLikePdf(contentType: string | null, url: string): boolean {
 
 function looksLikeHtml(contentType: string | null, url: string): boolean {
   if (!contentType) {
-    return !/\.(pdf|zip|png|jpe?g|gif|webp|pptx?|docx?|xlsx?)(?:$|[?#])/i.test(
+    return !/\.(pdf|zip|png|jpe?g|gif|webp|pptx?|docx?|xlsx?|txt|md|csv|json|xml|vtt|srt)(?:$|[?#])/i.test(
       url
     );
   }
@@ -861,16 +1022,54 @@ function looksLikeHtml(contentType: string | null, url: string): boolean {
   );
 }
 
+const OFFICE_URL_EXTENSION = /\.(docx|docm|dotx|pptx|pptm|potx|xlsx|xlsm|xltx)(?:$|[?#])/i;
+
+function looksLikeOfficeDocument(contentType: string | null, url: string): boolean {
+  if (OFFICE_URL_EXTENSION.test(url)) return true;
+  if (!contentType) return false;
+  const normalized = contentType.toLowerCase();
+  return (
+    normalized.includes("application/vnd.openxmlformats-officedocument") ||
+    normalized.includes("application/vnd.ms-powerpoint") ||
+    normalized.includes("application/vnd.ms-excel") ||
+    normalized.includes("application/msword")
+  );
+}
+
+/** A filename whose extension selects the Office extractor (URL first, then content type). */
+function guessOfficeFilename(url: string, contentType: string | null): string {
+  try {
+    const lastSegment = decodeURIComponent(new URL(url).pathname.split("/").pop() ?? "");
+    if (OFFICE_URL_EXTENSION.test(lastSegment)) return lastSegment;
+  } catch {
+    // Fall through to the content type.
+  }
+  const normalized = (contentType ?? "").toLowerCase();
+  if (normalized.includes("presentation") || normalized.includes("powerpoint")) {
+    return "document.pptx";
+  }
+  if (normalized.includes("spreadsheet") || normalized.includes("excel")) {
+    return "document.xlsx";
+  }
+  return "document.docx";
+}
+
+/**
+ * Plain text, including caption/subtitle tracks (.vtt/.srt): a lecture's
+ * captions are its transcript, the highest-value text a recording can offer.
+ */
 function looksLikePlainText(contentType: string | null, url: string): boolean {
   if (!contentType) {
-    return /\.(txt|md|csv|json|xml)(?:$|[?#])/i.test(url);
+    return /\.(txt|md|csv|json|xml|vtt|srt)(?:$|[?#])/i.test(url);
   }
 
   const normalized = contentType.toLowerCase();
   return (
     normalized.startsWith("text/") ||
     normalized.includes("application/json") ||
-    normalized.includes("application/xml")
+    normalized.includes("application/xml") ||
+    normalized.includes("application/x-subrip") ||
+    /\.(vtt|srt)(?:$|[?#])/i.test(url)
   );
 }
 
