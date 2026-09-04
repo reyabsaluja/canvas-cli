@@ -15,6 +15,7 @@ import type {
   CanvasDiscussionTopic,
   CanvasDiscussionTopicView,
   CanvasSubmission,
+  CanvasCalendarEvent,
 } from "../canvas/types.js";
 import { mapWithConcurrency } from "./concurrency.js";
 import {
@@ -65,6 +66,12 @@ export interface RawCourseContent {
   tabs: CanvasTab[];
   /** Assignment groups (weights, drop rules); rendered as a "Grading scheme" page. */
   assignmentGroups: CanvasAssignmentGroup[];
+  /**
+   * Course calendar events (exam slots, review sessions, office hours). Each
+   * is stored as a "Calendar event: <title>" page and all of them on the
+   * "Course calendar" page; empty when the calendar is blocked.
+   */
+  calendarEvents: CanvasCalendarEvent[];
   /**
    * How the student's own grader feedback was captured. The comments and
    * rubric assessments themselves are merged into each assignment's
@@ -370,6 +377,27 @@ export async function fetchCourseContent(
     rememberFetchedPage("grading-scheme", "Grading scheme: assignment groups and weights", gradingBody);
   }
 
+  // Course calendar: exam dates, review sessions and office hours often live
+  // only here. One page per event (so search finds "midterm review") plus a
+  // single chronological "Course calendar" page for "what's coming up?".
+  const getCalendarEventsSafe = (client as {
+    getCalendarEventsSafe?: (courseId: number, signal?: AbortSignal | null) => Promise<CanvasCalendarEvent[]>;
+  }).getCalendarEventsSafe;
+  const calendarEvents = getCalendarEventsSafe
+    ? await getCalendarEventsSafe.call(client, courseId, signal)
+    : [];
+  for (const event of calendarEvents) {
+    rememberFetchedPage(
+      `calendar-event-${event.id}`,
+      `Calendar event: ${event.title}`,
+      buildCalendarEventPageBody(event)
+    );
+  }
+  const calendarBody = buildCourseCalendarPageBody(calendarEvents);
+  if (calendarBody) {
+    rememberFetchedPage("course-calendar", "Course calendar", calendarBody);
+  }
+
   while (pendingSlugs.length > 0) {
     if (signal?.aborted) {
       throw signal.reason ?? new DOMException("Aborted", "AbortError");
@@ -410,9 +438,85 @@ export async function fetchCourseContent(
     quizzes,
     tabs,
     assignmentGroups,
+    calendarEvents,
     submissionFeedback,
     warnings,
   };
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** "2026-10-02" for an all-day event, else the full timestamp. */
+function describeEventStart(event: CanvasCalendarEvent): string | null {
+  if (event.all_day && event.all_day_date) return event.all_day_date;
+  if (event.all_day && event.start_at) return event.start_at.slice(0, 10);
+  return event.start_at ?? null;
+}
+
+/**
+ * Render one calendar event as HTML for the page pipeline: when, where, and
+ * the description (which may link handouts and pages). Exported for tests.
+ */
+export function buildCalendarEventPageBody(event: CanvasCalendarEvent): string {
+  const facts: string[] = [];
+  const start = describeEventStart(event);
+  if (event.all_day) {
+    facts.push(`<li>Date: ${start ? escapeHtml(start) : "not scheduled"}</li>`);
+    facts.push("<li>All day: yes</li>");
+  } else {
+    facts.push(`<li>Starts: ${start ? escapeHtml(start) : "not scheduled"}</li>`);
+    if (event.end_at && event.end_at !== event.start_at) {
+      facts.push(`<li>Ends: ${escapeHtml(event.end_at)}</li>`);
+    }
+  }
+  if (event.location_name) facts.push(`<li>Location: ${escapeHtml(event.location_name)}</li>`);
+  if (event.location_address) facts.push(`<li>Address: ${escapeHtml(event.location_address)}</li>`);
+  if (event.workflow_state && event.workflow_state !== "active") {
+    facts.push(`<li>Status: ${escapeHtml(event.workflow_state)}</li>`);
+  }
+  if (event.html_url) {
+    facts.push(`<li>Canvas URL: <a href="${escapeHtml(event.html_url)}">${escapeHtml(event.html_url)}</a></li>`);
+  }
+  const description = event.description?.trim()
+    ? `<h2>Description</h2>\n${event.description}`
+    : "<p>No event description provided.</p>";
+  return `<h2>Event details</h2>\n<ul>${facts.join("")}</ul>\n${description}`;
+}
+
+/**
+ * Every calendar event in chronological order (undated last) as one page,
+ * or null when the calendar is empty. Exported for tests.
+ */
+export function buildCourseCalendarPageBody(events: CanvasCalendarEvent[]): string | null {
+  if (events.length === 0) return null;
+  const sorted = [...events].sort((a, b) => {
+    const left = a.start_at ?? a.all_day_date ?? "";
+    const right = b.start_at ?? b.all_day_date ?? "";
+    if (left && right) return left.localeCompare(right);
+    if (left) return -1;
+    if (right) return 1;
+    return a.title.localeCompare(b.title);
+  });
+  const items = sorted.map((event) => {
+    const start = describeEventStart(event);
+    const when = event.all_day
+      ? `${start ?? "date not set"} (all day)`
+      : start
+        ? `${start}${event.end_at && event.end_at !== event.start_at ? ` to ${event.end_at}` : ""}`
+        : "not scheduled";
+    const where = event.location_name ? ` — ${escapeHtml(event.location_name)}` : "";
+    return `<li><strong>${escapeHtml(event.title)}</strong>: ${escapeHtml(when)}${where} (details: page calendar-event-${event.id})</li>`;
+  });
+  return (
+    "<p>Events on this course's Canvas calendar, in date order. Each event also has its own page with the full description.</p>" +
+    `<ul>${items.join("")}</ul>`
+  );
 }
 
 /**

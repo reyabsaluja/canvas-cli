@@ -67,6 +67,12 @@ export function renderIngestionSummary(result: IngestionResult): string {
   if ((c.quizzes ?? 0) > 0) {
     lines.push(`  ${chalk.dim("-")} ${c.quizzes} quizzes ${chalk.dim("(instructions, time limits, attempts)")}`);
   }
+  const calendarEvents = result.ingestion.calendar?.events ?? 0;
+  if (calendarEvents > 0) {
+    lines.push(
+      `  ${chalk.dim("-")} ${plural(calendarEvents, "calendar event")} ${chalk.dim("(exam slots, review sessions, office hours; see the Course calendar page)")}`
+    );
+  }
   if (c.pages > 0) {
     lines.push(`  ${chalk.dim("-")} ${c.pages} pages`);
   } else {

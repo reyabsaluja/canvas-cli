@@ -407,3 +407,13 @@ export interface AnnouncementThreadSummary {
 export interface IngestionMeta {
   announcementThreads?: AnnouncementThreadSummary;
 }
+
+// ---------------------------------------------------------------------------
+// ADDITIVE: course calendar (src/ingest/fetch-course-content.ts,
+// src/ingest/ingest-course.ts, src/format/render-ingestion-summary.ts).
+// ---------------------------------------------------------------------------
+
+export interface IngestionMeta {
+  /** Calendar events captured as "Calendar event: <title>" pages plus the "Course calendar" page. */
+  calendar?: { events: number };
+}

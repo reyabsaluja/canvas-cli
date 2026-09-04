@@ -392,6 +392,7 @@ export async function ingestCourse(
         0
       ),
     },
+    calendar: { events: raw.calendarEvents.length },
     announcementThreads: {
       topics: raw.announcementThreads.length,
       replies: raw.announcementThreads.reduce(
