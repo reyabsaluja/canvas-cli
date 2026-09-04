@@ -16,6 +16,19 @@ import { searchWorkspaceKnowledge } from "../tui/workspace-knowledge.js";
 const MAX_MEMORY_REUSE_ARTIFACTS = 3;
 const MIN_MEMORY_REUSE_SCORE = 12;
 
+const EXPLICIT_TOOL_REQUEST_RE =
+  /\b(open|launch|pull up|download|list files|show files|search course)\b/i;
+// Questions about what the instructor posted, what was discussed, which
+// lecture covers something, or what is due can only be answered by the
+// course tools (list_announcements, read_thread, open_lecture,
+// list_assignments). A remembered handout read that happens to mention
+// "extensions" or "lectures" must not short-circuit them.
+const COURSE_COMMUNICATION_INTENT_RE =
+  /\bannouncements?\b|\bdiscussions\b|\bdiscussion\s+(?:topics?|threads?|boards?|posts?)\b|\breplies\b/i;
+const LECTURE_INTENT_RE = /\b(?:lectures?|lec|recordings?|slides?)\b/i;
+const COURSE_WORKLOAD_INTENT_RE =
+  /\b(?:upcoming work|what'?s due|what is due|due (?:today|tomorrow|this week|next week|soon)|(?:list|show|other|all) assignments?)\b/i;
+
 export type RetrievalDecision =
   | { action: "answer_from_workup"; reason: string }
   | { action: "answer_from_memory"; reason: string; sourceArtifactIds: string[] }
@@ -38,8 +51,9 @@ export async function decideWorkspaceRetrieval(
     return { action: "let_model_decide", reason: "empty_question" };
   }
 
-  if (shouldBypassGate(question)) {
-    return { action: "let_model_decide", reason: "explicit_tool_request" };
+  const bypass = shouldBypassGate(question);
+  if (bypass) {
+    return bypass;
   }
 
   // A cut-off whole read must not be reused to answer about a page or heading
@@ -168,8 +182,18 @@ export async function decideWorkspaceRetrieval(
   };
 }
 
-function shouldBypassGate(question: string): boolean {
-  return /\b(open|launch|pull up|download|list files|show files|search course)\b/i.test(question);
+function shouldBypassGate(question: string): RetrievalDecision | null {
+  if (EXPLICIT_TOOL_REQUEST_RE.test(question)) {
+    return { action: "let_model_decide", reason: "explicit_tool_request" };
+  }
+  if (
+    COURSE_COMMUNICATION_INTENT_RE.test(question) ||
+    LECTURE_INTENT_RE.test(question) ||
+    COURSE_WORKLOAD_INTENT_RE.test(question)
+  ) {
+    return { action: "let_model_decide", reason: "course_intent_needs_tools" };
+  }
+  return null;
 }
 
 function workupLikelyCoversQuestion(

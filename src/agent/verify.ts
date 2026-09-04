@@ -45,6 +45,7 @@ export function verifyWorkspaceAnswer(
   const trimmedAnswer = input.answer.trim();
   const relevantGroundedObservations = selectRelevantGroundedObservations(
     input.question,
+    trimmedAnswer,
     input.observations
   );
   const sources = collectSources(
@@ -264,7 +265,11 @@ function collectSources(
 ): AnswerSource[] {
   const resolved: AnswerSource[] = [];
   const seen = new Set<string>();
-  const citationObservations = selectCitationObservations(question, observations);
+  const citationObservations = selectCitationObservations(
+    question,
+    answer,
+    observations
+  );
   const attributionText = answer.trim() || question.trim();
   const pushSource = (source: AnswerSource): void => {
     const key = `${source.kind}:${source.title}:${source.section ?? ""}`;
@@ -328,14 +333,19 @@ function collectSources(
 
 function selectCitationObservations(
   question: string,
+  answer: string,
   observations: Observation[]
 ): Observation[] {
-  const relevantGrounded = selectRelevantGroundedObservations(question, observations);
+  const relevantGrounded = selectRelevantGroundedObservations(
+    question,
+    answer,
+    observations
+  );
   if (relevantGrounded.length > 0) {
     return relevantGrounded;
   }
 
-  const relevant = selectRelevantCitationObservations(question, observations);
+  const relevant = selectRelevantCitationObservations(question, answer, observations);
   if (relevant.length > 0) {
     return relevant;
   }
@@ -348,25 +358,41 @@ function selectCitationObservations(
 
 function selectRelevantGroundedObservations(
   question: string,
+  answer: string,
   observations: Observation[]
 ): Observation[] {
   return selectRelevantCitationObservations(
     question,
+    answer,
     observations.filter((observation) => isGroundedContentObservation(observation))
   );
 }
 
+/**
+ * Observations worth citing: those relevant to the question, or to the
+ * answer. The student asks in their own words ("hand it in on Saturday")
+ * while the document that supports the answer uses the course's words
+ * ("late", "10% per day"); scoring against the answer keeps that read as
+ * direct evidence instead of downgrading it to "matched search evidence".
+ * The question is checked first so its matches keep priority.
+ */
 function selectRelevantCitationObservations(
   question: string,
+  answer: string,
   observations: Observation[]
 ): Observation[] {
   const trimmedQuestion = question.trim();
-  if (!trimmedQuestion) {
+  const trimmedAnswer = answer.trim();
+  if (!trimmedQuestion && !trimmedAnswer) {
     return [];
   }
 
   return observations.filter(
-    (observation) => scoreObservationRelevance(trimmedQuestion, observation) > 0
+    (observation) =>
+      (trimmedQuestion.length > 0 &&
+        scoreObservationRelevance(trimmedQuestion, observation) > 0) ||
+      (trimmedAnswer.length > 0 &&
+        scoreObservationRelevance(trimmedAnswer, observation) > 0)
   );
 }
 

@@ -1370,7 +1370,7 @@ function splitMarkdownIntoSections(
   };
 
   for (const line of lines) {
-    const headingMatch = line.match(/^#{1,4}\s+(.+)/);
+    const headingMatch = line.match(/^#{1,6}\s+(.+)/);
     if (headingMatch) {
       flush();
       currentSection = headingMatch[1] ?? "Top";
@@ -1557,42 +1557,119 @@ interface MatchExcerptHit {
   token: string;
 }
 
+interface ExcerptCluster {
+  distinct: number;
+  count: number;
+  first: number;
+  last: number;
+}
+
+interface ExcerptRange {
+  start: number;
+  end: number;
+}
+
+/** How many further query-centred windows follow the primary excerpt. */
+export const MAX_EXTRA_EXCERPT_WINDOWS = 2;
+/** Length of each extra window. */
+export const EXTRA_EXCERPT_WINDOW_CHARS = 160;
+/** Minimum distance between the anchors of two excerpt windows. */
+const MIN_EXTRA_EXCERPT_WINDOW_SEPARATION = 200;
+/** Joins the primary window and its extras. */
+export const EXCERPT_WINDOW_SEPARATOR = " … ";
+
+export interface MatchExcerptWindows {
+  /**
+   * The window of `maxLength` characters centred on the best cluster of
+   * query terms (or the whole text when it fits), "..." marking cut edges.
+   */
+  primary: string;
+  /**
+   * Up to MAX_EXTRA_EXCERPT_WINDOWS further windows of
+   * EXTRA_EXCERPT_WINDOW_CHARS centred on the next-best clusters, in
+   * document order. Empty when the query occurs only once or not at all.
+   */
+  extras: string[];
+}
+
 /**
  * Excerpt of `text` centred on the passage that matches `query` best: the
  * window of `maxLength` characters covering the most distinct query terms
  * (ties broken by total hits, then by earliest position). Falls back to the
  * head of the text when no query term occurs. Whitespace is collapsed and
  * the window is snapped to word boundaries, with "..." marking cut edges.
+ *
+ * When the query occurs again well outside that window, up to
+ * MAX_EXTRA_EXCERPT_WINDOWS short windows around those later (or earlier)
+ * mentions are appended after the primary window, joined by
+ * EXCERPT_WINDOW_SEPARATOR, so a section that states the late penalty, its
+ * cap, and the extension rule three thousand characters apart shows all
+ * three instead of the first alone. The primary window is unchanged.
  */
 export function buildMatchExcerpt(
   text: string,
   query: string,
   maxLength: number = 240
 ): string {
-  const cleaned = text.replace(/\s+/g, " ").trim();
-  if (cleaned.length <= maxLength) return cleaned;
+  const windows = buildMatchExcerptWindows(text, query, maxLength);
+  return [windows.primary, ...windows.extras].join(EXCERPT_WINDOW_SEPARATOR);
+}
 
+/** The pieces of `buildMatchExcerpt`, for callers that render them apart. */
+export function buildMatchExcerptWindows(
+  text: string,
+  query: string,
+  maxLength: number = 240
+): MatchExcerptWindows {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= maxLength) return { primary: cleaned, extras: [] };
+
+  const hits = collectExcerptHits(cleaned, query);
+  if (hits.length === 0) {
+    return {
+      primary: `${trimToWordBoundary(cleaned.slice(0, maxLength - 3), "end")}...`,
+      extras: [],
+    };
+  }
+
+  const best = rankExcerptClusters(hits, maxLength)[0]!;
+  const primaryRange = placeExcerptWindow(cleaned.length, best, maxLength);
+  const extraRanges = selectExtraExcerptWindows(cleaned.length, hits, best, primaryRange);
+  return {
+    primary: renderExcerptWindow(cleaned, primaryRange),
+    extras: extraRanges.map((range) => renderExcerptWindow(cleaned, range)),
+  };
+}
+
+function collectExcerptHits(cleaned: string, query: string): MatchExcerptHit[] {
   const queryTokens = new Set(analyzeSearchQuery(query).tokens);
   const hits: MatchExcerptHit[] = [];
-  if (queryTokens.size > 0) {
-    const lowered = cleaned.toLowerCase();
-    const wordPattern = /[a-z0-9]+/g;
-    let match: RegExpExecArray | null;
-    while ((match = wordPattern.exec(lowered)) !== null) {
-      const word = match[0];
-      if (word.length < 2) continue;
-      const stem = stemSearchToken(word);
-      if (queryTokens.has(stem)) {
-        hits.push({ start: match.index, end: match.index + word.length, token: stem });
-      }
+  if (queryTokens.size === 0) return hits;
+  const lowered = cleaned.toLowerCase();
+  const wordPattern = /[a-z0-9]+/g;
+  let match: RegExpExecArray | null;
+  while ((match = wordPattern.exec(lowered)) !== null) {
+    const word = match[0];
+    if (word.length < 2) continue;
+    const stem = stemSearchToken(word);
+    if (queryTokens.has(stem)) {
+      hits.push({ start: match.index, end: match.index + word.length, token: stem });
     }
   }
+  return hits;
+}
 
-  if (hits.length === 0) {
-    return `${trimToWordBoundary(cleaned.slice(0, maxLength - 3), "end")}...`;
-  }
-
-  let best = { distinct: 0, count: 0, first: 0, last: 0 };
+/**
+ * One cluster per hit, anchored at that hit and covering every later hit
+ * within `windowLength`, ranked by distinct query terms, then total hits,
+ * then earliest position. The first entry is the cluster the primary window
+ * has always been centred on.
+ */
+function rankExcerptClusters(
+  hits: MatchExcerptHit[],
+  windowLength: number
+): ExcerptCluster[] {
+  const clusters: ExcerptCluster[] = [];
   for (let anchor = 0; anchor < hits.length; anchor += 1) {
     const windowStart = hits[anchor]!.start;
     const seen = new Set<string>();
@@ -1600,30 +1677,37 @@ export function buildMatchExcerpt(
     let lastEnd = hits[anchor]!.end;
     for (let index = anchor; index < hits.length; index += 1) {
       const hit = hits[index]!;
-      if (hit.end - windowStart > maxLength) break;
+      if (hit.end - windowStart > windowLength) break;
       seen.add(hit.token);
       count += 1;
       lastEnd = hit.end;
     }
-    if (
-      seen.size > best.distinct ||
-      (seen.size === best.distinct && count > best.count)
-    ) {
-      best = { distinct: seen.size, count, first: windowStart, last: lastEnd };
-    }
+    clusters.push({ distinct: seen.size, count, first: windowStart, last: lastEnd });
   }
+  return clusters.sort(
+    (left, right) =>
+      right.distinct - left.distinct ||
+      right.count - left.count ||
+      left.first - right.first
+  );
+}
 
-  const clusterLength = best.last - best.first;
+function placeExcerptWindow(
+  textLength: number,
+  cluster: ExcerptCluster,
+  maxLength: number
+): ExcerptRange {
+  const clusterLength = cluster.last - cluster.first;
   // The answer usually follows its keyword ("Late policy: 10% per day"), so
   // give the window more room after the cluster than before it.
   const spare = Math.max(0, maxLength - clusterLength);
   const padding = Math.floor(spare * 0.3);
-  let start = Math.max(0, best.first - padding);
-  let end = Math.min(cleaned.length, start + maxLength);
+  let start = Math.max(0, cluster.first - padding);
+  let end = Math.min(textLength, start + maxLength);
   // Always keep some text after the last keyword hit, even when the cluster
   // itself fills the window: that is where "Late policy: 10% per day" lives.
   const tailRoom = Math.min(240, Math.floor(maxLength * 0.25));
-  const wantedEnd = Math.min(cleaned.length, best.last + tailRoom);
+  const wantedEnd = Math.min(textLength, cluster.last + tailRoom);
   if (wantedEnd > end) {
     end = wantedEnd;
     start = Math.max(0, end - maxLength);
@@ -1631,10 +1715,45 @@ export function buildMatchExcerpt(
   if (end - start < maxLength) {
     start = Math.max(0, end - maxLength);
   }
+  return { start, end };
+}
 
-  const prefix = start > 0 ? "..." : "";
-  const suffix = end < cleaned.length ? "..." : "";
-  let window = cleaned.slice(start, end);
+/**
+ * Further windows around the next-best clusters: each anchored at least
+ * MIN_EXTRA_EXCERPT_WINDOW_SEPARATION characters from every chosen anchor
+ * and never overlapping a chosen window, returned in document order.
+ */
+function selectExtraExcerptWindows(
+  textLength: number,
+  hits: MatchExcerptHit[],
+  primary: ExcerptCluster,
+  primaryRange: ExcerptRange
+): ExcerptRange[] {
+  const chosenRanges: ExcerptRange[] = [primaryRange];
+  const chosenAnchors: number[] = [primary.first];
+  const extras: ExcerptRange[] = [];
+  for (const cluster of rankExcerptClusters(hits, EXTRA_EXCERPT_WINDOW_CHARS)) {
+    if (extras.length >= MAX_EXTRA_EXCERPT_WINDOWS) break;
+    const tooClose = chosenAnchors.some(
+      (anchor) => Math.abs(anchor - cluster.first) < MIN_EXTRA_EXCERPT_WINDOW_SEPARATION
+    );
+    if (tooClose) continue;
+    const range = placeExcerptWindow(textLength, cluster, EXTRA_EXCERPT_WINDOW_CHARS);
+    const overlaps = chosenRanges.some(
+      (existing) => range.start < existing.end && range.end > existing.start
+    );
+    if (overlaps) continue;
+    chosenRanges.push(range);
+    chosenAnchors.push(cluster.first);
+    extras.push(range);
+  }
+  return extras.sort((left, right) => left.start - right.start);
+}
+
+function renderExcerptWindow(cleaned: string, range: ExcerptRange): string {
+  const prefix = range.start > 0 ? "..." : "";
+  const suffix = range.end < cleaned.length ? "..." : "";
+  let window = cleaned.slice(range.start, range.end);
   if (prefix) window = trimToWordBoundary(window, "start");
   if (suffix) window = trimToWordBoundary(window, "end");
   return `${prefix}${window.trim()}${suffix}`;
@@ -1816,9 +1935,9 @@ export const SYNONYM_MATCH_WEIGHT = 0.6;
  * course-logistics vocabulary where a miss is common and costly.
  */
 const SYNONYM_GROUPS: string[][] = [
-  ["due", "deadline", "deadlines"],
+  ["due", "deadline", "deadlines", "date"],
   ["rubric", "grading", "marking", "criteria", "breakdown"],
-  ["late", "penalty", "penalties", "extension", "extensions"],
+  ["late", "penalty", "penalties", "extension", "extensions", "deduction", "extend"],
   ["submit", "submission", "submissions", "upload", "handin"],
   ["exam", "midterm", "final", "test"],
   ["quiz", "quizzes", "test"],
@@ -1827,8 +1946,9 @@ const SYNONYM_GROUPS: string[][] = [
   ["assignment", "assignments", "homework", "hw", "pset", "problemset"],
   ["syllabus", "outline"],
   ["textbook", "reading", "readings", "chapter"],
-  ["grade", "grades", "mark", "marks", "score", "weight", "weighting"],
+  ["grade", "grades", "mark", "marks", "score", "weight", "weighting", "worth", "point", "points"],
   ["policy", "policies", "rules"],
+  ["starter", "template", "skeleton", "scaffold", "boilerplate"],
   ["tutorial", "tutorials", "section", "recitation"],
   ["office", "officehours"],
   ["group", "team", "partner", "partners"],

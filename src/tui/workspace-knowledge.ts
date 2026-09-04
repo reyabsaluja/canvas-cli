@@ -14,7 +14,8 @@ import {
   type ArtifactRecord,
   type ArtifactSection,
   type ArtifactScope,
-  buildMatchExcerpt,
+  buildMatchExcerptWindows,
+  EXCERPT_WINDOW_SEPARATOR,
 } from "../knowledge/artifact-index.js";
 
 export interface WorkspaceChatSearchMatch {
@@ -478,7 +479,8 @@ const WORKSPACE_SECTION_PREVIEW_CHARS = 2400;
  * sections used to be cut at the head, which hid matches deep in the
  * section; now the window is centred on the best cluster of query terms.
  * When the best window is the head anyway, the raw head is kept so line
- * structure survives.
+ * structure survives. Either way, further mentions of the query outside
+ * that window follow as short extra windows (see buildMatchExcerpt).
  */
 export function buildSectionPreview(
   text: string,
@@ -486,9 +488,7 @@ export function buildSectionPreview(
   maxLength: number = WORKSPACE_SECTION_PREVIEW_CHARS
 ): string {
   if (text.length <= maxLength) return text;
-  const excerpt = buildMatchExcerpt(text, query, maxLength);
-  if (!excerpt.startsWith("...")) {
-    return text.slice(0, maxLength);
-  }
-  return excerpt;
+  const { primary, extras } = buildMatchExcerptWindows(text, query, maxLength);
+  const head = primary.startsWith("...") ? primary : text.slice(0, maxLength);
+  return [head, ...extras].join(EXCERPT_WINDOW_SEPARATOR);
 }

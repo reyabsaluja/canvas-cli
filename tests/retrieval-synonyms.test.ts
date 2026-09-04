@@ -76,6 +76,33 @@ test("before/after: 'when is it due' finds the Deadlines section and 'rubric' fi
   });
 });
 
+test("before/after: 'how much is this worth' finds the Points section through the grade synonym group", async () => {
+  await withWorkspace(
+    {
+      "lab5.txt": [
+        "## Overview",
+        "Build a timer-driven display and hand in the C source with a short report.",
+        "",
+        "## Points",
+        "This lab counts for 100 points, 10% of the final grade.",
+        "",
+      ].join("\n"),
+    },
+    async (workspace) => {
+      const index = await loadArtifactIndex({ workspace, cache: null });
+      const hits = searchArtifactSections(index, "how much is this worth", { limit: 3 });
+      assert.equal(hits[0]?.section.section, "Points", `expected Points first, got ${hits.map((h) => h.section.section).join(", ") || "no hits"}`);
+    }
+  );
+});
+
+test("starter code vocabulary maps template, skeleton, scaffold and boilerplate onto each other", () => {
+  const expansions = analyzeSearchQuery("where is the starter code").expansions;
+  const starter = expansions.get("starter") ?? [];
+  assert.ok(starter.includes("templat") || starter.includes("template"), `expected a template synonym, got ${JSON.stringify([...expansions])}`);
+  assert.ok(starter.includes("skeleton"), `expected skeleton, got ${JSON.stringify(starter)}`);
+});
+
 test("a direct match still outranks a synonym-only match", async () => {
   await withWorkspace(
     {

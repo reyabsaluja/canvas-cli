@@ -1045,7 +1045,7 @@ export function findRawHeadingSection(
 ): { label: string; text: string } | null {
   const query = normalizeSectionRequest(requested);
   if (!query) return null;
-  const headingPattern = /^#{1,4}[ \t]+(.+?)[ \t]*$/gm;
+  const headingPattern = /^#{1,6}[ \t]+(.+?)[ \t]*$/gm;
   const headings: Array<{ label: string; start: number; bodyStart: number }> = [];
   let match: RegExpExecArray | null;
   while ((match = headingPattern.exec(content)) !== null) {
