@@ -34,6 +34,8 @@ export interface CanvasSubmission {
 export interface CanvasAssignment {
   id: number;
   name: string;
+  /** Group the assignment belongs to (for weighted grading schemes). */
+  assignment_group_id?: number | null;
   due_at: string | null;
   unlock_at?: string | null;
   lock_at?: string | null;
@@ -83,7 +85,10 @@ export interface CanvasRubricRating {
 export interface CanvasCourseDetail extends CanvasCourse {
   syllabus_body: string | null;
   html_url?: string;
+  /** True when the final grade is a weighted sum of assignment groups. */
+  apply_assignment_group_weights?: boolean | null;
 }
+
 
 export interface CanvasModule {
   id: number;
@@ -129,6 +134,13 @@ export interface CanvasAssignmentGroup {
   id: number;
   name: string;
   group_weight: number;
+  position?: number | null;
+  /** Drop rules applied within the group (e.g. drop the lowest lab). */
+  rules?: {
+    drop_lowest?: number | null;
+    drop_highest?: number | null;
+    never_drop?: number[] | null;
+  } | null;
   assignments?: CanvasAssignmentGroupAssignment[];
 }
 

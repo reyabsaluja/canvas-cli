@@ -1,4 +1,4 @@
-import type { MockCourse, MockAssignment, MockModule, MockQuiz, MockTab, MockPage, MockFile, MockFolder, MockAttachment, MockDiscussionTopic, MockServerData } from "./mock-canvas-server.js";
+import type { MockCourse, MockAssignment, MockModule, MockQuiz, MockTab, MockAssignmentGroup, MockPage, MockFile, MockFolder, MockAttachment, MockDiscussionTopic, MockServerData } from "./mock-canvas-server.js";
 
 // All dates are relative to "now" so the fixtures never go stale: the two
 // CS courses are always in the current term and HIST303 is always finished.
@@ -151,6 +151,11 @@ export const CS101_MODULES: MockModule[] = [
       { id: 102, title: "Variables Lecture Notes", type: "Page", position: 1, page_url: "variables-lecture" },
     ],
   },
+];
+
+export const CS101_ASSIGNMENT_GROUPS: MockAssignmentGroup[] = [
+  { id: 71, name: "Labs", position: 1, group_weight: 30, rules: { drop_lowest: 1 } },
+  { id: 72, name: "Exams", position: 2, group_weight: 70 },
 ];
 
 export const CS101_TABS: MockTab[] = [
@@ -375,6 +380,7 @@ export function buildDefaultServerData(): MockServerData {
     pages: new Map([[101, CS101_PAGES]]),
     quizzes: new Map([[101, CS101_QUIZZES]]),
     tabs: new Map([[101, CS101_TABS]]),
+    assignmentGroups: new Map([[101, CS101_ASSIGNMENT_GROUPS]]),
     files: new Map([[101, CS101_FILES]]),
     folders: new Map([[101, CS101_FOLDERS]]),
     discussions: new Map([[101, CS101_DISCUSSIONS]]),
