@@ -60,14 +60,14 @@
     "ai": "^6.0.141",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
-    "dotenv": "^16.4.7",
+    "dotenv": "^17.4.2",
     "pdf-parse": "^1.1.1",
-    "pdfkit": "^0.18.0",
+    "pdfkit": "^0.20.0",
     "yauzl-promise": "^4.0.0"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
-    "@types/pdfkit": "^0.13.8",
+    "@types/node": "^26.4.0",
+    "@types/pdfkit": "^0.17.6",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }

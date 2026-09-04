@@ -4,7 +4,7 @@ import { readStoredConfig } from "./store.js";
 import { loadCredential } from "./credentials.js";
 import { ConfigError } from "../errors.js";
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
 export interface Config {
   baseUrl: string;
