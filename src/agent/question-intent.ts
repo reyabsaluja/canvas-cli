@@ -48,37 +48,58 @@ function questionAsksAboutMultipleTopics(normalized: string): boolean {
 }
 
 /**
- * A joiner ("and", "plus", a comma) plus at least two distinct evidence
- * topics (due date, submission, grading, late policy, requirements,
- * resources). "The due date and time" is one topic; "the due date and the
- * late penalty" is two.
+ * Two distinct evidence topics (due date, submission, grading, late policy,
+ * requirements, resources) with a joiner sitting between them: "and",
+ * "plus", "as well as", "along with", "also", "both … and", or a comma or
+ * semicolon. The joiner must separate the two mentions; a comma anywhere
+ * else ("Hey, what's the late penalty in points?") or an "and" inside one
+ * topic ("the due date and time") is not a second question.
  */
 function questionMentionsMultipleEvidenceTopics(normalized: string): boolean {
-  const hasTopicJoiner =
-    /\b(?:and|also|plus|as well as|along with|both|each of)\b/i.test(
-      normalized
-    ) || /[,;]/.test(normalized);
-  if (!hasTopicJoiner) {
-    return false;
-  }
-
-  const topicPatterns = [
-    /\b(?:due|deadline|date|time|when|locks?|unlocks?|available|opens?|closes?)\b/i,
-    /\b(?:submit|submission|upload|format|files?|deliverables?|turn\s+in|hand\s+in|pdf|zip)\b/i,
-    /\b(?:grading?|graded|rubric|points?|pts?|marks?|score|percent(?:age)?|worth|weight(?:ed|s)?)\b/i,
-    /\b(?:late|extensions?|penalt(?:y|ies)|grace|accommodations?)\b/i,
-    /\b(?:requirements?|instructions?|spec(?:ification)?|criteria|steps?|parts?|tasks?|milestones?)\b/i,
-    /\b(?:resources?|attachments?|pages?|modules?|lectures?|slides?|videos?)\b/i,
-  ];
-
-  let matchedTopicCount = 0;
-  for (const pattern of topicPatterns) {
-    if (pattern.test(normalized)) {
-      matchedTopicCount += 1;
+  const mentions = collectEvidenceTopicMentions(normalized);
+  for (let i = 0; i < mentions.length; i += 1) {
+    for (let j = i + 1; j < mentions.length; j += 1) {
+      const left = mentions[i]!;
+      const right = mentions[j]!;
+      if (left.topic === right.topic) {
+        continue;
+      }
+      const between = normalized.slice(left.end, right.start);
+      if (TOPIC_JOINER_PATTERN.test(between)) {
+        return true;
+      }
     }
   }
+  return false;
+}
 
-  return matchedTopicCount >= 2;
+const TOPIC_JOINER_PATTERN =
+  /\b(?:and|also|plus|as\s+well\s+as|along\s+with)\b|[,;]/i;
+
+const EVIDENCE_TOPIC_PATTERNS = [
+  /\b(?:due|deadline|date|time|when|locks?|unlocks?|available|opens?|closes?)\b/gi,
+  /\b(?:submit|submission|upload|format|files?|deliverables?|turn\s+in|hand\s+in|pdf|zip)\b/gi,
+  /\b(?:grading?|graded|rubric|points?|pts?|marks?|score|percent(?:age)?|worth|weight(?:ed|s)?)\b/gi,
+  /\b(?:late|extensions?|penalt(?:y|ies)|grace|accommodations?)\b/gi,
+  /\b(?:requirements?|instructions?|spec(?:ification)?|criteria|steps?|parts?|tasks?|milestones?)\b/gi,
+  /\b(?:resources?|attachments?|pages?|modules?|lectures?|slides?|videos?)\b/gi,
+];
+
+interface EvidenceTopicMention {
+  topic: number;
+  start: number;
+  end: number;
+}
+
+/** Every topic word in the question with its position, in reading order. */
+function collectEvidenceTopicMentions(normalized: string): EvidenceTopicMention[] {
+  const mentions: EvidenceTopicMention[] = [];
+  EVIDENCE_TOPIC_PATTERNS.forEach((pattern, topic) => {
+    for (const match of normalized.matchAll(pattern)) {
+      mentions.push({ topic, start: match.index, end: match.index + match[0].length });
+    }
+  });
+  return mentions.sort((left, right) => left.start - right.start);
 }
 
 /**

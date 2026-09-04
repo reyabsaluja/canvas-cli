@@ -32,6 +32,10 @@ test("questionNeedsMultipleSources treats multi-part questions as needing more t
     // second question word.
     "What are the due date and the late penalty for lab 4?",
     "I need the submission format, the grading weights, and the deadline.",
+    // A comma between two distinct topics is a joiner.
+    "what's the late penalty, and how many points is it worth",
+    "Late penalty, submission format?",
+    "Tell me both the late penalty and the deadline.",
   ]) {
     assert.equal(questionNeedsMultipleSources(question), true, question);
   }
@@ -46,6 +50,10 @@ test("questionNeedsMultipleSources leaves single-fact questions alone", () => {
     "Explain the branch hazard requirement in detail.",
     // "and" inside a single topic is not a second topic.
     "What is the due date and time?",
+    // A comma or "and" that does not sit between two topics is not a joiner.
+    "Hey, what's the late penalty in points?",
+    "Please, when is lab 4 due?",
+    "Is the late penalty 10% per day and is that per weekday?",
   ]) {
     assert.equal(questionNeedsMultipleSources(question), false, question);
   }
