@@ -870,8 +870,38 @@ export function extractDateClaims(normalizedText: string): DateClaim[] {
   return claims;
 }
 
+const NUMBER_WORDS: Record<string, number> = {
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17,
+  eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70,
+  eighty: 80, ninety: 90,
+};
+const TENS_WORDS = "twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety";
+const UNIT_WORDS = "one|two|three|four|five|six|seven|eight|nine";
+const TEEN_WORDS = "ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen";
+// "twenty-five", "twenty five", "fifteen", "ten", "one hundred" → digits, so a
+// spelled-out figure is checked against a numeric one and vice versa. Standalone
+// "one" is left alone ("one of the labs" is not a number claim).
+const NUMBER_WORD_PATTERN = new RegExp(
+  `\\b(?:(${TENS_WORDS})(?:[\\s-]+(${UNIT_WORDS}))?|(${TEEN_WORDS})|(${UNIT_WORDS}))(?:\\s+hundred)?\\b(?=\\s*(?:percent|%|points?|pts|marks?|days?|weeks?|hours?|hrs?|minutes?|mins?|seconds?|pages?|words?|attempts?|questions?|labs?|assignments?|submissions?|times|late|per\\b))`,
+  "gi"
+);
+
+/** Replace spelled-out numbers that precede a unit-like word with digits. Exported for tests. */
+export function spellOutNumbersToDigits(text: string): string {
+  return text.replace(NUMBER_WORD_PATTERN, (match, tens, unit, teen, single) => {
+    let value: number | null = null;
+    if (tens) value = (NUMBER_WORDS[tens.toLowerCase()] ?? 0) + (unit ? NUMBER_WORDS[unit.toLowerCase()] ?? 0 : 0);
+    else if (teen) value = NUMBER_WORDS[teen.toLowerCase()] ?? null;
+    else if (single) value = NUMBER_WORDS[single.toLowerCase()] ?? null;
+    if (value === null) return match;
+    if (/hundred\s*$/i.test(match)) value *= 100;
+    return String(value);
+  });
+}
+
 function normalizeClaimText(text: string): string {
-  return text
+  return spellOutNumbersToDigits(text)
     .replace(/\r\n?/g, "\n")
     .replace(LIST_MARKER_PATTERN, " ")
     .replace(THOUSANDS_SEPARATOR_PATTERN, "$1")
