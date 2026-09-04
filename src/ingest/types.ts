@@ -189,6 +189,14 @@ export interface IngestionMeta {
     attachmentsSkipped: number;
     attachmentsFailed: number;
   };
+  /** Files attached directly to assignments (starter code, templates). */
+  assignmentAttachments?: {
+    selected: number;
+    alreadySelected: number;
+    skippedTooLarge: number;
+    downloaded: number;
+    failed: number;
+  };
 }
 
 export interface IngestionResult {

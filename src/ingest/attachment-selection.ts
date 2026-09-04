@@ -420,3 +420,71 @@ export function selectTopicAttachments(
 
   return { selected, summary };
 }
+
+export interface AssignmentAttachmentSelection {
+  selected: SelectedAttachment[];
+  summary: { assignments: number; alreadySelected: number; skippedTooLarge: number };
+}
+
+interface AssignmentWithAttachments {
+  id: number;
+  name: string;
+  attachments?: Array<{
+    id: number;
+    display_name?: string | null;
+    filename?: string | null;
+    url?: string | null;
+    content_type?: string | null;
+    "content-type"?: string | null;
+    size?: number | null;
+  }> | null;
+}
+
+/**
+ * Files attached to an assignment through the Canvas "Attach" control
+ * (starter code, templates, data sets). They are not linked from the
+ * description HTML, so no other selector sees them.
+ */
+export function selectAssignmentAttachments(
+  assignments: AssignmentWithAttachments[],
+  alreadySelected: SelectedAttachment[]
+): AssignmentAttachmentSelection {
+  const claimedIds = new Set<number>();
+  const claimedUrls = new Set<string>();
+  for (const attachment of alreadySelected) {
+    if (attachment.fileId !== null) claimedIds.add(attachment.fileId);
+    claimedUrls.add(attachment.downloadUrl);
+    const idFromUrl = attachment.downloadUrl.match(/\/files\/(\d+)/)?.[1];
+    if (idFromUrl) claimedIds.add(parseInt(idFromUrl, 10));
+  }
+  const summary = { assignments: 0, alreadySelected: 0, skippedTooLarge: 0 };
+  const selected: SelectedAttachment[] = [];
+  for (const assignment of assignments) {
+    for (const attachment of assignment.attachments ?? []) {
+      const url = typeof attachment.url === "string" ? attachment.url : "";
+      if (!url) continue;
+      if (claimedIds.has(attachment.id) || claimedUrls.has(url)) {
+        summary.alreadySelected += 1;
+        continue;
+      }
+      if (typeof attachment.size === "number" && attachment.size > MAX_COURSE_FILE_BYTES) {
+        summary.skippedTooLarge += 1;
+        continue;
+      }
+      claimedIds.add(attachment.id);
+      claimedUrls.add(url);
+      summary.assignments += 1;
+      selected.push({
+        sourceType: "assignment_linked",
+        fileId: attachment.id,
+        filename: attachment.display_name?.trim() || attachment.filename?.trim() || `file-${attachment.id}`,
+        downloadUrl: url,
+        reason: `attached to assignment "${assignment.name}"`,
+        contentType: attachment.content_type ?? attachment["content-type"] ?? null,
+        size: typeof attachment.size === "number" ? attachment.size : null,
+        subfolder: "assignments",
+      });
+    }
+  }
+  return { selected, summary };
+}

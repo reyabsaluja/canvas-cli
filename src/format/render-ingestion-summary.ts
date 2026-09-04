@@ -31,6 +31,14 @@ export function renderIngestionSummary(result: IngestionResult): string {
   } else {
     lines.push(`  ${chalk.dim("-")} files ${chalk.dim("(API not accessible)")}`);
   }
+  const assignmentAttachments = result.ingestion.assignmentAttachments;
+  if (assignmentAttachments && assignmentAttachments.selected > 0) {
+    lines.push(
+      `  ${chalk.dim("-")} ${assignmentAttachments.downloaded} files attached to assignments${
+        assignmentAttachments.failed > 0 ? chalk.red(` (${assignmentAttachments.failed} failed)`) : ""
+      }`
+    );
+  }
   if ((c.assignmentGroups ?? 0) > 0) {
     lines.push(`  ${chalk.dim("-")} ${c.assignmentGroups} assignment groups ${chalk.dim("(weights and drop rules on the grading-scheme page)")}`);
   }

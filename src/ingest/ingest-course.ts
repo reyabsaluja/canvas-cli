@@ -23,6 +23,7 @@ import { identifySyllabusCandidates } from "./syllabus-heuristics.js";
 import {
   selectAttachments,
   selectCourseFiles,
+  selectAssignmentAttachments,
   selectTopicAttachments,
   buildFolderIndex,
 } from "./attachment-selection.js";
@@ -141,6 +142,16 @@ export async function ingestCourse(
     ]
   );
 
+  // Step 5c'': Files attached to assignments themselves (starter code,
+  // templates, data). Never linked from the description HTML either.
+  const assignmentAttachmentSelection = selectAssignmentAttachments(raw.assignments, [
+    ...heuristicAttachments,
+    ...moduleAttachments,
+    ...descriptionAttachments,
+    ...htmlLinkedAttachments,
+    ...topicAttachmentSelection.selected,
+  ]);
+
   const capturedExternalLinks = await captureExternalCourseLinks({
     courseId: course.id,
     courseHtmlUrl: courseMeta.htmlUrl,
@@ -170,6 +181,7 @@ export async function ingestCourse(
     ...descriptionAttachments,
     ...htmlLinkedAttachments,
     ...topicAttachmentSelection.selected,
+    ...assignmentAttachmentSelection.selected,
   ]);
 
   const allSelected = [
@@ -178,6 +190,7 @@ export async function ingestCourse(
     ...descriptionAttachments,
     ...htmlLinkedAttachments,
     ...topicAttachmentSelection.selected,
+    ...assignmentAttachmentSelection.selected,
     ...courseFileSelection.selected,
   ];
   // downloadSelectedAttachments returns results in input order; remember where
@@ -272,6 +285,17 @@ export async function ingestCourse(
       ...courseFileSelection.summary,
       downloaded: courseFileResults.filter((a) => a.status !== "failed").length,
       failed: courseFileResults.filter((a) => a.status === "failed").length,
+    },
+    assignmentAttachments: {
+      selected: assignmentAttachmentSelection.summary.assignments,
+      alreadySelected: assignmentAttachmentSelection.summary.alreadySelected,
+      skippedTooLarge: assignmentAttachmentSelection.summary.skippedTooLarge,
+      downloaded: attachmentResults.filter(
+        (a) => a.status === "downloaded" && a.reason.startsWith("attached to assignment")
+      ).length,
+      failed: attachmentResults.filter(
+        (a) => a.status === "failed" && a.reason.startsWith("attached to assignment")
+      ).length,
     },
     topicAttachments: {
       ...topicAttachmentSelection.summary,

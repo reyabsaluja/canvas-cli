@@ -23,6 +23,7 @@ export interface MockAssignment {
   points_possible?: number | null;
   submission_types?: string[];
   allowed_attempts?: number;
+  attachments?: MockAttachment[];
   peer_reviews?: boolean;
   peer_review_count?: number;
   group_category_id?: number | null;
@@ -273,6 +274,12 @@ function findMockTopicAttachment(
   data: MockServerData,
   fileId: number
 ): MockAttachment | undefined {
+  for (const assignments of data.assignments.values()) {
+    for (const assignment of assignments) {
+      const onAssignment = (assignment.attachments ?? []).find((a) => a.id === fileId);
+      if (onAssignment) return onAssignment;
+    }
+  }
   for (const topics of data.discussions?.values() ?? []) {
     for (const topic of topics) {
       const onTopic = (topic.attachments ?? []).find((a) => a.id === fileId);
