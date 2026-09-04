@@ -172,14 +172,15 @@ When every part of the question is answered by something you actually read, resp
         /\blec(?:ture)?|slides?|video/i.test(item.title) || item.type === "File"
       );
       if (lecItems.length > 0 || /\blec/i.test(mod.name)) {
-        const itemList = lecItems.slice(0, 5).map((item) => item.title).join(", ");
-        parts.push(`- ${mod.name}${itemList ? `: ${itemList}` : ""}`);
+        const itemList = lecItems.slice(0, PROMPT_MODULE_ITEM_LIMIT).map((item) => item.title).join(", ");
+        const extra = lecItems.length > PROMPT_MODULE_ITEM_LIMIT ? ` (+${lecItems.length - PROMPT_MODULE_ITEM_LIMIT} more)` : "";
+        parts.push(`- ${mod.name}${itemList ? `: ${itemList}${extra}` : ""}`);
       }
     }
   }
 
   if (ctx.cache && ctx.cache.lectures.length > 0) {
-    const lectureTitles = ctx.cache.lectures.slice(0, 30);
+    const lectureTitles = ctx.cache.lectures.slice(0, PROMPT_LECTURE_LIST_LIMIT);
     parts.push(`\nCourse lectures (use open_resource to open for the user):`);
     for (const lecture of lectureTitles) {
       const type = lecture.contentType !== "unknown" ? ` [${lecture.contentType}]` : "";
@@ -187,8 +188,11 @@ When every part of the question is answered by something you actually read, resp
       const num = lecture.lectureNumber !== null ? ` (Lecture ${lecture.lectureNumber})` : "";
       parts.push(`- ${lecture.title}${num}${type}${topic}`);
     }
-    if (ctx.cache.lectures.length > 30) {
-      parts.push(`- ... and ${ctx.cache.lectures.length - 30} more`);
+    if (ctx.cache.lectures.length > PROMPT_LECTURE_LIST_LIMIT) {
+      const remaining = ctx.cache.lectures.length - PROMPT_LECTURE_LIST_LIMIT;
+      parts.push(
+        `- ... and ${remaining} more not listed here. Every lecture is indexed: search_course with the lecture number or topic (e.g. "lecture 41 recording") finds any of them, and open_lecture opens it.`
+      );
     }
     parts.push(`\nIMPORTANT: When the student asks which lectures to review or how to prepare, answer from the assignment context above combined with this lecture list and module structure. Use the MODULE NAMES to understand what each lecture covers (e.g. if a module is named "LEC05 - Polling and Timers" then Lecture 5 covers polling and timers). Do NOT hallucinate lecture descriptions: if you cannot determine what a lecture covers from the module name or title, say so honestly, and if the slides are available as extracted documents, read_file them instead of guessing. Do not read plan.md for lecture questions. Offer to open relevant lectures with open_lecture or open_resource.`);
   }
@@ -291,3 +295,8 @@ export function collectCourseReferencePages(ctx: ChatAgentContext): string[] {
   }
   return lines;
 }
+
+/** How many lectures the system prompt lists inline; the rest are reachable via search_course. */
+export const PROMPT_LECTURE_LIST_LIMIT = 60;
+/** How many lecture-like items are shown per module in the prompt's module structure. */
+export const PROMPT_MODULE_ITEM_LIMIT = 8;

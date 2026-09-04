@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **reason**
+Next area: **ground**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -74,3 +74,4 @@ Next area: **reason**
 - 2026-09-04 discover: module prerequisites, unlock dates, sequential-progress and per-item completion requirements (must view/submit/contribute, min score) are recorded in modules.json and rendered into the module artifact ("Requirements: unlocks after completing Week 1; ...") so "what do I need to do to unlock module 3" is searchable (caller did it directly)
 - 2026-09-04 extract: real page extracts carry "Updated:" and "Canvas URL:" lines from the page index (synthetic pages skip them), and announcement extracts name their author and link beside the posted date, so "is this current", "who said it" and "where is it on Canvas" are answerable (caller did it directly)
 - 2026-09-04 retrieve: lecture entries (slides, recordings, embedded videos) are indexed as a "lecture" artifact kind with title, topic, number and URL, so search_course finds "lecture 5 recording" beyond the prompt's 30-entry list, and the result guidance says to open it with open_lecture (caller did it directly)
+- 2026-09-04 reason: the prompt lists up to 60 lectures (was 30) and 8 lecture items per module (was 5), and the overflow line tells the agent every lecture is indexed and reachable via search_course + open_lecture (caller did it directly)
