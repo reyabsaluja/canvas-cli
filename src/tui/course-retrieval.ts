@@ -26,10 +26,22 @@ export interface CoursePassage {
   score: number;
 }
 
+/** How many extra matching sections a course hit may list besides the best one. */
+const MAX_EXTRA_PASSAGES = 2;
+/** An extra section must score at least this fraction of the document's best section. */
+const EXTRA_PASSAGE_MIN_RATIO = 0.4;
+const EXTRA_PASSAGE_EXCERPT_LENGTH = 160;
+
 export interface CourseArtifactMatch {
   artifact: ArtifactRecord;
   score: number;
   passage: CoursePassage | null;
+  /**
+   * Other sections of the same document that also match, strongest first.
+   * A syllabus can answer "late penalty" in both "Late policy" and
+   * "Extensions"; showing only one hides the other from the model.
+   */
+  morePassages: CoursePassage[];
 }
 
 const PASSAGE_EXCERPT_LENGTH = 240;
@@ -89,7 +101,11 @@ export async function searchCourseArtifacts(
   });
 
   const deduped = dropExtractedFileDuplicates(index, results);
-  const bestSections = findBestSectionsByArtifact(index, trimmed, kinds);
+  const sectionsByArtifact = findMatchingSectionsByArtifact(index, trimmed, kinds);
+  const bestSections = new Map<string, { section: ArtifactSection; score: number }>();
+  for (const [artifactId, hits] of sectionsByArtifact) {
+    if (hits[0]) bestSections.set(artifactId, hits[0]);
+  }
 
   // Document-level scores are presence-based, so a long syllabus that
   // mentions every query word once ties with the page that is actually about
@@ -112,7 +128,7 @@ export async function searchCourseArtifacts(
   return reranked
     .slice(0, limit)
     .map((result) =>
-      mapCourseArtifactMatch(result, trimmed, bestSections.get(result.artifact.id))
+      mapCourseArtifactMatch(result, trimmed, sectionsByArtifact.get(result.artifact.id) ?? [])
     );
 }
 
@@ -157,18 +173,32 @@ function findBestSectionsByArtifact(
   kinds: ArtifactKind[]
 ): Map<string, { section: ArtifactSection; score: number }> {
   const best = new Map<string, { section: ArtifactSection; score: number }>();
-  const ranked = searchArtifactSections(index, query, { scope: "course", kinds });
-  for (const entry of ranked) {
-    if (!best.has(entry.section.artifactId)) {
-      best.set(entry.section.artifactId, entry);
-    }
+  for (const [artifactId, hits] of findMatchingSectionsByArtifact(index, query, kinds)) {
+    if (hits[0]) best.set(artifactId, hits[0]);
   }
   return best;
 }
 
+/** All matching sections per document, strongest first (ranked order is preserved). */
+function findMatchingSectionsByArtifact(
+  index: ArtifactIndex,
+  query: string,
+  kinds: ArtifactKind[]
+): Map<string, Array<{ section: ArtifactSection; score: number }>> {
+  const byArtifact = new Map<string, Array<{ section: ArtifactSection; score: number }>>();
+  const ranked = searchArtifactSections(index, query, { scope: "course", kinds });
+  for (const entry of ranked) {
+    const list = byArtifact.get(entry.section.artifactId) ?? [];
+    list.push(entry);
+    byArtifact.set(entry.section.artifactId, list);
+  }
+  return byArtifact;
+}
+
 function buildCoursePassage(
   query: string,
-  hit: { section: ArtifactSection; score: number } | undefined
+  hit: { section: ArtifactSection; score: number } | undefined,
+  excerptLength: number = PASSAGE_EXCERPT_LENGTH
 ): CoursePassage | null {
   if (!hit) return null;
   const label = hit.section.section.trim();
@@ -178,9 +208,25 @@ function buildCoursePassage(
       label.length > 0 && !GENERIC_SECTION_LABELS.has(label.toLowerCase())
         ? label
         : null,
-    excerpt: buildMatchExcerpt(hit.section.text, query, PASSAGE_EXCERPT_LENGTH),
+    excerpt: buildMatchExcerpt(hit.section.text, query, excerptLength),
     score: hit.score,
   };
+}
+
+function buildExtraPassages(
+  query: string,
+  hits: Array<{ section: ArtifactSection; score: number }>
+): CoursePassage[] {
+  const best = hits[0];
+  if (!best) return [];
+  const extras: CoursePassage[] = [];
+  for (const hit of hits.slice(1)) {
+    if (extras.length >= MAX_EXTRA_PASSAGES) break;
+    if (hit.score < best.score * EXTRA_PASSAGE_MIN_RATIO) break;
+    const passage = buildCoursePassage(query, hit, EXTRA_PASSAGE_EXCERPT_LENGTH);
+    if (passage && passage.section) extras.push(passage);
+  }
+  return extras;
 }
 
 export async function searchCourseKnowledge(
@@ -302,27 +348,31 @@ export function renderCourseDocumentLookupResult(
  * Falls back to the document head when no passage matched.
  */
 export function formatCourseArtifactMatchLine(
-  match: Pick<CourseArtifactMatch, "artifact" | "passage">
+  match: Pick<CourseArtifactMatch, "artifact" | "passage"> & { morePassages?: CoursePassage[] }
 ): string {
   const label = formatArtifactLabel(match.artifact);
   const passage = match.passage;
+  const extras = (match.morePassages ?? [])
+    .map((extra) => `    also — ${extra.section}: ${extra.excerpt}`)
+    .join("\n");
   if (passage && passage.excerpt.length > 0) {
     const prefix = passage.section ? `${passage.section}: ` : "";
-    return `${label} — ${prefix}${passage.excerpt}`;
+    return `${label} — ${prefix}${passage.excerpt}${extras ? `\n${extras}` : ""}`;
   }
   const summary = match.artifact.excerpt ? ` — ${match.artifact.excerpt}` : "";
-  return `${label}${summary}`;
+  return `${label}${summary}${extras ? `\n${extras}` : ""}`;
 }
 
 function mapCourseArtifactMatch(
   result: RankedArtifact,
   query: string,
-  bestSection: { section: ArtifactSection; score: number } | undefined
+  hits: Array<{ section: ArtifactSection; score: number }>
 ): CourseArtifactMatch {
   return {
     artifact: result.artifact,
     score: result.score,
-    passage: buildCoursePassage(query, bestSection),
+    passage: buildCoursePassage(query, hits[0]),
+    morePassages: buildExtraPassages(query, hits),
   };
 }
 
