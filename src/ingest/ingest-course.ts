@@ -196,14 +196,18 @@ export async function ingestCourse(
   // Step 5c''': Files the grader attached to feedback on the student's own
   // submissions (marked-up PDFs, annotated rubrics) or linked from the
   // comment text. Never appear in the Files tab or any page HTML.
-  const submissionFeedbackAttachments = selectSubmissionFeedbackFiles(raw.assignments, [
-    ...heuristicAttachments,
-    ...moduleAttachments,
-    ...descriptionAttachments,
-    ...htmlLinkedAttachments,
-    ...topicAttachmentSelection.selected,
-    ...assignmentAttachmentSelection.selected,
-  ]);
+  const submissionFeedbackAttachments = selectSubmissionFeedbackFiles(
+    raw.assignments,
+    [
+      ...heuristicAttachments,
+      ...moduleAttachments,
+      ...descriptionAttachments,
+      ...htmlLinkedAttachments,
+      ...topicAttachmentSelection.selected,
+      ...assignmentAttachmentSelection.selected,
+    ],
+    config.baseUrl
+  );
 
   // Grader feedback often points at external resources ("see this video on
   // recursion"); feed it into link capture alongside the page bodies. The
@@ -637,7 +641,8 @@ function selectDescriptionLinkedFiles(
  */
 function selectSubmissionFeedbackFiles(
   assignments: RawAssignmentRecord[],
-  alreadySelected: SelectedAttachment[]
+  alreadySelected: SelectedAttachment[],
+  canvasBaseUrl: string
 ): SelectedAttachment[] {
   const selected: SelectedAttachment[] = [];
   const claimedIds = new Set<number>();
@@ -682,7 +687,7 @@ function selectSubmissionFeedbackFiles(
       for (const source of collectAssignmentFeedbackHtmlSources({
         submission: { submission_comments: [comment] },
       })) {
-        for (const file of extractLinkedFiles(source.html)) {
+        for (const file of extractLinkedFiles(source.html, canvasBaseUrl)) {
           if (!claim(null, file.downloadUrl)) continue;
           selected.push({
             sourceType: "submission_comment_attachment",
@@ -704,7 +709,7 @@ function selectSubmissionFeedbackFiles(
       rubric: assignment.rubric,
       submission: { rubric_assessment: assignment.submission?.rubric_assessment },
     })) {
-      for (const file of extractLinkedFiles(source.html)) {
+      for (const file of extractLinkedFiles(source.html, canvasBaseUrl)) {
         if (!claim(null, file.downloadUrl)) continue;
         selected.push({
           sourceType: "submission_comment_attachment",

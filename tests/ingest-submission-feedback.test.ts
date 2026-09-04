@@ -145,6 +145,62 @@ test("ingestCourse writes a Submission Feedback section and downloads the feedba
   }
 });
 
+test("files linked from grader comments are resolved against the Canvas base URL", async () => {
+  const { config, stop } = await startFeedbackServer((data) => {
+    const midterm = data.submissions!.get(101)![0]!;
+    const comment = midterm.submission_comments![0]!;
+    comment.html_comment = [
+      comment.html_comment,
+      // A relative Canvas file link, the way the rich editor writes them.
+      '<p>Marked-up copy: <a href="/files/5305/download?download_frd=1">marked-up-solution.txt</a>.</p>',
+      // A file-shaped link on another host must be dropped, not attempted.
+      '<p>Mirror: <a href="https://elsewhere.invalid/files/9999/download">external copy</a>.</p>',
+    ].join("");
+    // Served by GET /files/5305/download; not in CS101's Files tab, so only
+    // the feedback selector can claim it.
+    data.files.set(202, [
+      {
+        id: 5305,
+        display_name: "marked-up-solution.txt",
+        filename: "marked-up-solution.txt",
+        content_type: "text/plain",
+        size: 40,
+        url: "https://canvas.example/files/5305/download",
+        updated_at: null,
+        folder_id: null,
+      },
+    ]);
+  });
+  try {
+    await withTempCwd(async () => {
+      const client = new CanvasClient(config, { maxRetries: 0 });
+      const result = await ingestCourse(COURSE, client, config, { refresh: false });
+
+      const linked = result.attachments.find((a) => a.originalFilename === "marked-up-solution.txt");
+      assert.ok(linked, "the relative file link in the grader comment is selected");
+      assert.equal(linked.sourceType, "submission_comment_attachment");
+      assert.equal(linked.status, "downloaded");
+      assert.equal(linked.localPath, "attachments/submission-comments/marked-up-solution.txt");
+      assert.match(linked.reason, /linked in submission feedback for "Midterm Exam" by TA Linus/);
+      assert.equal(
+        linked.downloadUrl,
+        `${config.baseUrl.replace(/\/api\/v1$/, "")}/files/5305/download?download_frd=1`,
+        "the download URL is absolute on the Canvas origin"
+      );
+      const onDisk = await fs.readFile(path.join(result.coursePath, linked.localPath), "utf-8");
+      assert.match(onDisk, /mock content of marked-up-solution\.txt/);
+
+      assert.ok(
+        !result.attachments.some((a) => a.downloadUrl.includes("elsewhere.invalid")),
+        "an off-origin file link is dropped at selection time, not recorded as a failed download"
+      );
+      assert.equal(result.ingestion.submissionFeedback?.attachmentsDownloaded, 2);
+    });
+  } finally {
+    await stop();
+  }
+});
+
 test("with submission feedback off, no submissions request is made and no section is written", async () => {
   const { config, requests, stop } = await startFeedbackServer();
   try {
