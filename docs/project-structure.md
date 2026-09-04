@@ -7,6 +7,7 @@ canvas-cli/
 ├── .github/               CI and publish workflows
 ├── bin/                   Node launcher for the published package
 ├── docs/                  Maintainer and contributor documentation
+│   └── harness-loop.md    Improvement-loop state: area rotation, per-area file ownership, backlog, Done log
 ├── src/                   TypeScript source code
 ├── tests/                 Automated tests (primary location)
 ├── test/                  A few older TUI regression tests
@@ -63,6 +64,7 @@ src/
 - Put rendering-only helpers in `src/format/`.
 - Route anything that touches the filesystem from untrusted names through `src/sanitize.ts`.
 - Use kebab-case for new files to keep the tree consistent.
+- Before editing ingestion, extraction, retrieval, agent, or grounding code, check the ownership table in `docs/harness-loop.md` so changes stay within one area's files.
 
 ## Tests
 

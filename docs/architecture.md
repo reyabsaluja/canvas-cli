@@ -20,7 +20,7 @@
 
 ### 2. Course ingestion
 
-- `src/ingest/` fetches modules, files, pages, and assignments from Canvas.
+- `src/ingest/` fetches modules, files (folder-aware Files-tab crawl), pages, assignments, quizzes, announcements and discussion threads with replies, course-navigation tools, and assignment groups from Canvas, and builds "Quiz: ...", "Course tools", and "Grading scheme" reference pages.
 - The ingestion pipeline chooses relevant attachments, downloads local copies, extracts text, and writes artifacts under `.canvas-cli/courses/`.
 - `src/enrich/` reads that stored data later to add deterministic context to assignment results.
 - `src/knowledge/` indexes cached artifacts so the TUI and agents can retrieve them by name or content.
@@ -83,3 +83,7 @@
 - Treat `.canvas-cli/` as generated local state, not source-controlled content.
 - Keep the TUI isolated from Canvas-specific logic where possible so workflows stay testable.
 - Never write to disk from an untrusted name without going through `src/sanitize.ts`.
+
+## Improvement Loop
+
+- `docs/harness-loop.md` is the state file for the recurring improvement loop: the area rotation (discover → extract → retrieve → reason → ground), which files each area owns and must never touch, the open backlog, and a one-line Done log. Read it before changing ingestion, extraction, retrieval, agent, or grounding code.

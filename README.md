@@ -9,7 +9,7 @@
 - Interactive TUI for browsing courses, assignments, modules, and files
 - Ingest course materials into a reusable local cache
 - AI-powered assignment workspaces with summaries, plans, and extracted artifacts
-- Grounded Q&A against workspace context
+- Grounded Q&A against workspace and course context, with section-level citations and a claim check on every answer
 - Timeline, grades, announcements, and discussion threads straight from Canvas (`/timeline`, `/grade`, `/announcements`, `/thread`)
 - Practice quizzes, lecture lookup, and PDF export with LaTeX rendering (`/quiz`, `/lecture`, `/pdf`)
 - Persistent chat sessions across global, course, and workspace scopes
@@ -515,6 +515,24 @@ Type questions directly:
   ...
 ```
 
+### How the assistant answers
+
+Course and workspace chat run a small agent loop: it plans, investigates with tools, reflects on each result, and decides whether it has enough to answer, within a visible budget of 30 steps. Every answer is then checked against what the tools actually returned before it is shown. The tools it can call:
+
+| Tool | What it does |
+|---|---|
+| `search_workspace <query> [limit]` | Search the workspace and ingested course documents; returns passages, not whole files. `limit` (1-20, default 8) widens a thin first pass |
+| `search_course <query> [limit]` | Search the whole course cache: modules, pages, assignments, quizzes, the grading scheme, course tools, announcements, discussions, lectures, and files. Each hit shows the best-matching section and a query-centred passage, plus "also — ..." lines for other sections of the same document |
+| `read_file <filename> [section] [offset]` | Read an extracted document. Every read starts with the section outline (PDF pages appear as `Page 1–60`); without `section` it returns up to about 120k characters and names the sections left out. `section` reads one page or heading in full (`"Page 57"`, `"57"`, `"p. 12"`, or a heading fragment); `offset` continues past a cut-off |
+| `list_files` | List every extracted document, downloaded attachment, and workspace file |
+| `download_course_file <title>` | Download a course file that ingestion skipped and return its text |
+| `list_assignments`, `list_announcements`, `read_thread` | Assignments with due dates; announcement and discussion titles; a full thread with all replies |
+| `open_lecture <query>`, `open_resource <query>` | Open a lecture (slides, recording, embedded video) or any file on your machine |
+
+Searches strip stop words, stem ("deadlines" matches "deadline"), and expand course vocabulary (due/deadline, rubric/grading, late/penalty, lecture/slides), and newer announcements rank above older ones on equal matches. The agent remembers what it read in earlier turns of the same session, including which sections a long document read left out.
+
+**Grounding notes you may see.** Answers cite the section they came from (`Lab4.pdf — Page 57`, `Syllabus — ## Grading`) and end with a confidence line. If an answer states a date, time, percentage, mark value, or address that the assistant did not actually read this session, confidence drops one level and the answer carries a note: *"This answer includes details I could not confirm in the sources I read (...)"*. Dates are checked in any spelling, spelled-out figures ("ten percent") count, and a weekday written next to a date is checked against the calendar. When the assistant cannot find something, it says what it looked at: *"Not found after checking: Lab4.pdf (read in full); course search for "penalty" (no matches)"*. In a workspace, if the syllabus or instructions give a due date that disagrees with Canvas, the workup shows a **Due-date conflict** line instead of silently trusting either.
+
 ### Slash commands
 
 `/help` lists exactly what is available in the current scope. Type a partial command to get inline completion.
@@ -599,6 +617,8 @@ You see the progress live before the workspace session opens:
   › workspace ready
 ```
 
+The investigation's `read_document` reads up to about 60k characters at a time and can take a `section` ("Page 12", a heading) to reach pages past that cut-off. The workup always records the due date the documents state; if it disagrees with Canvas, `assignment.md` shows a **Due-date conflict** line.
+
 On subsequent opens, the workspace loads instantly.
 
 If the workspace is still valid but the underlying course cache is newer, it opens immediately in a **stale** state and recommends `/refresh` instead of forcing a rebuild up front.
@@ -633,26 +653,36 @@ canvas-cli ingest ece297 --json                       # machine-readable summary
 
 **Storage location:** `.canvas-cli/courses/<course-slug>/` in the current directory.
 
+**What gets captured.** Beyond modules, pages, files, and assignments, ingestion crawls the whole Files tab folder by folder, reads announcements and discussion threads with every reply in thread order, downloads files attached to posts, replies, and assignments, and finds lecture recordings embedded in pages, the syllabus, announcements, and assignment descriptions (YouTube, Panopto, Kaltura, Echo360, Zoom, and others). It also builds a few reference pages that the assistant can search and read like any other document: one `Quiz: <title>` page per quiz (classic and New Quizzes, practice quizzes, surveys) with due and lock dates, time limit, attempts, points, and instructions; a **Course tools and external links** page from the course navigation (Piazza, Ed, Zoom, Gradescope, ...); and a **Grading scheme** page from the assignment groups with their weights, drop rules, and each assignment's share of the final grade. Assignment extracts state their submission rules (attempts, group work, peer review) and grade weight, and modules record their prerequisites and completion requirements. The summary printed after `ingest` lists a count for each of these.
+
+PDFs are extracted page by page under `## Page N` headings (up to 400k characters), and DOCX, PPTX, and XLSX files are extracted with their headings, tables, speaker notes, and sheets, so the assistant can cite and read a single page or section.
+
 **What gets stored:**
 
 | File | Contents |
 |---|---|
 | `course.json` | Normalized course metadata (name, code, term, dates, syllabus body) |
 | `assignments.json` | All assignment objects for the course |
-| `modules.json` | Module structure with all module items, preserving order |
+| `modules.json` | Module structure with all module items, preserving order, plus prerequisites and completion requirements |
 | `files.json` | Course file index (empty if Files API is blocked) |
-| `pages.json` | Course page index (empty if Pages API is blocked) |
+| `pages.json` | Course page index (empty if Pages API is blocked), including the generated quiz, course-tools, and grading-scheme pages |
+| `announcements.json`, `discussions.json` | Announcement and discussion indexes (replies, participants, attachments) |
+| `lectures.json` | Discovered lectures: slides, recordings, and embedded videos with lecture numbers |
+| `external-links.json` | External resources linked from course content |
 | `syllabus-candidates.json` | Ranked list of likely syllabus sources with reasons |
 | `attachments.json` | Metadata for all downloaded/skipped/failed attachments |
 | `ingestion.json` | Ingestion run metadata (timestamps, counts, version) |
 | `extracted/syllabus-body.txt` | Plain text extracted from course syllabus body (if present) |
 | `extracted/syllabus-body.html` | Raw HTML of course syllabus body (if present) |
+| `extracted/` | Extracted text for pages, assignments, announcements, discussions, external links, and every downloaded attachment |
 | `attachments/syllabus/` | Downloaded syllabus/outline PDFs and docs |
 | `attachments/important/` | Downloaded important course documents |
+| `attachments/files/<folder>/` | Files-tab crawl, mirroring the Canvas folder structure |
+| `attachments/assignments/`, `attachments/announcements/`, `attachments/discussions/` | Files attached to assignments, announcements, and discussion posts or replies |
 
 **Repeated invocation** refreshes all data and re-downloads missing attachments. Use `--refresh` to force a complete re-ingestion.
 
-**Note:** Some institutions block the Files API and/or Pages API for students. When this happens, the file and page indexes will be empty, and attachment selection will be limited. Module items and assignment descriptions remain accessible.
+**Note:** Some institutions block the Files API and/or Pages API for students. When this happens, the file and page indexes will be empty, and attachment selection will be limited. Module items and assignment descriptions remain accessible. Quizzes, external tools, and assignment groups are optional in the same way: a 403 leaves them empty rather than failing the run.
 
 ## Project Structure
 
