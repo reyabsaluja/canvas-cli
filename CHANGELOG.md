@@ -62,6 +62,10 @@ Initial release of `@reyabsaluja/canvas-cli`.
 
 ### Changed
 
+- Model catalog refreshed for September 2026: Claude Fable 5.1, Fable 5, Opus 5, Sonnet 5, Opus 4.8 and Haiku 4.5; GPT-5.6 (Sol, Terra, Luna), GPT-6 Astra and GPT-5.5; Gemini 3.8 Flash, 3.7 Flash and 3.5 Flash Lite; and the matching Bedrock `us.` inference profiles. Defaults are now Claude Opus 5, GPT-5.6, Gemini 3.8 Flash, and Claude Sonnet 5 on Bedrock
+- Effort is a five-step scale (`low`, `medium`, `high`, `xhigh`, `max`) that works on every provider, including Google: Claude 4.6 and later use adaptive thinking with the `effort` parameter (older Claude models keep an extended-thinking budget), OpenAI models get `reasoning.effort` including `xhigh` and `max`, Gemini models get a `thinking_level`, and Bedrock mirrors Claude. Pickers only offer the levels a model accepts, and an unsupported level rounds up to the nearest one the model has
+- Model display names are derived from the id (so `us.anthropic.claude-opus-5` shows as "Opus 5" and `gpt-5.6-terra` as "GPT 5.6 Terra") instead of a lookup table; the Bedrock picker reads from the shared catalog
+- `@ai-sdk/openai` bumped to 3.0.104 so `max` reasoning effort passes provider validation
 - The TUI is the sole interactive interface. There are no non-interactive `courses`, `assignments`, `show`, `do`, `work`, `ask`, `grades`, or `submit` commands.
 - Package published under the scoped name `@reyabsaluja/canvas-cli`; source maps and declarations are excluded from the tarball
 - Retrieval: every search path strips query stop words, applies conservative stemming, and expands course vocabulary synonyms (due/deadline, rubric/grading/marking, late/penalty, submit/upload, exam/midterm, lecture/slides, ...) at a lower weight so direct matches still win

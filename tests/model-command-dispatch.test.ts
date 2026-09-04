@@ -89,19 +89,4 @@ describe("modelCommand dispatch", () => {
       assert.equal(result, null);
     })
   );
-
-  test(
-    "effort subcommand returns null for google provider",
-    withEnv(
-      { AI_PROVIDER: "google", GOOGLE_API_KEY: "test", AI_MODEL: "gemini-3.5-flash" },
-      async () => {
-        writeStoredConfig(
-          { canvasBaseUrl: "", aiProvider: "google", aiModel: "gemini-3.5-flash" },
-          "default"
-        );
-        const result = await modelCommand("effort");
-        assert.equal(result, null);
-      }
-    )
-  );
 });

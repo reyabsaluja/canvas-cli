@@ -242,19 +242,19 @@ The default model is `default` (whatever your Codex config selects); enter a spe
 Each provider has a sensible default, but you can override it with `AI_MODEL`:
 
 ```bash
-AI_MODEL=claude-opus-4-7        # use Anthropic's most capable model
-AI_MODEL=gpt-5.5                # use OpenAI's most capable model
-AI_MODEL=gemini-3.1-pro-preview # use Google's reasoning model
+AI_MODEL=claude-fable-5-1       # use Anthropic's frontier model (default is claude-opus-5)
+AI_MODEL=gpt-5.6-terra          # use OpenAI's balanced tier (default is gpt-5.6, which routes to Sol)
+AI_MODEL=gemini-3.1-pro-preview # use Google's reasoning model (default is gemini-3.8-flash)
 ```
 
 Available models per provider:
 
 | Provider | Models |
 |---|---|
-| Anthropic | `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6` |
-| OpenAI | `gpt-5.5`, `gpt-5.4-pro`, `gpt-5.4`, `gpt-5.4-mini` |
-| Google | `gemini-3.5-flash`, `gemini-3.1-pro-preview`, `gemini-3-flash-preview`, `gemini-3.1-flash-lite`, `gemini-2.5-pro`, `gemini-2.5-flash` |
-| Bedrock | `us.anthropic.claude-opus-4-7`, `us.anthropic.claude-opus-4-6-v1`, `us.anthropic.claude-sonnet-4-6` |
+| Anthropic | `claude-fable-5-1`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5` |
+| OpenAI | `gpt-5.6` (Sol), `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-6-astra` (limited access), `gpt-5.5`, `gpt-5.4` |
+| Google | `gemini-3.8-flash`, `gemini-3.1-pro-preview`, `gemini-3.7-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-2.5-pro` |
+| Bedrock | `us.anthropic.claude-fable-5-1`, `us.anthropic.claude-opus-5`, `us.anthropic.claude-sonnet-5`, `us.anthropic.claude-fable-5`, `us.anthropic.claude-opus-4-8`, `us.anthropic.claude-opus-4-7`, `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-haiku-4-5-20251001-v1:0` (swap `us.` for `global.`, `eu.`, `jp.`, or `au.` as a Custom model) |
 | GitHub Copilot | `auto`, or any model ID the `copilot` CLI accepts (Custom) |
 | ChatGPT via Codex | `default`, or any model ID the `codex` CLI accepts (Custom) |
 
@@ -262,16 +262,17 @@ You can also set the model interactively with the `/model` command in the TUI, o
 
 ### Thinking effort
 
-For providers that support extended thinking (Anthropic, OpenAI, Bedrock, Copilot, Codex), you can control how much reasoning the model does:
+Every provider takes an effort level that controls how much reasoning the model does:
 
 ```bash
 AI_EFFORT=low       # fastest, cheapest — good for simple questions
 AI_EFFORT=medium    # balanced
-AI_EFFORT=high      # more thorough analysis
-AI_EFFORT=max       # maximum reasoning — best for complex assignments
+AI_EFFORT=high      # thorough analysis (the provider default on current models)
+AI_EFFORT=xhigh     # deep, long-horizon reasoning — Claude 4.7+/5, GPT-5.4+
+AI_EFFORT=max       # no limits on thinking — Claude 4.6+/5, GPT-5.6+
 ```
 
-Set interactively with `/model effort` in the TUI. Google/Gemini does not support effort levels. On Copilot this becomes the CLI's `--effort`; on Codex it becomes `model_reasoning_effort`.
+Set interactively with `/model effort` in the TUI; the picker only offers the levels the selected model accepts, and a level set in the environment that the model lacks rounds up to the nearest one it does (for example `xhigh` becomes `max` on Claude Sonnet 4.6 and `high` on Gemini). Under the hood, Claude 4.6 and later use adaptive thinking with the `effort` parameter, older Claude models (Haiku 4.5 and earlier) get an extended-thinking token budget, OpenAI models receive `reasoning.effort`, Gemini models receive a `thinking_level` (`low`/`medium`/`high`), and Bedrock mirrors the Claude behaviour. On Copilot this becomes the CLI's `--effort`; on Codex it becomes `model_reasoning_effort`.
 
 ### Auto-detection fallback
 
@@ -338,7 +339,7 @@ Use `--profile <name>` with `login`, `logout`, and `status` to keep separate Can
 | `CANVAS_CLI_PROFILE` | Active profile name (default: `default`) |
 | `AI_PROVIDER` | `anthropic`, `openai`, `google` (or `gemini`), `bedrock`, `copilot` (GitHub Copilot subscription), or `codex` (ChatGPT plan via Codex, experimental; aliases `chatgpt`, `openai-codex`) |
 | `AI_MODEL` | Model ID override for the provider |
-| `AI_EFFORT` | `low`, `medium`, `high`, or `max` (ignored for Google) |
+| `AI_EFFORT` | `low`, `medium`, `high`, `xhigh`, or `max`; rounds to the nearest level the model supports |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY` | Provider API keys |
 | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_BEARER_TOKEN_BEDROCK` | Bedrock credentials |
 | `DEBUG=canvas-cli` | Same as `--debug` |

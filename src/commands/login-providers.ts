@@ -3,6 +3,7 @@ import { verticalPicker, horizontalPicker, BACK, C, type PickerOption } from "./
 import { promptLine, promptSecret, ESCAPED } from "./login-prompts.js";
 import { SUBSCRIPTION_PROVIDERS, type SubscriptionProvider } from "../ai/cli-backend.js";
 import { checkSubscriptionCli, runSubscriptionLogin } from "../ai/subscription-status.js";
+import { supportedEffortLevels, type AIEffortLevel } from "../ai/model-capabilities.js";
 
 const require = createRequire(import.meta.url);
 const modelsJson: Record<string, PickerOption[]> = require("../ai/models.json");
@@ -11,6 +12,23 @@ const MODEL_CATALOG: Record<string, PickerOption[]> = Object.fromEntries(
 );
 
 const ESC_HINT = C.dim("(esc to go back)");
+
+const EFFORT_HINTS: Record<AIEffortLevel, string> = {
+  low: "quick",
+  medium: "balanced",
+  high: "thorough",
+  xhigh: "deep",
+  max: "no limits",
+};
+
+/** Effort picker choices for a provider/model pair; empty when the model has no effort control. */
+export function effortPickerOptions(provider: string, model: string): PickerOption[] {
+  return supportedEffortLevels(provider, model).map((level) => ({
+    label: level,
+    value: level,
+    description: EFFORT_HINTS[level],
+  }));
+}
 
 export interface BedrockResult {
   awsRegion: string;
@@ -54,12 +72,7 @@ export async function runBedrockSteps(freshStep: () => void): Promise<BedrockRes
       subStep = 5;
     } else if (subStep === 5) {
       console.log();
-      const effort = await horizontalPicker("Effort", [
-        { label: "low", value: "low" },
-        { label: "medium", value: "medium" },
-        { label: "high", value: "high" },
-        { label: "max", value: "max" },
-      ]);
+      const effort = await horizontalPicker("Effort", effortPickerOptions("bedrock", aiModel));
       if (effort === BACK) { subStep = 4; continue; }
       if (effort === null) { subStep = 4; continue; }
       aiEffort = effort;
@@ -84,7 +97,6 @@ export async function runStandardProviderSteps(provider: string, freshStep: () =
 
   const keyName = getAiKeyName(provider);
   const models = getModelOptions(provider);
-  const hasEffort = provider === "openai" || provider === "anthropic";
 
   while (subStep >= 1) {
     if (subStep === 1) {
@@ -112,14 +124,10 @@ export async function runStandardProviderSteps(provider: string, freshStep: () =
       }
       subStep = 3;
     } else if (subStep === 3) {
-      if (hasEffort) {
+      const effortChoices = effortPickerOptions(provider, aiModel);
+      if (effortChoices.length > 0) {
         console.log();
-        const effort = await horizontalPicker("Effort", [
-          { label: "low", value: "low" },
-          { label: "medium", value: "medium" },
-          { label: "high", value: "high" },
-          { label: "max", value: "max" },
-        ]);
+        const effort = await horizontalPicker("Effort", effortChoices);
         if (effort === BACK) { subStep = 2; continue; }
         if (effort === null) { subStep = 2; continue; }
         aiEffort = effort;
@@ -159,13 +167,6 @@ export interface SubscriptionResult {
   aiModel: string;
   aiEffort: string;
 }
-
-const EFFORT_CHOICES: PickerOption[] = [
-  { label: "low", value: "low" },
-  { label: "medium", value: "medium" },
-  { label: "high", value: "high" },
-  { label: "max", value: "max" },
-];
 
 /**
  * Wizard steps for a subscription provider: make sure the vendor CLI is
@@ -239,7 +240,7 @@ export async function runSubscriptionProviderSteps(
       subStep = 3;
     } else if (subStep === 3) {
       console.log();
-      const effort = await horizontalPicker("Effort", EFFORT_CHOICES);
+      const effort = await horizontalPicker("Effort", effortPickerOptions(provider, aiModel));
       if (effort === BACK) { subStep = 2; continue; }
       if (effort === null) { subStep = 2; continue; }
       aiEffort = effort;

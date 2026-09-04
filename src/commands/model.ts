@@ -1,10 +1,10 @@
 import { verticalPicker, horizontalPicker, BACK, C, type PickerOption } from "./login-picker.js";
 import { promptSecret, promptLine, ESCAPED } from "./login-prompts.js";
-import { getAiKeyName, getCredentialKey } from "./login-providers.js";
+import { getAiKeyName, getCredentialKey, effortPickerOptions } from "./login-providers.js";
 import { readStoredConfig, writeStoredConfig, defaultStoredConfig } from "../config/store.js";
 import { getActiveProfile } from "../config/env.js";
 import { loadCredential, storeCredential } from "../config/credentials.js";
-import { isSubscriptionProvider, SUBSCRIPTION_PROVIDERS, type AIEffortLevel } from "../ai/provider.js";
+import { isSubscriptionProvider, SUBSCRIPTION_PROVIDERS, isEffortLevel, type AIEffortLevel } from "../ai/provider.js";
 import { checkSubscriptionCli } from "../ai/subscription-status.js";
 import catalogJson from "../ai/models.json" with { type: "json" };
 
@@ -17,14 +17,6 @@ interface ModelGroup {
   provider: string;
   models: PickerOption[];
 }
-
-// Bedrock IDs: Opus 4.6 requires a "-v1" suffix; 4.7+ and Sonnet do not.
-// If AWS changes this, formatAIError will surface the correct ID from the API response.
-const BEDROCK_MODELS: PickerOption[] = [
-  { label: "Claude Opus 4.7", value: "us.anthropic.claude-opus-4-7", description: "most capable" },
-  { label: "Claude Opus 4.6", value: "us.anthropic.claude-opus-4-6-v1", description: "flagship" },
-  { label: "Claude Sonnet 4.6", value: "us.anthropic.claude-sonnet-4-6", description: "balanced" },
-];
 
 const LOGO = [
   "⠀⠀⢀⣤⠀⠺⣿⣿⠗⠀⣠⣀⠀⠀",
@@ -71,10 +63,7 @@ function readCurrentConfig(): CurrentConfig {
 }
 
 function resolveModelLabel(provider: string | null, modelId: string): string {
-  if (provider === "bedrock") {
-    const match = BEDROCK_MODELS.find((m) => m.value === modelId);
-    if (match) return match.label;
-  } else if (provider && MODEL_CATALOG[provider]) {
+  if (provider && MODEL_CATALOG[provider]) {
     const match = MODEL_CATALOG[provider]!.find((m: PickerOption) => m.value === modelId);
     if (match) return match.label;
   }
@@ -103,7 +92,9 @@ function buildModelGroups(): ModelGroup[] {
   if (MODEL_CATALOG["google"]) {
     groups.push({ label: "Google", provider: "google", models: MODEL_CATALOG["google"] });
   }
-  groups.push({ label: "AWS Bedrock", provider: "bedrock", models: BEDROCK_MODELS });
+  if (MODEL_CATALOG["bedrock"]) {
+    groups.push({ label: "AWS Bedrock", provider: "bedrock", models: MODEL_CATALOG["bedrock"] });
+  }
 
   return groups;
 }
@@ -128,19 +119,6 @@ async function promptBedrockCredentials(profile: string): Promise<boolean> {
   writeStoredConfig({ ...base, awsRegion: region }, profile);
   return true;
 }
-
-const EFFORT_OPTIONS: PickerOption[] = [
-  { label: "low", value: "low" },
-  { label: "medium", value: "medium" },
-  { label: "high", value: "high" },
-  { label: "max", value: "max", description: "extended thinking" },
-];
-
-const EFFORT_OPTIONS_OPENAI: PickerOption[] = [
-  { label: "low", value: "low" },
-  { label: "medium", value: "medium" },
-  { label: "high", value: "high" },
-];
 
 function printHeader(): void {
   const current = readCurrentConfig();
@@ -205,10 +183,11 @@ async function modelEffortSubcommand(): Promise<ModelResult> {
       return null;
     }
 
-    if (current.provider === "google") {
+    const effortChoices = effortPickerOptions(current.provider, current.model);
+    if (effortChoices.length === 0) {
       clearScreen();
       printHeader();
-      console.log(`  ${C.error("✗")} ${C.text("Effort levels are not supported for Google models.")}\n`);
+      console.log(`  ${C.error("✗")} ${C.text("Effort levels are not supported for this model.")}\n`);
       return null;
     }
 
@@ -220,7 +199,6 @@ async function modelEffortSubcommand(): Promise<ModelResult> {
     console.log(`  ${C.success("✓")} ${C.dim("Provider")}  ${C.muted(providerLabel)}`);
     console.log(`  ${C.success("✓")} ${C.dim("Model")}     ${C.muted(modelLabel)}\n`);
 
-    const effortChoices = current.provider === "openai" ? EFFORT_OPTIONS_OPENAI : EFFORT_OPTIONS;
     const picked = await horizontalPicker("effort", effortChoices);
     if (picked === BACK || picked === null) return null;
 
@@ -294,10 +272,7 @@ async function modelKeySubcommand(): Promise<ModelResult> {
     }
 
     if (!current.model) return null;
-    const validEfforts: string[] = ["low", "medium", "high", "max"];
-    const effort = validEfforts.includes(current.effort ?? "")
-      ? (current.effort as AIEffortLevel)
-      : undefined;
+    const effort = isEffortLevel(current.effort) ? current.effort : undefined;
     return { provider: current.provider, model: current.model, effort };
   } finally {
     showCursor();
@@ -410,7 +385,8 @@ async function modelFullFlow(): Promise<ModelResult> {
       modelLabel = finalModel;
     }
 
-    const supportsEffort = selectedProvider !== "google";
+    const effortChoices = effortPickerOptions(selectedProvider, finalModel);
+    const supportsEffort = effortChoices.length > 0;
     let effort: AIEffortLevel | undefined;
 
     if (supportsEffort) {
@@ -419,7 +395,6 @@ async function modelFullFlow(): Promise<ModelResult> {
       console.log(`  ${C.success("✓")} ${C.dim("Provider")}  ${C.muted(group.label)}`);
       console.log(`  ${C.success("✓")} ${C.dim("Model")}     ${C.muted(modelLabel)}\n`);
 
-      const effortChoices = selectedProvider === "openai" ? EFFORT_OPTIONS_OPENAI : EFFORT_OPTIONS;
       const picked = await horizontalPicker("effort", effortChoices);
       if (picked === BACK || picked === null) return null;
       effort = picked as AIEffortLevel;
