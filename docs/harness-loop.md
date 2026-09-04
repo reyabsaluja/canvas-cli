@@ -8,7 +8,7 @@ appends a Done entry, and rotates the pointer. Keep entries to one line.
 
 Areas, in order: `discover` → `extract` → `retrieve` → `reason` → `ground` → back to `discover`.
 
-Next area: **reason**
+Next area: **ground**
 
 ## File ownership (so iterations never collide with each other or with edits in flight)
 
@@ -64,3 +64,4 @@ Next area: **reason**
 - 2026-09-03 discover: assignment groups (weights, drop rules, member assignments with each one's share of the final grade) captured as a "Grading scheme" page via the existing getAssignmentGroupsSafe; count in ingestion.json and summary (caller did it directly)
 - 2026-09-04 extract: assignment extracts now state submission rules from the detail record (attempts allowed, group assignment and grading mode, peer reviews and count, anonymous, omitted from final grade, unpublished, lock reason) so "can I resubmit?" / "is this a group lab?" are answerable (caller did it directly)
 - 2026-09-04 retrieve: announcements and discussion threads get a recency multiplier in both search scorers (up to +20% for a post from today, fading to nothing at 90 days; discussions use last reply time), so the newest matching post ranks first (caller did it directly)
+- 2026-09-04 reason: prompt lists the course reference pages ingestion now builds (grading scheme, course tools, quiz pages) and routes "how much is this worth", "where do I ask questions" and quiz-rule questions to them (caller did it directly)

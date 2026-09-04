@@ -53,6 +53,9 @@ Routing table — which tool to reach for first:
 - Other assignments, what is due next, workload: list_assignments.
 - Lectures, slides, recordings, topics to review: the lecture list and module structure below, plus open_lecture to open one; read_file on the slides when they are listed as extracted documents and the question is about their content.
 - Course pages, modules, or files that are not in this workspace: search_course, then read_file (or download_course_file for a file that has not been downloaded yet).
+- How much an assignment is worth, group weights, drop-lowest rules, how the final grade is computed: search_course "grading scheme", then read_file on the "Grading scheme: assignment groups and weights" page.
+- Where to ask questions, office-hours or lecture links, Piazza, Ed, Zoom, Gradescope: search_course "course tools", then read_file on "Course tools and external links".
+- Quiz rules (time limit, attempts, what it covers, when it opens): search_course with the quiz name; quizzes are pages titled "Quiz: <name>".
 - Unknown filename, or an earlier read or open failed: list_files.
 
 Tool usage rules:
@@ -151,6 +154,14 @@ When every part of the question is answered by something you actually read, resp
         ? " (contains extracted files — PDFs inside are readable)"
         : "";
       parts.push(`- ${extractedFile.name}${hint}`);
+    }
+  }
+
+  const referencePages = collectCourseReferencePages(ctx);
+  if (referencePages.length > 0) {
+    parts.push(`\nCourse reference pages (read_file by exact title, or search_course):`);
+    for (const line of referencePages) {
+      parts.push(`- ${line}`);
     }
   }
 
@@ -254,4 +265,29 @@ function buildConversationPrompt(
   }
   sections.push(userMessage);
   return sections.join("\n");
+}
+
+/**
+ * Synthetic pages ingestion builds from Canvas metadata (grading scheme,
+ * external tools, quizzes). They answer questions no document covers, so the
+ * model must know they exist. Exported for tests.
+ */
+export function collectCourseReferencePages(ctx: ChatAgentContext): string[] {
+  const pages = ctx.cache?.pages ?? [];
+  const lines: string[] = [];
+  const grading = pages.find((page) => page.title.startsWith("Grading scheme"));
+  if (grading) {
+    lines.push(`"${grading.title}" — assignment group weights, drop rules, and each assignment's share of the final grade`);
+  }
+  const tools = pages.find((page) => page.title.startsWith("Course tools"));
+  if (tools) {
+    lines.push(`"${tools.title}" — Piazza/Ed/Zoom/Gradescope and other external tools with what each is for`);
+  }
+  const quizzes = pages.filter((page) => page.title.startsWith("Quiz: "));
+  if (quizzes.length > 0) {
+    const shown = quizzes.slice(0, 8).map((page) => `"${page.title}"`).join(", ");
+    const more = quizzes.length > 8 ? ` and ${quizzes.length - 8} more` : "";
+    lines.push(`${quizzes.length} quiz page${quizzes.length === 1 ? "" : "s"} with time limits, attempts, and instructions: ${shown}${more}`);
+  }
+  return lines;
 }
