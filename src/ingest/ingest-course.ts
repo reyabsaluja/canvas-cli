@@ -237,7 +237,6 @@ export async function ingestCourse(
     syllabusBody: courseMeta.syllabusBody,
     announcements: raw.announcements,
     discussionThreads: [...raw.discussionThreads, ...announcementReplyThreads],
-    tabs: raw.tabs,
     config,
     signal,
   });

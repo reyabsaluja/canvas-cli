@@ -57,9 +57,11 @@ function makeXlsx(): Buffer {
 
 function startServer(
   routes: Record<string, { contentType: string; body: Buffer }>
-): Promise<{ url: string; close: () => Promise<void> }> {
+): Promise<{ url: string; requests: string[]; close: () => Promise<void> }> {
   return new Promise((resolve) => {
+    const requests: string[] = [];
     const server = http.createServer((req, res) => {
+      requests.push(req.url ?? "");
       const route = routes[req.url ?? ""];
       if (!route) {
         res.writeHead(404);
@@ -74,6 +76,7 @@ function startServer(
       const port = typeof addr === "object" && addr ? addr.port : 0;
       resolve({
         url: `http://127.0.0.1:${port}`,
+        requests,
         close: () =>
           new Promise((r) => {
             server.closeAllConnections();
@@ -388,50 +391,78 @@ test("captureExternalCourseLinks reads .srt subtitles served with a subtitle con
   }
 });
 
-test("captureExternalCourseLinks treats visible external course tabs on the Canvas origin as candidates", async () => {
-  const server = await startServer({
+test("captureExternalCourseLinks never fetches Canvas external-tool launch URLs but still captures ordinary external pages", async () => {
+  // Canvas answers a tool launch URL with its login page even when the API
+  // bearer token is attached, so fetching one would store login HTML under
+  // the tool's title. The synthetic "Course tools and external links" page
+  // already records the launch links; capture must leave them alone.
+  const canvas = await startServer({
     "/courses/1/external_tools/77": {
       contentType: "text/html",
       body: Buffer.from(
-        "<html><head><title>Piazza</title></head><body><p>Ask questions in the CS101 Piazza forum.</p></body></html>"
+        "<html><head><title>Log In to Canvas</title></head><body><form>Email / Password</form></body></html>"
+      ),
+    },
+  });
+  const external = await startServer({
+    "/piazza-guide": {
+      contentType: "text/html",
+      body: Buffer.from(
+        "<html><head><title>Piazza guide</title></head><body><p>Ask questions in the CS101 Piazza forum.</p></body></html>"
       ),
     },
   });
   try {
+    const launchUrl = `${canvas.url}/courses/1/external_tools/77`;
     const result = await captureExternalCourseLinks(
       baseOptions({
-        config: { baseUrl: `${server.url}/api/v1`, accessToken: "tok" } as Config,
-        tabs: [
-          { id: "home", label: "Home", html_url: "/courses/1", type: "internal" },
+        config: { baseUrl: `${canvas.url}/api/v1`, accessToken: "tok" } as Config,
+        fetchedPages: [
           {
-            id: "context_external_tool_77",
-            label: "Piazza",
-            html_url: "/courses/1/external_tools/77",
-            full_url: `${server.url}/courses/1/external_tools/77`,
-            type: "external",
+            slug: "course-tools",
+            title: "Course tools and external links",
+            body: `<ul><li><strong>Piazza</strong> (Q&amp;A forum) — <a href="${launchUrl}">${launchUrl}</a></li></ul>`,
           },
+        ],
+        syllabusBody: [
+          '<p>Post questions on <a href="/courses/1/external_tools/77">Piazza</a>;',
+          `the <a href="${external.url}/piazza-guide">Piazza guide</a> explains how.</p>`,
+          `<iframe src="${canvas.url}/courses/1/external_tools/78?display=borderless"></iframe>`,
+          `<a href="${canvas.url}/accounts/1/external_tools/5">Account-level tool</a>`,
+        ].join(""),
+        modules: [
           {
-            id: "context_external_tool_78",
-            label: "Old tool",
-            full_url: `${server.url}/courses/1/external_tools/78`,
-            type: "external",
-            hidden: true,
-          },
-          {
-            id: "context_external_tool_79",
-            label: "Elsewhere",
-            full_url: "https://tools.invalid/launch",
-            type: "external",
-          },
+            name: "Week 1",
+            items: [
+              {
+                type: "ExternalTool",
+                title: "Piazza",
+                externalUrl: null,
+                htmlUrl: launchUrl,
+                contentId: null,
+              },
+            ],
+          } as any,
         ],
       })
     );
+    assert.deepEqual(
+      canvas.requests,
+      [],
+      "no launch URL on the Canvas origin may be requested"
+    );
+    assert.deepEqual(external.requests, ["/piazza-guide"]);
     assert.equal(result.length, 1);
-    assert.equal(result[0]!.entry.title, "Piazza");
-    assert.deepEqual(result[0]!.entry.sources, ['course navigation tab "Piazza"']);
+    assert.equal(result[0]!.entry.title, "Piazza guide");
+    assert.equal(result[0]!.entry.contentStatus, "captured");
     assert.match(result[0]!.text, /Ask questions in the CS101 Piazza forum/);
+    assert.ok(
+      result.every((capture) => !/Log In to Canvas/.test(capture.text)),
+      "login HTML must never be stored as captured text"
+    );
   } finally {
-    await server.close();
+    await canvas.close();
+    await external.close();
   }
 });
 

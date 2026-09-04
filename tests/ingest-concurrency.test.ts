@@ -784,7 +784,7 @@ test("ingestCourse captures discussion thread clarifications and linked resource
   });
 });
 
-test("ingestCourse captures external resources linked from course content and module tools", async () => {
+test("ingestCourse captures external resources linked from course content and never launches module tools through Canvas", async () => {
   await withTempCwd(async () => {
     const course: Course = {
       id: 17,
@@ -802,14 +802,10 @@ test("ingestCourse captures external resources linked from course content and mo
           ? init.headers
           : new Headers((init?.headers as Record<string, string> | undefined) ?? {});
 
-      if (url === "https://canvas.example/courses/17/external_tools/launch") {
-        assert.equal(headers.get("Authorization"), "Bearer token");
-        return new Response(null, {
-          status: 302,
-          headers: {
-            location: "https://public.example/shared-spec",
-          },
-        });
+      if (url.includes("/external_tools/")) {
+        // Canvas only honours the API token on /api/ routes; a launch GET
+        // comes back as the login page, so it must never be requested.
+        assert.fail(`external-tool launch URL must not be fetched: ${url}`);
       }
 
       if (url === "https://public.example/shared-spec") {
@@ -922,13 +918,15 @@ test("ingestCourse captures external resources linked from course content and mo
       );
 
       assert.equal(result.externalLinks?.length, 1);
-      assert.equal(result.externalLinks?.[0]?.title, "Shared Lab Spec");
+      assert.equal(result.externalLinks?.[0]?.title, "shared lab spec");
       assert.equal(
         result.externalLinks?.[0]?.resolvedUrl,
         "https://public.example/shared-spec"
       );
       assert.equal(result.externalLinks?.[0]?.contentStatus, "captured");
-      assert.equal(result.externalLinks?.[0]?.sourceCount, 2);
+      // Only the description link counts: the module item's launch URL is
+      // recorded by the course-tools page, not captured.
+      assert.equal(result.externalLinks?.[0]?.sourceCount, 1);
 
       const externalLinks = JSON.parse(
         await fs.readFile(
@@ -936,8 +934,8 @@ test("ingestCourse captures external resources linked from course content and mo
           "utf-8"
         )
       ) as Array<{ title: string; sourceCount: number }>;
-      assert.equal(externalLinks[0]?.title, "Shared Lab Spec");
-      assert.equal(externalLinks[0]?.sourceCount, 2);
+      assert.equal(externalLinks[0]?.title, "shared lab spec");
+      assert.equal(externalLinks[0]?.sourceCount, 1);
 
       const externalExtract = await fs.readFile(
         path.join(
@@ -949,8 +947,9 @@ test("ingestCourse captures external resources linked from course content and mo
         "utf-8"
       );
       assert.match(externalExtract, /Use signed overflow detection for the ALU/);
+      assert.match(externalExtract, /Page title: Shared Lab Spec/);
       assert.match(externalExtract, /assignment "Homework 1" description/);
-      assert.match(externalExtract, /module "Week 4" item "Shared Lab Spec"/);
+      assert.doesNotMatch(externalExtract, /module "Week 4" item "Shared Lab Spec"/);
       assert.match(externalExtract, /Source URL: https:\/\/public\.example\/shared-spec/);
     } finally {
       globalThis.fetch = originalFetch;

@@ -5,7 +5,6 @@ import {
   readBodyWithLimit,
   withTimeoutSignal,
 } from "../canvas/safe-download.js";
-import type { CanvasTab } from "../canvas/types.js";
 import type { Config } from "../config/env.js";
 import { extractOfficeText } from "../extract/office-text.js";
 import { decodeEntities, htmlToText } from "../format/html-to-text.js";
@@ -72,8 +71,6 @@ export async function captureExternalCourseLinks(options: {
     html_url?: string | null;
   }>;
   discussionThreads: RawDiscussionThread[];
-  /** Course navigation tabs; visible external-tool tabs are captured by their launch URL. */
-  tabs?: CanvasTab[] | null;
   config: Config;
   /** Ctrl-C during ingestion: stops new fetches and aborts in-flight ones. */
   signal?: AbortSignal | null;
@@ -101,30 +98,6 @@ export async function captureExternalCourseLinks(options: {
       sources: [candidate.source],
     });
   };
-
-  // Course navigation tabs for external tools (Piazza, Ed, Zoom, ...). Their
-  // launch URL always lives on the Canvas origin; anything else is not a tab
-  // launch URL and is left alone.
-  for (const tab of options.tabs ?? []) {
-    if (tab.type !== "external" || tab.hidden) continue;
-    for (const rawUrl of [tab.full_url, tab.html_url]) {
-      const url = resolveHref(rawUrl ?? "", options.config.baseUrl);
-      if (
-        !url ||
-        !canvasOrigin ||
-        getOrigin(url) !== canvasOrigin ||
-        !isCapturableExternalUrl(url, { courseId: options.courseId, canvasOrigin })
-      ) {
-        continue;
-      }
-      addCandidate({
-        url,
-        title: tab.label,
-        source: `course navigation tab "${tab.label}"`,
-      });
-      break;
-    }
-  }
 
   for (const module of options.modules) {
     for (const item of module.items) {
@@ -805,6 +778,14 @@ function isCapturableExternalUrl(
   const path = parsed.pathname;
   if (options.canvasOrigin && parsed.origin === options.canvasOrigin) {
     if (path.startsWith("/api/")) {
+      return false;
+    }
+    // LTI launch URLs (/courses/:id/external_tools/:id, account-level tools,
+    // the launch iframes course HTML embeds) only work in a browser session:
+    // Canvas honours the API bearer token on /api/ routes alone and answers a
+    // launch with its login page, which would be stored as the tool's text.
+    // The "Course tools and external links" page already records the links.
+    if (/\/external_tools\//.test(path)) {
       return false;
     }
     if (new RegExp(`^/courses/${options.courseId}(?:/|$)`).test(path)) {
