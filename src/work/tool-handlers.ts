@@ -6,6 +6,7 @@ import type { CourseCache } from "../enrich/cache-loader.js";
 import type { ToolExecutionResult } from "../agent/observation.js";
 import type { InvestigationState } from "./types.js";
 import { extractFileText } from "../extract/extract-text.js";
+import { buildDocumentReadView, parseDocumentReadRequest } from "../tui/chat-agent/tool-execution.js";
 import { confineToDirectory, sanitizeFilename } from "../sanitize.js";
 
 /**
@@ -85,7 +86,7 @@ export async function executeToolDetailed(
     case "get_module_items":
       return getModuleItems(input.module_name as string, ctx.cache);
     case "read_document":
-      return readDocument(input.filename as string, ctx);
+      return readDocument(input.filename as string, ctx, parseDocumentReadRequest(input).section ?? null);
     case "download_module_file":
       return downloadModuleFile(input.item_title as string, ctx);
     case "get_syllabus":
@@ -196,13 +197,17 @@ function getModuleItems(moduleName: string, cache: CourseCache): ToolExecutionRe
 
 async function readDocument(
   filename: string,
-  ctx: ToolContext
+  ctx: ToolContext,
+  section: string | null = null
 ): Promise<ToolExecutionResult> {
   const { cache, state } = ctx;
+  // Section reads are cached separately: a cut-off whole read must never be
+  // served in place of the page that was actually asked for.
+  const cacheKey = section ? `${filename}#${section.toLowerCase()}` : filename;
 
   // Check if already extracted in this session
-  if (state.extractedTexts.has(filename)) {
-    const cached = state.extractedTexts.get(filename)!;
+  if (state.extractedTexts.has(cacheKey)) {
+    const cached = state.extractedTexts.get(cacheKey)!;
     maybeRememberPrimaryInstructionSource(state, filename, filename);
     return {
       observation: {
@@ -242,9 +247,23 @@ async function readDocument(
   const fullPath = path.join(cache.coursePath, att.localPath);
   const text = await extractFileText(fullPath, att.originalFilename);
 
-  const truncated = truncateDocumentText(text);
+  let truncated: string;
+  let summary = `Read ${att.originalFilename}.`;
+  if (section) {
+    const view = buildDocumentReadView(text, { section }, MAX_DOC_TEXT);
+    if (view.sectionLabel) {
+      truncated = view.content;
+      summary = `Read ${att.originalFilename} — ${view.sectionLabel}.`;
+    } else {
+      truncated = `[Section "${section}" was not found in ${att.originalFilename}; showing the document from the start. Sections available: ${
+        view.labels.slice(0, 40).join(" | ") || "none"
+      }]\n\n${truncateDocumentText(text)}`;
+    }
+  } else {
+    truncated = truncateDocumentText(text);
+  }
 
-  state.extractedTexts.set(filename, truncated);
+  state.extractedTexts.set(cacheKey, truncated);
   state.visitedSources.push(filename);
   maybeRememberPrimaryInstructionSource(
     state,
@@ -256,7 +275,7 @@ async function readDocument(
     observation: {
       tool: "read_document",
       status: "ok",
-      summary: `Read ${att.originalFilename}.`,
+      summary,
       artifacts: [],
       content: truncated,
     },
