@@ -82,6 +82,7 @@ Initial release of `@reyabsaluja/canvas-cli`.
 - Discovery: external-link capture now follows embedded resources, not just anchors — iframe/embed/object/video/audio/source `src` and `data` attributes and caption `<track>`s (titled from the track, e.g. "Captions: English (en)") — and visible external-tool tabs from the course navigation, keeping the 4-wide concurrency, 30 s timeout and 100 MB body cap
 - Extraction: external links to Office documents (.docx/.pptx/.xlsx, by extension or content type) are extracted with the Office extractor; `.vtt`/`.srt` caption tracks are captured as plain-text transcripts; Google Slides links are read through their .pptx export and Google Sheets through their CSV export, alongside the existing Google Docs text export
 - Extraction: Word documents include reviewer comments (listed under "Comments:" with `[comment N]` markers where they are anchored) and headers/footers; PowerPoint decks include legacy and threaded reviewer comments under the slide they belong to (unattached comment parts are listed after the slides); spreadsheet cells show their formula next to the cached value, e.g. `0.75 (formula: =SUM(B2:B3))`
+- Extraction: HTML `<pre>` blocks become fenced code with indentation, tabs, and blank lines intact (with the language from `language-*` classes); `<details>` render as "Details: <summary>" blocks; `<video>`/`<audio>` list every `<source>`, caption/subtitle `<track>`, and poster; `<object>`/`<embed>` and lazy `data-src`/`data` URLs emit "Embedded object" lines with their type and fallback text
 - Workspace answers are no longer capped at 2-4 sentences, and the prompt asks the agent to list the sources it checked in not-found answers
 - Observation relevance stems question words and treats a match on a document heading as strong on its own, so a read that answers the question counts as grounded evidence across verification, memory reuse, and the retrieval gate
 - Minimum supported Node.js is now 20.10 (`engines.node` is `>=20.10`), the first release with stable JSON import attributes
@@ -99,6 +100,7 @@ Initial release of `@reyabsaluja/canvas-cli`.
 - Questions already covered by the workup still get tool calls instead of an answer from memory alone
 - Quizzes, external tools, and assignment groups degrade to none on a 403 instead of failing ingestion
 - Ctrl+C during the external-link capture phase of ingestion now aborts in-flight requests and stops starting new ones, instead of letting each request run to its 30 s timeout
+- `login` prompts no longer abort on arrow keys, other escape sequences, or a bracketed paste (only a bare Esc goes back), and a rejected token re-prompts in place with the error still visible and a "Try again or press esc to go back" hint
 
 ### Security
 
