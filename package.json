@@ -35,7 +35,7 @@
     "ai"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=20.10"
   },
   "bin": {
     "canvas-cli": "./bin/canvas-cli.js"

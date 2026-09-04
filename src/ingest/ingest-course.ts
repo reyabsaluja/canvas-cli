@@ -163,6 +163,7 @@ export async function ingestCourse(
     announcements: raw.announcements,
     discussionThreads: raw.discussionThreads,
     config,
+    signal,
   });
   const externalLinks = capturedExternalLinks.map((capture) => capture.entry);
 

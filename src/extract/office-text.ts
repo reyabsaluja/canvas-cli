@@ -2,6 +2,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { decodeEntities } from "../format/html-to-text.js";
 import { stripControlChars } from "../sanitize.js";
+import { MAX_ZIP_ENTRY_BYTES, readZipEntryBounded } from "./zip-bounds.js";
 
 const require = createRequire(import.meta.url);
 
@@ -78,12 +79,11 @@ async function readZipParts(buffer: Buffer): Promise<Map<string, string>> {
       const name = String(entry.filename).replace(/^\/+/, "");
       if (name.endsWith("/")) continue;
       if (!isInterestingPart(name)) continue;
-      const stream = await entry.openReadStream();
-      const chunks: Buffer[] = [];
-      for await (const chunk of stream) {
-        chunks.push(chunk as Buffer);
-      }
-      parts.set(name, Buffer.concat(chunks).toString("utf-8"));
+      // A part past the per-entry cap throws ZipEntryTooLargeError; it
+      // propagates so callers report the container as unreadable instead of
+      // inflating a hostile XML part into memory.
+      const bytes = await readZipEntryBounded(entry, MAX_ZIP_ENTRY_BYTES);
+      parts.set(name, bytes.toString("utf-8"));
     }
   } finally {
     await zip.close();

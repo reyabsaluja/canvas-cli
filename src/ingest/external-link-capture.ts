@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
+import {
+  DownloadTooLargeError,
+  readBodyWithLimit,
+  withTimeoutSignal,
+} from "../canvas/safe-download.js";
 import type { Config } from "../config/env.js";
 import { decodeEntities, htmlToText } from "../format/html-to-text.js";
 import { mapWithConcurrency } from "./concurrency.js";
@@ -17,6 +22,13 @@ const EXTERNAL_LINK_CAPTURE_CONCURRENCY = 4;
 const MAX_REDIRECTS = 6;
 const MAX_CAPTURED_TEXT = 30000;
 const EXTERNAL_FETCH_TIMEOUT_MS = 30_000;
+/**
+ * Largest response body read from an external link. Only the first 30k
+ * characters are ever kept, so this is purely a guard against a link that
+ * resolves to a multi-gigabyte download (a lecture recording, a dataset)
+ * being buffered in memory while text extraction is attempted.
+ */
+const MAX_EXTERNAL_BODY_BYTES = 100 * 1024 * 1024;
 
 interface ExternalLinkCandidate {
   url: string;
@@ -59,8 +71,11 @@ export async function captureExternalCourseLinks(options: {
   }>;
   discussionThreads: RawDiscussionThread[];
   config: Config;
+  /** Ctrl-C during ingestion: stops new fetches and aborts in-flight ones. */
+  signal?: AbortSignal | null;
 }): Promise<CapturedExternalLink[]> {
   const canvasOrigin = getOrigin(options.config.baseUrl);
+  const signal = options.signal ?? null;
   const aggregated = new Map<string, AggregatedExternalLinkCandidate>();
 
   const addCandidate = (candidate: ExternalLinkCandidate): void => {
@@ -184,9 +199,10 @@ export async function captureExternalCourseLinks(options: {
     async (candidate) => {
       return {
         candidate,
-        fetched: await fetchExternalLink(candidate.url, options.config),
+        fetched: await fetchExternalLink(candidate.url, options.config, signal),
       };
-    }
+    },
+    signal
   );
 
   const deduped = new Map<
@@ -257,14 +273,16 @@ export async function captureExternalCourseLinks(options: {
 
 async function fetchExternalLink(
   url: string,
-  config: Config
+  config: Config,
+  signal: AbortSignal | null
 ): Promise<ExternalLinkFetchResult> {
   let response: Response;
   let finalUrl: string;
 
   try {
-    ({ response, finalUrl } = await fetchWithControlledRedirects(url, config));
+    ({ response, finalUrl } = await fetchWithControlledRedirects(url, config, signal));
   } catch (error) {
+    if (signal?.aborted) throw error;
     return {
       status: "failed",
       resolvedUrl: null,
@@ -288,8 +306,9 @@ async function fetchExternalLink(
     };
   }
 
-  const googleDocExport = await fetchGoogleDocumentExport(finalUrl);
+  const googleDocExport = await fetchGoogleDocumentExport(finalUrl, signal);
   if (googleDocExport) {
+    await response.body?.cancel().catch(() => {});
     return {
       status: googleDocExport.text.length > 0 ? "captured" : "metadata_only",
       resolvedUrl: finalUrl,
@@ -301,9 +320,10 @@ async function fetchExternalLink(
   }
 
   if (looksLikePdf(contentType, finalUrl)) {
+    const body = await readExternalBody(response, signal);
+    if (!body.ok) return bodyFailureResult(body, finalUrl, contentType);
     try {
-      const buffer = Buffer.from(await response.arrayBuffer());
-      const extracted = (await pdfParse(buffer)).text.trim().slice(0, MAX_CAPTURED_TEXT);
+      const extracted = (await pdfParse(body.buffer)).text.trim().slice(0, MAX_CAPTURED_TEXT);
       return {
         status: extracted.length > 0 ? "captured" : "metadata_only",
         resolvedUrl: finalUrl,
@@ -330,7 +350,9 @@ async function fetchExternalLink(
   }
 
   if (looksLikeHtml(contentType, finalUrl)) {
-    const html = (await response.text()).slice(0, MAX_CAPTURED_TEXT * 2);
+    const body = await readExternalBody(response, signal);
+    if (!body.ok) return bodyFailureResult(body, finalUrl, contentType);
+    const html = body.buffer.toString("utf-8").slice(0, MAX_CAPTURED_TEXT * 2);
     const pageTitle = extractHtmlTitle(html);
     const pageDescription = extractMetaDescription(html);
     const htmlForText = extractHtmlBody(html) ?? html;
@@ -352,7 +374,9 @@ async function fetchExternalLink(
   }
 
   if (looksLikePlainText(contentType, finalUrl)) {
-    const text = (await response.text()).trim().slice(0, MAX_CAPTURED_TEXT);
+    const body = await readExternalBody(response, signal);
+    if (!body.ok) return bodyFailureResult(body, finalUrl, contentType);
+    const text = body.buffer.toString("utf-8").trim().slice(0, MAX_CAPTURED_TEXT);
     return {
       status: text.length > 0 ? "captured" : "metadata_only",
       resolvedUrl: finalUrl,
@@ -366,6 +390,7 @@ async function fetchExternalLink(
     };
   }
 
+  await response.body?.cancel().catch(() => {});
   return {
     status: "metadata_only",
     resolvedUrl: finalUrl,
@@ -379,8 +404,64 @@ async function fetchExternalLink(
   };
 }
 
+type ExternalBodyRead =
+  | { ok: true; buffer: Buffer }
+  | { ok: false; reason: "too_large" | "unreadable"; message: string };
+
+/**
+ * Read a response body within MAX_EXTERNAL_BODY_BYTES. A user abort is
+ * rethrown; anything else (too large, connection dropped, body timeout) is
+ * returned as a failure so one bad link degrades to metadata_only instead of
+ * failing the whole capture phase.
+ */
+async function readExternalBody(
+  response: Response,
+  signal: AbortSignal | null
+): Promise<ExternalBodyRead> {
+  try {
+    const buffer = await readBodyWithLimit(response, MAX_EXTERNAL_BODY_BYTES, {
+      signal,
+      timeoutMs: EXTERNAL_FETCH_TIMEOUT_MS,
+    });
+    return { ok: true, buffer };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    if (error instanceof DownloadTooLargeError) {
+      return { ok: false, reason: "too_large", message: externalBodyCapNote() };
+    }
+    return {
+      ok: false,
+      reason: "unreadable",
+      message: `The resource was reachable, but its body could not be read: ${
+        error instanceof Error ? error.message : "unknown error"
+      }.`,
+    };
+  }
+}
+
+function externalBodyCapNote(): string {
+  const mb = Math.round(MAX_EXTERNAL_BODY_BYTES / (1024 * 1024));
+  return `The resource was reachable, but it is larger than the ${mb} MB limit for external downloads, so its content was not captured.`;
+}
+
+function bodyFailureResult(
+  body: Extract<ExternalBodyRead, { ok: false }>,
+  finalUrl: string,
+  contentType: string | null
+): ExternalLinkFetchResult {
+  return {
+    status: "metadata_only",
+    resolvedUrl: finalUrl,
+    contentType,
+    pageTitle: null,
+    text: "",
+    note: body.message,
+  };
+}
+
 async function fetchGoogleDocumentExport(
-  url: string
+  url: string,
+  signal: AbortSignal | null
 ): Promise<{
   contentType: string | null;
   pageTitle: string | null;
@@ -392,16 +473,35 @@ async function fetchGoogleDocumentExport(
     return null;
   }
 
+  const timed = withTimeoutSignal(signal, EXTERNAL_FETCH_TIMEOUT_MS);
   try {
-    const response = await fetch(exportUrl, {
-      redirect: "follow",
-      signal: AbortSignal.timeout(EXTERNAL_FETCH_TIMEOUT_MS),
-    });
+    let response: Response;
+    try {
+      response = await fetch(exportUrl, {
+        redirect: "follow",
+        signal: timed.signal,
+      });
+    } finally {
+      timed.dispose();
+    }
     if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
       return null;
     }
 
-    const text = (await response.text()).trim().slice(0, MAX_CAPTURED_TEXT);
+    const body = await readExternalBody(response, signal);
+    if (!body.ok) {
+      // The export exists but cannot be read here; report why rather than
+      // falling back to scraping the (login-walled) HTML page.
+      return {
+        contentType: response.headers.get("content-type"),
+        pageTitle: null,
+        text: "",
+        note: body.message,
+      };
+    }
+
+    const text = body.buffer.toString("utf-8").trim().slice(0, MAX_CAPTURED_TEXT);
     return {
       contentType: response.headers.get("content-type"),
       pageTitle: null,
@@ -411,7 +511,8 @@ async function fetchGoogleDocumentExport(
           ? null
           : "The Google Doc export was reachable, but it did not include readable text.",
     };
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) throw error;
     return null;
   }
 }
@@ -440,7 +541,8 @@ function buildGoogleDocumentExportUrl(url: string): string | null {
 
 async function fetchWithControlledRedirects(
   url: string,
-  config: Config
+  config: Config,
+  signal: AbortSignal | null
 ): Promise<{ response: Response; finalUrl: string }> {
   const canvasOrigin = getOrigin(config.baseUrl);
   let currentUrl = url;
@@ -449,11 +551,19 @@ async function fetchWithControlledRedirects(
     const headers = shouldSendCanvasAuth(currentUrl, canvasOrigin)
       ? { Authorization: `Bearer ${config.accessToken}` }
       : undefined;
-    const response = await fetch(currentUrl, {
-      headers,
-      redirect: "manual",
-      signal: AbortSignal.timeout(EXTERNAL_FETCH_TIMEOUT_MS),
-    });
+    // The timer covers the header exchange only; body reads are bounded
+    // separately by readExternalBody. A user abort propagates through.
+    const timed = withTimeoutSignal(signal, EXTERNAL_FETCH_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetch(currentUrl, {
+        headers,
+        redirect: "manual",
+        signal: timed.signal,
+      });
+    } finally {
+      timed.dispose();
+    }
     const redirectLocation = response.headers.get("location");
 
     if (
@@ -461,6 +571,7 @@ async function fetchWithControlledRedirects(
       response.status >= 300 &&
       response.status < 400
     ) {
+      await response.body?.cancel().catch(() => {});
       currentUrl = new URL(redirectLocation, currentUrl).toString();
       continue;
     }

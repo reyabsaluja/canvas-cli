@@ -79,6 +79,7 @@ Initial release of `@reyabsaluja/canvas-cli`.
 - Extraction: zip summary caps raised from 30k to 120k characters per file and from 50k to 400k total, with an explicit "N more characters omitted" note instead of a silent cut
 - Workspace answers are no longer capped at 2-4 sentences, and the prompt asks the agent to list the sources it checked in not-found answers
 - Observation relevance stems question words and treats a match on a document heading as strong on its own, so a read that answers the question counts as grounded evidence across verification, memory reuse, and the retrieval gate
+- Minimum supported Node.js is now 20.10 (`engines.node` is `>=20.10`), the first release with stable JSON import attributes
 
 ### Fixed
 
@@ -92,6 +93,7 @@ Initial release of `@reyabsaluja/canvas-cli`.
 - A wrong due date is flagged even when its day number appears elsewhere in the evidence (dates are checked as month+day pairs in any common spelling)
 - Questions already covered by the workup still get tool calls instead of an answer from memory alone
 - Quizzes, external tools, and assignment groups degrade to none on a 403 instead of failing ingestion
+- Ctrl+C during the external-link capture phase of ingestion now aborts in-flight requests and stops starting new ones, instead of letting each request run to its 30 s timeout
 
 ### Security
 
@@ -101,6 +103,8 @@ Initial release of `@reyabsaluja/canvas-cli`.
 - On macOS, a successful Keychain write no longer leaves a plaintext copy on disk; the file backend is used only when the Keychain is unavailable or `CANVAS_CLI_CREDENTIAL_BACKEND=file` is set
 - When `CANVAS_BASE_URL` comes from the environment, `CANVAS_ACCESS_TOKEN` must too — a stored token is never sent to an environment-supplied URL
 - Profile names are validated to prevent path traversal; plain-HTTP Canvas URLs are rejected; secrets are masked in debug output
+- Zip inflation is bounded to stop archive bombs: 100 MB per entry (checked against the declared size and again while streaming), 5,000 entries and 1 GB inflated per archive, for zip summaries, on-demand unpacks (which now stream to a temp file and rename), and Office document containers. Oversized entries are still listed with their size and a "[Skipped ...]" note; everything else in the archive is read as before
+- External-link capture reads at most 100 MB per response; a larger resource is recorded as `metadata_only` with a note naming the limit rather than being buffered in memory
 - Subscription CLIs (Copilot, Codex) run isolated: non-interactive, in an empty temporary directory, with their built-in shell, file, and web tools removed and denied (Codex `--ephemeral --sandbox read-only --ignore-user-config`; Copilot with custom instructions and built-in MCP servers disabled). The Canvas tool bridge binds to 127.0.0.1 only and requires a per-run bearer token; `OPENAI_API_KEY` is stripped from the Codex environment so the subscription path never falls back to API billing
 
 [Unreleased]: https://github.com/reyabsaluja/canvas-cli/commits/main

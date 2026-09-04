@@ -3,6 +3,23 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { htmlToText } from "../format/html-to-text.js";
 import { extractOfficeText, isOfficeExtension } from "./office-text.js";
+import {
+  ZipEntryTooLargeError,
+  formatByteCap,
+  readZipEntryBounded,
+  resolveZipReadLimits,
+  writeZipEntryBounded,
+  type ZipReadLimits,
+} from "./zip-bounds.js";
+
+export {
+  MAX_ZIP_ENTRY_BYTES,
+  MAX_ZIP_ENTRY_COUNT,
+  MAX_ZIP_TOTAL_BYTES,
+  ZipEntryTooLargeError,
+  readZipEntryBounded,
+  type ZipReadLimits,
+} from "./zip-bounds.js";
 
 const require = createRequire(import.meta.url);
 
@@ -50,7 +67,7 @@ const MAX_TEXT = 400_000;
 // view and should be as complete as a direct read.
 const MAX_ZIP_TEXT = 400_000;
 const MAX_ZIP_FILE_TEXT = 120_000;
-const MAX_ZIP_ENTRY_BYTES = 100 * 1024 * 1024; // Per-entry inflated size cap when unpacking
+// Inflation bounds (per entry, entry count, total) live in ./zip-bounds.ts.
 
 const TEXTUAL_ZIP_EXTENSIONS = new Set([
   ".txt", ".md", ".csv", ".py", ".c", ".h", ".java", ".js",
@@ -112,15 +129,24 @@ export async function extractFileText(
  * Preserves the zip's internal directory structure. Skips entries whose
  * resolved path would escape destDir.
  * Returns metadata for each unpacked entry (directories are not returned).
+ *
+ * Inflation is bounded: an entry past the per-file cap is skipped (its
+ * partial `.tmp-*` file removed), and unpacking stops once the entry-count
+ * or total-bytes cap is reached. `limits` exists so tests can use small
+ * numbers; production callers get the defaults.
  */
 export async function unpackZipToDirectory(
   zipPath: string,
-  destDir: string
+  destDir: string,
+  limits?: Partial<ZipReadLimits>
 ): Promise<ZipUnpackEntry[]> {
   const yauzl = require("yauzl-promise");
+  const bounds = resolveZipReadLimits(limits);
   const zip = await yauzl.open(zipPath);
   const results: ZipUnpackEntry[] = [];
   const resolvedDest = path.resolve(destDir);
+  let entriesRead = 0;
+  let totalBytes = 0;
 
   try {
     for await (const entry of zip) {
@@ -141,36 +167,30 @@ export async function unpackZipToDirectory(
       }
 
       // Guard against zip bombs: skip entries that declare (or actually
-      // inflate to) more than the per-entry limit.
+      // inflate to) more than the per-entry limit, and stop altogether once
+      // the archive has produced more entries or bytes than any course
+      // attachment reasonably should.
       const declaredSize = Number(entry.uncompressedSize ?? 0);
-      if (declaredSize > MAX_ZIP_ENTRY_BYTES) continue;
+      if (declaredSize > bounds.maxEntryBytes) continue;
+      if (entriesRead >= bounds.maxEntries) break;
+      if (totalBytes + declaredSize > bounds.maxTotalBytes) break;
 
-      await fs.mkdir(path.dirname(targetPath), { recursive: true });
-
+      let written: number;
       try {
-        const stream = await entry.openReadStream();
-        const chunks: Buffer[] = [];
-        let total = 0;
-        let tooLarge = false;
-        for await (const chunk of stream) {
-          total += (chunk as Buffer).length;
-          if (total > MAX_ZIP_ENTRY_BYTES) {
-            tooLarge = true;
-            break;
-          }
-          chunks.push(chunk as Buffer);
-        }
-        if (tooLarge) continue;
-        await fs.writeFile(targetPath, Buffer.concat(chunks));
+        written = await writeZipEntryBounded(entry, targetPath, bounds.maxEntryBytes);
       } catch {
+        // Too large, corrupt, or unwritable: the temp file is already gone.
         continue;
       }
 
+      entriesRead += 1;
+      totalBytes += written;
       results.push({
         entryName: normalized,
         absolutePath: targetPath,
-        size: Number(entry.uncompressedSize ?? 0),
+        size: declaredSize,
       });
+      if (totalBytes >= bounds.maxTotalBytes) break;
     }
   } finally {
     await zip.close();
@@ -183,39 +203,83 @@ export async function unpackZipToDirectory(
  * Extract and list contents of a zip file.
  * Reads text-based files inside the zip and returns their content.
  * For PDFs inside the zip, extracts text. For other binary files, lists them.
+ *
+ * Every entry is listed (the central directory is cheap), but bodies are
+ * only inflated within the zip bounds: an entry past the per-file cap gets a
+ * "[Skipped ...]" note under its listing line, and reading stops with a note
+ * once the entry-count or total-bytes cap is reached.
  */
 export async function extractZip(
   zipPath: string,
-  zipName: string
+  zipName: string,
+  limits?: Partial<ZipReadLimits>
 ): Promise<string> {
   const yauzl = require("yauzl-promise");
+  const bounds = resolveZipReadLimits(limits);
 
   const zip = await yauzl.open(zipPath);
-  const entries: Array<{ name: string; size: number }> = [];
+  const entries: Array<{ name: string; size: number; note?: string }> = [];
   const textContents: Array<{ name: string; content: string }> = [];
+  const stopNotes: string[] = [];
   let totalText = 0;
+  let entriesRead = 0;
+  let totalBytes = 0;
+  let stopped = false;
 
   try {
     for await (const entry of zip) {
       // Skip directories
       if (entry.filename.endsWith("/")) continue;
 
-      entries.push({ name: entry.filename, size: entry.uncompressedSize });
+      const listing: { name: string; size: number; note?: string } = {
+        name: entry.filename,
+        size: entry.uncompressedSize,
+      };
+      entries.push(listing);
 
       // Only extract text from readable files, stop if we have enough
-      if (totalText >= MAX_ZIP_TEXT) continue;
+      if (stopped || totalText >= MAX_ZIP_TEXT) continue;
 
       const ext = path.extname(entry.filename).toLowerCase();
       const isTextFile = TEXTUAL_ZIP_EXTENSIONS.has(ext);
+      const isOffice = isOfficeExtension(ext);
+      const isPdf = ext === ".pdf";
+      if (!isTextFile && !isOffice && !isPdf) continue;
+
+      const declaredSize = Number(entry.uncompressedSize ?? 0);
+      if (declaredSize > bounds.maxEntryBytes) {
+        listing.note = `[Skipped ${entry.filename}: inflates past the ${formatByteCap(bounds.maxEntryBytes)} per-file cap]`;
+        continue;
+      }
+      if (entriesRead >= bounds.maxEntries) {
+        stopNotes.push(`[Read stopped after ${bounds.maxEntries} entries]`);
+        stopped = true;
+        continue;
+      }
+      if (totalBytes + declaredSize > bounds.maxTotalBytes) {
+        stopNotes.push(
+          `[Read stopped: archive inflates past the ${formatByteCap(bounds.maxTotalBytes)} total cap]`
+        );
+        stopped = true;
+        continue;
+      }
+
+      let buffer: Buffer;
+      try {
+        buffer = await readZipEntryBounded(entry, bounds.maxEntryBytes);
+      } catch (error) {
+        if (error instanceof ZipEntryTooLargeError) {
+          listing.note = `[Skipped ${entry.filename}: inflates past the ${formatByteCap(bounds.maxEntryBytes)} per-file cap]`;
+        }
+        // Otherwise the entry is unreadable (corrupt, encrypted); skip it.
+        continue;
+      }
+      entriesRead += 1;
+      totalBytes += buffer.length;
 
       if (isTextFile) {
         try {
-          const stream = await entry.openReadStream();
-          const chunks: Buffer[] = [];
-          for await (const chunk of stream) {
-            chunks.push(chunk as Buffer);
-          }
-          let text = Buffer.concat(chunks).toString("utf-8");
+          let text = buffer.toString("utf-8");
           if (ext === ".html" || ext === ".htm") {
             text = htmlToText(text);
           }
@@ -227,16 +291,9 @@ export async function extractZip(
         } catch {
           // Skip unreadable entries
         }
-      }
-
-      if (isOfficeExtension(ext)) {
+      } else if (isOffice) {
         try {
-          const stream = await entry.openReadStream();
-          const chunks: Buffer[] = [];
-          for await (const chunk of stream) {
-            chunks.push(chunk as Buffer);
-          }
-          const text = (await extractOfficeText(Buffer.concat(chunks), entry.filename)) ?? "";
+          const text = (await extractOfficeText(buffer, entry.filename)) ?? "";
           if (text.trim().length > 0) {
             const truncated = capZipEntryText(text, entry.filename);
             textContents.push({ name: entry.filename, content: truncated });
@@ -245,16 +302,9 @@ export async function extractZip(
         } catch {
           // Skip unreadable Office documents
         }
-      }
-
-      if (ext === ".pdf") {
+      } else if (isPdf) {
         try {
-          const stream = await entry.openReadStream();
-          const chunks: Buffer[] = [];
-          for await (const chunk of stream) {
-            chunks.push(chunk as Buffer);
-          }
-          const text = await extractPdfText(Buffer.concat(chunks), MAX_ZIP_FILE_TEXT);
+          const text = await extractPdfText(buffer, MAX_ZIP_FILE_TEXT);
           if (text.length > 0) {
             textContents.push({ name: entry.filename, content: text });
             totalText += text.length;
@@ -262,6 +312,13 @@ export async function extractZip(
         } catch {
           // Skip unreadable PDFs
         }
+      }
+
+      if (totalBytes >= bounds.maxTotalBytes) {
+        stopNotes.push(
+          `[Read stopped: archive inflates past the ${formatByteCap(bounds.maxTotalBytes)} total cap]`
+        );
+        stopped = true;
       }
     }
   } finally {
@@ -278,6 +335,10 @@ export async function extractZip(
   for (const e of entries) {
     const size = e.size < 1024 ? `${e.size}B` : `${(e.size / 1024).toFixed(0)}KB`;
     lines.push(`  ${e.name} (${size})`);
+    if (e.note) lines.push(`    ${e.note}`);
+  }
+  for (const note of stopNotes) {
+    lines.push(`  ${note}`);
   }
 
   // Show extracted text content
