@@ -54,6 +54,19 @@ export interface CanvasAssignmentDetail extends CanvasAssignment {
   grading_type: string;
   submission_types: string[];
   allowed_extensions: string[] | null;
+  /** -1 means unlimited. */
+  allowed_attempts?: number | null;
+  peer_reviews?: boolean | null;
+  automatic_peer_reviews?: boolean | null;
+  peer_review_count?: number | null;
+  /** Non-null when this is a group assignment. */
+  group_category_id?: number | null;
+  grade_group_students_individually?: boolean | null;
+  anonymous_submissions?: boolean | null;
+  omit_from_final_grade?: boolean | null;
+  published?: boolean | null;
+  /** Reason the assignment is locked for this student, when it is. */
+  lock_explanation?: string | null;
   rubric?: CanvasRubricCriterion[] | null;
   attachments?: Array<{
     id: number;

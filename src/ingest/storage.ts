@@ -255,6 +255,11 @@ function formatAssignmentText(
       `Allowed file extensions: ${rawAssignment.allowed_extensions.join(", ")}`
     );
   }
+  // Submission rules students ask about ("can I resubmit?", "is this a group
+  // assignment?", "do I have to peer review?") live on the detail record.
+  for (const line of formatSubmissionRules(rawAssignment)) {
+    lines.push(line);
+  }
   lines.push(`Canvas URL: ${assignment.htmlUrl}`);
   lines.push("");
   lines.push("## Description");
@@ -281,6 +286,43 @@ function formatAssignmentText(
   }
 
   return lines.join("\n") + "\n";
+}
+
+function formatSubmissionRules(rawAssignment?: RawAssignmentRecord): string[] {
+  if (!rawAssignment) return [];
+  const lines: string[] = [];
+  const attempts = rawAssignment.allowed_attempts;
+  if (typeof attempts === "number") {
+    lines.push(`Attempts allowed: ${attempts < 0 ? "unlimited" : String(attempts)}`);
+  }
+  if (rawAssignment.group_category_id) {
+    lines.push(
+      `Group assignment: yes${
+        rawAssignment.grade_group_students_individually ? " (students graded individually)" : " (one grade per group)"
+      }`
+    );
+  }
+  if (rawAssignment.peer_reviews) {
+    const count = rawAssignment.peer_review_count;
+    lines.push(
+      `Peer reviews: required${typeof count === "number" && count > 0 ? ` (${count} per student)` : ""}${
+        rawAssignment.automatic_peer_reviews ? ", assigned automatically" : ""
+      }`
+    );
+  }
+  if (rawAssignment.anonymous_submissions) {
+    lines.push("Anonymous submissions: yes");
+  }
+  if (rawAssignment.omit_from_final_grade) {
+    lines.push("Counts toward final grade: no (omitted from the final grade)");
+  }
+  if (rawAssignment.published === false) {
+    lines.push("Published: no (not yet visible to students)");
+  }
+  if (rawAssignment.lock_explanation) {
+    lines.push(`Locked: ${rawAssignment.lock_explanation}`);
+  }
+  return lines;
 }
 
 function formatRubricText(
