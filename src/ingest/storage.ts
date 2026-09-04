@@ -16,6 +16,7 @@ import type {
 import type {
   CanvasRubricCriterion,
   CanvasTopicAttachment,
+  CanvasAssignmentGroup,
 } from "../canvas/types.js";
 import type {
   CourseMetadata,
@@ -66,7 +67,9 @@ export async function writeIngestionArtifacts(
     attachments?: CanvasTopicAttachment[] | null;
   }>,
   rawDiscussionThreads?: RawDiscussionThread[],
-  capturedExternalLinks?: CapturedExternalLink[]
+  capturedExternalLinks?: CapturedExternalLink[],
+  /** Assignment groups so each assignment extract can state its weight. */
+  assignmentGroups?: CanvasAssignmentGroup[]
 ): Promise<void> {
   debugFs("write", coursePath, "writing ingestion artifacts");
   // Ensure directory structure
@@ -121,7 +124,11 @@ export async function writeIngestionArtifacts(
     });
     for (const assignment of assignments) {
       const rawAssignment = rawAssignmentsById.get(assignment.id);
-      const assignmentText = formatAssignmentText(assignment, rawAssignment);
+      const assignmentText = formatAssignmentText(
+        assignment,
+        rawAssignment,
+        describeAssignmentWeight(assignment.id, rawAssignment, assignmentGroups ?? [])
+      );
       await writeAtomic(
         getExtractedAssignmentPath(coursePath, assignment.id),
         assignmentText
@@ -224,9 +231,46 @@ async function writeAtomic(filePath: string, content: string): Promise<void> {
   await fs.rename(tmpPath, filePath);
 }
 
+/**
+ * "Assignment group: Labs (30% of the final grade; lowest 1 dropped);
+ * this assignment is about 7.5% of the final grade." Exported for tests.
+ */
+export function describeAssignmentWeight(
+  assignmentId: number,
+  rawAssignment: { assignment_group_id?: number | null; points_possible?: number | null } | undefined,
+  groups: CanvasAssignmentGroup[]
+): string[] {
+  if (groups.length === 0) return [];
+  const group =
+    groups.find((candidate) => (candidate.assignments ?? []).some((a) => a.id === assignmentId)) ??
+    (rawAssignment?.assignment_group_id
+      ? groups.find((candidate) => candidate.id === rawAssignment.assignment_group_id)
+      : undefined);
+  if (!group) return [];
+  const anyWeight = groups.some((candidate) => typeof candidate.group_weight === "number" && candidate.group_weight > 0);
+  const weightText =
+    anyWeight && typeof group.group_weight === "number"
+      ? `${group.group_weight}% of the final grade`
+      : "weight not set; final grade is by total points";
+  const rules: string[] = [];
+  if (group.rules?.drop_lowest) rules.push(`lowest ${group.rules.drop_lowest} dropped`);
+  if (group.rules?.drop_highest) rules.push(`highest ${group.rules.drop_highest} dropped`);
+  const lines = [`Assignment group: ${group.name} (${weightText}${rules.length ? `; ${rules.join(", ")}` : ""})`];
+  const members = (group.assignments ?? []).filter((a) => !a.omit_from_final_grade);
+  const total = members.reduce((sum, a) => sum + (a.points_possible ?? 0), 0);
+  const own = members.find((a) => a.id === assignmentId)?.points_possible ?? rawAssignment?.points_possible ?? null;
+  if (anyWeight && typeof group.group_weight === "number" && total > 0 && own) {
+    lines.push(
+      `Approximate share of the final grade: ${((own / total) * group.group_weight).toFixed(1)}% (${own} of ${total} points in ${group.name})`
+    );
+  }
+  return lines;
+}
+
 function formatAssignmentText(
   assignment: AssignmentIndexEntry,
-  rawAssignment?: RawAssignmentRecord
+  rawAssignment?: RawAssignmentRecord,
+  weightLines: string[] = []
 ): string {
   const lines = [`# ${assignment.name}`, ""];
 
@@ -258,6 +302,9 @@ function formatAssignmentText(
   // Submission rules students ask about ("can I resubmit?", "is this a group
   // assignment?", "do I have to peer review?") live on the detail record.
   for (const line of formatSubmissionRules(rawAssignment)) {
+    lines.push(line);
+  }
+  for (const line of weightLines) {
     lines.push(line);
   }
   lines.push(`Canvas URL: ${assignment.htmlUrl}`);
