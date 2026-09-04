@@ -22,6 +22,7 @@ import { matchAssignments } from "../domain/matching.js";
 import { loadCourseCache } from "../enrich/cache-loader.js";
 import { isAbortError } from "../errors.js";
 import { ingestCourse } from "../ingest/ingest-course.js";
+import { resolveIncludeSubmissionFeedback } from "../config/submission-feedback.js";
 
 export async function pickCourse(services: AppServices): Promise<Course | null> {
   const courses = getDisplayCourses(services);
@@ -104,6 +105,7 @@ export async function ensureCourseIngested(
   try {
     await ingestCourse(course, services.client, services.config, {
       refresh,
+      includeSubmissionFeedback: resolveIncludeSubmissionFeedback(),
       signal: ac.signal,
       onProgress: (msg) => {
         progress.addStep(msg);

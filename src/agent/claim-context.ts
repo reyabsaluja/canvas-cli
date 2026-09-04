@@ -13,7 +13,7 @@
  * only says "may", "optional", or "recommended".
  */
 
-import { extractDateClaims } from "./verify.js";
+import { extractDateClaims } from "./date-claims.js";
 
 // ---------------------------------------------------------------------------
 // Anchored figure check.

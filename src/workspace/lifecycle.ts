@@ -8,6 +8,7 @@ import { ingestCourse } from "../ingest/ingest-course.js";
 import { runInvestigation } from "../work/orchestrator.js";
 import type { AssignmentWorkup, InvestigationState, WorkResult } from "../work/types.js";
 import { createWorkWorkspace } from "./create.js";
+import { resolveIncludeSubmissionFeedback } from "../config/submission-feedback.js";
 
 export const WORKSPACE_AI_REQUIRED_ERROR_MESSAGE =
   "AI provider not configured — cannot run assignment workup";
@@ -184,6 +185,7 @@ async function resolveWorkspaceCache(
         onProgress(progressLabels.ingest);
         await ingestCourse(options.course, options.client, options.config, {
           refresh: false,
+          includeSubmissionFeedback: resolveIncludeSubmissionFeedback(),
         });
         onProgress(progressLabels.ingested);
         cache = await loadCourseCache(options.course.courseCode, options.course.id);
@@ -199,6 +201,7 @@ async function resolveWorkspaceCache(
       onProgress(progressLabels.refreshIngest);
       await ingestCourse(options.course, options.client, options.config, {
         refresh: true,
+        includeSubmissionFeedback: resolveIncludeSubmissionFeedback(),
       });
       onProgress(progressLabels.loadFreshCache);
       const cache = await loadCourseCache(

@@ -1,6 +1,5 @@
 import { CanvasClient } from "../canvas/client.js";
-import { getActiveProfile, loadConfig } from "../config/env.js";
-import { readStoredConfig } from "../config/store.js";
+import { loadConfig } from "../config/env.js";
 import { normalizeCourse } from "../domain/normalize.js";
 import { matchCourses } from "../domain/matching.js";
 import { ingestCourse } from "../ingest/ingest-course.js";
@@ -10,6 +9,7 @@ import {
 } from "../format/render-ingestion-summary.js";
 import { handleError, isAbortError } from "../errors.js";
 import chalk from "chalk";
+import { resolveIncludeSubmissionFeedback } from "../config/submission-feedback.js";
 
 const USER_ABORT_EXIT_CODE = 130;
 
@@ -20,21 +20,6 @@ interface IngestOptions {
   feedback?: boolean;
 }
 
-/**
- * Grader feedback on the student's own submissions is captured by default;
- * `--no-feedback` on the command line or `"ingestSubmissionFeedback": false`
- * in the profile's config.json turns it off.
- */
-export function resolveIncludeSubmissionFeedback(options: IngestOptions): boolean {
-  if (options.feedback === false) return false;
-  let stored: ReturnType<typeof readStoredConfig> = null;
-  try {
-    stored = readStoredConfig(getActiveProfile());
-  } catch {
-    stored = null;
-  }
-  return stored?.ingestSubmissionFeedback !== false;
-}
 
 export async function ingestCourseCommand(
   courseQuery: string,
@@ -88,7 +73,7 @@ export async function ingestCourseCommand(
   try {
     result = await ingestCourse(course, client, config, {
       refresh: options.refresh ?? false,
-      includeSubmissionFeedback: resolveIncludeSubmissionFeedback(options),
+      includeSubmissionFeedback: resolveIncludeSubmissionFeedback(options.feedback),
       signal: ac.signal,
       onProgress: options.json
         ? null

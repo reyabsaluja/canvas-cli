@@ -758,6 +758,10 @@ export async function runChatShell<TExit>(
 
       let streamingStarted = false;
       let streamedText = "";
+      // Index of the assistant message committed when a tool call interrupted
+      // streaming (the post-answer recovery pass does this). If the final
+      // answer turns out to be that same text, it must not be shown twice.
+      let committedAnswerIndex = -1;
       let pendingStreamDelta = "";
       let streamCommitTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -842,6 +846,7 @@ export async function runChatShell<TExit>(
                     role: "assistant",
                     content: streamedText.trim(),
                   };
+                  committedAnswerIndex = messages.length - 1;
                   markTranscriptDirty(messages.length - 1);
                   persistence.schedule();
                 } else {
@@ -879,7 +884,35 @@ export async function runChatShell<TExit>(
         stopSpinner();
         const elapsed = formatElapsed(Date.now() - processingStartTime);
         const pastVerb = PAST_TENSE[currentVerb] ?? currentVerb;
-        if (streamingStarted) {
+        const committedAnswer =
+          committedAnswerIndex >= 0 ? messages[committedAnswerIndex] : undefined;
+        const finalRepeatsCommittedAnswer =
+          committedAnswer?.role === "assistant" &&
+          typeof committedAnswer.content === "string" &&
+          final.content.trim().length > 0 &&
+          committedAnswer.content.trim() === final.content.trim();
+        if (finalRepeatsCommittedAnswer) {
+          // Recovery ran after the answer was shown but did not change it:
+          // attach the verification details to the message already on
+          // screen and keep only the short closing note that was streamed.
+          messages[committedAnswerIndex] = {
+            ...committedAnswer,
+            bulletPoints: final.bulletPoints,
+            sources: final.sources,
+            confidence: final.confidence,
+            verificationNote: final.verificationNote,
+          };
+          markTranscriptDirty(committedAnswerIndex);
+          if (streamingStarted) {
+            if (streamedText.trim()) {
+              messages[messages.length - 1] = { role: "assistant", content: streamedText.trimEnd() };
+              markTranscriptDirty(messages.length - 1);
+            } else {
+              messages.pop();
+              markTranscriptDirty(messages.length);
+            }
+          }
+        } else if (streamingStarted) {
           messages[messages.length - 1] = {
             role: "assistant",
             content: (final.content || streamedText).trimEnd(),
