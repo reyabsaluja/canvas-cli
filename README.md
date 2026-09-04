@@ -661,6 +661,8 @@ canvas-cli ingest ece297 --no-feedback                # leave grader comments on
 
 PDFs are extracted page by page under `## Page N` headings (up to 400k characters), and DOCX, PPTX, and XLSX files are extracted with their headings, tables, speaker notes, and sheets, so the assistant can cite and read a single page or section.
 
+Content that hides inside other content is followed too. Canvas file links are picked up in every form course HTML uses (plain anchors, embedded PDF viewers, `data-src` embeds, and module "external URL" items that really point at a Canvas file). External links are captured beyond plain anchors: iframes, embeds, and `<video>`/`<audio>` sources, caption tracks (`.vtt`/`.srt`, which are usually the lecture transcript), Office documents hosted elsewhere, and Google Docs, Slides, and Sheets through their export URLs. Zips are opened up to three levels deep and unpacked into `<name>.zip.unpacked/` folders, with inflation bounded so an archive bomb cannot fill the disk. Word and PowerPoint reviewer comments, document headers and footers, and spreadsheet formulas are extracted alongside the text, and HTML `<pre>` blocks keep their indentation so code samples read correctly.
+
 **What gets stored:**
 
 | File | Contents |
