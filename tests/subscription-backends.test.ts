@@ -12,7 +12,9 @@ import {
 } from "../src/ai/cli-backend.js";
 import {
   buildCodexArgs,
+  codexDeniedToolApproval,
   consumeCodexEvent,
+  createCodexStreamState,
   runCodex,
   type CodexStreamState,
 } from "../src/ai/backends/codex.js";
@@ -82,11 +84,31 @@ test("buildCodexArgs isolates the run and wires the MCP bridge", () => {
   assert.ok(args.includes('model_reasoning_effort="high"'));
   assert.ok(args.includes('mcp_servers.canvas.url="http://127.0.0.1:1/mcp"'));
   assert.ok(args.includes('mcp_servers.canvas.bearer_token_env_var="CANVAS_CLI_MCP_TOKEN"'));
+  // approval_policy="never" would otherwise auto-deny every bridge tool call.
+  assert.ok(args.includes('mcp_servers.canvas.default_tools_approval_mode="approve"'));
+  // GPT-5.6+ "code mode" hides MCP tools behind a REPL host that cannot run here.
+  assert.ok(args.includes("features.code_mode=false"));
   assert.equal(args[args.length - 1], "-", "prompt comes from stdin");
 
   const withModel = buildCodexArgs({ model: "gpt-5.4-codex", cwd: "/tmp/x" });
   assert.deepEqual(withModel.slice(withModel.indexOf("-m"), withModel.indexOf("-m") + 2), ["-m", "gpt-5.4-codex"]);
   assert.ok(!withModel.some((a) => a.startsWith("mcp_servers")));
+  assert.ok(withModel.includes("features.code_mode=false"), "code mode is off even without a bridge");
+});
+
+test("consumeCodexEvent counts MCP tool calls and keeps their errors", () => {
+  const state = createCodexStreamState();
+  consumeCodexEvent(state, { type: "item.started", item: { type: "mcp_tool_call", server: "canvas", tool: "read_file", status: "in_progress" } });
+  consumeCodexEvent(state, { type: "item.completed", item: { type: "mcp_tool_call", server: "canvas", tool: "read_file", error: null, status: "completed" } });
+  consumeCodexEvent(state, {
+    type: "item.completed",
+    item: { type: "mcp_tool_call", server: "canvas", tool: "search_course", error: { message: "MCP tool call requires approval, but approval policy is never" }, status: "failed" },
+  });
+  consumeCodexEvent(state, { type: "turn.completed", usage: {} });
+  assert.equal(state.toolCalls, 2);
+  assert.deepEqual(state.toolErrors, ["search_course: MCP tool call requires approval, but approval policy is never"]);
+  assert.equal(codexDeniedToolApproval(state), true);
+  assert.equal(codexDeniedToolApproval({ toolErrors: ["read_file: file not found"] }), false);
 });
 
 test("buildCopilotArgs removes built-in tools and keeps the variadic flag last", () => {
@@ -196,6 +218,14 @@ const out = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
   if (process.env.FAKE_MODE === "hang") {
     await new Promise((r) => setTimeout(r, 60000));
   }
+  if (process.env.FAKE_MODE === "approval-denied") {
+    // An older Codex that ignores default_tools_approval_mode: every tool call
+    // is refused, then the model answers from the prompt alone.
+    out({ type: "item.completed", item: { id: "i1", type: "mcp_tool_call", server: "canvas", tool: "get_assignment", arguments: {}, result: null, error: { message: "MCP tool call requires approval, but approval policy is never" }, status: "failed" } });
+    out({ type: "item.completed", item: { id: "i2", type: "agent_message", text: "The assignment descriptions were not accessible in the course cache." } });
+    out({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } });
+    return;
+  }
   let toolText = "";
   if (url) {
     const call = async (body) => (await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + token }, body: JSON.stringify(body) })).json();
@@ -283,6 +313,31 @@ test("runCodex round-trips a tool call through the bridge and returns the agent 
     assert.match(text, /^prompt-bytes=\d+ tool=get_assignment#7 model=gpt-5\.4-codex$/);
     assert.deepEqual(toolCalls, ["get_assignment"]);
     assert.equal(deltas.join(""), text);
+  } finally {
+    cleanup();
+  }
+});
+
+test("runCodex fails loudly when Codex refuses to run the bridge tools", async () => {
+  const { deps, cleanup } = fakeCliDeps(FAKE_CODEX, "approval-denied");
+  try {
+    await assert.rejects(
+      runCodex(
+        {
+          provider: "codex",
+          model: "default",
+          systemPrompt: "s",
+          messages: [{ role: "user", content: "what is homework about?" }],
+          tools: [TOOL],
+          executeTool: async () => "unused",
+        },
+        deps
+      ),
+      (error: unknown) =>
+        error instanceof AIError &&
+        /refused to run the Canvas tools/.test(error.userMessage) &&
+        /npm install -g @openai\/codex/.test(error.setupHint ?? "")
+    );
   } finally {
     cleanup();
   }

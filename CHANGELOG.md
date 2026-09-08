@@ -104,6 +104,7 @@ Initial release of `@reyabsaluja/canvas-cli`.
 
 ### Fixed
 
+- ChatGPT via Codex could not read the course at all on current Codex CLI builds: `approval_policy="never"` made Codex auto-deny every Canvas tool call, and GPT-5.6-class models hid the tools behind "code mode", so the model answered from the prompt alone ("descriptions weren't accessible in the course cache", workups saying PDFs were inaccessible). The bridge's tools are now pre-approved (`mcp_servers.canvas.default_tools_approval_mode="approve"`), code mode is turned off for the run, tool-call errors from the event stream are tracked, and a run whose tool calls were all refused fails with a clear message instead of returning an ungrounded answer
 - Endpoints that are rate-limited or blocked for students (Files, Pages) are skipped with a warning instead of aborting ingestion
 - Network failures from undici (`fetch failed` with an error cause) are classified as network errors with a useful hint
 - Assignments with a null score are treated as ungraded in `/grade`

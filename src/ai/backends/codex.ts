@@ -53,6 +53,13 @@ export function buildCodexArgs(input: {
     'approval_policy="never"',
     "-c",
     'web_search="disabled"',
+    // Newer models (GPT-5.6+) default to "code mode", where MCP tools are only
+    // reachable through a JavaScript REPL host that is unavailable in this
+    // sandboxed, ephemeral run — the model then reports it has no Canvas
+    // tools at all. Plain function-calling exposes the bridge tools directly.
+    // Unknown feature keys given through -c are ignored by older Codex builds.
+    "-c",
+    "features.code_mode=false",
   ];
   // "default" means Codex's built-in default. When the CLI's model catalog says
   // which model that is, pass it explicitly so the run matches what the header
@@ -67,6 +74,10 @@ export function buildCodexArgs(input: {
   if (input.bridgeUrl) {
     args.push("-c", `mcp_servers.canvas.url="${input.bridgeUrl}"`);
     args.push("-c", `mcp_servers.canvas.bearer_token_env_var="${MCP_TOKEN_ENV}"`);
+    // approval_policy="never" makes Codex auto-deny MCP tool calls unless the
+    // server's tools are pre-approved; without this every Canvas read fails
+    // with "requires approval" and the model answers from the prompt alone.
+    args.push("-c", 'mcp_servers.canvas.default_tools_approval_mode="approve"');
   }
   // "-" reads the prompt from stdin so it never appears in the process list.
   args.push("-");
@@ -78,6 +89,21 @@ export interface CodexStreamState {
   done: boolean;
   lastError: string | null;
   fatalError: string | null;
+  /** MCP tool calls the run reported (completed or failed). */
+  toolCalls: number;
+  /** Error messages from failed MCP tool calls, in order. */
+  toolErrors: string[];
+}
+
+export function createCodexStreamState(): CodexStreamState {
+  return { text: "", done: false, lastError: null, fatalError: null, toolCalls: 0, toolErrors: [] };
+}
+
+const APPROVAL_DENIED_RE = /requires approval/i;
+
+/** True when Codex refused to run the bridge tools because of its approval policy. */
+export function codexDeniedToolApproval(state: Pick<CodexStreamState, "toolErrors">): boolean {
+  return state.toolErrors.some((message) => APPROVAL_DENIED_RE.test(message));
 }
 
 /** Consume one JSONL event from `codex exec --json`. Exported for tests. */
@@ -88,11 +114,19 @@ export function consumeCodexEvent(
 ): void {
   const type = event.type;
   if (type === "item.completed") {
-    const item = event.item as { type?: string; text?: string } | undefined;
+    const item = event.item as
+      | { type?: string; text?: string; tool?: string; server?: string; error?: { message?: string } | null }
+      | undefined;
     if (item?.type === "agent_message" && typeof item.text === "string" && item.text) {
       const delta = state.text ? `\n\n${item.text}` : item.text;
       state.text += delta;
       onTextDelta?.(delta);
+    } else if (item?.type === "mcp_tool_call") {
+      state.toolCalls += 1;
+      const message = item.error?.message;
+      if (typeof message === "string" && message) {
+        state.toolErrors.push(`${item.tool ?? "tool"}: ${message}`);
+      }
     }
     return;
   }
@@ -152,7 +186,7 @@ export async function runCodex(request: CliBackendRequest, deps: CliDeps = {}): 
       promptLength: prompt.length,
     });
 
-    const state: CodexStreamState = { text: "", done: false, lastError: null, fatalError: null };
+    const state = createCodexStreamState();
     const result = await runCliJsonl({
       command,
       args,
@@ -180,6 +214,19 @@ export async function runCodex(request: CliBackendRequest, deps: CliDeps = {}): 
     if (state.fatalError) {
       throw classifyCliFailure("codex", state.fatalError);
     }
+    if (bridge && codexDeniedToolApproval(state)) {
+      // Every Canvas read was refused, so whatever text came back was written
+      // without looking at the course. Fail loudly instead of returning it.
+      throw new AIError("ChatGPT (Codex) refused to run the Canvas tools, so it could not read your course.", "unknown", {
+        setupHint:
+          "Your Codex CLI ignored the tool approval setting canvas-cli passes. Update it with `npm install -g @openai/codex` and try again.",
+      });
+    }
+    if (bridge && request.tools.length > 0 && state.toolCalls === 0) {
+      debugAI("codex", request.model, "codex answered without calling any Canvas tool", {
+        toolErrors: state.toolErrors,
+      });
+    }
     if (!state.done || (!state.text && result.exitCode !== 0)) {
       const detail = state.lastError ?? cleanStderr(result.stderr);
       throw classifyCliFailure("codex", detail || `codex exited with code ${result.exitCode ?? "unknown"}`);
@@ -189,6 +236,8 @@ export async function runCodex(request: CliBackendRequest, deps: CliDeps = {}): 
       durationMs: Date.now() - startedAt,
       responseLength: state.text.length,
       toolCalls: bridge?.callCount ?? 0,
+      toolCallsReported: state.toolCalls,
+      toolErrors: state.toolErrors.length,
     });
     return state.text;
   } finally {
