@@ -477,11 +477,16 @@ export async function runChatShell<TExit>(
       !(activeOpenPartial !== null && openMatches.length > 0)
     ) {
       const partial = inputBuffer.toLowerCase();
+      const names = (command: CommandDefinition) => [command.name, ...(command.aliases ?? [])];
       slashMatches = availableCommands.filter((command) =>
-        [command.name, ...(command.aliases ?? [])].some((alias) =>
-          alias.startsWith(partial)
-        )
+        names(command).some((alias) => alias.startsWith(partial))
       );
+      // A command typed in full (or by its alias) comes first, so Enter runs
+      // it: "/q" is /quit, even though /quiz also starts with "q".
+      const exact = slashMatches.findIndex((command) => names(command).includes(partial));
+      if (exact > 0) {
+        slashMatches = [slashMatches[exact]!, ...slashMatches.filter((_, i) => i !== exact)];
+      }
     }
 
     return {
