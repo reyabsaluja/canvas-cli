@@ -321,7 +321,7 @@ export async function runCourseSetup(
 ): Promise<CourseConfig> {
   const selected = await showMultiSelect(
     "Welcome to canvas",
-    "Select your courses — space to toggle, enter when done",
+    "Select your courses — space or enter to toggle, d when done",
     allCourses
   );
 
@@ -402,7 +402,7 @@ export async function runCourseManagement(
 
       const selected = await showMultiSelect(
         "Add courses",
-        "Select courses to add — space to toggle, enter when done",
+        "Select courses to add — space or enter to toggle, d when done",
         available
       );
 
