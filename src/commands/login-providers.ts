@@ -1,13 +1,12 @@
-import { createRequire } from "node:module";
 import { verticalPicker, horizontalPicker, BACK, C, type PickerOption } from "./login-picker.js";
 import { promptLine, promptSecret, ESCAPED } from "./login-prompts.js";
 import { SUBSCRIPTION_PROVIDERS, type SubscriptionProvider } from "../ai/cli-backend.js";
 import { checkSubscriptionCli, runSubscriptionLogin } from "../ai/subscription-status.js";
 import { deriveModelDisplayName, supportedEffortLevels, type AIEffortLevel } from "../ai/model-capabilities.js";
 import { listCodexModels } from "../ai/backends/codex-models.js";
+import catalogJson from "../ai/models.json" with { type: "json" };
 
-const require = createRequire(import.meta.url);
-const modelsJson: Record<string, PickerOption[]> = require("../ai/models.json");
+const modelsJson = catalogJson as unknown as Record<string, PickerOption[]>;
 const MODEL_CATALOG: Record<string, PickerOption[]> = Object.fromEntries(
   Object.entries(modelsJson).filter(([k]) => !k.startsWith("$") && !k.startsWith("_"))
 );

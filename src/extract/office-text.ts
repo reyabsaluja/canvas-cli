@@ -1,5 +1,4 @@
 import path from "node:path";
-import { createRequire } from "node:module";
 import { decodeEntities } from "../format/html-to-text.js";
 import { stripControlChars } from "../sanitize.js";
 import {
@@ -10,8 +9,6 @@ import {
   resolveZipReadLimits,
   type ZipReadLimits,
 } from "./zip-bounds.js";
-
-const require = createRequire(import.meta.url);
 
 /**
  * Structure-preserving text extraction for Office Open XML documents
@@ -93,7 +90,7 @@ async function readZipParts(
 ): Promise<Map<string, string>> {
   const bounds = resolveZipReadLimits(limits);
   const budget = createZipReadBudget();
-  const yauzl = require("yauzl-promise");
+  const { default: yauzl } = await import("yauzl-promise");
   const zip = await yauzl.fromBuffer(buffer);
   const parts = new Map<string, string>();
   try {

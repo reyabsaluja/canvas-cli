@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createRequire } from "node:module";
+import pdfParseLib from "pdf-parse/lib/pdf-parse.js";
 import {
   DownloadTooLargeError,
   readBodyWithLimit,
@@ -16,8 +16,7 @@ import type {
   ModuleIndexEntry,
 } from "./types.js";
 
-const require = createRequire(import.meta.url);
-const pdfParse: (buffer: Buffer) => Promise<{ text: string }> = require("pdf-parse");
+const pdfParse: (buffer: Buffer) => Promise<{ text: string }> = pdfParseLib;
 
 const EXTERNAL_LINK_CAPTURE_CONCURRENCY = 4;
 const MAX_REDIRECTS = 6;

@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { createRequire } from "node:module";
+import pdfParseLib from "pdf-parse/lib/pdf-parse.js";
 import { htmlToText } from "../format/html-to-text.js";
 import { extractOfficeText, isOfficeExtension } from "./office-text.js";
 import {
@@ -25,8 +25,6 @@ export {
   type ZipReadLimits,
 } from "./zip-bounds.js";
 
-const require = createRequire(import.meta.url);
-
 interface PdfTextItem {
   str: string;
   transform: number[];
@@ -50,7 +48,7 @@ const pdfParse: (
   data: Uint8Array,
   options?: PdfParseOptions
 ) => Promise<{ text: string; numpages: number; numrender: number }> =
-  require("pdf-parse");
+  pdfParseLib;
 
 /**
  * Shared text extraction utility used by ingestion, work agent, and chat agent.
@@ -153,7 +151,7 @@ export async function unpackZipToDirectory(
   destDir: string,
   limits?: Partial<ZipReadLimits>
 ): Promise<ZipUnpackEntry[]> {
-  const yauzl = require("yauzl-promise");
+  const { default: yauzl } = await import("yauzl-promise");
   const bounds = resolveZipReadLimits(limits);
   const zip = await yauzl.open(zipPath);
   const results: ZipUnpackEntry[] = [];
@@ -243,7 +241,7 @@ async function extractZipSource(
   bounds: ZipReadLimits,
   budget: ZipReadBudget
 ): Promise<string> {
-  const yauzl = require("yauzl-promise");
+  const { default: yauzl } = await import("yauzl-promise");
 
   const zip = Buffer.isBuffer(zipSource)
     ? await yauzl.fromBuffer(zipSource)

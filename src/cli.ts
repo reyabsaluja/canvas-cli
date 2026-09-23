@@ -12,12 +12,20 @@ import { statusCommand } from "./commands/status.js";
 import { loadStoredCredentialsToEnv } from "./config/load-credentials-to-env.js";
 import { CanvasCliError, classifyError } from "./errors.js";
 
+// Standalone binaries (scripts/build-binary.ts) bake the version in at build
+// time because there is no package.json beside them to read.
+declare const CANVAS_CLI_VERSION: string | undefined;
+
 let version = "0.0.0";
-try {
-  const require = createRequire(import.meta.url);
-  const pkg: { version: string } = require("../package.json");
-  version = pkg.version;
-} catch {}
+if (typeof CANVAS_CLI_VERSION === "string") {
+  version = CANVAS_CLI_VERSION;
+} else {
+  try {
+    const require = createRequire(import.meta.url);
+    const pkg: { version: string } = require("../package.json");
+    version = pkg.version;
+  } catch {}
+}
 
 const program = new Command();
 
