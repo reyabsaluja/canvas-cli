@@ -85,3 +85,38 @@ jobs:
           echo "Exit code: $CODE"
           [ "$CODE" -ge 1 ] && [ "$CODE" -le 2 ]
           echo "$OUTPUT" | grep -q "canvas-cli login"
+
+  # The standalone binary install.sh ships. Catches dependencies the bundler
+  # cannot embed (e.g. a new createRequire lookup) before a release tag does.
+  binary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+          cache: true
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run build:binary
+
+      - name: Install with install.sh and verify
+        run: |
+          set -euo pipefail
+          CANVAS_CLI_DOWNLOAD_URL="file://$PWD/dist-bin" CANVAS_CLI_INSTALL_DIR="$RUNNER_TEMP/bin" bash install.sh
+          BIN="$RUNNER_TEMP/bin/canvas-cli"
+          [ "$("$BIN" --version)" = "$(jq -r .version package.json)" ]
+          "$BIN" --help
+
+      - name: Verify graceful error without credentials (binary)
+        run: |
+          set +e
+          OUTPUT=$("$RUNNER_TEMP/bin/canvas-cli" ingest CS101 2>&1)
+          CODE=$?
+          set -e
+          echo "$OUTPUT"
+          echo "Exit code: $CODE"
+          [ "$CODE" -ge 1 ] && [ "$CODE" -le 2 ]
+          echo "$OUTPUT" | grep -q "canvas-cli login"

@@ -7,9 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-23
+
 Initial release of `@reyabsaluja/canvas-cli`.
 
 ### Added
+
+- One-line install for macOS and Linux (`curl -fsSL https://raw.githubusercontent.com/reyabsaluja/canvas-cli/main/install.sh | bash`) that installs a standalone binary with no Node.js requirement, verified against the release's SHA256 checksums; binaries for macOS (arm64, x64) and Linux (x64, arm64, glibc and musl) are attached to each GitHub release
 
 - Interactive TUI (`canvas-cli` with no arguments) with three scopes — global, course, and workspace — and a persistent chat session per scope under `.canvas-cli/chat-sessions/`
 - AI chat agent with tools for reading cached course material, downloaded attachments, and zip archives on demand; streaming responses, Esc to interrupt, typing while streaming, and `@<resource>` pins to attach files to a prompt
@@ -130,4 +134,5 @@ Initial release of `@reyabsaluja/canvas-cli`.
 - External-link capture reads at most 100 MB per response; a larger resource is recorded as `metadata_only` with a note naming the limit rather than being buffered in memory
 - Subscription CLIs (Copilot, Codex) run isolated: non-interactive, in an empty temporary directory, with their built-in shell, file, and web tools removed and denied (Codex `--ephemeral --sandbox read-only --ignore-user-config`; Copilot with custom instructions and built-in MCP servers disabled). The Canvas tool bridge binds to 127.0.0.1 only and requires a per-run bearer token; `OPENAI_API_KEY` is stripped from the Codex environment so the subscription path never falls back to API billing
 
-[Unreleased]: https://github.com/reyabsaluja/canvas-cli/commits/main
+[Unreleased]: https://github.com/reyabsaluja/canvas-cli/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/reyabsaluja/canvas-cli/releases/tag/v0.1.0

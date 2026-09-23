@@ -32,6 +32,24 @@ Example: `npm version 0.2.0-beta.1`
 
 ## Release Process
 
+### 0. One-time setup
+
+Publishing needs an npm token stored as the `NPM_TOKEN` repository secret:
+
+1. On npmjs.com, create a **granular access token** with read and write access to packages (for the first publish, scope it to all packages, since `@reyabsaluja/canvas-cli` does not exist yet), and allow it to bypass 2FA so CI can use it.
+2. Store it: `gh secret set NPM_TOKEN` (paste the token when prompted).
+
+### First release (v0.1.0)
+
+`package.json` already says `0.1.0`, so skip `npm version` and tag the current commit instead:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Every release after that follows the steps below.
+
 ### 1. Prepare the release
 
 ```bash
@@ -88,14 +106,25 @@ git push origin HEAD --follow-tags
 Pushing the tag triggers `.github/workflows/publish.yml`, which:
 
 1. Runs the full CI pipeline (typecheck, test, build, audit)
-2. Publishes to npm with provenance
-3. Creates a GitHub Release with auto-generated notes
+2. Builds standalone binaries for every platform on macOS (`bun run build:binary --all`, which ad-hoc signs the macOS builds) and checks the version they report
+3. Installs them with `install.sh` on Linux and verifies the result
+4. Publishes to npm with provenance (only if steps 1–3 passed)
+5. Creates a GitHub Release with auto-generated notes and attaches the binaries, `SHA256SUMS`, and `install.sh`. Pre-release tags are marked as pre-releases, so `install.sh` (which downloads the latest release) never picks them up.
 
 ### 6. Verify
 
 - Check the [GitHub Actions](https://github.com/reyabsaluja/canvas-cli/actions) run
 - Verify the package on [npm](https://www.npmjs.com/package/@reyabsaluja/canvas-cli)
 - Test installation: `npx @reyabsaluja/canvas-cli@latest --version`
+- Test the curl installer: `curl -fsSL https://raw.githubusercontent.com/reyabsaluja/canvas-cli/main/install.sh | bash`, then `canvas-cli --version`
+
+### Standalone binaries
+
+`scripts/build-binary.ts` bundles `src/cli.ts` with `bun build --compile`. Anything the bundler cannot follow fails only at runtime inside the binary, so:
+
+- Import dependencies and JSON with static `import` or `await import("pkg")`, never `createRequire(import.meta.url)` (the only exception is the `package.json` version fallback in `src/cli.ts`, which binaries replace with a build-time constant).
+- Two dependencies are patched at build time: pdf-parse (its pdf.js version is pinned) and pdfkit (its font lookups are bundled). The build fails loudly if either library's internals change.
+- The Smoke Test workflow builds and runs the binary on every push, so a bundling break shows up before a release tag.
 
 ## Release Checklist
 

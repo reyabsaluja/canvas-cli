@@ -12,3 +12,5 @@ canvas.txt
 .video/
 .env.bak
 package-lock.json
+dist-bin/
+*.bun-build

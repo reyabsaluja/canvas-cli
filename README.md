@@ -16,7 +16,29 @@
 
 ## Installation
 
-**Prerequisites:** [Node.js](https://nodejs.org/) version 20 or later.
+### Quick install (macOS and Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/reyabsaluja/canvas-cli/main/install.sh | bash
+```
+
+This downloads a standalone binary for your platform (no Node.js required), checks it against the release's SHA256 checksums, and installs it to `~/.local/bin/canvas-cli`. If that directory isn't on your `PATH`, the installer prints the line to add. Run the same command again to update.
+
+Options:
+
+```bash
+# A specific version
+curl -fsSL https://raw.githubusercontent.com/reyabsaluja/canvas-cli/main/install.sh | bash -s -- 0.1.0
+
+# A different install directory
+curl -fsSL https://raw.githubusercontent.com/reyabsaluja/canvas-cli/main/install.sh | CANVAS_CLI_INSTALL_DIR="$HOME/bin" bash
+```
+
+Supported platforms: macOS (Apple Silicon and Intel) and Linux (x64 and arm64, glibc or musl). Binaries are also attached to each [GitHub release](https://github.com/reyabsaluja/canvas-cli/releases).
+
+### npm (any platform, including Windows)
+
+**Prerequisites:** [Node.js](https://nodejs.org/) version 20.10 or later.
 
 ```bash
 npm install -g @reyabsaluja/canvas-cli
@@ -35,7 +57,9 @@ Or run without installing:
 npx @reyabsaluja/canvas-cli
 ```
 
-Verify the installation:
+Update with `npm install -g @reyabsaluja/canvas-cli@latest`.
+
+### Verify the installation
 
 ```bash
 canvas-cli --version
@@ -364,9 +388,9 @@ Generated local state is stored under `.canvas-cli/` and ignored by git:
 | `canvas-cli ingest <course>` | Downloads course data into `.canvas-cli/courses/` |
 | `canvas-cli clean` | Removes the entire `.canvas-cli/` directory in the current project |
 | `canvas-cli clean --all` | Removes `.canvas-cli/` and `~/.config/canvas-cli/` (credentials + config) |
-| `npm uninstall -g @reyabsaluja/canvas-cli` | Removes the CLI binary only — local `.canvas-cli/` directories and `~/.config/canvas-cli/` are **not** removed |
+| `rm ~/.local/bin/canvas-cli` (quick install) or `npm uninstall -g @reyabsaluja/canvas-cli` | Removes the CLI binary only — local `.canvas-cli/` directories and `~/.config/canvas-cli/` are **not** removed |
 
-To fully uninstall, run `canvas-cli clean --all` before uninstalling the package.
+To fully uninstall, run `canvas-cli clean --all` before removing the binary or package.
 
 ## Privacy
 
@@ -419,6 +443,7 @@ bun run typecheck
 bun run test
 bun run build
 bun run check          # typecheck + test + build (all gates)
+bun run build:binary   # standalone executable for this platform in dist-bin/ (--all for every release target)
 ```
 
 ## Documentation

@@ -36,7 +36,7 @@ jobs:
       - run: bun run test
 
   publish:
-    needs: ci
+    needs: [ci, verify-binaries]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -74,14 +74,76 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+  # Standalone executables for install.sh. Built on macOS so the darwin
+  # binaries can be ad-hoc signed; the linux ones cross-compile from there.
+  binaries:
+    needs: ci
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run build:binary --all
+
+      - name: Verify darwin binary
+        run: |
+          set -euo pipefail
+          EXPECTED="${GITHUB_REF_NAME#v}"
+          VERSION=$(./dist-bin/canvas-cli-darwin-arm64 --version)
+          echo "binary --version: $VERSION"
+          [ "$VERSION" = "$EXPECTED" ]
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binaries
+          path: dist-bin/
+          if-no-files-found: error
+
+  # Run install.sh on Linux against the built binaries before anything ships.
+  verify-binaries:
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: binaries
+          path: dist-bin
+
+      - name: Install with install.sh and verify
+        run: |
+          set -euo pipefail
+          CANVAS_CLI_DOWNLOAD_URL="file://$PWD/dist-bin" CANVAS_CLI_INSTALL_DIR="$RUNNER_TEMP/bin" bash install.sh
+          VERSION=$("$RUNNER_TEMP/bin/canvas-cli" --version)
+          echo "installed --version: $VERSION"
+          [ "$VERSION" = "${GITHUB_REF_NAME#v}" ]
+          "$RUNNER_TEMP/bin/canvas-cli" --help
+
   github-release:
     needs: publish
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
+      - uses: actions/download-artifact@v8
+        with:
+          name: binaries
+          path: dist-bin
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           REF_NAME: ${{ github.ref_name }}
-        run: gh release create "$REF_NAME" --generate-notes
+        run: |
+          set -euo pipefail
+          # Pre-releases must not become "latest", which is what install.sh downloads.
+          PRERELEASE=""
+          if [[ "$REF_NAME" == *-* ]]; then PRERELEASE="--prerelease"; fi
+          gh release create "$REF_NAME" --generate-notes $PRERELEASE \
+            dist-bin/canvas-cli-* dist-bin/SHA256SUMS install.sh
