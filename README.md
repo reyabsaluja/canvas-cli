@@ -4,6 +4,8 @@
 
 `canvas-cli` is an interactive terminal interface for Canvas LMS. It provides a TUI for browsing courses, assignments, and course materials, with optional AI-assisted assignment investigation — all from the terminal.
 
+**Documentation: [reyabsaluja.github.io/canvas-cli](https://reyabsaluja.github.io/canvas-cli/)**
+
 ## Highlights
 
 - Interactive TUI for browsing courses, assignments, modules, and files
@@ -86,7 +88,7 @@ Credentials are stored securely. On macOS they go in your system Keychain with n
 canvas-cli status
 ```
 
-You should see your credentials and connection confirmed. If not, see [Troubleshooting](#troubleshooting) below.
+You should see your profile, Canvas URL, and where credentials are stored. `status` does not contact Canvas; run `/doctor` in the TUI to test the connection. See [Troubleshooting](#troubleshooting) if anything is missing.
 
 ### 3. Launch canvas-cli
 
@@ -129,7 +131,7 @@ The fastest way to set up AI is through the interactive login:
 canvas-cli login
 ```
 
-Select "Configure AI provider" when prompted, choose your provider, and paste your API key (or, for a subscription provider, sign in through its CLI). You can also change providers later with the `/model` command in the TUI.
+At the AI provider step, choose your provider (or Skip), and paste your API key (or, for a subscription provider, sign in through its CLI). You can also change providers later with the `/model` command in the TUI.
 
 ### Which features require AI?
 
@@ -146,14 +148,14 @@ Select "Configure AI provider" when prompted, choose your provider, and paste yo
 
 | Provider | Default model | Cost tier | Best for |
 |---|---|---|---|
-| Anthropic | Claude Sonnet 4.6 | Mid | Detailed reasoning, structured output |
-| OpenAI | GPT-5.4 | Mid | General-purpose, fast responses |
-| Google / Gemini | Gemini 3.5 Flash | Low | Budget-friendly, fast |
-| AWS Bedrock | Claude Sonnet 4.6 | Mid | Teams already on AWS, no separate API key |
+| Anthropic | Claude Opus 5 | Mid | Detailed reasoning, structured output |
+| OpenAI | GPT-5.6 | Mid | General-purpose, fast responses |
+| Google / Gemini | Gemini 3.8 Flash | Low | Budget-friendly, fast |
+| AWS Bedrock | Claude Sonnet 5 | Mid | Teams already on AWS, no separate API key |
 | GitHub Copilot | `auto` (Copilot picks) | Subscription | Copilot Free, or the free Copilot Pro students get via GitHub Education — no API key |
 | ChatGPT via Codex (experimental) | `default` (Codex's current default model) | Subscription | An existing ChatGPT plan — no API key |
 
-**Typical usage costs ~$0.50–2/month** for a student using AI features a few times per week (check your provider's pricing page for current rates). Costs depend on the model you choose and how often you use AI features in the TUI (workspace creation, chat, `/quiz`, `/pdf`). Budget models (Gemini Flash, GPT-5.4 Mini) are significantly cheaper; premium models (Claude Opus, GPT-5.5) cost more but produce higher-quality analysis.
+**Typical usage costs ~$0.50–2/month** for a student using AI features a few times per week (check your provider's pricing page for current rates). Costs depend on the model you choose and how often you use AI features in the TUI (workspace creation, chat, `/quiz`, `/pdf`). Budget models (Gemini Flash, GPT-5.6 Luna) are significantly cheaper; premium models (Claude Opus, GPT-5.5) cost more but produce higher-quality analysis.
 
 ### Setting up Anthropic
 
@@ -325,7 +327,7 @@ If you set an API key without specifying `AI_PROVIDER`, canvas-cli auto-detects 
 
 ### AI features not working
 
-- **No provider configured:** Run `canvas-cli login` and select "Configure AI provider" to set up an API key or a subscription provider.
+- **No provider configured:** Run `canvas-cli login` and choose a provider at the AI provider step, or use `/model` in the TUI.
 - **Copilot or Codex not working:** Run `/doctor` — it checks that the vendor CLI is installed and (for Codex) signed in. Install with `npm install -g @github/copilot` or `npm install -g @openai/codex`, then run `copilot login` or `codex login`.
 - **Invalid API key:** Verify your key is correct and has not been revoked. Test it directly with your provider's API.
 - **Rate limited:** If you see rate limit errors, wait a few minutes and retry. Consider using a provider with higher rate limits.
@@ -543,7 +545,7 @@ Type questions directly:
 
 ### How the assistant answers
 
-Course and workspace chat run a small agent loop: it plans, investigates with tools, reflects on each result, and decides whether it has enough to answer, within a visible budget of 30 steps. Every answer is then checked against what the tools actually returned before it is shown. The tools it can call:
+Workspace chat runs a small agent loop: it plans, investigates with tools, reflects on each result, and decides whether it has enough to answer, within a budget of 30 steps. Every workspace answer is then checked against what the tools actually returned before it is shown. (Course and global chat use a lighter tool loop without the verification pass.) The tools it can call:
 
 | Tool | What it does |
 |---|---|

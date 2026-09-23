@@ -1,0 +1,45 @@
+.scrollbar {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 10;
+  pointer-events: none;
+  /* --dot-color and --dot-hover-color are set inline from props */
+  color: var(--dot-color);
+}
+
+.scrollbar line {
+  stroke: currentColor;
+  stroke-width: var(--stroke-width, 4);
+  stroke-linecap: round;
+  transition: stroke 250ms ease;
+}
+
+.scrollbar .hit-area,
+.scrollbar .arrow-hit {
+  fill: none;
+  pointer-events: none;
+}
+
+/* The arrow's strip only activates in idle */
+.scrollbar[data-state="idle"] .arrow-hit {
+  pointer-events: all;
+  cursor: pointer;
+}
+
+/* Section strips only activate once the dots are showing */
+.scrollbar[data-state="tracking"] .hit-area {
+  pointer-events: all;
+  cursor: pointer;
+}
+
+/* Section name shown beside the hovered dot */
+.scrollbar-label {
+  position: fixed;
+  z-index: 11;
+  pointer-events: none;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  transition: opacity 150ms ease;
+}
