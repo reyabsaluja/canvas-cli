@@ -177,7 +177,7 @@ export async function createShellContext(
               const nearest = upcoming.reduce((a, b) =>
                 new Date(a.dueAt!).getTime() < new Date(b.dueAt!).getTime() ? a : b
               );
-              setCourseStatus(runtime, `next due ${formatDueCompact(nearest.dueAt)}`);
+              setCourseStatus(runtime, `next ${formatDueCompact(nearest.dueAt)}`);
             } else {
               const count = nextAssignments.length;
               setCourseStatus(
