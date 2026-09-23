@@ -500,6 +500,38 @@ export async function generateWithTools(
 }
 
 /**
+ * Tracks the answer text of a tool-calling turn. The model may write a line
+ * before each tool call ("Let me read the handout..."); the shell shows that
+ * narration as it streams, so the returned answer is only the text written
+ * after the last tool call. If nothing follows the last tool call, the whole
+ * text is the answer.
+ */
+export function createAnswerTextTracker() {
+  let all = "";
+  let sinceLastTool = "";
+  let toolRanSinceText = false;
+  return {
+    text(delta: string) {
+      if (toolRanSinceText) {
+        sinceLastTool = "";
+        toolRanSinceText = false;
+      }
+      all += delta;
+      sinceLastTool += delta;
+    },
+    tool() {
+      toolRanSinceText = true;
+    },
+    get all() {
+      return all;
+    },
+    answer(): string {
+      return sinceLastTool.trim() ? sinceLastTool.replace(/^\s+/, "") : all;
+    },
+  };
+}
+
+/**
  * Stream tool-calling generation. Tool calls execute synchronously and
  * fire onToolCall. The final text response streams token-by-token via onTextDelta.
  *
@@ -526,7 +558,19 @@ export async function streamWithTools(
   const streamStartTime = Date.now();
 
   if (isSubscriptionProvider(config.provider)) {
-    const text = await runSubscriptionBackend(config, systemPrompt, messages, toolDefs, executeTool, callbacks);
+    const tracker = createAnswerTextTracker();
+    await runSubscriptionBackend(config, systemPrompt, messages, toolDefs, executeTool, {
+      ...callbacks,
+      onToolCall: (name, input, result) => {
+        tracker.tool();
+        callbacks.onToolCall?.(name, input, result);
+      },
+      onTextDelta: (delta) => {
+        tracker.text(delta);
+        callbacks.onTextDelta?.(delta);
+      },
+    });
+    const text = tracker.answer();
     debugAI(config.provider, config.model, "streamWithTools completed (cli)", {
       durationMs: Date.now() - streamStartTime,
       responseLength: text.length,
@@ -538,6 +582,7 @@ export async function streamWithTools(
   const STREAM_TEXT_MAX_HOLD_MS = 40;
   const STREAM_TEXT_FORCE_FLUSH_CHARS = 64;
   const aiTools: Record<string, any> = {};
+  const answerText = createAnswerTextTracker();
   let pendingTextDelta = "";
   let textFlushTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingTextStartedAt = 0;
@@ -626,6 +671,7 @@ export async function streamWithTools(
         flushPendingTextDelta(true);
         const result = await executeTool(t.name, input);
         if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        answerText.tool();
         callbacks.onToolCall?.(t.name, input, result);
         return result;
       },
@@ -655,6 +701,7 @@ export async function streamWithTools(
         const delta = (part as any).text ?? "";
         if (delta) {
           fullText += delta;
+          answerText.text(delta);
           if (!pendingTextDelta) {
             pendingTextStartedAt = Date.now();
           }
@@ -686,11 +733,12 @@ export async function streamWithTools(
   if (capturedStreamError && !fullText) {
     throw capturedStreamError;
   }
+  const answer = answerText.answer();
   debugAI(config.provider, config.model, "streamWithTools completed", {
     durationMs: Date.now() - streamStartTime,
-    responseLength: fullText.length,
+    responseLength: answer.length,
   });
-  return fullText;
+  return answer;
 }
 
 export function classifyAIError(error: unknown): AIError {
