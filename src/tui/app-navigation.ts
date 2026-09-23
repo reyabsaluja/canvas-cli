@@ -137,6 +137,21 @@ export async function ensureCourseIngested(
   }
 }
 
+/** Picker headline: relative for open work; submitted work is never "overdue". */
+function formatAssignmentDue(assignment: Assignment): string {
+  if (assignment.submitted && assignment.dueAt && assignment.dueAt.getTime() < Date.now()) {
+    return `was due ${assignment.dueAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+  }
+  return formatDueCompact(assignment.dueAt);
+}
+
+/** The exact due date and time, e.g. "Fri, Sep 25 at 11:59 PM". */
+function formatDueExact(dueAt: Date): string {
+  const day = dueAt.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  const time = dueAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  return `${day} at ${time}`;
+}
+
 export async function pickAssignmentScope(
   services: AppServices,
   courseId: number
@@ -170,8 +185,12 @@ export async function pickAssignmentScope(
     subtitle: `${assignments.length} assignments`,
     items: assignments.map((assignment) => ({
       label: assignment.name,
-      sublabel: formatDueCompact(assignment.dueAt),
-      description: assignment.submitted ? "submitted" : (assignment.dueAt ? formatDueCompact(assignment.dueAt) : "no due date"),
+      sublabel: formatAssignmentDue(assignment),
+      description: assignment.submitted
+        ? "submitted"
+        : assignment.dueAt
+          ? formatDueExact(assignment.dueAt)
+          : "no due date",
       rightLabel: assignment.submitted ? "✓" : "",
       value: String(assignment.id),
       dimmed: assignment.submitted,
