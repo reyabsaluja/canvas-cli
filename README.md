@@ -4,6 +4,8 @@
 
 `canvas-cli` is an interactive terminal interface for Canvas LMS. It provides a TUI for browsing courses, assignments, and course materials, with optional AI-assisted assignment investigation — all from the terminal.
 
+**Documentation: [reyab.ca/projects/canvas-cli](https://reyab.ca/projects/canvas-cli)**
+
 ## Highlights
 
 - Interactive TUI for browsing courses, assignments, modules, and files
