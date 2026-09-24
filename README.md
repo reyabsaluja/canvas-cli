@@ -340,7 +340,7 @@ If you set an API key without specifying `AI_PROVIDER`, canvas-cli auto-detects 
 | `canvas-cli` | Launch the interactive TUI |
 | `canvas-cli login [--profile <name>]` | Set up Canvas credentials (and optionally an AI provider) interactively |
 | `canvas-cli logout [--profile <name>]` | Remove stored credentials and configuration |
-| `canvas-cli status [--profile <name>]` | Show current configuration and connection status |
+| `canvas-cli status [--profile <name>]` | Show the current configuration (use `/doctor` in the TUI to test the connection) |
 | `canvas-cli ingest <course> [--refresh] [--json]` | Cache course materials locally |
 | `canvas-cli clean [-y]` | Remove local cached data (courses, sessions, chat history); `-y` skips the confirmation |
 | `canvas-cli clean --all` | Also remove global config and stored credentials |
