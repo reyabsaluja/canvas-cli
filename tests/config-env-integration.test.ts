@@ -244,3 +244,28 @@ describe("AI base URLs never receive a stored key", () => {
     assert.doesNotThrow(() => assertBaseUrlKeyPairing("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"));
   });
 });
+
+describe("a provider chosen in the environment ignores the saved model", () => {
+  const profile = "default";
+  beforeEach(() => resetEnv());
+  afterEach(() => {
+    resetEnv();
+    try { deleteStoredConfig(profile); } catch {}
+    Object.assign(process.env, originalEnv);
+  });
+
+  test("a different AI_PROVIDER does not inherit the saved aiModel", () => {
+    writeStoredConfig({ canvasBaseUrl: "https://school.test", aiProvider: "anthropic", aiModel: "claude-opus-5", aiEffort: "high" }, profile);
+    process.env.AI_PROVIDER = "openai";
+    loadStoredCredentialsToEnv();
+    assert.equal(process.env.AI_MODEL, undefined);
+    assert.equal(process.env.AI_EFFORT, "high");
+  });
+
+  test("the same provider (by any alias) keeps the saved model", () => {
+    writeStoredConfig({ canvasBaseUrl: "https://school.test", aiProvider: "google", aiModel: "gemini-3.8-flash" }, profile);
+    process.env.AI_PROVIDER = "Gemini";
+    loadStoredCredentialsToEnv();
+    assert.equal(process.env.AI_MODEL, "gemini-3.8-flash");
+  });
+});

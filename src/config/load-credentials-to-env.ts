@@ -38,7 +38,12 @@ export function loadStoredCredentialsToEnv(): void {
     process.env.AI_PROVIDER = stored.aiProvider;
     debug("config", `Set AI_PROVIDER from stored config: ${stored.aiProvider}`);
   }
-  if (stored?.aiModel && !process.env.AI_MODEL) {
+  // A saved model belongs to the saved provider. When AI_PROVIDER in the
+  // environment picks a different one, leave AI_MODEL unset so that provider's
+  // default is used instead of, say, a Claude model id sent to OpenAI.
+  const sameProvider =
+    normalizeAIProvider(process.env.AI_PROVIDER) === normalizeAIProvider(stored?.aiProvider);
+  if (stored?.aiModel && !process.env.AI_MODEL && sameProvider) {
     process.env.AI_MODEL = stored.aiModel;
     debug("config", `Set AI_MODEL from stored config: ${stored.aiModel}`);
   }
