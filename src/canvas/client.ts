@@ -11,6 +11,7 @@ import {
 import { debug, debugApiRequest, debugApiResponse, maskUrl } from "../debug.js";
 import { fetchWithRetry, type RetryOptions, RateLimitThrottle } from "./retry.js";
 import { isSameCanvasOrigin } from "../sanitize.js";
+import { DEFAULT_DOWNLOAD_TIMEOUT_MS, DEFAULT_MAX_DOWNLOAD_BYTES, readBodyWithLimit } from "./safe-download.js";
 import type {
   CanvasAssignment,
   CanvasAssignmentDetail,
@@ -322,16 +323,22 @@ export class CanvasClient {
   }
 
   /**
-   * Download a file by URL with Canvas auth. Returns the buffer or null on failure.
+   * Download a file by URL with Canvas auth. Returns the buffer or null on
+   * failure. Like ingestion's downloads, the token is only sent to the Canvas
+   * origin and the body is capped at DEFAULT_MAX_DOWNLOAD_BYTES.
    */
   async downloadFile(downloadUrl: string): Promise<Buffer | null> {
+    if (!isSameCanvasOrigin(downloadUrl, this.baseUrl)) {
+      debug("api", `Refusing on-demand download from non-Canvas origin: ${maskUrl(downloadUrl)}`);
+      return null;
+    }
     try {
       const response = await fetchWithRetry(downloadUrl, {
         headers: this.headers,
         redirect: "follow",
-      }, { ...this.retryOptions, requestTimeoutMs: 60_000 });
+      }, { ...this.retryOptions, requestTimeoutMs: DEFAULT_DOWNLOAD_TIMEOUT_MS });
       if (!response.ok) return null;
-      return Buffer.from(await response.arrayBuffer());
+      return await readBodyWithLimit(response, DEFAULT_MAX_DOWNLOAD_BYTES);
     } catch {
       return null;
     }
