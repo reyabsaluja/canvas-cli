@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { createRequire } from "node:module";
 import { Command } from "commander";
 import { initDebug, debug } from "./debug.js";
 import { cleanCommand } from "./commands/clean.js";
@@ -11,21 +10,7 @@ import { logoutCommand } from "./commands/logout.js";
 import { statusCommand } from "./commands/status.js";
 import { loadStoredCredentialsToEnv } from "./config/load-credentials-to-env.js";
 import { CanvasCliError, classifyError } from "./errors.js";
-
-// Standalone binaries (scripts/build-binary.ts) bake the version in at build
-// time because there is no package.json beside them to read.
-declare const CANVAS_CLI_VERSION: string | undefined;
-
-let version = "0.0.0";
-if (typeof CANVAS_CLI_VERSION === "string") {
-  version = CANVAS_CLI_VERSION;
-} else {
-  try {
-    const require = createRequire(import.meta.url);
-    const pkg: { version: string } = require("../package.json");
-    version = pkg.version;
-  } catch {}
-}
+import { VERSION } from "./version.js";
 
 const program = new Command();
 
@@ -34,7 +19,7 @@ program
   .description(
     "A terminal interface for Canvas LMS — manage courses, assignments, and content from the command line."
   )
-  .version(version, "-V, --version", "output the current version")
+  .version(VERSION, "-V, --version", "output the current version")
   .option("--debug", "Enable verbose debug output to stderr")
   .addHelpText(
     "after",
@@ -54,7 +39,7 @@ const SKIP_CREDENTIAL_LOADING = new Set(["login", "logout", "status", "examples"
 program.hook("preAction", (_thisCommand, actionCommand) => {
   const opts = program.opts();
   initDebug(Boolean(opts.debug));
-  debug("general", `canvas-cli v${version} starting`);
+  debug("general", `canvas-cli v${VERSION} starting`);
   debug("config", "Node.js " + process.version);
 
   if (!SKIP_CREDENTIAL_LOADING.has(actionCommand.name())) {

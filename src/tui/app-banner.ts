@@ -10,6 +10,7 @@ import {
   type AppServices,
 } from "./services.js";
 import { formatModelName } from "../ai/provider.js";
+import { VERSION } from "../version.js";
 
 type MenuLineBuffer = { push(line: string): void };
 
@@ -103,7 +104,7 @@ function renderInfoBox(
   const leftW = Math.floor(boxInner * 0.4);
   const rightW = boxInner - leftW - 1;
 
-  const versionLabel = " v0.1.0 ";
+  const versionLabel = ` v${VERSION} `;
   const topLineTotal = leftW + 1 + rightW + 2;
   const versionStart = Math.floor((topLineTotal - versionLabel.length) / 2);
   const topLeft = "─".repeat(Math.max(0, versionStart));

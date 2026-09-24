@@ -122,7 +122,7 @@ Pushing the tag triggers `.github/workflows/publish.yml`, which:
 
 `scripts/build-binary.ts` bundles `src/cli.ts` with `bun build --compile`. Anything the bundler cannot follow fails only at runtime inside the binary, so:
 
-- Import dependencies and JSON with static `import` or `await import("pkg")`, never `createRequire(import.meta.url)` (the only exception is the `package.json` version fallback in `src/cli.ts`, which binaries replace with a build-time constant).
+- Import dependencies and JSON with static `import` or `await import("pkg")`, never `createRequire(import.meta.url)` (the only exception is the `package.json` version fallback in `src/version.ts`, which binaries replace with a build-time constant).
 - Two dependencies are patched at build time: pdf-parse (its pdf.js version is pinned) and pdfkit (its font lookups are bundled). The build fails loudly if either library's internals change.
 - The Smoke Test workflow builds and runs the binary on every push, so a bundling break shows up before a release tag.
 
