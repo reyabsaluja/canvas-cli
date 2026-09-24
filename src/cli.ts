@@ -69,7 +69,7 @@ Examples:
 program
   .command("logout")
   .description("Remove stored credentials and configuration")
-  .option("--profile <name>", "Profile to remove (defaults to \"default\")")
+  .option("--profile <name>", "Profile to remove (defaults to the active profile: CANVAS_CLI_PROFILE, else \"default\")")
   .addHelpText(
     "after",
     `

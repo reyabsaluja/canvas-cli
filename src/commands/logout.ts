@@ -1,3 +1,4 @@
+import { getActiveProfile } from "../config/env.js";
 import { deleteStoredConfig, readStoredConfig } from "../config/store.js";
 import { deleteAllCredentials } from "../config/credentials.js";
 import { C } from "./login-picker.js";
@@ -7,7 +8,7 @@ interface LogoutOptions {
 }
 
 export function logoutCommand(options: LogoutOptions): void {
-  const profile = options.profile || "default";
+  const profile = options.profile || getActiveProfile();
 
   const existing = readStoredConfig(profile);
   if (!existing) {

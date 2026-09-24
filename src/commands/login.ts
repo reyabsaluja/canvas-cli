@@ -1,3 +1,4 @@
+import { getActiveProfile } from "../config/env.js";
 import { spawn } from "node:child_process";
 import { platform } from "node:os";
 import { writeStoredConfig, readStoredConfig, type StoredConfig } from "../config/store.js";
@@ -54,7 +55,7 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
   };
   process.on("exit", restoreTerminal);
 
-  const profile = options.profile || "default";
+  const profile = options.profile || getActiveProfile();
 
   const banner = [
     "░█▀▀░█▀█░█▀█░█░█░█▀█░█▀▀",
