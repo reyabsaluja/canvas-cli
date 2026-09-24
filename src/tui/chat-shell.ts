@@ -80,6 +80,12 @@ interface AskCallbacks {
   abortSignal?: AbortSignal;
 }
 
+// Terminals disagree on Home/End: xterm and most emulators send ESC[H / ESC[F,
+// application mode sends ESC O H / ESC O F, vt/rxvt send ESC[1~ / ESC[4~ or
+// ESC[7~ / ESC[8~.
+const HOME_KEYS = new Set(["\x1b[H", "\x1bOH", "\x1b[1~", "\x1b[7~"]);
+const END_KEYS = new Set(["\x1b[F", "\x1bOF", "\x1b[4~", "\x1b[8~"]);
+
 export interface ChatShellOptions<TExit> {
   session: ChatSession;
   runtime: ScopeRuntime;
@@ -1434,13 +1440,13 @@ export async function runChatShell<TExit>(
         }
         return;
       }
-      if (key === "\x1b[4~" || key === "\x1B[4~") {
+      if (END_KEYS.has(key)) {
         if (setChatScrollOffset(0)) {
           render();
         }
         return;
       }
-      if (key === "\x1b[1~" || key === "\x1B[1~") {
+      if (HOME_KEYS.has(key)) {
         if (setChatScrollOffset(maxChatScrollOffset)) {
           render();
         }
