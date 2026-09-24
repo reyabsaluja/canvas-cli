@@ -4,6 +4,7 @@ import { loadCredential, getCredentialBackend } from "../config/credentials.js";
 import { getConfigDir } from "../config/paths.js";
 import { C } from "./login-picker.js";
 import { isSubscriptionProvider, SUBSCRIPTION_PROVIDERS } from "../ai/provider.js";
+import { normalizeAIProvider } from "../ai/provider-names.js";
 
 interface StatusOptions {
   profile?: string;
@@ -25,14 +26,24 @@ export function statusCommand(options: StatusOptions = {}): void {
   console.log(`  ${label("Canvas URL")}${baseUrl ? C.success(baseUrl) : C.error("not set")}`);
   console.log(`  ${label("Access Token")}${hasToken ? C.success("configured") : C.error("not set")}`);
 
-  if (stored?.aiProvider) {
-    const model = stored.aiModel || "(default)";
-    const viaCli = isSubscriptionProvider(stored.aiProvider)
-      ? ` ${C.dim(`· subscription via \`${SUBSCRIPTION_PROVIDERS[stored.aiProvider].binary}\` CLI`)}`
+  // What will actually run: AI_PROVIDER in the environment overrides the
+  // saved provider, and the saved model only applies to the saved provider.
+  const envProvider = normalizeAIProvider(process.env.AI_PROVIDER);
+  const storedProvider = normalizeAIProvider(stored?.aiProvider);
+  const provider = envProvider ?? storedProvider;
+  if (process.env.AI_PROVIDER && !envProvider) {
+    // An unrecognized value turns AI off rather than falling back.
+    console.log(`  ${label("AI Provider")}${C.error(`unrecognized AI_PROVIDER "${process.env.AI_PROVIDER}" (AI is off)`)}`);
+  } else if (provider) {
+    const model =
+      process.env.AI_MODEL ||
+      (provider === storedProvider ? stored?.aiModel : undefined) ||
+      "(default)";
+    const source = envProvider ? ` ${C.dim("· from environment")}` : "";
+    const viaCli = isSubscriptionProvider(provider)
+      ? ` ${C.dim(`· subscription via \`${SUBSCRIPTION_PROVIDERS[provider].binary}\` CLI`)}`
       : "";
-    console.log(`  ${label("AI Provider")}${C.success(stored.aiProvider)} ${C.dim(`(model: ${model})`)}${viaCli}`);
-  } else if (process.env.AI_PROVIDER) {
-    console.log(`  ${label("AI Provider")}${C.success(process.env.AI_PROVIDER)} ${C.dim("(from env)")}`);
+    console.log(`  ${label("AI Provider")}${C.success(provider)} ${C.dim(`(model: ${model})`)}${viaCli}${source}`);
   } else {
     console.log(`  ${label("AI Provider")}${C.dim("not configured")}`);
   }
