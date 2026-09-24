@@ -109,7 +109,7 @@ Pushing the tag triggers `.github/workflows/publish.yml`, which:
 2. Builds standalone binaries for every platform on macOS (`bun run build:binary --all`, which ad-hoc signs the macOS builds) and checks the version they report
 3. Installs them with `install.sh` on Linux and verifies the result
 4. Publishes to npm with provenance (only if steps 1–3 passed)
-5. Creates a GitHub Release with auto-generated notes and attaches the binaries, `SHA256SUMS`, and `install.sh`. Pre-release tags are marked as pre-releases, so `install.sh` (which downloads the latest release) never picks them up.
+5. Creates a GitHub Release (after step 3, independently of npm) with auto-generated notes and attaches the binaries, `SHA256SUMS`, and `install.sh`. Pre-release tags are marked as pre-releases, so `install.sh` (which downloads the latest release) never picks them up.
 
 ### 6. Verify
 

@@ -125,8 +125,10 @@ jobs:
           [ "$VERSION" = "${GITHUB_REF_NAME#v}" ]
           "$RUNNER_TEMP/bin/canvas-cli" --help
 
+  # Depends on the verified binaries, not on npm: a failed npm publish (a
+  # token problem, say) should not also take down the curl installer.
   github-release:
-    needs: publish
+    needs: [ci, verify-binaries]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
