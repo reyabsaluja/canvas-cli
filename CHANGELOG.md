@@ -7,6 +7,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `/quiz retry` asks the questions you missed in the last quiz again, as the results screen already offered
+- `SECURITY.md` with private vulnerability reporting
+
+### Changed
+
+- `canvas-cli status` shows the provider and model that will actually be used, notes when `AI_PROVIDER` comes from the environment, and says when its value is unrecognized
+- `login` and `logout` use the active profile (`CANVAS_CLI_PROFILE`, then `default`) when `--profile` is omitted, and re-running `login` keeps settings the wizard doesn't ask about
+- The Bedrock step in `login` offers the model list, with a custom id option, instead of a blank prompt
+- `ingest` lists your courses when nothing matches, and its summary names what Canvas refused instead of a generic note
+- `--refresh` downloads every file again; without it, a file whose size changed on Canvas is fetched again
+- Course and global chat answers are checked for dates and figures that appear nowhere in what the assistant was shown, with the same "could not confirm" note workspace answers get
+- The npm package requires Node.js 20.10, matching `package.json`
+
+### Fixed
+
+- Answers no longer include the model's narration from before its tool calls
+- The course status line read "next due due in 2d"; submitted assignments are no longer labelled overdue in the picker
+- `/q` started a quiz instead of quitting in course and workspace scope; exact command and alias matches now sort first
+- Home and End work in common terminals; an `@` inside a word, such as an email address, is no longer read as a pin
+- The home screen shows the real version; the course picker subtitle and `/doctor` hint describe current behaviour
+- Saved API keys are found when `AI_PROVIDER` uses an alias or capitals, and a saved model is not sent to a different provider
+- Workspaces no longer get an empty `resources/` folder
+
+### Security
+
+- A saved AI key is never sent to an `ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL` from the environment; set the key alongside it
+- On-demand file downloads get the same Canvas-origin check and size cap as ingestion
+- Prompts reach the Copilot CLI on stdin rather than the command line, and the Copilot and Codex processes no longer inherit the Canvas token or API-key-provider secrets
+- Secrets saved to the macOS Keychain no longer appear in the process list, and every write is read back
+- `.canvas-cli/` is created readable only by you, and an existing one is tightened
+
 ## [0.1.0] - 2026-09-23
 
 Initial release of `@reyabsaluja/canvas-cli`.

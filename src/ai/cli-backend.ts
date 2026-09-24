@@ -74,7 +74,6 @@ const EXTRA_BIN_DIRS = (): string[] => {
   ];
 };
 
-/** Locate an executable on PATH or in the usual npm/bun global bin directories. */
 /**
  * Secrets that belong to canvas-cli (or to the API-key providers) and must
  * not reach a vendor CLI. The CLIs sign in with their own login, and GitHub
@@ -99,6 +98,7 @@ export function cliChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return next;
 }
 
+/** Locate an executable on PATH or in the usual npm/bun global bin directories. */
 export function findExecutable(name: string, env: NodeJS.ProcessEnv = process.env): string | null {
   const isWindows = platform() === "win32";
   const candidates = isWindows ? [`${name}.cmd`, `${name}.exe`, name] : [name];
