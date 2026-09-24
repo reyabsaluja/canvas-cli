@@ -65,17 +65,28 @@ export async function runBedrockSteps(freshStep: () => void): Promise<BedrockRes
       awsSecretKey = secretKey;
       subStep = 4;
     } else if (subStep === 4) {
-      console.log(`\n  ${C.dim("Enter the full Bedrock model ID:")}  ${ESC_HINT}`);
-      const model = await promptLine(`  ${C.dim("→")} `);
-      if (model === ESCAPED) { subStep = 3; continue; }
-      aiModel = model;
+      // Same list /model offers (us. inference profiles), plus Custom for
+      // other regions' prefixes or models outside the catalog.
+      console.log();
+      const selectedModel = await verticalPicker("Model", getModelOptions("bedrock"));
+      if (selectedModel === BACK || selectedModel === null) { subStep = 3; continue; }
+      if (selectedModel === "__custom__") {
+        const custom = await promptLine(`\n  ${C.dim("Bedrock model ID →")} `);
+        if (custom === ESCAPED) { continue; }
+        aiModel = custom;
+      } else {
+        aiModel = selectedModel;
+      }
       subStep = 5;
     } else if (subStep === 5) {
-      console.log();
-      const effort = await horizontalPicker("Effort", effortPickerOptions("bedrock", aiModel));
-      if (effort === BACK) { subStep = 4; continue; }
-      if (effort === null) { subStep = 4; continue; }
-      aiEffort = effort;
+      const effortChoices = effortPickerOptions("bedrock", aiModel);
+      if (effortChoices.length > 0) {
+        console.log();
+        const effort = await horizontalPicker("Effort", effortChoices);
+        if (effort === BACK) { subStep = 4; continue; }
+        if (effort === null) { subStep = 4; continue; }
+        aiEffort = effort;
+      }
       break;
     }
   }
