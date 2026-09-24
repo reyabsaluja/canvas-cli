@@ -183,3 +183,30 @@ process.on("exit", () => {
     rmSync(tempDir, { recursive: true });
   } catch {}
 });
+
+describe("stored AI keys with provider aliases", () => {
+  const profile = "default";
+
+  beforeEach(() => resetEnv());
+  afterEach(() => {
+    resetEnv();
+    deleteAllCredentials(profile);
+    try { deleteStoredConfig(profile); } catch {}
+    Object.assign(process.env, originalEnv);
+  });
+
+  for (const [alias, credKey, envKey] of [
+    ["gemini", "google-key", "GOOGLE_API_KEY"],
+    ["Anthropic", "anthropic-key", "ANTHROPIC_API_KEY"],
+    ["aws-bedrock", "aws-access-key", "AWS_ACCESS_KEY_ID"],
+  ] as const) {
+    test(`AI_PROVIDER=${alias} finds the key saved under the canonical name`, () => {
+      writeStoredConfig({ canvasBaseUrl: "https://school.test" }, profile);
+      storeCredential(profile, credKey, "stored-secret");
+      process.env.AI_PROVIDER = alias;
+      loadStoredCredentialsToEnv();
+      ensureAICredentials();
+      assert.equal(process.env[envKey], "stored-secret");
+    });
+  }
+});

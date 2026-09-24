@@ -2,6 +2,7 @@ import { loadCredential } from "./credentials.js";
 import { readStoredConfig } from "./store.js";
 import { getActiveProfile } from "./env.js";
 import { debug } from "../debug.js";
+import { normalizeAIProvider } from "../ai/provider-names.js";
 
 const PROVIDER_CREDENTIALS: Record<string, [credKey: string, envKey: string][]> = {
   openai: [["openai-key", "OPENAI_API_KEY"]],
@@ -57,7 +58,9 @@ export function ensureAICredentials(): void {
 
   const profile = getActiveProfile();
   const stored = readStoredConfig(profile);
-  const provider = process.env.AI_PROVIDER || stored?.aiProvider;
+  // Keys are stored under the canonical name, so "gemini", "Anthropic", or
+  // "aws-bedrock" must find them too.
+  const provider = normalizeAIProvider(process.env.AI_PROVIDER || stored?.aiProvider);
   const relevantCreds = provider ? PROVIDER_CREDENTIALS[provider] : undefined;
   if (!relevantCreds) return;
 

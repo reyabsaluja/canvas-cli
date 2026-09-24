@@ -19,7 +19,8 @@ export { isSubscriptionProvider, SUBSCRIPTION_PROVIDERS, type SubscriptionProvid
  * subscription providers: they drive the vendor CLI on the user's machine and
  * never touch the AI SDK path.
  */
-export type AIProviderName = "anthropic" | "openai" | "google" | "bedrock" | "copilot" | "codex";
+import { normalizeAIProvider, type AIProviderName } from "./provider-names.js";
+export type { AIProviderName } from "./provider-names.js";
 
 export type AIBackendKind = "sdk" | "cli";
 
@@ -135,32 +136,6 @@ export function getAIConfig(): AIProviderConfig | null {
   }
 
   return null;
-}
-
-function normalizeAIProvider(value: string | undefined): AIProviderName | null {
-  const normalized = value?.trim().toLowerCase();
-  switch (normalized) {
-    case "anthropic":
-      return "anthropic";
-    case "openai":
-      return "openai";
-    case "google":
-    case "gemini":
-      return "google";
-    case "bedrock":
-    case "aws-bedrock":
-    case "amazon-bedrock":
-      return "bedrock";
-    case "copilot":
-    case "github-copilot":
-      return "copilot";
-    case "codex":
-    case "chatgpt":
-    case "openai-codex":
-      return "codex";
-    default:
-      return null;
-  }
 }
 
 function buildAIConfig(
