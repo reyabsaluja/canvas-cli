@@ -477,3 +477,19 @@ test("doctor turns a missing subscription CLI into a failing check with install 
     process.env.PATH = savedPath;
   }
 });
+
+test("vendor CLIs never receive canvas-cli's secrets, but keep their own login", async () => {
+  const { cliChildEnv } = await import("../src/ai/cli-backend.js");
+  const env = cliChildEnv({
+    PATH: "/usr/bin",
+    CANVAS_ACCESS_TOKEN: "canvas",
+    ANTHROPIC_API_KEY: "a",
+    OPENAI_API_KEY: "o",
+    GOOGLE_API_KEY: "g",
+    AWS_SECRET_ACCESS_KEY: "s",
+    AWS_BEARER_TOKEN_BEDROCK: "b",
+    GH_TOKEN: "gh",
+    COPILOT_GITHUB_TOKEN: "cp",
+  });
+  assert.deepEqual(Object.keys(env).sort(), ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "PATH"]);
+});

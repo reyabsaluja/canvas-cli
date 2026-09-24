@@ -5,6 +5,7 @@ import { AIError } from "../errors.js";
 import { startToolBridge, type ToolBridge } from "../mcp-bridge.js";
 import {
   buildTranscriptPrompt,
+  cliChildEnv,
   classifyCliFailure,
   findExecutable,
   makeScratchDir,
@@ -208,7 +209,7 @@ export async function runCopilot(request: CliBackendRequest, deps: CliDeps = {})
     const result = await runCliJsonl({
       command,
       args,
-      env: { ...baseEnv },
+      env: cliChildEnv(baseEnv),
       cwd: scratch.path,
       stdin: prompt,
       abortSignal: request.abortSignal,

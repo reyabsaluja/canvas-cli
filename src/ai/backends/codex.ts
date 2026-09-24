@@ -3,6 +3,7 @@ import { AIError } from "../errors.js";
 import { startToolBridge, type ToolBridge } from "../mcp-bridge.js";
 import {
   buildTranscriptPrompt,
+  cliChildEnv,
   classifyCliFailure,
   findExecutable,
   makeScratchDir,
@@ -176,9 +177,9 @@ export async function runCodex(request: CliBackendRequest, deps: CliDeps = {}): 
     });
     const prompt = buildTranscriptPrompt(request.systemPrompt, request.messages);
 
-    const env: NodeJS.ProcessEnv = { ...baseEnv };
-    // The subscription path must not silently fall back to API-key billing.
-    delete env.OPENAI_API_KEY;
+    // Also drops OPENAI_API_KEY, so the subscription path cannot silently fall
+    // back to API-key billing.
+    const env: NodeJS.ProcessEnv = cliChildEnv(baseEnv);
     if (bridge) env[MCP_TOKEN_ENV] = bridge.token;
 
     debugAI("codex", request.model, "codex run starting", {

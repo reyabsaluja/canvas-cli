@@ -75,6 +75,30 @@ const EXTRA_BIN_DIRS = (): string[] => {
 };
 
 /** Locate an executable on PATH or in the usual npm/bun global bin directories. */
+/**
+ * Secrets that belong to canvas-cli (or to the API-key providers) and must
+ * not reach a vendor CLI. The CLIs sign in with their own login, and GitHub
+ * tokens stay because that is how Copilot authenticates.
+ */
+const SECRETS_WITHHELD_FROM_CLIS = [
+  "CANVAS_ACCESS_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "GOOGLE_API_KEY",
+  "GOOGLE_GENERATIVE_AI_API_KEY",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+  "AWS_BEARER_TOKEN_BEDROCK",
+];
+
+/** A copy of `env` without the secrets a vendor CLI has no business seeing. */
+export function cliChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const next: NodeJS.ProcessEnv = { ...env };
+  for (const key of SECRETS_WITHHELD_FROM_CLIS) delete next[key];
+  return next;
+}
+
 export function findExecutable(name: string, env: NodeJS.ProcessEnv = process.env): string | null {
   const isWindows = platform() === "win32";
   const candidates = isWindows ? [`${name}.cmd`, `${name}.exe`, name] : [name];
