@@ -41,7 +41,6 @@ interface UnifiedWorkspaceResult {
   filesWritten: string[];
   filesSkipped: string[];
   attachments: DownloadResult;
-  resourcesCopied: string[];
   documentsExtracted: string[];
 }
 
@@ -63,7 +62,6 @@ export async function createWorkWorkspace(
     workspacePath: result.workspacePath,
     filesWritten: result.filesWritten,
     filesSkipped: result.filesSkipped,
-    resourcesCopied: result.resourcesCopied,
     documentsExtracted: result.documentsExtracted,
   };
 }
@@ -80,7 +78,6 @@ async function writeWorkspaceArtifacts(
 
   // Ensure shared workspace structure first so every caller gets the same layout.
   await fs.mkdir(path.join(wsPath, "work"), { recursive: true });
-  await fs.mkdir(path.join(wsPath, "resources"), { recursive: true });
   await fs.mkdir(path.join(wsPath, "extracted"), { recursive: true });
 
   const filesWritten: string[] = [];
@@ -146,7 +143,6 @@ async function writeWorkspaceArtifacts(
 
   if (!existed) {
     filesWritten.push("work/");
-    filesWritten.push("resources/");
     filesWritten.push("extracted/");
   }
 
@@ -160,15 +156,6 @@ async function writeWorkspaceArtifacts(
     }
     if (documentsExtracted.length > 0) {
       filesWritten.push(`extracted/ (${documentsExtracted.length} documents)`);
-    }
-  }
-
-  const resourcesCopied: string[] = [];
-  if (options.workup) {
-    for (const resource of options.workup.relevantResources) {
-      if (resource.location && resource.type === "pdf") {
-        resourcesCopied.push(resource.title);
-      }
     }
   }
 
@@ -200,7 +187,6 @@ async function writeWorkspaceArtifacts(
     filesWritten,
     filesSkipped,
     attachments: attachmentResult,
-    resourcesCopied,
     documentsExtracted,
   };
 }

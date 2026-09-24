@@ -85,6 +85,5 @@ export interface WorkResult {
   workspacePath: string;
   filesWritten: string[];
   filesSkipped: string[];
-  resourcesCopied: string[];
   documentsExtracted: string[];
 }
