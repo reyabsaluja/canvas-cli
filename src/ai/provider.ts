@@ -5,7 +5,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { debugAI } from "../debug.js";
-import { ensureAICredentials } from "../config/load-credentials-to-env.js";
+import { ensureAICredentials, isEnvKeyFromStore } from "../config/load-credentials-to-env.js";
 import { AIError, type AIErrorKind } from "./errors.js";
 import { isSubscriptionProvider, type CliBackendRequest, type SubscriptionProvider } from "./cli-backend.js";
 import { runCodex } from "./backends/codex.js";
@@ -245,15 +245,36 @@ export function getEffortOptions(config: AIProviderConfig): EffortOptions {
   }
 }
 
+/**
+ * The Anthropic and OpenAI SDKs send requests to ANTHROPIC_BASE_URL /
+ * OPENAI_BASE_URL when set, and a .env file in the working directory can set
+ * them. Like the Canvas rule (a URL from the environment needs a token from
+ * the environment), a stored key is never sent to a base URL the user did not
+ * store it with.
+ */
+export function assertBaseUrlKeyPairing(baseUrlKey: string, apiKeyEnv: string): void {
+  if (process.env[baseUrlKey] && isEnvKeyFromStore(apiKeyEnv)) {
+    throw new AIError(
+      `${baseUrlKey} is set, but ${apiKeyEnv} would come from your saved login, so canvas-cli will not send it there.`,
+      "auth",
+      {
+        setupHint: `Set ${apiKeyEnv} alongside ${baseUrlKey} if you meant to use that endpoint, or unset ${baseUrlKey} (check for a .env file in this folder).`,
+      }
+    );
+  }
+}
+
 function getModel(config: AIProviderConfig) {
   switch (config.provider) {
     case "anthropic": {
+      assertBaseUrlKeyPairing("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY");
       const anthropic = createAnthropic({
         apiKey: process.env.ANTHROPIC_API_KEY!,
       });
       return anthropic(config.model);
     }
     case "openai": {
+      assertBaseUrlKeyPairing("OPENAI_BASE_URL", "OPENAI_API_KEY");
       const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY! });
       return openai(config.model);
     }

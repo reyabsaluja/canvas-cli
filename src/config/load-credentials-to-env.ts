@@ -16,6 +16,14 @@ const PROVIDER_CREDENTIALS: Record<string, [credKey: string, envKey: string][]> 
 
 let aiCredentialsLoaded = false;
 
+/** Environment variables whose value came from the credential store, not the user's environment. */
+const envKeysFromStore = new Set<string>();
+
+/** True when `envKey` was filled in from the credential store by this process. */
+export function isEnvKeyFromStore(envKey: string): boolean {
+  return envKeysFromStore.has(envKey);
+}
+
 /**
  * Loads non-secret config values (provider, model, effort, region) from the
  * stored config file into env vars. This is fast (file read only, no keychain).
@@ -44,6 +52,7 @@ export function loadStoredCredentialsToEnv(): void {
   }
 
   aiCredentialsLoaded = false;
+  envKeysFromStore.clear();
 }
 
 /**
@@ -69,6 +78,7 @@ export function ensureAICredentials(): void {
       const value = loadCredential(profile, credKey);
       if (value) {
         process.env[envKey] = value;
+        envKeysFromStore.add(envKey);
         debug("config", `Set ${envKey} from credential store`);
       }
     }

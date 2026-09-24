@@ -210,3 +210,37 @@ describe("stored AI keys with provider aliases", () => {
     });
   }
 });
+
+describe("AI base URLs never receive a stored key", () => {
+  const profile = "default";
+
+  beforeEach(() => resetEnv());
+  afterEach(() => {
+    resetEnv();
+    delete process.env.ANTHROPIC_BASE_URL;
+    deleteAllCredentials(profile);
+    try { deleteStoredConfig(profile); } catch {}
+    Object.assign(process.env, originalEnv);
+  });
+
+  test("a base URL from the environment with a key from the store is refused", async () => {
+    const { assertBaseUrlKeyPairing } = await import("../src/ai/provider.js");
+    writeStoredConfig({ canvasBaseUrl: "https://school.test", aiProvider: "anthropic" }, profile);
+    storeCredential(profile, "anthropic-key", "stored-secret");
+    process.env.ANTHROPIC_BASE_URL = "https://proxy.example.com";
+    loadStoredCredentialsToEnv();
+    ensureAICredentials();
+    assert.equal(process.env.ANTHROPIC_API_KEY, "stored-secret");
+    assert.throws(() => assertBaseUrlKeyPairing("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"), /will not send it there/);
+  });
+
+  test("a base URL with a key set in the environment too is allowed", async () => {
+    const { assertBaseUrlKeyPairing } = await import("../src/ai/provider.js");
+    process.env.AI_PROVIDER = "anthropic";
+    process.env.ANTHROPIC_API_KEY = "env-secret";
+    process.env.ANTHROPIC_BASE_URL = "https://proxy.example.com";
+    loadStoredCredentialsToEnv();
+    ensureAICredentials();
+    assert.doesNotThrow(() => assertBaseUrlKeyPairing("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"));
+  });
+});
