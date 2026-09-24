@@ -47,9 +47,14 @@ export async function ingestCourseCommand(
   const matches = matchCourses(courseQuery, courses);
 
   if (matches.length === 0) {
-    console.error(
-      `No course matching "${courseQuery}".\nUse ${chalk.dim("canvas-cli courses")} to see available courses.`
-    );
+    console.error(`No course matching "${courseQuery}".`);
+    if (courses.length > 0) {
+      console.error(`\nYour courses:\n`);
+      for (const c of courses) {
+        console.error(`  ${chalk.bold(c.courseCode)}  ${c.name}`);
+      }
+      console.error(`\nUse a course code or part of a name, e.g. ${chalk.dim(`canvas-cli ingest ${courses[0]!.courseCode}`)}`);
+    }
     process.exit(1);
   }
 

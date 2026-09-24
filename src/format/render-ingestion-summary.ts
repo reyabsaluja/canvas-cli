@@ -200,8 +200,8 @@ export function renderIngestionSummary(result: IngestionResult): string {
   // Next
   lines.push("");
   lines.push(chalk.dim("Next:"));
-  lines.push(chalk.dim("  - future commands will use this local course cache"));
-  lines.push(chalk.dim("  - this ingestion does not yet infer true assignments"));
+  lines.push(chalk.dim("  - run canvas-cli and open this course with /courses; it will use this cache"));
+  lines.push(chalk.dim("  - run this command again to pick up new material from Canvas"));
   lines.push("");
 
   return lines.join("\n");
