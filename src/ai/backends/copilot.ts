@@ -45,19 +45,18 @@ export const COPILOT_EXCLUDED_TOOLS = [
   "store_memory",
 ];
 
-/** Maximum prompt size passed on the command line (stays well under ARG_MAX). */
-const MAX_PROMPT_ARG_BYTES = 400 * 1024;
-
+/**
+ * Arguments for a non-interactive run. The prompt itself is piped on stdin,
+ * which the CLI reads when no -p is given, so it never appears in the process
+ * list and is not limited by the command-line length.
+ */
 export function buildCopilotArgs(input: {
-  prompt: string;
   model: string;
   effort?: string;
   cwd: string;
   mcpConfigPath?: string;
 }): string[] {
   const args = [
-    "-p",
-    input.prompt,
     "--output-format",
     "json",
     "--stream",
@@ -193,14 +192,7 @@ export async function runCopilot(request: CliBackendRequest, deps: CliDeps = {})
     }
 
     const prompt = buildTranscriptPrompt(request.systemPrompt, request.messages);
-    if (Buffer.byteLength(prompt, "utf8") > MAX_PROMPT_ARG_BYTES) {
-      throw new AIError("The request is too large for GitHub Copilot.", "bad_request", {
-        setupHint: "Start a new chat with /clear or ask about fewer documents at once.",
-      });
-    }
-
     const args = buildCopilotArgs({
-      prompt,
       model: request.model,
       effort: request.effort,
       cwd: scratch.path,
@@ -218,6 +210,7 @@ export async function runCopilot(request: CliBackendRequest, deps: CliDeps = {})
       args,
       env: { ...baseEnv },
       cwd: scratch.path,
+      stdin: prompt,
       abortSignal: request.abortSignal,
       timeoutMs: request.timeoutMs,
       spawnImpl: deps.spawn,

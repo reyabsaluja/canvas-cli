@@ -261,7 +261,6 @@ The model picker lists the models your ChatGPT plan offers (for example GPT 5.6 
 - Copilot streams tokens as they arrive; Codex delivers each message once it is complete.
 - The model list is not discoverable offline. To see which IDs your plan offers, run `copilot` or `codex` directly and use `/model` there.
 - The step limit that bounds API-key tool loops is not enforced on these backends.
-- On Copilot, a request larger than about 400 KB is rejected because the prompt is passed as a command-line argument — start a new chat with `/clear` or ask about fewer documents at once.
 
 ### Overriding the default model
 

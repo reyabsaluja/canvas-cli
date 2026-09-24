@@ -113,13 +113,12 @@ test("consumeCodexEvent counts MCP tool calls and keeps their errors", () => {
 
 test("buildCopilotArgs removes built-in tools and keeps the variadic flag last", () => {
   const args = buildCopilotArgs({
-    prompt: "hi",
     model: "auto",
     effort: "medium",
     cwd: "/tmp/y",
     mcpConfigPath: "/tmp/y/mcp.json",
   });
-  assert.deepEqual(args.slice(0, 2), ["-p", "hi"]);
+  assert.ok(!args.includes("-p"), "the prompt is piped on stdin, never passed as an argument");
   assert.ok(args.includes("--output-format") && args.includes("json"));
   assert.ok(args.includes("--disable-builtin-mcps"));
   assert.ok(args.includes("--no-custom-instructions"));
@@ -243,7 +242,8 @@ const out = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
 const FAKE_COPILOT = `
 const fs = require("node:fs");
 const args = process.argv.slice(2);
-const prompt = args[args.indexOf("-p") + 1];
+if (args.includes("-p")) throw new Error("the prompt must come on stdin, not -p");
+const prompt = fs.readFileSync(0, "utf8");
 const cfgArg = args.find((a) => a.startsWith("@"));
 const out = (o) => process.stdout.write(JSON.stringify({ id: "e", timestamp: "now", parentId: null, ...o }) + "\\n");
 (async () => {
