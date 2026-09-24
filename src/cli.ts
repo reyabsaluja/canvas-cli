@@ -78,7 +78,7 @@ Examples:
 
 program
   .command("status")
-  .description("Show current configuration and connection status")
+  .description("Show the current configuration (does not contact Canvas; use /doctor in the shell for that)")
   .option("--profile <name>", "Profile to inspect (defaults to active profile)")
   .addHelpText(
     "after",
