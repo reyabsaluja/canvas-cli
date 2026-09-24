@@ -1,3 +1,4 @@
+import { buildUnsupportedClaimsNote, findUnsupportedAnswerClaims } from "../agent/verify.js";
 import {
   streamWithTools,
   type AIProviderConfig,
@@ -264,6 +265,8 @@ interface CourseAssistantOptions {
   onToolCall?: (event: ScopeToolCallEvent) => void;
   onTextDelta?: (delta: string) => void;
   abortSignal?: AbortSignal;
+  /** Receives the context the model was given, for checking the answer. */
+  evidence?: string[];
 }
 
 export async function answerGlobalQuestion(options: {
@@ -276,12 +279,15 @@ export async function answerGlobalQuestion(options: {
   onToolCall?: (event: ScopeToolCallEvent) => void;
   onTextDelta?: (delta: string) => void;
   abortSignal?: AbortSignal;
+  /** Receives the context the model was given, for checking the answer. */
+  evidence?: string[];
 }): Promise<string> {
   const system = buildGlobalSystemPrompt(
     options.services,
     options.recent,
     options.upcomingAssignments
   );
+  options.evidence?.push(system);
 
   return streamWithTools(
     options.aiConfig,
@@ -443,6 +449,7 @@ export async function answerCourseQuestion(
     options.cache,
     options.assignments
   );
+  options.evidence?.push(system);
 
   return streamWithTools(
     options.aiConfig,
@@ -856,4 +863,44 @@ function searchGlobalHome(
   }
 
   return lines.slice(0, 12).join("\n");
+}
+
+/**
+ * Course and global answers are not run through the workspace verifier (no
+ * observations or citations), but their dates and figures can still be
+ * checked against everything the model was shown: the scope's context, this
+ * turn's tool results, and the conversation so far. Returns the same
+ * "could not confirm" note workspace answers get, or null.
+ */
+export function checkScopeAnswer(answer: string, evidence: string[], question: string): string | null {
+  if (!answer.trim()) return null;
+  const text = evidence.join("\n\n");
+  const claims = findUnsupportedAnswerClaims(answer, `${text}\n\n${readableIsoDates(text)}`, question);
+  return claims.length > 0 ? buildUnsupportedClaimsNote(claims, []) : null;
+}
+
+const ISO_DATE = /\b(\d{4})-(\d{2})-(\d{2})(T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?/g;
+
+/**
+ * The scope context and tool results carry ISO timestamps, which the claim
+ * checker does not read as dates. Spell each one out as "September 25, 2026",
+ * in both local time and UTC, since a 11:59 PM deadline can fall on the next
+ * day in UTC and the model may use either.
+ */
+export function readableIsoDates(text: string): string {
+  const out = new Set<string>();
+  const spell = (date: Date, timeZone?: string) =>
+    date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone });
+  for (const match of text.matchAll(ISO_DATE)) {
+    const [whole, year, month, day, time] = match;
+    if (!time) {
+      out.add(spell(new Date(Date.UTC(Number(year), Number(month) - 1, Number(day))), "UTC"));
+      continue;
+    }
+    const date = new Date(whole);
+    if (Number.isNaN(date.getTime())) continue;
+    out.add(spell(date));
+    out.add(spell(date, "UTC"));
+  }
+  return [...out].join("\n");
 }

@@ -1,7 +1,7 @@
 import { loadCourseCache } from "../enrich/cache-loader.js";
 import { loadWorkspace } from "../ask/load-workspace.js";
 import { updateWorkspaceSessionMeta } from "../workspace/session.js";
-import { answerCourseQuestion, answerGlobalQuestion } from "./chat-assistant.js";
+import { answerCourseQuestion, answerGlobalQuestion, checkScopeAnswer } from "./chat-assistant.js";
 import {
   askWorkspaceQuestion,
   createChatContext,
@@ -19,7 +19,7 @@ import {
   loadOrCreateChatSession,
   saveChatSession,
 } from "./chat-sessions.js";
-import type { AppScope } from "./chat-state.js";
+import type { AppScope, ChatMessage } from "./chat-state.js";
 import type { AssignmentWorkup } from "../work/types.js";
 import type { Assignment } from "../domain/models.js";
 import { renderGlobalBanner } from "./app-banner.js";
@@ -83,6 +83,7 @@ export async function createShellContext(
           };
         }
         const upcoming = await getUpcomingAssignments();
+        const evidence = conversationEvidence(session.messages);
         const answer = await answerGlobalQuestion({
           aiConfig: services.aiConfig,
           services,
@@ -90,11 +91,12 @@ export async function createShellContext(
           history: session.messages,
           recent,
           upcomingAssignments: upcoming,
-          onToolCall: callbacks.onToolCall,
+          onToolCall: collectToolEvidence(evidence, callbacks.onToolCall),
           onTextDelta: callbacks.onTextDelta,
           abortSignal: callbacks.abortSignal,
+          evidence,
         });
-        return { content: answer };
+        return { content: answer, verificationNote: checkScopeAnswer(answer, evidence, input) };
       },
     };
   }
@@ -254,6 +256,7 @@ export async function createShellContext(
           };
         }
         await hydrateCourseData();
+        const evidence = conversationEvidence(session.messages);
         const answer = await answerCourseQuestion({
           aiConfig: services.aiConfig,
           services,
@@ -265,11 +268,12 @@ export async function createShellContext(
           history: session.messages,
           lastExportedPdfPath: session.metadata.lastExportedPdfPath ?? null,
           question: input,
-          onToolCall: callbacks.onToolCall,
+          onToolCall: collectToolEvidence(evidence, callbacks.onToolCall),
           onTextDelta: callbacks.onTextDelta,
           abortSignal: callbacks.abortSignal,
+          evidence,
         });
-        return { content: answer };
+        return { content: answer, verificationNote: checkScopeAnswer(answer, evidence, input) };
       },
       getCourseCache: () => cache,
     };
@@ -439,5 +443,21 @@ async function loadOrCreateWorkspaceShell(
         verificationNote: answer.verificationNote,
       };
     },
+  };
+}
+
+/** Text of the conversation so far (answers and tool output), as evidence for checking a new answer. */
+function conversationEvidence(messages: ChatMessage[]): string[] {
+  return messages.map((message) => message.content).filter(Boolean);
+}
+
+/** Wraps a tool-call callback so each tool result is also kept as evidence. */
+function collectToolEvidence<E extends { result: string }>(
+  evidence: string[],
+  onToolCall?: (event: E) => void
+): (event: E) => void {
+  return (event) => {
+    evidence.push(event.result);
+    onToolCall?.(event);
   };
 }
