@@ -11,6 +11,7 @@ import { statusCommand } from "./commands/status.js";
 import { loadStoredCredentialsToEnv } from "./config/load-credentials-to-env.js";
 import { CanvasCliError, classifyError } from "./errors.js";
 import { VERSION } from "./version.js";
+import { ensurePrivateLocalRoot } from "./workspace/local-root.js";
 
 const program = new Command();
 
@@ -44,6 +45,8 @@ program.hook("preAction", (_thisCommand, actionCommand) => {
 
   if (!SKIP_CREDENTIAL_LOADING.has(actionCommand.name())) {
     loadStoredCredentialsToEnv();
+    // The shell and ingest write course data to ./.canvas-cli.
+    ensurePrivateLocalRoot();
   }
 });
 
