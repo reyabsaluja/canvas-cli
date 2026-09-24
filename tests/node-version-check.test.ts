@@ -36,13 +36,31 @@ test("version check exits with code 1 and correct message on old Node", () => {
   } catch (err: any) {
     assert.equal(err.status, 1);
     assert.ok(
-      err.stderr.includes("canvas-cli requires Node.js 20 or later"),
+      err.stderr.includes("canvas-cli requires Node.js 20.10 or later"),
       "Should print the required error message"
     );
     assert.ok(
       err.stderr.includes("https://nodejs.org"),
       "Should include the upgrade URL"
     );
+  }
+});
+
+test("version check rejects Node 20 releases before 20.10", () => {
+  const checkPortion = wrapperContent
+    .split('import("../dist/cli.js")')[0]
+    .split("\n")
+    .filter((line) => !line.startsWith("#!") && !line.startsWith("//"))
+    .join("\n");
+  for (const [version, rejected] of [["20.9.0", true], ["20.10.0", false], ["22.0.0", false]] as const) {
+    const script = `Object.defineProperty(process.versions, "node", { value: "${version}", configurable: true });\n${checkPortion}`;
+    let status = 0;
+    try {
+      execFileSync("node", ["--eval", script], { encoding: "utf-8" });
+    } catch (err: any) {
+      status = err.status;
+    }
+    assert.equal(status === 1, rejected, `Node ${version} should ${rejected ? "" : "not "}be rejected`);
   }
 });
 
@@ -58,7 +76,7 @@ test("version check wrapper passes the version gate on supported Node", async ()
   });
 
   assert.ok(
-    !stderr.includes("canvas-cli requires Node.js 20 or later"),
+    !stderr.includes("canvas-cli requires Node.js 20.10 or later"),
     "Should not fail the version gate on a supported Node version"
   );
   assert.strictEqual(code, 0, `CLI exited with code ${code}. stderr: ${stderr}`);
