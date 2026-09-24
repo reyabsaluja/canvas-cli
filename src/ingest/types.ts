@@ -176,6 +176,8 @@ export interface LectureIndexEntry {
 export interface IngestionMeta {
   version: number;
   ingestedAt: string;
+  /** Canvas endpoints that failed or were blocked during this run, in plain words. */
+  warnings?: string[];
   courseId: number;
   courseName: string;
   courseCode: string;

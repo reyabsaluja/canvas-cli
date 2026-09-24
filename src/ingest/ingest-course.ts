@@ -360,6 +360,7 @@ export async function ingestCourse(
     courseName: course.name,
     courseCode: course.courseCode,
     refresh: options.refresh,
+    warnings: raw.warnings,
     counts: {
       assignments: assignments.length,
       modules: modules.length,

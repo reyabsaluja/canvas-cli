@@ -190,9 +190,15 @@ export function renderIngestionSummary(result: IngestionResult): string {
     }
   }
 
-  // Warnings
-  const warnings = result.ingestion.counts.files === 0 || result.ingestion.counts.pages === 0;
-  if (warnings) {
+  // Warnings: what Canvas refused or failed to return this run.
+  const warnings = result.ingestion.warnings ?? [];
+  if (warnings.length > 0) {
+    lines.push("");
+    lines.push(chalk.yellow("Warnings:"));
+    for (const warning of warnings) {
+      lines.push(`  ${chalk.dim("-")} ${warning}`);
+    }
+  } else if (result.ingestion.counts.files === 0 || result.ingestion.counts.pages === 0) {
     lines.push("");
     lines.push(chalk.dim("Note: some APIs were not accessible. Attachment selection is limited to available file index."));
   }
