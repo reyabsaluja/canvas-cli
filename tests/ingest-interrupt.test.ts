@@ -170,7 +170,8 @@ test("downloadSelectedAttachments skips already-downloaded files even with signa
           downloadUrl: "https://example.com/existing.pdf",
           reason: "test",
           contentType: "application/pdf",
-          size: 100,
+          // Same size as the cached file: unchanged on Canvas, so it is kept.
+          size: "cached".length,
           subfolder: "modules",
         },
       ];

@@ -296,7 +296,8 @@ export async function ingestCourse(
     signal,
     (completed, total) => {
       onProgress(`Downloading files (${completed}/${total})...`);
-    }
+    },
+    { refresh: options.refresh }
   );
 
   // Step 7: Discover lectures from module items, front page, and fetched pages
