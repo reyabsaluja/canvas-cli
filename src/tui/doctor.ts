@@ -430,7 +430,7 @@ export async function runDoctor(): Promise<string> {
     results.push({
       label: "AI provider",
       status: "skip",
-      detail: "Not configured (optional — powers ask/work commands)",
+      detail: "Not configured (optional — powers chat, workspaces, /quiz, and /pdf)",
       fix: "Run `canvas-cli login` to configure an AI provider.",
     });
   } else {
