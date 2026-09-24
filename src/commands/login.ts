@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { platform } from "node:os";
-import { writeStoredConfig, readStoredConfig } from "../config/store.js";
+import { writeStoredConfig, readStoredConfig, type StoredConfig } from "../config/store.js";
 import { storeCredential, loadCredential } from "../config/credentials.js";
 import { getConfigDir } from "../config/paths.js";
 import { verticalPicker, BACK, C } from "./login-picker.js";
@@ -277,13 +277,13 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
   const finalEffort = aiEffort || undefined;
 
   writeStoredConfig(
-    {
+    mergeLoginConfig(readStoredConfig(profile), {
       canvasBaseUrl: baseUrl,
       ...(finalProvider && { aiProvider: finalProvider }),
       ...(finalModel && { aiModel: finalModel }),
       ...(finalEffort && { aiEffort: finalEffort }),
       ...(awsRegion && { awsRegion }),
-    },
+    }),
     profile
   );
 
@@ -399,3 +399,19 @@ function openBrowser(url: string): void {
   }
 }
 
+/**
+ * The config a login writes: login owns the Canvas address and the AI
+ * settings (so a provider left out is cleared), while any other key the user
+ * set, such as ingestSubmissionFeedback, survives a re-login.
+ */
+export function mergeLoginConfig(existing: StoredConfig | null, fromLogin: StoredConfig): StoredConfig {
+  const {
+    canvasBaseUrl: _url,
+    aiProvider: _provider,
+    aiModel: _model,
+    aiEffort: _effort,
+    awsRegion: _region,
+    ...preserved
+  } = existing ?? ({} as StoredConfig);
+  return { ...preserved, ...fromLogin };
+}
