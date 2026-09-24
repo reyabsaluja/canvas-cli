@@ -66,10 +66,34 @@ function removeCredentialFile(profile: string, key: string): boolean {
   return false;
 }
 
-// macOS `security add-generic-password -w` requires the secret as a CLI arg,
-// making it momentarily visible in `ps`. This is a known limitation of the
-// Security.framework CLI — the exposure window is sub-millisecond and no
-// stdin-based alternative exists for generic passwords.
+/** Double-quote a value for a `security -i` command line. */
+function quoteForSecurityShell(value: string): string {
+  return `"${value.replace(/[\\"]/g, "\\$&")}"`;
+}
+
+/**
+ * Add a keychain item without putting the secret in any process's argv.
+ * `security -i` reads its commands from stdin, so the secret travels there
+ * instead of appearing in `ps`. (The `-w` prompt would also read stdin, but
+ * it truncates at 128 characters, which cuts long API keys.)
+ */
+function addKeychainPassword(account: string, value: string): void {
+  if (/[\r\n]/.test(value)) {
+    throw new Error("Credential value contains a line break");
+  }
+  const command = [
+    "add-generic-password",
+    "-U",
+    "-s",
+    quoteForSecurityShell(SERVICE_NAME),
+    "-a",
+    quoteForSecurityShell(account),
+    "-w",
+    quoteForSecurityShell(value),
+  ].join(" ");
+  execFileSync("security", ["-i"], { input: `${command}\n`, stdio: ["pipe", "ignore", "ignore"] });
+}
+
 export function storeCredential(profile: string, key: string, value: string): StorageBackend {
   validateProfileName(profile);
   if (value.includes("\0")) {
@@ -82,17 +106,16 @@ export function storeCredential(profile: string, key: string, value: string): St
       try {
         execFileSync("security", ["delete-generic-password", "-s", SERVICE_NAME, "-a", account], { stdio: "ignore" });
       } catch {}
-      execFileSync("security", ["add-generic-password", "-s", SERVICE_NAME, "-a", account, "-w", value], { stdio: "ignore" });
-      // Verify the write for the primary credential to catch silent truncation
-      if (key === "canvas-token") {
-        const readBack = execFileSync(
-          "security",
-          ["find-generic-password", "-s", SERVICE_NAME, "-a", account, "-w"],
-          { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }
-        ).trim();
-        if (readBack !== value) {
-          throw new Error("Keychain read-back mismatch");
-        }
+      addKeychainPassword(account, value);
+      // `security -i` exits 0 even when a command fails, so every write is
+      // read back; a mismatch falls back to the file store below.
+      const readBack = execFileSync(
+        "security",
+        ["find-generic-password", "-s", SERVICE_NAME, "-a", account, "-w"],
+        { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }
+      ).trim();
+      if (readBack !== value) {
+        throw new Error("Keychain read-back mismatch");
       }
       debug("config", `Stored credential in keychain: ${key} (profile: ${profile})`);
       cache.set(ck, value);
