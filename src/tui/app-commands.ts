@@ -36,7 +36,15 @@ import {
   renderNeedResult,
 } from "./grade-command.js";
 import { calculateNeeded } from "./grade-calculator.js";
-import { parseQuizArgs, gatherMaterial, generateQuestions, checkConversationRelevance } from "./quiz-command.js";
+import {
+  parseQuizArgs,
+  gatherMaterial,
+  generateQuestions,
+  checkConversationRelevance,
+  getMissedQuestions,
+  isQuizRetry,
+  rememberMissedQuestions,
+} from "./quiz-command.js";
 import { runQuizSession, renderScoreScreen } from "./quiz-session.js";
 
 export async function handleCommand(
@@ -604,6 +612,32 @@ function buildQuizTask(
   args: string,
   workspace: LoadedWorkspace | null
 ): ShellResult | void {
+  const courseName =
+    workspace?.courseName ?? (api.runtime.scope.type === "course" ? api.runtime.title : null);
+
+  if (isQuizRetry(args)) {
+    const missed = getMissedQuestions(api.session.id);
+    if (missed.length === 0) {
+      void api.addMessage({ role: "system", content: "Nothing to retry: no missed questions from a quiz in this conversation. Start one with /quiz." });
+      return;
+    }
+    return {
+      type: "background-task",
+      verb: "",
+      run: async (_signal, controls) => {
+        await api.addMessage({ role: "assistant", content: `Retrying the ${missed.length} question${missed.length === 1 ? "" : "s"} you missed.` });
+        controls.pauseShell();
+        try {
+          const result = await runQuizSession(missed, courseName);
+          rememberMissedQuestions(api.session.id, result);
+          await api.addMessage({ role: "assistant", content: renderScoreScreen(result, courseName) });
+        } finally {
+          controls.resumeShell();
+        }
+      },
+    };
+  }
+
   if (!services.aiConfig) {
     void api.addMessage({ role: "system", content: "└ ERROR: No AI model configured. Run /model first." });
     return;
@@ -623,7 +657,6 @@ function buildQuizTask(
 
   const conversationContext = buildConversationContext(api);
   const userContext = buildUserContext(api);
-  const courseName = workspace?.courseName ?? null;
 
   if (!workspace && !parsed.topic && !userContext.trim()) {
     void api.addMessage({ role: "system", content: "Start a conversation or specify a topic first so the quiz is relevant. Try /quiz <topic> or ask about something first." });
@@ -677,6 +710,7 @@ function buildQuizTask(
       controls.pauseShell();
       try {
         const result = await runQuizSession(questions, courseName);
+        rememberMissedQuestions(api.session.id, result);
         const scoreOutput = renderScoreScreen(result, courseName);
         await api.addMessage({ role: "assistant", content: scoreOutput });
       } finally {

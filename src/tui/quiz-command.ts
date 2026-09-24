@@ -59,6 +59,26 @@ export interface QuizResult {
   times: number[];
 }
 
+/**
+ * The questions missed in the last quiz of each conversation, for
+ * `/quiz retry`. Kept in memory: a retry belongs to the session it came from.
+ */
+const missedBySession = new Map<string, QuizQuestion[]>();
+
+export function rememberMissedQuestions(sessionId: string, result: QuizResult): void {
+  const missed = result.questions.filter((_, i) => result.answers[i] === false);
+  if (missed.length > 0) missedBySession.set(sessionId, missed);
+  else missedBySession.delete(sessionId);
+}
+
+export function getMissedQuestions(sessionId: string): QuizQuestion[] {
+  return missedBySession.get(sessionId) ?? [];
+}
+
+export function isQuizRetry(args: string): boolean {
+  return args.trim().toLowerCase() === "retry";
+}
+
 export function parseQuizArgs(args: string): QuizArgs {
   const parts = args.trim().toLowerCase().split(/\s+/).filter(Boolean);
   let count = 5;

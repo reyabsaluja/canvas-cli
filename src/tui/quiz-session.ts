@@ -365,7 +365,12 @@ export function renderScoreScreen(result: QuizResult, courseName: string | null)
 
   lines.push("");
   lines.push(`  ${B.dim("─".repeat(40))}`);
-  lines.push(`  ${B.muted("/quiz")} ${B.dim("new")}  ${B.muted("/quiz retry")} ${B.dim("missed")}`);
+  const missed = result.answers.filter((a) => a === false).length;
+  lines.push(
+    missed > 0
+      ? `  ${B.muted("/quiz")} ${B.dim("new")}  ${B.muted("/quiz retry")} ${B.dim(`the ${missed} missed`)}`
+      : `  ${B.muted("/quiz")} ${B.dim("new")}`
+  );
 
   return lines.join("\n");
 }
