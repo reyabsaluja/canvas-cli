@@ -1492,8 +1492,8 @@ export async function runChatShell<TExit>(
             const clampedPin = Math.min(pinSelected, inputState.pinMatches.length - 1);
             const selected = inputState.pinMatches[clampedPin]!;
             inputBuffer = inputBuffer.replace(
-              /@\S*$/,
-              `@${selected.label}`
+              /(^|\s)@\S*$/,
+              (_match, before: string) => `${before}@${selected.label}`
             );
             pinSelected = 0;
             renderAfterInputMutation(true, getInputState());
@@ -1635,8 +1635,8 @@ export async function runChatShell<TExit>(
         if (inputState.pinMatches.length > 0) {
           const selected = inputState.pinMatches[pinSelected]!;
           inputBuffer = inputBuffer.replace(
-            /@\S*$/,
-            `@${selected.label}`
+            /(^|\s)@\S*$/,
+            (_match, before: string) => `${before}@${selected.label}`
           );
           pinSelected = 0;
           renderAfterInputMutation(true, getInputState());

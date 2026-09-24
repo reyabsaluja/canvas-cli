@@ -63,9 +63,10 @@ export function extractInlinePins(
   options: ShellPinOption[]
 ): ExtractedPins {
   const queries: string[] = [];
-  const cleanInput = input.replace(/@(\S+)/g, (_match, query: string) => {
+  // A pin starts a word; an @ inside one (ta@uni.edu) is plain text.
+  const cleanInput = input.replace(/(^|\s)@(\S+)/g, (_match, before: string, query: string) => {
     queries.push(query);
-    return " ";
+    return `${before} `;
   });
 
   const result = resolvePinReferences(queries, options);

@@ -1,6 +1,7 @@
 import { tailPlainToWidth } from "./screen.js";
 
-const ACTIVE_PIN_PATTERN = /@(\S*)$/;
+/** An @ that starts the last word of the input; an @ inside a word is plain text. */
+const ACTIVE_PIN_PATTERN = /(?:^|\s)@(\S*)$/;
 
 /**
  * Shared helpers for shell pin-input behavior. These support the active chat
@@ -26,6 +27,7 @@ export function getPinOverlayIndent(inputText: string, boxWidth: number): number
     return 1;
   }
 
+  const atIndex = match.index + match[0].length - (match[1]?.length ?? 0) - 1;
   const visible = getVisibleInputSegment(inputText, boxWidth);
-  return 1 + Math.max(0, match.index - visible.start);
+  return 1 + Math.max(0, atIndex - visible.start);
 }

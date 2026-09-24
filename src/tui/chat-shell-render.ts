@@ -376,7 +376,8 @@ function buildAutocompleteOverlayRows(
       0,
       Math.min(pinSelected - Math.floor(maxShow / 2), pinMatches.length - maxShow)
     );
-    const pinIndex = inputBuffer.search(/@/);
+    const activePin = /(?:^|\s)(@\S*)$/.exec(inputBuffer);
+    const pinIndex = activePin ? activePin.index + activePin[0].length - activePin[1]!.length : 0;
     const indent = " ".repeat(Math.max(0, pinIndex + 1));
     const firstRow = lastRowAboveInput - maxShow + 1;
     for (let index = 0; index < maxShow; index++) {
@@ -496,7 +497,7 @@ function buildStickyBottomRows(
       const hasCursor = chunk.endsWith("█");
       const rawText = hasCursor ? chunk.slice(0, -1) : chunk;
       const colored = rawText
-        .replace(/@\S+/g, (match) => C.warm(match))
+        .replace(/(^|\s)(@\S+)/g, (_match, before: string, pin: string) => before + C.warm(pin))
         .replace(/\/\S+/g, (match) => {
           const cmd = match.toLowerCase();
           if (availableCommands?.some((c) => c.name === cmd || (c.aliases ?? []).includes(cmd))) {
