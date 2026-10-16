@@ -30,7 +30,7 @@ Options:
 
 ```bash
 # A specific version
-curl -fsSL https://raw.githubusercontent.com/reyabsaluja/canvas-cli/main/install.sh | bash -s -- 0.1.0
+curl -fsSL https://raw.githubusercontent.com/reyabsaluja/canvas-cli/main/install.sh | bash -s -- 0.1.1
 
 # A different install directory
 curl -fsSL https://raw.githubusercontent.com/reyabsaluja/canvas-cli/main/install.sh | CANVAS_CLI_INSTALL_DIR="$HOME/bin" bash

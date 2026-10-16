@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-16
+
 ### Added
 
 - `/quiz retry` asks the questions you missed in the last quiz again, as the results screen already offered
@@ -167,5 +169,6 @@ Initial release of `@reyabsaluja/canvas-cli`.
 - External-link capture reads at most 100 MB per response; a larger resource is recorded as `metadata_only` with a note naming the limit rather than being buffered in memory
 - Subscription CLIs (Copilot, Codex) run isolated: non-interactive, in an empty temporary directory, with their built-in shell, file, and web tools removed and denied (Codex `--ephemeral --sandbox read-only --ignore-user-config`; Copilot with custom instructions and built-in MCP servers disabled). The Canvas tool bridge binds to 127.0.0.1 only and requires a per-run bearer token; `OPENAI_API_KEY` is stripped from the Codex environment so the subscription path never falls back to API billing
 
-[Unreleased]: https://github.com/reyabsaluja/canvas-cli/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/reyabsaluja/canvas-cli/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/reyabsaluja/canvas-cli/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/reyabsaluja/canvas-cli/releases/tag/v0.1.0
