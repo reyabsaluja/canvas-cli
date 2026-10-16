@@ -44,9 +44,13 @@ test("timeline", async (t) => {
 
   await t.test("resolveTimeWindow: default returns 2 weeks back, 4 weeks forward", () => {
     const { window } = resolveTimeWindow("default", []);
-    const now = Date.now();
-    const startDiff = Math.abs(window.start.getTime() - (now - 14 * 86400000));
-    const endDiff = Math.abs(window.end.getTime() - (now + 28 * 86400000));
+    // Calendar days, not 24-hour blocks: a window that crosses a DST change is an hour off from that.
+    const expectedStart = new Date();
+    expectedStart.setDate(expectedStart.getDate() - 14);
+    const expectedEnd = new Date();
+    expectedEnd.setDate(expectedEnd.getDate() + 28);
+    const startDiff = Math.abs(window.start.getTime() - expectedStart.getTime());
+    const endDiff = Math.abs(window.end.getTime() - expectedEnd.getTime());
     assert.ok(startDiff < 2000);
     assert.ok(endDiff < 2000);
   });
@@ -86,9 +90,9 @@ test("timeline", async (t) => {
 
   await t.test("resolveTimeWindow: next N weeks", () => {
     const { window } = resolveTimeWindow("next 3 weeks", []);
-    const now = Date.now();
-    const expectedEnd = now + 21 * 86400000;
-    assert.ok(Math.abs(window.end.getTime() - expectedEnd) < 2000);
+    const expectedEnd = new Date();
+    expectedEnd.setDate(expectedEnd.getDate() + 21);
+    assert.ok(Math.abs(window.end.getTime() - expectedEnd.getTime()) < 2000);
   });
 
   await t.test("buildTimelineOutput: no visible assignments and no extras returns guidance", () => {
