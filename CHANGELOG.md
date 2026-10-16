@@ -40,6 +40,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - On-demand file downloads get the same Canvas-origin check and size cap as ingestion
 - Prompts reach the Copilot CLI on stdin rather than the command line, and the Copilot and Codex processes no longer inherit the Canvas token or API-key-provider secrets
 - Secrets saved to the macOS Keychain no longer appear in the process list, and every write is read back
+- undici, used by the OpenAI provider, is updated to 6.29.0 for [GHSA-rfgv-xxqx-mfg5](https://github.com/advisories/GHSA-rfgv-xxqx-mfg5) and two lower-severity advisories
 - `.canvas-cli/` is created readable only by you, and an existing one is tightened
 
 ## [0.1.0] - 2026-09-23
